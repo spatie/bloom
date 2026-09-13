@@ -25,7 +25,6 @@ private struct ServerConnectionContent: View {
     @State private var maintenance: ServerMaintenanceModel
     @State private var editorID = UUID()
     @State private var section: ServerSettingsSection? = .connection
-    @State private var setsUpMaintenance = false
 
     init(server: ServerWindowModel) {
         self.server = server
@@ -39,45 +38,19 @@ private struct ServerConnectionContent: View {
     var body: some View {
         Group {
             if showsSetup {
-                VStack(spacing: 0) {
-                    if setsUpMaintenance {
-                        HStack {
-                            Button("Back to Updates") { setup.cancel(); showsSetup = false }
-                                .disabled(setup.isBusy)
-                            Spacer()
-                            Text("Set up updates for " + server.displayName)
-                                .font(Typo.caption).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle)
-                        }.padding(Metrics.gutter)
-                        Divider()
-                    }
-                    ServerSetupView(model: setup) { showsSetup = false }
-                }
+                ServerSetupView(model: setup) { showsSetup = false }
             } else {
                 ServerConnectionView(model: server, storage: storage, updates: updates, maintenance: maintenance, section: $section, showSetup: {
                     setup.cancel()
-                    setsUpMaintenance = false
                     setup = ServerSetupModel(server: server, resumeExisting: server.isConnected)
                     showsSetup = true
-                }, showMaintenanceSetup: beginMaintenanceSetup)
+                })
             }
         }
         .onAppear { server.setConnectionEditing(true, id: editorID) }
         .onDisappear { server.setConnectionEditing(false, id: editorID) }
     }
 
-    private func beginMaintenanceSetup() {
-        setup.cancel()
-        setup = ServerSetupModel(server: server, resumeExisting: false)
-        setup.label = server.displayName
-        if !server.usesHTTPS, let hostname = server.host.split(separator: "@").last, !hostname.isEmpty {
-            // This is a visible setup proposal, not a change to the saved workspace connection.
-            setup.host = "root@" + hostname
-            setup.beginSetup()
-        }
-        setsUpMaintenance = true
-        showsSetup = true
-    }
 }
 
 private struct ServerConnectionView: View {
@@ -87,7 +60,6 @@ private struct ServerConnectionView: View {
     let maintenance: ServerMaintenanceModel
     @Binding var section: ServerSettingsSection?
     let showSetup: () -> Void
-    let showMaintenanceSetup: () -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
@@ -125,7 +97,7 @@ private struct ServerConnectionView: View {
                         .disabled(updates.updating != nil)
                 case .updates:
                     ServerMaintenanceView(model: maintenance, legacy: updates, showConnection: { section = .connection },
-                                          showAccounts: { section = .accounts }, showMaintenanceSetup: showMaintenanceSetup)
+                                          showAccounts: { section = .accounts })
                         .disabled(storage.isCleaning)
                 }
             }

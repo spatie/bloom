@@ -56,6 +56,7 @@ final class ServerSetupModel {
     private var installedKnownHosts: URL?
     private var task: Task<Void, Never>?
     private var stoppingServerID: UUID?
+    private var maintenanceReconnectGeneration: Int?
     private var generation = UUID()
     private var retryStep = Phase.address
     private var validatedHost = ""
@@ -155,14 +156,68 @@ final class ServerSetupModel {
         }
     }
 
+    /// Maintenance is limited to the selected installation, even if an administrator checks another host.
+    var canMaintainExistingServer: Bool {
+        guard let check, check.existing, inputsUnchanged, !isBusy,
+              check.blockers.allSatisfy({ $0.code == "server_running" }) else { return false }
+        let targetHost = server.host.split(separator: "@").last.map(String.init)
+        let checkedHost = validatedHost.split(separator: "@").last.map(String.init)
+        return targetHost == checkedHost && check.dataDirectory == server.remoteDirectory
+    }
+
+    func startExistingServer() async {
+        guard canMaintainExistingServer, let connection else { return }
+        let profileID = server.connectionProfile?.id
+        let connectionGeneration = server.connectionGeneration
+        let completed = await perform(.connecting) {
+            self.record("Starting the existing Bloom Server installation.")
+            _ = try await connection.startServer(script: self.installerScript()) { [weak self] event in
+                await self?.receive(event)
+            }
+            self.record("Bloom Server is running. Reconnecting to your workspaces.")
+            guard self.server.connectionProfile?.id == profileID,
+                  self.server.connectionGeneration == connectionGeneration else { throw CancellationError() }
+            await self.server.connect()
+            guard self.server.isConnected else { throw ServerSetupFailure(code: .unreachable) }
+            self.phase = .complete
+        }
+        if completed { activity.finish() }
+    }
+
+    func updateExistingServer() async {
+        guard canMaintainExistingServer else { return }
+        let profileID = server.connectionProfile?.id
+        installsBrowserTools = false; installsDocker = false; installsSwap = false
+        phase = .readyToInstall
+        maintenanceReconnectGeneration = nil
+        installed = nil
+        await install(restartingExistingServer: true)
+        guard installed != nil, let reconnectGeneration = maintenanceReconnectGeneration else { return }
+        let installationFailure = failure
+        // Account diagnostics must not prevent a verified update from restoring the existing connection.
+        // perform owns this final connection attempt even if the presenting task has disappeared.
+        await perform(.connecting) {
+            guard self.server.connectionProfile?.id == profileID,
+                  self.server.connectionGeneration == reconnectGeneration else { throw CancellationError() }
+            self.record("Bloom Server is running. Reconnecting to your workspaces.")
+            await self.server.connect()
+            guard self.server.isConnected else { throw ServerSetupFailure(code: .unreachable) }
+            self.phase = .complete
+        }
+        if failure == nil { failure = installationFailure }
+    }
+
     func reviewInstallation() {
         guard phase == .address, canReviewInstallation else { return }
         failure = nil
         phase = .readyToInstall
     }
 
-    func install() async {
-        guard phase == .readyToInstall, let connection, inputsUnchanged, check?.blockers.isEmpty == true else { return }
+    func install(restartingExistingServer: Bool = false) async {
+        guard phase == .readyToInstall, let connection, inputsUnchanged,
+              restartingExistingServer ? canMaintainExistingServer : check?.blockers.isEmpty == true else { return }
+        let reviewedProfile = server.connectionProfile?.id
+        let reviewedGeneration = server.connectionGeneration
         activity.begin(browser: installsBrowserTools, docker: installsDocker, swap: willInstallSwap)
         progress = []
         let completed = await perform(.installing) {
@@ -178,23 +233,65 @@ final class ServerSetupModel {
             try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: pendingKey)
             let maintenanceDigest = SHA256.hash(data: Data(maintenanceKey.utf8)).map { String(format: "%02x", $0) }.joined()
             self.record("Client key ready. Connecting to upload the server package.")
-            let installed = try await self.installConnection(connection, script, package,
-                URL(fileURLWithPath: key.path + ".pub"), maintenanceDigest) { [weak self] event in
-                    await self?.receive(event)
+            let installOperation = self.installConnection
+            let publicKey = URL(fileURLWithPath: key.path + ".pub")
+            let progress: @Sendable (ServerInstallEvent) async -> Void = { [weak self] event in await self?.receive(event) }
+            let installed: ServerInstallEvent
+            if restartingExistingServer {
+                try Task.checkCancellation()
+                guard self.server.connectionProfile?.id == reviewedProfile,
+                      self.server.connectionGeneration == reviewedGeneration, !self.server.isDisconnecting,
+                      self.inputsUnchanged else { throw CancellationError() }
+                let profileID = reviewedProfile
+                let needsStop = self.check?.blockers.contains(where: { $0.code == "server_running" }) == true
+                self.record(needsStop ? "Pausing this Mac’s connection before the server update." : "Updating the stopped server.")
+                await self.server.disconnect()
+                guard self.server.connectionProfile?.id == reviewedProfile else { throw CancellationError() }
+                let pausedGeneration = self.server.connectionGeneration
+                self.maintenanceReconnectGeneration = pausedGeneration
+                do {
+                    installed = try await ServerUpdateLifecycle.perform(needsStop: needsStop, stop: {
+                        await progress(ServerInstallEvent(event: "progress", step: "server-stop", message: "Checking active work and stopping Bloom Server."))
+                        _ = try await connection.stopServer(script: script)
+                    }, install: {
+                        try await installOperation(connection, script, package, publicKey, maintenanceDigest, progress)
+                    }, restart: {
+                        _ = try await connection.startServer(script: script, progress: progress)
+                    })
+                } catch let update as ServerUpdateFailure {
+                    if self.server.connectionProfile?.id == profileID, self.server.connectionGeneration == pausedGeneration {
+                        self.server.shouldReconnect = true
+                        if update.serverRunning {
+                            self.record("The server is running. Restoring your connection after the update failure.")
+                            await self.server.connect()
+                        }
+                    }
+                    throw ServerSetupFailure.installation(code: "installation", message: "The server update did not finish.",
+                        recovery: update.serverRunning ? "The server was restarted. Review the output before trying the update again." : "Use Start Server to recover the service after resolving the reported problem.",
+                        details: update.localizedDescription)
                 }
-            try Task.checkCancellation()
+            } else {
+                installed = try await installOperation(connection, script, package, publicKey, maintenanceDigest, progress)
+            }
+            if !restartingExistingServer { try Task.checkCancellation() }
+            // A confirmed maintenance installation must retain its credential association even
+            // when cancellation arrives during the final readiness check.
             self.installed = installed
             if installed.maintenanceKeyAccepted == true, let endpoint = self.installedEndpoint {
                 try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: PaneStateNamespace.connectionID(endpoint))
             }
             self.activity.finish()
+            if restartingExistingServer {
+                self.phase = .accounts
+                return
+            }
             if self.willInstallSwap { try await self.configureSwap() }
             if self.installsBrowserTools { try await self.configureBrowser() }
             if self.installsDocker { try await self.configureDocker() }
             try Task.checkCancellation()
             self.phase = .accounts
         }
-        if completed, installed != nil, phase == .accounts { await refreshAccounts() }
+        if completed, !restartingExistingServer, installed != nil, phase == .accounts { await refreshAccounts() }
     }
 
     func refreshAccounts() async {

@@ -8,11 +8,11 @@ struct ServerMaintenanceView: View {
     let legacy: ServerToolUpdatesModel
     let showConnection: () -> Void
     let showAccounts: () -> Void
-    let showMaintenanceSetup: () -> Void
     @State private var showsAccess = false
     @State private var showsLegacy = false
     @State private var review: ServerMaintenancePlan?
     @State private var cancellation: ServerMaintenanceJob?
+    @State private var confirmsAdministration = false
 
     var body: some View {
         Group {
@@ -29,9 +29,24 @@ struct ServerMaintenanceView: View {
                 maintenanceContent
             }
         }
-        .task(id: String(model.server.connectionGeneration) + String(model.server.isConnected)) { await model.observe() }
+        .task(id: model.server.connectionProfile?.id) { await model.observe() }
+        .onChange(of: model.server.connectionProfile?.id) {
+            confirmsAdministration = false
+            model.selectedServerChanged()
+        }
         .onChange(of: model.server.connectionGeneration) {
             review = nil; cancellation = nil; showsAccess = false; showsLegacy = false
+        }
+        .confirmationDialog(model.administrationIntent == .start ? "Start Bloom Server?" : "Update Bloom Server and reconnect?",
+                            isPresented: $confirmsAdministration, titleVisibility: .visible) {
+            Button(model.administrationIntent == .start ? "Start Server" : "Update and Reconnect") {
+                Task { await model.performAdministration() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(model.administrationIntent == .start
+                 ? "Start the existing installation on this server and reconnect this Mac. No packages or project data will be replaced."
+                 : "Bloom checks for active work, stops the service if needed, installs the server package included with this app, starts the service and reconnects. Projects and sign-ins stay on the server. If installation fails, Bloom attempts to restart the existing service; it does not retry installation automatically.")
         }
         .sheet(isPresented: $showsAccess) {
             if let access = model.access { ServerMaintenanceAccessView(access: access, serverName: model.server.displayName) }
@@ -61,16 +76,28 @@ struct ServerMaintenanceView: View {
     private var maintenanceContent: some View {
         VStack(spacing: 0) {
             Form {
-                if !model.server.isConnected {
-                    Section("Server updates") {
-                        Text("Connect to check versions and manage updates.").settingsFootnote()
-                        Button("Connection Settings", action: showConnection)
+                if let administration = model.administration {
+                    administrationSection(administration)
+                } else if !model.server.isConnected {
+                    Section("Reconnect to your server") {
+                        if model.server.isConnecting {
+                            ProgressView("Reconnecting to Bloom Server…").controlSize(.small)
+                        } else {
+                            Text(model.server.shouldReconnect ? "Bloom is retrying the connection. If the service was stopped, start it here to continue." : "Your server is disconnected. Connect to check versions, or start the service if it was stopped.").settingsFootnote()
+                        }
+                        if let error = model.server.error { Text(error).settingsFootnote().textSelection(.enabled) }
+                        HStack {
+                            Button("Reconnect") { Task { await model.reconnect() } }.disabled(model.server.isConnecting)
+                            Button("Start Server…") { model.beginAdministration(.start) }
+                            Button("Update Server…") { model.beginAdministration(.update) }
+                        }
+                        Text("Starting or updating uses administrator SSH access. Bloom verifies the server before changing anything.").settingsFootnote()
                     }
                 } else if let session = model.session {
                     if session.unsupported {
                         Section("Managed updates aren’t available yet") {
                             Text("Add Bloom’s maintenance service so updates can continue independently of this app.").settingsFootnote()
-                            Button("Set Up Server Updates…", action: showMaintenanceSetup)
+                            Button("Set Up Server Updates…") { model.beginAdministration(.update) }
                             Text(legacy.connection != nil
                                  ? "Setup uses an administrator SSH connection. Review the address and check the server before installing."
                                  : "You’ll need this server’s SSH address and administrator access. The HTTPS address is used only for your existing connection.")
@@ -83,6 +110,9 @@ struct ServerMaintenanceView: View {
                     } else {
                         accessSection(session)
                         if !session.components.isEmpty { componentsSection(session) }
+                        Section {
+                            Text("Bloom handles stopping, updating and starting the service. This Mac reconnects automatically; you do not need to stop the server yourself.").settingsFootnote()
+                        }
                         if session.isLoading { Section { ProgressView("Checking your server…").controlSize(.small) } }
                         if session.isPreparing { Section { ProgressView("Preparing update details…").controlSize(.small) } }
                         if let failure = session.failure, !failure.isAuthorizationFailure {
@@ -111,11 +141,19 @@ struct ServerMaintenanceView: View {
                 Button("Copy Report") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(model.report, forType: .string)
-                }.disabled(model.session == nil)
+                }.disabled(model.session == nil && model.administration == nil)
                 Spacer()
                 Button("Refresh") { Task { await model.refresh() } }
-                    .disabled(!model.server.isConnected || model.session?.isLoading == true || model.session?.isSubmitting == true)
+                    .disabled(!model.server.isConnected || model.session?.isLoading == true || model.session?.isSubmitting == true || model.administration?.isBusy == true)
             }.padding(Metrics.gutter)
+        }
+    }
+
+    private func administrationSection(_ setup: ServerSetupModel) -> some View {
+        Section(model.administrationIntent == .start ? "Start Bloom Server" : "Set up managed server updates") {
+            ServerMaintenanceAdministrationView(setup: setup, isStarting: model.administrationIntent == .start,
+                review: { confirmsAdministration = true }, recover: { model.recoverAdministration() },
+                finish: { model.finishAdministration() })
         }
     }
 

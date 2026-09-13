@@ -142,6 +142,7 @@ def parser():
     mode = result.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--stop-server", action="store_true")
+    mode.add_argument("--start-server", action="store_true")
     result.add_argument("--package", type=pathlib.Path)
     result.add_argument("--sha256")
     result.add_argument("--maintenance-key-sha256")
@@ -481,9 +482,9 @@ def check_existing_activity(args, account):
              "Click Check Again in Bloom. To use the current server without updating, choose Connect to Existing Server.")
 
 
-def managed_service_state(args):
+def managed_service_state(args, allow_maintenance_recovery=False):
     supervised = maintenance_installation(args)
-    if supervised is not None:
+    if supervised is not None and not allow_maintenance_recovery:
         maintenance_call(supervised.ensure_idle)
     unit = args.systemd_dir / (args.service_name + ".service")
     protected_system_path(unit)
@@ -566,6 +567,38 @@ def stop_server(args):
     if account_operation(account, lambda: daemon_locked(args)):
         fail("stop_failed", "A process still owns the server data after the service stopped.", "Inspect manually started processes before continuing. Bloom will not stop unrelated processes.")
     return probe(args)
+
+
+def start_server(args):
+    if os.geteuid() != 0:
+        fail("administrator_required", "Starting the managed service needs administrator access.", "Connect as root or use passwordless sudo.")
+    existing = marker(args)
+    if not existing or existing.get("phase") != "installed":
+        fail("unmanaged_server", "There is no completed managed Bloom installation to start.", "Inspect the original installation before starting a service.")
+    check_ownership(args, existing)
+    account = existing_account(args, existing)
+    # A stopped supervisor must be allowed to recover its own durable checkpoint. Manual repair
+    # and stop still require idle jobs; starting the verified unit does not alter that checkpoint.
+    state = managed_service_state(args, allow_maintenance_recovery=True)
+    if state["ActiveState"] == "active" and state["SubState"] == "running":
+        verify_managed_process(args, account, state)
+    elif state["ActiveState"] in ("inactive", "failed") and state["MainPID"] == "0":
+        if account_operation(account, lambda: daemon_locked(args)):
+            fail("unmanaged_server", "Another process owns the Bloom database.", "Inspect the existing process before starting the managed service. Nothing was started.")
+        latest = managed_service_state(args, allow_maintenance_recovery=True)
+        if latest != state:
+            fail("server_running", "The service changed while startup was being checked.", "Check its status again before retrying.")
+        emit("progress", step="server-start", message="Starting the existing Bloom Server service")
+        command(["systemctl", "start", args.service_name + ".service"], timeout=40)
+    else:
+        fail("server_running", "The service is already starting or stopping.", "Wait for it to finish, then retry startup.")
+    started = managed_service_state(args, allow_maintenance_recovery=True)
+    if started["ActiveState"] != "active" or started["SubState"] != "running":
+        fail("start_failed", "The service did not start.", "Inspect the service journal and retry startup. Existing server data was preserved.")
+    verify_managed_process(args, account, started)
+    emit("progress", step="server-start", message="Checking that Bloom Server accepts connections")
+    wait_ready(args, account.pw_uid)
+    return {"ready": True, "message": "Bloom Server is running and ready to reconnect.", **metadata(args)}
 
 
 def probe(args):
@@ -1034,6 +1067,8 @@ def main():
                 fail("installation_busy", "Another installation is already running.", "Wait for it to finish, then retry.")
             if args.stop_server:
                 emit("check", **stop_server(args))
+            elif args.start_server:
+                emit("complete", **start_server(args))
             else:
                 install(args)
         return 0

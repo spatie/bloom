@@ -655,10 +655,19 @@ server. Other clients enter the maintenance key in Updates; normal workspace aut
 cannot authorise maintenance. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
 plans, phases, idempotency, logs and shared client behaviour.
 
-On older servers, **Set Up Server Updates…** opens the administrator installer. For SSH connections,
-review the proposed `root@host` address and complete the server checks before installing. HTTPS
-connections require an explicit SSH address; Bloom does not infer it from the web address. The
-existing connection remains unchanged until a verified setup is connected.
+On older SSH servers, **Set Up Server Updates…** keeps the administrator checks and installation
+inside Updates. Review the proposed `root@host` address and installation location, then confirm
+**Update and Reconnect**. Bloom verifies the package and client key before disconnecting, checks
+for active work, stops the managed service, installs and starts it, then reconnects. If installation
+fails, it attempts to restart the service without repeating installation. Keep the Mac connected
+during this initial installation of the maintenance service.
+
+When disconnected, Updates offers **Reconnect**, **Start Server…** and **Update Server…**.
+Starting verifies the existing managed installation without replacing packages or project data.
+Automatic connection retries resume after failures; a deliberate disconnect or change of server
+prevents a completed update from reconnecting the wrong profile. Administrator checks must match
+the saved SSH host and data directory. HTTPS-only legacy profiles need a corresponding SSH
+connection before this initial migration; Bloom does not infer administrator access from a web URL.
 
 The root-owned Python supervisor and support modules live in `/usr/local/libexec`; protected
 metadata, recovery files and verified releases live in `/var/lib/bloom-maintenance/bloom-server`.

@@ -815,7 +815,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(database.execute("SELECT value FROM preserved").fetchone(), ("kept",))
 
 
-class StopServerTests(unittest.TestCase):
+class ServiceLifecycleFixture(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="bloom-stop-tests-")
         self.addCleanup(self.temporary.cleanup)
@@ -840,6 +840,8 @@ class StopServerTests(unittest.TestCase):
                       mock.patch.object(installer, "account_operation", side_effect=lambda account, operation: operation())]:
             patch.start(); self.addCleanup(patch.stop)
 
+
+class StopServerTests(ServiceLifecycleFixture):
     def assert_refused(self, code, states=None):
         with mock.patch.object(installer, "managed_service_state", side_effect=states or [self.active]):
             with self.assertRaises(installer.InstallError) as raised:
@@ -896,6 +898,61 @@ class StopServerTests(unittest.TestCase):
             with self.assertRaises(installer.InstallError): installer.stop_server(self.args)
         self.patches["command"].assert_called_once()
         self.patches["probe"].assert_not_called()
+
+
+class StartServerTests(ServiceLifecycleFixture):
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(installer, "wait_ready")
+        self.ready = patch.start(); self.addCleanup(patch.stop)
+
+    def test_start_retains_configuration_and_verifies_readiness(self):
+        with mock.patch.object(installer, "managed_service_state", side_effect=[self.inactive, self.inactive, self.active]):
+            event = installer.start_server(self.args)
+        self.assertTrue(event["ready"])
+        self.assertEqual(event["dataDirectory"], str(self.args.data_dir))
+        self.patches["command"].assert_called_once_with(["systemctl", "start", "bloom-fixture.service"], timeout=40)
+        self.ready.assert_called_once_with(self.args, self.account.pw_uid)
+
+    def test_running_service_is_verified_without_start_or_restart(self):
+        with mock.patch.object(installer, "managed_service_state", return_value=self.active):
+            self.assertTrue(installer.start_server(self.args)["ready"])
+        self.patches["command"].assert_not_called()
+        self.ready.assert_called_once()
+
+    def test_start_rejects_missing_partial_and_unmanaged_installations(self):
+        for value in (None, {"phase": "prepared"}):
+            self.patches["marker"].return_value = value
+            with self.assertRaises(installer.InstallError) as raised:
+                installer.start_server(self.args)
+            self.assertEqual(raised.exception.code, "unmanaged_server")
+        self.patches["command"].assert_not_called()
+
+    def test_manual_database_owner_blocks_start(self):
+        self.patches["daemon_locked"].return_value = True
+        with mock.patch.object(installer, "managed_service_state", return_value=self.inactive):
+            with self.assertRaises(installer.InstallError) as raised:
+                installer.start_server(self.args)
+        self.assertEqual(raised.exception.code, "unmanaged_server")
+        self.patches["command"].assert_not_called()
+
+    def test_changed_service_blocks_start(self):
+        with mock.patch.object(installer, "managed_service_state", side_effect=[self.inactive, self.active]):
+            with self.assertRaises(installer.InstallError) as raised:
+                installer.start_server(self.args)
+        self.assertEqual(raised.exception.code, "server_running")
+        self.patches["command"].assert_not_called()
+
+    def test_failed_health_check_is_not_success(self):
+        self.ready.side_effect = installer.InstallError("service_failed", "No socket", "Inspect journal")
+        with mock.patch.object(installer, "managed_service_state", side_effect=[self.inactive, self.inactive, self.active]):
+            with self.assertRaises(installer.InstallError): installer.start_server(self.args)
+
+    def test_start_can_resume_durable_supervisor_recovery(self):
+        with mock.patch.object(installer, "managed_service_state", return_value=self.active) as checked:
+            installer.start_server(self.args)
+        for call in checked.call_args_list:
+            self.assertTrue(call.kwargs["allow_maintenance_recovery"])
 
 
 class StopOwnershipTests(unittest.TestCase):

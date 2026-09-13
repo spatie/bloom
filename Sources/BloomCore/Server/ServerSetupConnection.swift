@@ -146,6 +146,16 @@ public struct ServerSetupConnection: Sendable {
         return try Self.stoppedServerCheck(status: result.status, output: String(decoding: result.output, as: UTF8.self))
     }
 
+    /// Start only the installer-owned service, preserving its account, data and credentials.
+    public func startServer(script: String,
+                            progress: @escaping @Sendable (ServerInstallEvent) async -> Void = { _ in }) async throws -> ServerInstallEvent {
+        try Task.checkCancellation()
+        return try await stream(Self.startServerCommand, script: script, commandLabel: "Start Bloom Server",
+                                step: "server-start", progress: progress)
+    }
+
+    static let startServerCommand = "if [ \"$(id -u)\" = 0 ]; then python3 - --start-server; elif sudo -n true; then sudo -n python3 - --start-server; else python3 - --start-server; fi"
+
     static let stopServerCommand = "if [ \"$(id -u)\" = 0 ]; then python3 - --stop-server; elif sudo -n true; then sudo -n python3 - --stop-server; else python3 - --stop-server; fi"
 
     static func stoppedServerCheck(status: Int32, output: String) throws -> ServerInstallCheck {
