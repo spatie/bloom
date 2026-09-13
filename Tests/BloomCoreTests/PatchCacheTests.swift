@@ -67,10 +67,10 @@ struct PatchCacheTests {
         var cache = PatchCache()
         let first = BranchCommit(sha: "a", subject: "one", author: "x", date: .distantPast)
         let second = BranchCommit(sha: "b", subject: "two", author: "x", date: .distantPast)
-        cache.store("held", for: key(scope: .since(first)))
+        cache.store("held", for: key(scope: .commit(first)))
 
-        #expect(cache.patch(for: key(scope: .since(first))) == "held")
-        #expect(cache.patch(for: key(scope: .since(second))) == nil)
+        #expect(cache.patch(for: key(scope: .commit(first))) == "held")
+        #expect(cache.patch(for: key(scope: .commit(second))) == nil)
     }
 
     /// A landed refresh means git has looked at the worktree again, so everything measured before

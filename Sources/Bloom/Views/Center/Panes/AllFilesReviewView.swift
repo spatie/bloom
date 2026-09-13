@@ -31,28 +31,29 @@ struct AllFilesReviewView: View {
                                 DiffView(
                                     model: model, file: file, embeddedWidth: geometry.size.width,
                                     embeddedViewportHeight: geometry.size.height,
-                                    isCollapsed: collapsedPaths.contains(file.path),
+                                    isCollapsed: collapsedPaths.contains(file.id),
                                     onScrollFocus: {
                                         guard hasNavigated, pendingDestination == nil else { return }
                                         if model.selectedFilePath != file.path { model.selectedFilePath = file.path }
+                                        if model.selectedChangeLayer != file.layer { model.selectedChangeLayer = file.layer }
                                     },
-                                    navigationTarget: pendingDestination == file.path,
+                                    navigationTarget: pendingDestination == file.id,
                                     onNavigationLayout: {
-                                        guard pendingDestination == file.path else { return }
-                                        scroll(to: file.path, using: reader)
+                                        guard pendingDestination == file.id else { return }
+                                        scroll(to: file.id, using: reader)
                                     },
                                     onPrepared: {
-                                        if pendingDestination == file.path { destinationPrepared = true }
+                                        if pendingDestination == file.id { destinationPrepared = true }
                                         layoutRevision += 1
                                     },
                                     onToggleCollapsed: {
                                         pendingDestination = nil
-                                        if !collapsedPaths.insert(file.path).inserted {
-                                            collapsedPaths.remove(file.path)
+                                        if !collapsedPaths.insert(file.id).inserted {
+                                            collapsedPaths.remove(file.id)
                                         }
                                     }
                                 )
-                                .id(file.path)
+                                .id(file.id)
                             }
                         }
                         .background {
@@ -70,20 +71,22 @@ struct AllFilesReviewView: View {
                     .onScrollGeometryChange(for: Bool.self) { geometry in
                         geometry.contentOffset.y <= geometry.contentInsets.top
                     } action: { _, atTop in
-                        if hasNavigated, pendingDestination == nil, atTop, let path = model.reviewFiles.first?.path,
-                           model.selectedFilePath != path {
-                            model.selectedFilePath = path
+                        if hasNavigated, pendingDestination == nil, atTop, let first = model.reviewFiles.first {
+                            if model.selectedFilePath != first.path { model.selectedFilePath = first.path }
+                            if model.selectedChangeLayer != first.layer { model.selectedChangeLayer = first.layer }
                         }
                     }
                     .onChange(of: navigationRevision, initial: true) { _, _ in
                         let requested = hasNavigated ? selectedPath : model.selectedFilePath ?? selectedPath
                         hasNavigated = true
-                        let path = requested.isEmpty ? model.reviewFiles.first?.path : requested
-                        guard let path, model.reviewFiles.contains(where: { $0.path == path }) else { return }
+                        let file = model.selectedChangedFile(path: requested) ?? model.reviewFiles.first
+                        guard let file else { return }
+                        let path = file.id
                         collapsedPaths.remove(path)
                         destinationPrepared = false
                         pendingDestination = path
-                        model.selectedFilePath = path
+                        model.selectedFilePath = file.path
+                        model.selectedChangeLayer = file.layer
                         reader.scrollTo(path, anchor: .top)
                     }
                     .onScrollGeometryChange(for: CGSize.self) { geometry in
@@ -94,7 +97,7 @@ struct AllFilesReviewView: View {
                     .onChange(of: layoutRevision) { _, _ in
                         if let path = pendingDestination { scroll(to: path, using: reader) }
                     }
-                    .onChange(of: model.reviewFiles.map(\.path)) { _, paths in
+                    .onChange(of: model.reviewFiles.map(\.id)) { _, paths in
                         collapsedPaths.formIntersection(paths)
                         if let pendingDestination, !paths.contains(pendingDestination) { self.pendingDestination = nil }
                     }
@@ -104,8 +107,9 @@ struct AllFilesReviewView: View {
     }
 
     private func scroll(to path: String, using reader: ScrollViewProxy) {
-        let absolute = (model.workspace.path as NSString).appendingPathComponent(path)
-        if destinationPrepared, let destination = SourceEditorState.file(absolute).diffRequest {
+        let relative = model.reviewFiles.first { $0.id == path }?.path ?? path
+        let absolute = (model.workspace.path as NSString).appendingPathComponent(relative)
+        if destinationPrepared, model.diffScope == .all, let destination = SourceEditorState.file(absolute).diffRequest {
             reader.scrollTo("\(path):definition:\(destination.line)", anchor: .center)
         } else {
             reader.scrollTo(path, anchor: .top)

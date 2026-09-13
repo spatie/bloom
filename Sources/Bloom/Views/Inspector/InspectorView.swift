@@ -62,10 +62,10 @@ struct InspectorView: View {
             // marks them off the same list, so a narrowed scope quietly takes marks off that tree
             // too. A tab where the scope has an effect is a tab where it has to be explained. The
             // checks list is GitHub's and owes nothing to any of this.
-            if model.inspectorTab != .checks, model.diffScope.isNarrowed {
+            if model.inspectorTab == .allFiles, model.diffScope.isNarrowed {
                 DiffScopeBand(
                     scope: model.diffScope,
-                    fileCount: model.changedFiles.count,
+                    fileCount: Set(model.changedFiles.map(\.path)).count,
                     note: model.scopeNote
                 ) {
                     model.setDiffScope(.all)
@@ -120,7 +120,7 @@ struct InspectorView: View {
         case .allFiles:
             FileTreeView(model: model)
         case .changes:
-            ChangedFileList(model: model)
+            ChangesBrowser(model: model)
         case .checks:
             ChecksView(model: model)
         }
