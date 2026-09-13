@@ -246,6 +246,15 @@ struct TerminalSplitView: View {
 
         case .toggleZoom:
             return splits.toggleZoom(in: ownerID)
+
+        // The context menu's Add to Chat, from the keyboard. Nothing selected, or no conversation
+        // to add to, hands the key back, so the menu bar answers it with a beep rather than nothing.
+        case .addSelectionToChat:
+            guard let onAddToChat, let excerpt = TerminalSessionStore.shared.excerpt(
+                inPaneID: pane, workspaceID: workspace.id, label: terminalLabel
+            ) else { return false }
+            onAddToChat(excerpt)
+            return true
         }
     }
 }

@@ -82,7 +82,8 @@ struct DiffView: View {
     /// keyed by path in `ReviewPaneView` and destroyed by walking to another file. View state
     /// answered the first death and not the second; see `WorkspaceModel.reviewDrafts` for the
     /// fragment that committing on disappear minted instead.
-    private var draft: ReviewDraft? { model.reviewDrafts[file.path] }
+    private var allowsWorktreeActions: Bool { model.diffScope.allowsWorktreeActions(for: file) }
+    private var draft: ReviewDraft? { allowsWorktreeActions ? model.reviewDrafts[file.path] : nil }
     private var draftSelection: ReviewSelection? { draft?.selection }
     /// Where the editor is drawn: under the LAST line the note will cover, so a note begun by
     /// dragging reads as being about the lines above the box rather than as covering them. The
@@ -175,9 +176,9 @@ struct DiffView: View {
         self.onPrepared = onPrepared
         self.onToggleCollapsed = onToggleCollapsed
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
-        _mode = State(initialValue: FileEditSession.shared.isDirty(absolute)
+        _mode = State(initialValue: model.diffScope.allowsWorktreeActions(for: file) && (FileEditSession.shared.isDirty(absolute)
             || SourceEditorState.file(absolute).prefersEditing
-            || (embeddedWidth == nil && SourceEditorState.file(absolute).request != nil) ? .edit : .diff)
+            || (embeddedWidth == nil && SourceEditorState.file(absolute).request != nil)) ? .edit : .diff)
 
         let held = model.heldDiff(
             for: file,
@@ -204,6 +205,7 @@ struct DiffView: View {
         var workspaceID: WorkspaceID
         var file: ChangedFile
         var scope: DiffScope
+        var generation: Int
         var isCollapsed: Bool
         var ignoringWhitespace: Bool
     }
@@ -324,6 +326,7 @@ struct DiffView: View {
         .task(id: LoadID(
             language: effectiveLanguage,
             workspaceID: model.workspace.id, file: file, scope: model.diffScope,
+            generation: model.diffScope.isHistorical ? 0 : model.changesGeneration,
             isCollapsed: isCollapsed, ignoringWhitespace: ignoresWhitespace
         )) {
             guard !isCollapsed else {
@@ -457,6 +460,11 @@ struct DiffView: View {
 
     private func load() async {
         priming?.cancel()
+        if file.layer == .conflicted {
+            phase = .notice(symbol: "exclamationmark.triangle", title: "Unresolved conflict",
+                            detail: "This file has unmerged changes. Resolve the conflict in the working tree.")
+            return
+        }
         let ignoringWhitespace = ignoresWhitespace
         if let preparedWhitespace, preparedWhitespace != ignoringWhitespace {
             expandedRuns = []
@@ -504,7 +512,15 @@ struct DiffView: View {
             isEditable = false
         }
 
-        let patch = await model.patch(for: file)
+        let patch: String
+        do {
+            patch = try await model.readPatch(for: file)
+        } catch {
+            guard !Task.isCancelled else { return }
+            phase = .notice(symbol: "exclamationmark.triangle", title: "Could not read the diff",
+                            detail: error.localizedDescription)
+            return
+        }
         guard !Task.isCancelled else { return }
         let path = file.path
         let parsed = await Task.detached(priority: .userInitiated) {
@@ -553,7 +569,7 @@ struct DiffView: View {
             !binary && FileEditor.isEditable(absolute)
         }.value
         guard !Task.isCancelled else { return }
-        isEditable = editable
+        isEditable = editable && allowsWorktreeActions
     }
 
     /// Turn the parsed patch into whatever the current settings say it should be.
@@ -584,6 +600,7 @@ struct DiffView: View {
     /// Throw the file's changes away. Only ever reached through the confirmation in the header
     /// bar, which names what is about to go.
     private func revert() {
+        guard allowsWorktreeActions else { return }
         Task {
             session.discard(path: absolutePath)
             // The file is about to be replaced or deleted outright, so a box open on the lines it
@@ -615,15 +632,17 @@ struct DiffView: View {
         // resolve against these lines, so the two splits disagreeing at the end of the file is
         // exactly the band-versus-payload disagreement `ReviewCommentRender` warns against.
         let language = effectiveLanguage
+        let scope = model.diffScope
+        let selectedFile = file
         let prepared = await Task.detached(priority: .userInitiated) {
             (
                 document: DiffDocument.prepare(file: fileDiff, path: path, language: language),
-                lines: WorkspaceModel.contents(of: path, in: worktree)
+                lines: await WorkspaceModel.reviewContents(worktree: worktree, file: selectedFile, scope: scope)
                     .map(ReviewCommentAnchor.split)
             )
         }.value
 
-        guard !Task.isCancelled, whitespace == ignoresWhitespace, language == effectiveLanguage else { return }
+        guard !Task.isCancelled, whitespace == ignoresWhitespace, language == effectiveLanguage, scope == model.diffScope else { return }
 
         let document = prepared.document
         fileLines = prepared.lines
@@ -1106,8 +1125,9 @@ struct DiffView: View {
             width: width,
             wrappedHeights: wrappedHeights,
             lookupRevision: rowRevision,
+            isReadOnly: !allowsWorktreeActions,
             onLookup: { view, offset, references, automatic, newTab in
-                guard isCurrent(document), let fileLines else { return }
+                guard allowsWorktreeActions, isCurrent(document), let fileLines else { return }
                 SourceActions.lookupInDiff(at: offset, view: view, lines: lines, source: fileLines.joined(separator: "\n"),
                     path: file.path, model: model, references: references, automatic: automatic, newTab: newTab) { location, newTab in
                     guard isCurrent(document) else { return }
@@ -1117,12 +1137,12 @@ struct DiffView: View {
                 }
             },
             destination: SourceEditorState.file(absolutePath).diffRequest,
-            onComment: { if isCurrent(document) { beginDraft(at: $0) } },
+            onComment: allowsWorktreeActions ? { if isCurrent(document) { beginDraft(at: $0) } } : nil,
             onDragComment: { if isCurrent(document) { extendDrag(from: $0, to: $1) } },
             onEndCommentDrag: {
                 if isCurrent(document) { finishDrag() } else { rangeDrag = nil }
             },
-            onEdit: { if isCurrent(document) { beginEdit(at: $0) } }
+            onEdit: allowsWorktreeActions ? { if isCurrent(document) { beginEdit(at: $0) } } : nil
         )
         // For the reason given at the per line call sites above, and up to four hundred times as
         // much of it: one of these stands in for a whole run of rows.
@@ -1147,7 +1167,7 @@ struct DiffView: View {
 
     /// The pending comments on this one file, which is all a diff of it can place.
     private var fileComments: [ReviewComment] {
-        model.reviewComments.filter { $0.filePath == file.path }
+        allowsWorktreeActions ? model.reviewComments.filter { $0.filePath == file.path } : []
     }
 
     /// The spots one rendered row answers for, filtered the way `DiffLineView.offeredSpot` is,
@@ -1266,7 +1286,7 @@ struct DiffView: View {
     /// The lines being edited in place on this file, or nil. Held by the session rather than by
     /// this view for the reason written out on `DiffEditSession`: everything that moves a diff
     /// destroys this view, and none of it is the user saying they have finished typing.
-    private var editRegion: DiffEditRegion? { edits.editor(for: absolutePath)?.region }
+    private var editRegion: DiffEditRegion? { allowsWorktreeActions ? edits.editor(for: absolutePath)?.region : nil }
 
     /// Open a box on the lines around `line`, or say why not.
     ///
@@ -1274,6 +1294,7 @@ struct DiffView: View {
     /// a whitespace refold changes which lines are printed, and the numbers in the gutter the
     /// reader right clicked are these ones.
     private func beginEdit(at line: Int) {
+        guard allowsWorktreeActions else { return }
         guard case let .ready(document) = phase else { return }
 
         // Not while Edit mode is holding unsaved text for the same file. Two boxes over one file
@@ -1447,6 +1468,7 @@ struct DiffView: View {
     /// while comments or an open editor are pending on this one file, and the load path already
     /// reads the same file the same way.
     private func refreshWorktreeCopy() {
+        guard allowsWorktreeActions else { return }
         let isEditing = edits.isOpen(absolutePath)
         guard case .ready = phase, !fileComments.isEmpty || draftSelection != nil || isEditing else {
             return

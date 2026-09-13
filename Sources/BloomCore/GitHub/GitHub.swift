@@ -173,6 +173,14 @@ public enum GitHub {
         "closedAt",
     ].joined(separator: ",")
 
+    /// Target the displayed pull request, even if the worktree's current branch has changed.
+    public static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
+        guard pullRequest.isOpen, pullRequest.isDraft else {
+            throw GitHubError("This pull request is no longer an open draft.")
+        }
+        try await checkGH(["pr", "ready", pullRequest.url], worktree: worktree)
+    }
+
     public static func isAvailable() async -> Bool {
         await access() == .ready
     }

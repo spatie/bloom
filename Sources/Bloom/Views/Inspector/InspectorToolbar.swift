@@ -63,7 +63,7 @@ struct InspectorToolbar: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.changedFiles.isEmpty)
+                .disabled(model.changedFiles.isEmpty || model.diffScope == .uncommitted)
                 .accessibilityLabel("Group changes by folder")
                 .accessibilityAddTraits(isTree ? .isSelected : [])
                 .help(
@@ -72,32 +72,6 @@ struct InspectorToolbar: View {
                         : "Group the changed files by folder"
                 )
 
-                // What the list is measured from. On this tab only, because it is the only pane
-                // the scope means anything for: the file tree is the whole worktree and the checks
-                // list is GitHub's. Which scope is in force is said by the band under this row
-                // rather than in it, for the width reason `DiffScopeBand` spells out.
-                Menu {
-                    DiffScopeMenuItems(model: model)
-                } label: {
-                    Label(
-                        "What the changes are measured from",
-                        systemImage: "line.3.horizontal.decrease.circle"
-                    )
-                }
-                .labelStyle(.iconOnly)
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .controlSize(.small)
-                .fixedSize()
-                .help("What the changes are measured from")
-                // One glyph, in one colour, whichever scope is in force. It carried
-                // `.foregroundStyle(Palette.accent)` while narrowed for a while; photographed in
-                // both states the two glyphs came out at exactly the same grey, because a
-                // borderless `Menu` is an `NSPopUpButton` and a foreground style set out here does
-                // not reach the image it draws. `.symbolVariant(.fill)` does reach it, and a
-                // filled disc in a row of outlines is louder than this control has any business
-                // being. The band under this row is what says the list is narrowed, and it says it
-                // in a sentence rather than by a shade of a glyph nobody would notice.
             }
 
             // No Refresh. The list keeps itself current: `AppModel`'s poll re-reads the selected
@@ -208,7 +182,7 @@ struct InspectorToolbar: View {
     /// fewer.
     private func title(for tab: InspectorTab) -> String {
         guard tab == .changes, !model.changedFiles.isEmpty else { return tab.rawValue }
-        return "\(tab.rawValue) (\(model.changedFiles.count))"
+        return "\(tab.rawValue) (\(Set(model.changedFiles.map(\.path)).count))"
     }
 
 }

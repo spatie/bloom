@@ -94,6 +94,7 @@ enum MarkdownPrime {
 public struct MarkdownView: View {
     private let text: String
     private let isStreaming: Bool
+    @State private var selection = TranscriptTextSelection()
 
     /// - Parameter isStreaming: whether this text is still being written. It changes nothing about
     ///   what is drawn, only which cache the parse goes through. See
@@ -116,6 +117,9 @@ public struct MarkdownView: View {
             ? MarkdownParseCache.streamingParsed(for: text)
             : MarkdownParseCache.parsed(for: text)
         MarkdownBlocksView(blocks: parsed.blocks)
+            .environment(\.transcriptTextSelection, selection)
+            .onAppear { selection.source = text }
+            .onChange(of: text) { _, value in selection.source = value }
             .environment(\.markdownIsStreaming, isStreaming)
             .opensTranscriptLinks()
             .transcriptLinkMenu(parsed.addresses)
@@ -148,6 +152,7 @@ extension EnvironmentValues {
 private struct MarkdownBlocksView: View {
     let blocks: [MarkdownBlock]
     var foreground = Palette.textPrimary
+    var copyPrefix = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: MarkdownMetrics.blockGap) {
@@ -155,7 +160,10 @@ private struct MarkdownBlocksView: View {
             // second array of pairs every pass to draw the same blocks. The same change is made
             // everywhere below it, and the identity is what it always was: a block's position.
             ForEach(blocks.indices, id: \.self) { offset in
-                MarkdownBlockView(block: blocks[offset], foreground: foreground, isFirst: offset == 0)
+                MarkdownBlockView(
+                    block: blocks[offset], foreground: foreground, isFirst: offset == 0,
+                    copyPrefix: offset == 0 ? copyPrefix : ""
+                )
             }
         }
     }
@@ -166,6 +174,7 @@ private struct MarkdownBlockView: View {
     let foreground: Color
     /// A heading only claims space above it when there is something above it to be separated from.
     var isFirst = false
+    var copyPrefix = ""
 
     /// The marker column follows the conversation's text size, otherwise a raised body size pushes
     /// "10." straight out of a column sized for the default one. This was a `@ScaledMetric`, which
@@ -244,59 +253,31 @@ private struct MarkdownBlockView: View {
         }
     }
 
-    /// An attributed string needs a real `Font`, so the rung is resolved here rather than left to
-    /// the `.font(ScaledFont)` modifier the rest of the app leans on. The rung is carried this far
-    /// rather than a `Font`, because the code face has to be derived from the same rung: a span of
-    /// code takes its size from the run it sits in, not from a rung of its own.
-    /// One run of inline markdown, drawn by whichever of the two renderers this run needs.
-    ///
-    /// **`Text` unless there is a link in it.** An `NSTextView` is what makes a link behave like
-    /// one, and it is also the more expensive of the two: it holds a layout manager and a text
-    /// storage, and handing it a new string relays the whole run out. Most paragraphs in most
-    /// answers hold no address at all, and those keep the renderer they have always had, with the
-    /// attributed string cache in front of it.
-    ///
-    /// **And never while the answer is still arriving.** `4088ecd` established that a streamed
-    /// answer is re-rendered on every delta, and rebuilding an attributed string and relaying out
-    /// a text view per token is quadratic over the length of the answer. A link is not pressable
-    /// for the second or two its sentence is being written, and it becomes pressable the moment
-    /// the turn settles, which nobody will ever notice.
-    @ViewBuilder
+    /// Every run joins the answer's native selection scope, including prose without links.
     private func inlineText(
-        _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil
+        _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil,
+        prefix: String? = nil, separatorBefore: String = "\n\n"
     ) -> some View {
-        let font = rung.resolved(scale: fontScale, face: chatFont)
-        if !isStreaming, InlineNSAttributes.hasLink(inline) {
-            TranscriptTextView(
-                text: InlineNSAttributes.make(
-                    inline,
-                    font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
-                    code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
-                    color: NSColor(color),
-                    // The block's leading, not this rung's. A paragraph is led once, by the
-                    // caller's `.proseLeading()`, and the `Text` branch below inherits that
-                    // number through the environment; asking for a heading's own here would set
-                    // a heading with a link in it differently from the heading beside it and
-                    // change what the row measures at.
-                    lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
-                        Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
-                    )
-                ),
-                linkColor: Palette.linkNSColor,
-                actions: linkActions
-            )
-        } else {
-            Text(InlineAttributes.make(
-                inline,
-                font: font,
-                code: rung.monospacedCompanion(scale: fontScale, face: chatFont),
-                color: color
-            ))
-            .font(font)
-            .foregroundStyle(color)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-        }
+        let text = InlineNSTextCache.make(
+            inline,
+            font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
+            code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
+            color: NSColor(color),
+            lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
+                Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
+            ),
+            isStreaming: isStreaming
+        )
+        let baseline = TranscriptTextView.firstBaseline(of: text)
+        return TranscriptTextView(
+            text: text,
+            linkColor: Palette.linkNSColor,
+            copyPrefix: prefix ?? copyPrefix,
+            copySeparatorBefore: separatorBefore,
+            actions: linkActions
+        )
+        // Native text views do not supply a SwiftUI baseline for the list marker beside them.
+        .alignmentGuide(.firstTextBaseline) { _ in baseline }
     }
 
     private func marker(_ text: String) -> some View {
@@ -316,7 +297,10 @@ private struct MarkdownBlockView: View {
                 // and top alignment sat the marker a fraction above the line it marks.
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
-                    MarkdownBlocksView(blocks: items[offset], foreground: foreground)
+                    MarkdownBlocksView(
+                        blocks: items[offset], foreground: foreground,
+                        copyPrefix: start.map { "\($0 + offset). " } ?? "• "
+                    )
                         .lineSpacing(proseListLineSpacing)
                         .environment(\.markdownLineSpacingOverride, proseListLineSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -339,7 +323,10 @@ private struct MarkdownBlockView: View {
                         .accessibilityLabel(item.checked ? "Done" : "Not done")
                     // The AppKit link renderer reads spacing here, before a modifier below can
                     // override the environment. Nested checklists must not inherit prose leading.
-                    inlineText(item.inline, rung: Typo.body, color: foreground, spacing: listLineSpacing)
+                    inlineText(
+                        item.inline, rung: Typo.body, color: foreground, spacing: listLineSpacing,
+                        prefix: item.checked ? "[x] " : "[ ] "
+                    )
                         .lineSpacing(listLineSpacing)
                         .environment(\.markdownLineSpacingOverride, listLineSpacing)
                 }
@@ -355,7 +342,8 @@ private struct MarkdownBlockView: View {
                     rung: Typo.labelEmphasis,
                     alignment: alignment(at: column, in: alignments),
                     isLastColumn: column == headers.count - 1,
-                    isLastRow: rows.isEmpty
+                    isLastRow: rows.isEmpty,
+                    separatorBefore: column == 0 ? "\n\n" : "\t"
                 )
                 .background(Palette.surfaceSunken)
             }
@@ -367,7 +355,8 @@ private struct MarkdownBlockView: View {
                         rung: Typo.label,
                         alignment: alignment(at: column, in: alignments),
                         isLastColumn: column == row.count - 1,
-                        isLastRow: index == rows.count - 1
+                        isLastRow: index == rows.count - 1,
+                        separatorBefore: column == 0 ? "\n" : "\t"
                     )
                 }
             }
@@ -384,9 +373,10 @@ private struct MarkdownBlockView: View {
         rung: ScaledFont,
         alignment: Alignment,
         isLastColumn: Bool,
-        isLastRow: Bool
+        isLastRow: Bool,
+        separatorBefore: String
     ) -> some View {
-        inlineText(inline, rung: rung, color: foreground)
+        inlineText(inline, rung: rung, color: foreground, separatorBefore: separatorBefore)
             .padding(.horizontal, Metrics.spacingWide)
             .padding(.vertical, Metrics.spacing)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)

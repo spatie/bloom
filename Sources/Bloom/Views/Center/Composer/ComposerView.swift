@@ -165,7 +165,9 @@ struct ComposerView: View {
         // just arrived are at the front and are the ones the button was pressed to change.
         .onChange(of: transcript.composerFocusRequests) { _, _ in
             isFocused = true
-            caret = 0
+            caret = transcript.composerFocusCaretAtEnd
+                ? (SlashCommandDraft.parse(transcript.draft).body as NSString).length
+                : 0
         }
         .focusedValue(\.composerTranscript, isFocused ? transcript : nil)
         .onDisappear(perform: saveDraftNow)
@@ -244,9 +246,37 @@ struct ComposerView: View {
         case .escape:
             if let onDismiss { onDismiss() } else { isFocused = false }
             return true
-        case .up, .down, .tab:
+        case .up:
+            return recall(.older)
+        case .down:
+            return recall(.newer)
+        case .tab:
             return false
         }
+    }
+
+    /// Up or Down in an empty composer, or in one still holding a prompt they brought back.
+    ///
+    /// The guard in front is about cost rather than rules, which are `PromptRecall`'s: reading the
+    /// sent prompts decodes every user row in the session, and an arrow key pressed in a draft
+    /// somebody is writing has no business paying for that.
+    private func recall(_ direction: PromptRecall.Direction) -> Bool {
+        let draft = transcript.draft
+        guard draft.isEmpty || transcript.promptRecall.isBrowsing else { return false }
+
+        // The caret counts the body, the draft counts the `/command` in front of it too.
+        let body = SlashCommandDraft.parse(draft).body
+        let lead = (draft as NSString).length - (body as NSString).length
+        let sent = transcript.rows.lazy
+            .filter { $0.kind == .user }
+            .map { UserTurnPrompt.text(in: $0.payload) }
+        guard let text = transcript.promptRecall.step(
+            direction, prompts: PromptRecall.prompts(from: Array(sent)), draft: draft, caret: caret + lead
+        ) else { return false }
+
+        transcript.draft = text
+        caret = (SlashCommandDraft.parse(text).body as NSString).length
+        return true
     }
 
     // MARK: - Actions

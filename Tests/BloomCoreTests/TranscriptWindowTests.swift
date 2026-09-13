@@ -9,6 +9,25 @@ import Testing
 /// this returns are the difference between a resize at six frames a second and one at sixty.
 @Suite("Transcript window")
 struct TranscriptWindowTests {
+    @Test func savedMessageIsPresentWhenItsEchoIsRemoved() {
+        let drawn = TranscriptWindow(start: 20, end: 100)
+        let firstPass = drawn.includingAppendedRows(previousCount: 100, rowCount: 101)
+        #expect(firstPass == TranscriptWindow(start: 20, end: 101))
+        #expect((firstPass.start..<firstPass.end).contains(100))
+    }
+
+    @Test func appendingDoesNotOpenHistoryWindowsToTheLiveEnd() {
+        let drawn = TranscriptWindow(start: 20, end: 100)
+        #expect(drawn.includingAppendedRows(previousCount: 200, rowCount: 201) == drawn)
+    }
+
+    @Test func appendWindowHandlesEmptyAndReloadedTranscripts() {
+        #expect(TranscriptWindow(start: 0, end: 0)
+            .includingAppendedRows(previousCount: 0, rowCount: 1) == TranscriptWindow(start: 0, end: 1))
+        #expect(TranscriptWindow(start: 20, end: 100)
+            .includingAppendedRows(previousCount: 100, rowCount: 10) == TranscriptWindow(start: 10, end: 10))
+    }
+
     // MARK: Opening
 
     @Test("a session shorter than the tail is drawn whole")

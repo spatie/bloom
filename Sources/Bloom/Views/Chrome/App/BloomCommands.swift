@@ -256,6 +256,16 @@ struct BloomCommands: Commands {
             // undivided run of eight items. Every Mac Edit menu keeps find in a group of its own.
             Divider()
 
+            // Beside the pasteboard rather than in the find group, because it is the same kind of
+            // act as Copy: take what is selected and put it somewhere. Never disabled, for Find's
+            // reason: whether anything is selected is the responder chain's to say, and it says so
+            // at the moment the key is pressed rather than when this body was last built.
+            MenuCommand(.addSelectionToChat) {
+                if !SelectionToChat.perform() { NSSound.beep() }
+            }
+
+            Divider()
+
             // The find group every Mac Edit menu has, which this one did not: Cmd+F opened a
             // screen, there was no Cmd+G anywhere in the app, and the terminal's own find bar had
             // never been asked for. A submenu called Find, because that is where Mail, Safari,
@@ -799,7 +809,9 @@ struct BloomCommands: Commands {
         // Splitting and closing a shell pane are the tab's own, and the menu bar reaches neither
         // from here: Split Right opens in the CENTRE column and Close Pane closes a centre pane,
         // which are the two items directly above these in the same menu.
-        case .split, .close:
+        // Adding a selection is the shell's own too, and the menu bar's Add to Chat finds
+        // the shell through the responder chain rather than coming through here.
+        case .split, .close, .addSelectionToChat:
             return
         }
     }

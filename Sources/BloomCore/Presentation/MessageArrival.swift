@@ -28,14 +28,14 @@ public struct MessageArrival: Hashable, Sendable {
     }
 
     public func pose(at date: Date, reduceMotion: Bool) -> Pose {
-        guard !reduceMotion else { return .settled }
+        guard !reduceMotion, style == .reply else { return .settled }
         let fraction = min(1, max(0, date.timeIntervalSince(startedAt) / duration))
         // A cubic ease out, with no overshoot or moving layout dimensions.
         let remainder = pow(1 - fraction, 3)
         return Pose(
             opacity: 1 - remainder,
-            rise: style == .sent ? 10 * remainder : 0,
-            scale: style == .sent ? 1 - 0.025 * remainder : 1
+            rise: 0,
+            scale: 1
         )
     }
 }

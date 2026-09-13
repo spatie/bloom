@@ -22,6 +22,7 @@ struct DiffRunView: View, Equatable {
     var width: CGFloat
     var wrappedHeights: [CGFloat]?
     var lookupRevision = 0
+    var isReadOnly = false
     var onLookup: ((CodeTextView, Int, Bool, Bool, Bool) -> Void)?
     var destination: CodeLocation?
     /// Opens the review comment editor at a line. Nil, the default, draws no `+` at all.
@@ -70,6 +71,7 @@ struct DiffRunView: View, Equatable {
             && lhs.wrappedHeights == rhs.wrappedHeights
             && lhs.destination == rhs.destination
             && lhs.lookupRevision == rhs.lookupRevision
+            && lhs.isReadOnly == rhs.isReadOnly
     }
 
     var body: some View {

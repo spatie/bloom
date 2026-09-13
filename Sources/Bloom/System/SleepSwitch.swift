@@ -80,17 +80,21 @@ final class SleepSwitch {
     func setHoldingLidClosed(_ held: Bool) {
         refreshStanding()
         guard standing == .ready else { return }
+        // Hopped rather than assumed: NSXPCConnection calls its invalidation handler on its own
+        // queue, and `assumeIsolated` there is a trap rather than a check.
         let proxy = proxy { [weak self] in
-            MainActor.assumeIsolated { self?.connection = nil }
+            Task { @MainActor in self?.connection = nil }
         }
-        proxy?.setSleepDisabled(held, clientPID: ProcessInfo.processInfo.processIdentifier) { _ in }
+        proxy?.setSleepDisabled(held, clientPID: ProcessInfo.processInfo.processIdentifier, withReply: Self.ignoreReply)
     }
 
     /// Puts the switch back, whatever a session thought. Called on the way out, so quitting Bloom
     /// never leaves a Mac that will not sleep.
     func releaseOnQuit() {
         guard case .ready = standing else { return }
-        proxy(onInvalidation: {})?.setSleepDisabled(false, clientPID: ProcessInfo.processInfo.processIdentifier) { _ in }
+        proxy(onInvalidation: {})?.setSleepDisabled(
+            false, clientPID: ProcessInfo.processInfo.processIdentifier, withReply: Self.ignoreReply
+        )
     }
 
     private func refreshStanding() {
@@ -110,8 +114,16 @@ final class SleepSwitch {
             created.resume()
             connection = created
         }
-        return connection?.remoteObjectProxyWithErrorHandler { _ in } as? SleepControl
+        return connection?.remoteObjectProxyWithErrorHandler(Self.ignoreError) as? SleepControl
     }
+
+    /// The reply and the error handler XPC calls back on its own queue, declared outside the
+    /// class's main actor. Written inline as `{ _ in }` inside a method of this class, each closure
+    /// inherited main actor isolation, and Swift checks that on entry: the first time the daemon
+    /// was unreachable, the error handler ran on XPC's queue and Bloom stopped at launch in
+    /// `dispatch_assert_queue`.
+    private nonisolated static let ignoreReply: @Sendable (Bool) -> Void = { _ in }
+    private nonisolated static let ignoreError: @Sendable (any Error) -> Void = { _ in }
 }
 
 /// The daemon's side of the wire, declared again here rather than shared through a module: the
