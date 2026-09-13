@@ -50,10 +50,15 @@ final class TranscriptTextSelection {
 
     var selectedText: String {
         if selectsWholeAnswer { return source }
-        return orderedViews.compactMap { view in
-            guard let storage = view.textStorage, view.selectedRange().length > 0 else { return nil }
-            return TranscriptLink.selectedText(in: storage, range: view.selectedRange())
-        }.joined(separator: "\n\n")
+        var output = ""
+        for view in orderedViews {
+            let range = view.selectedRange()
+            guard let storage = view.textStorage, range.length > 0 else { continue }
+            if !output.isEmpty { output += view.copySeparatorBefore }
+            if range.location == 0 { output += view.copyPrefix }
+            output += TranscriptLink.selectedText(in: storage, range: range)
+        }
+        return output
     }
 
     func begin(in view: LinkTextView, offset: Int, extending: Bool) {

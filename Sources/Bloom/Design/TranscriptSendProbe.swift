@@ -28,6 +28,8 @@ enum TranscriptSendProbe {
             if let label = activity.label {
                 StreamingStatusView(glyph: nil, text: label)
                     .padding(.bottom, TranscriptLayout.block)
+            } else {
+                Color.clear.frame(height: 0)
             }
         }
     }
@@ -56,10 +58,13 @@ enum TranscriptSendProbe {
             )
         }
         let activity = Activity()
+        let isShort = CommandLine.arguments.contains("--short-transcript")
+        var sentArrival: MessageArrival?
         func message(_ id: TranscriptEntryID, visible: Bool) -> TranscriptTableEntry {
             TranscriptTableEntry(
                 id: id, contentKey: TranscriptContentKey { $0.combine(id); $0.combine(visible) },
                 drawsNothing: !visible,
+                sentArrival: visible ? sentArrival : nil,
                 content: {
                     guard visible else { return AnyView(EmptyView()) }
                     return AnyView(
@@ -70,17 +75,25 @@ enum TranscriptSendProbe {
                 }
             )
         }
-        let history = (0..<25).map { entry(.row($0), text: "Earlier message \($0)", height: 48) }
+        let history = (0..<(isShort ? 2 : 25)).map { entry(.row($0), text: "Earlier message \($0)", height: 48) }
         func entries(phase: Int) -> [TranscriptTableEntry] {
             var rows = history
-            if phase >= 2 { rows.append(message(.row(25), visible: true)) }
+            // Sending already follows the completed turn. Its gap cannot wait for persistence.
+            rows.append(entry(.row(100), text: "Completed", height: 24 + (phase > 0 ? TranscriptLayout.turnGap : TranscriptLayout.tight)))
+            let held = TranscriptWindow(start: 0, end: 1)
+            let visible = held.includingAppendedRows(previousCount: 1, rowCount: phase >= 2 ? 2 : 1)
+            if visible.end == 2 { rows.append(message(.row(101), visible: true)) }
+            let activityHeight = TranscriptLayout.rowHeight + TranscriptLayout.block
+            if phase == 3 { rows.append(entry(.row(102), text: "Completed", height: activityHeight)) }
             rows.append(message(.sending, visible: phase == 1))
+            let showsActivity = phase > 0 && phase < 3
             rows.append(TranscriptTableEntry(
-                id: .streaming, contentKey: TranscriptContentKey { $0.combine("activity"); $0.combine(phase > 0) },
-                minimumHeight: phase > 0 ? TranscriptLayout.rowHeight + TranscriptLayout.block : 0,
+                id: .streaming, contentKey: TranscriptContentKey { $0.combine("activity"); $0.combine(showsActivity) },
+                minimumHeight: showsActivity ? activityHeight : 0,
+                fixedHeight: phase == 3 ? 0 : nil,
                 content: {
                     AnyView(ActivityRow(activity: activity)
-                        .frame(minHeight: phase > 0 ? TranscriptLayout.rowHeight + TranscriptLayout.block : 0))
+                        .frame(minHeight: showsActivity ? activityHeight : 0))
                 }
             ))
             rows.append(.bottomSpacing(clearance: 100))
@@ -112,6 +125,7 @@ enum TranscriptSendProbe {
         guard let scroll = controller.scrollView else { exit(1) }
         let before = scroll.contentView.bounds.minY
         let oldHeight = scroll.documentView?.frame.height ?? 0
+        sentArrival = MessageArrival(style: .sent)
         activity.label = "Starting"
         host.rootView = root(phase: 1)
         host.layoutSubtreeIfNeeded()
@@ -121,22 +135,37 @@ enum TranscriptSendProbe {
         check(abs(beginning - before) <= 1, "send jumped to the new end before its first animation frame")
         check(follower.isFollowing, "follower did not take ownership before insertion")
         if let table = scroll.documentView as? NSTableView {
-            let bubbleTop = table.rect(ofRow: history.count).minY - beginning
-            check(bubbleTop >= scroll.contentView.bounds.height - 100 - 1, "bubble did not begin behind the composer")
+            let bubbleTop = table.rect(ofRow: history.count + 1).minY - beginning
+            if isShort {
+                let cell = table.view(atColumn: 0, row: history.count + 1, makeIfNecessary: false)
+                let animation = cell?.subviews.first?.layer?.animation(forKey: TranscriptSentMotion.animationKey) as? CABasicAnimation
+                let distance = abs((animation?.fromValue as? NSNumber)?.doubleValue ?? 0)
+                check(distance > 0, "short conversation did not animate the bubble")
+                check(abs(bubbleTop + distance - (scroll.contentView.bounds.height - 100 + ComposerLayout.textClearance)) <= 1,
+                      "short conversation's bubble did not start behind the composer")
+            } else {
+                check(bubbleTop >= scroll.contentView.bounds.height - 100 - 1, "bubble did not begin behind the composer")
+            }
         }
         var offsets: [Double] = [Double(beginning)]
         var heights: [Double] = []
         var rowHeights: [[Double]] = []
+        var bubbleTops: [Double] = []
         for frame in 0..<70 {
             if frame == 8 {
                 activity.label = "Working"
                 host.rootView = root(phase: 2)
+            }
+            if frame == 40 {
+                activity.label = nil
+                host.rootView = root(phase: 3)
             }
             host.layoutSubtreeIfNeeded()
             follower.advance(at: CACurrentMediaTime())
             offsets.append(Double(scroll.contentView.bounds.minY))
             heights.append(Double(scroll.documentView?.frame.height ?? 0))
             if let table = scroll.documentView as? NSTableView {
+                bubbleTops.append(table.rect(ofRow: history.count + 1).minY - scroll.contentView.bounds.minY)
                 rowHeights.append((max(0, table.numberOfRows - 4)..<table.numberOfRows).map {
                     Double(table.rect(ofRow: $0).height)
                 })
@@ -144,9 +173,16 @@ enum TranscriptSendProbe {
             try? await Task.sleep(for: .milliseconds(8))
         }
         check(zip(offsets, offsets.dropFirst()).allSatisfy { $1 >= $0 - 0.5 }, "send or Working transition reversed the scroll")
-        check(offsets.filter { $0 > beginning + 1 && $0 < scroll.endOffset - 1 }.count > 5, "send had no intermediate scroll positions")
+        check(zip(bubbleTops, bubbleTops.dropFirst()).allSatisfy { $1 <= $0 + 0.5 }, "saving pushed the message back towards the composer")
+        if !isShort {
+            check(offsets.filter { $0 > beginning + 1 && $0 < scroll.endOffset - 1 }.count > 5, "send had no intermediate scroll positions")
+        }
         check(scroll.distanceFromEnd <= 1, "send did not settle at the live end")
-        check((heights.last ?? 0) > Double(oldHeight), "send did not add the message and activity line")
+        if isShort {
+            check(abs((heights.last ?? 0) - Double(oldHeight)) <= 1, "short-chat animation unexpectedly resized the document")
+        } else {
+            check((heights.last ?? 0) > Double(oldHeight), "send did not add the message and activity line")
+        }
         if let low = heights.min(), let high = heights.max() {
             check(high - low <= 1, "temporary and saved message handoff exposed a transient height")
         }

@@ -112,6 +112,8 @@ struct TranscriptTextView: NSViewRepresentable {
     /// the page around it is doing, and AppKit cannot read the SwiftUI environment that says so.
     var selectionColor: NSColor
     var alignsBubbleInk = false
+    var copyPrefix = ""
+    var copySeparatorBefore = "\n\n"
     var actions = TranscriptLinkActions()
 
     func makeCoordinator() -> Coordinator { Coordinator(actions: actions) }
@@ -183,6 +185,8 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     private func apply(to view: LinkTextView) {
+        view.copyPrefix = copyPrefix
+        view.copySeparatorBefore = copySeparatorBefore
         if view.answerSelection !== selection {
             view.answerSelection?.unregister(view)
             view.answerSelection = selection
@@ -330,6 +334,30 @@ struct TranscriptTextView: NSViewRepresentable {
 /// The text view itself: hover, and the menu over a link.
 final class LinkTextView: NSTextView, HoverQuickLookSource {
     weak var answerSelection: TranscriptTextSelection?
+    var copyPrefix = ""
+    var copySeparatorBefore = "\n\n"
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        // AppKit highlights only the first responder in the active colour. The other paragraphs
+        // in one answer looked deselected even though Copy included them. Draw their selection
+        // with the same ink while the answer owns the keyboard.
+        guard let answerSelection, let window, window.isKeyWindow,
+              let owner = window.firstResponder as? LinkTextView,
+              owner !== self, owner.answerSelection === answerSelection,
+              let layout = layoutManager, let container = textContainer else { return }
+        let range = selectedRange()
+        guard range.length > 0 else { return }
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let origin = textContainerOrigin
+        NSColor.selectedTextBackgroundColor.setFill()
+        layout.enumerateEnclosingRects(
+            forGlyphRange: glyphs, withinSelectedGlyphRange: glyphs, in: container
+        ) { rect, _ in
+            NSBezierPath(rect: rect.offsetBy(dx: origin.x, dy: origin.y)).fill()
+        }
+        layout.drawGlyphs(forGlyphRange: glyphs, at: origin)
+    }
 
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()

@@ -152,6 +152,7 @@ extension EnvironmentValues {
 private struct MarkdownBlocksView: View {
     let blocks: [MarkdownBlock]
     var foreground = Palette.textPrimary
+    var copyPrefix = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: MarkdownMetrics.blockGap) {
@@ -159,7 +160,10 @@ private struct MarkdownBlocksView: View {
             // second array of pairs every pass to draw the same blocks. The same change is made
             // everywhere below it, and the identity is what it always was: a block's position.
             ForEach(blocks.indices, id: \.self) { offset in
-                MarkdownBlockView(block: blocks[offset], foreground: foreground, isFirst: offset == 0)
+                MarkdownBlockView(
+                    block: blocks[offset], foreground: foreground, isFirst: offset == 0,
+                    copyPrefix: offset == 0 ? copyPrefix : ""
+                )
             }
         }
     }
@@ -170,6 +174,7 @@ private struct MarkdownBlockView: View {
     let foreground: Color
     /// A heading only claims space above it when there is something above it to be separated from.
     var isFirst = false
+    var copyPrefix = ""
 
     /// The marker column follows the conversation's text size, otherwise a raised body size pushes
     /// "10." straight out of a column sized for the default one. This was a `@ScaledMetric`, which
@@ -250,7 +255,8 @@ private struct MarkdownBlockView: View {
 
     /// Every run joins the answer's native selection scope, including prose without links.
     private func inlineText(
-        _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil
+        _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil,
+        prefix: String? = nil, separatorBefore: String = "\n\n"
     ) -> some View {
         let text = InlineNSTextCache.make(
             inline,
@@ -267,6 +273,8 @@ private struct MarkdownBlockView: View {
             text: text,
             linkColor: Palette.linkNSColor,
             selectionColor: .selectedTextBackgroundColor,
+            copyPrefix: prefix ?? copyPrefix,
+            copySeparatorBefore: separatorBefore,
             actions: linkActions
         )
         // Native text views do not supply a SwiftUI baseline for the list marker beside them.
@@ -290,7 +298,10 @@ private struct MarkdownBlockView: View {
                 // and top alignment sat the marker a fraction above the line it marks.
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
-                    MarkdownBlocksView(blocks: items[offset], foreground: foreground)
+                    MarkdownBlocksView(
+                        blocks: items[offset], foreground: foreground,
+                        copyPrefix: start.map { "\($0 + offset). " } ?? "• "
+                    )
                         .lineSpacing(proseListLineSpacing)
                         .environment(\.markdownLineSpacingOverride, proseListLineSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -313,7 +324,10 @@ private struct MarkdownBlockView: View {
                         .accessibilityLabel(item.checked ? "Done" : "Not done")
                     // The AppKit link renderer reads spacing here, before a modifier below can
                     // override the environment. Nested checklists must not inherit prose leading.
-                    inlineText(item.inline, rung: Typo.body, color: foreground, spacing: listLineSpacing)
+                    inlineText(
+                        item.inline, rung: Typo.body, color: foreground, spacing: listLineSpacing,
+                        prefix: item.checked ? "[x] " : "[ ] "
+                    )
                         .lineSpacing(listLineSpacing)
                         .environment(\.markdownLineSpacingOverride, listLineSpacing)
                 }
@@ -329,7 +343,8 @@ private struct MarkdownBlockView: View {
                     rung: Typo.labelEmphasis,
                     alignment: alignment(at: column, in: alignments),
                     isLastColumn: column == headers.count - 1,
-                    isLastRow: rows.isEmpty
+                    isLastRow: rows.isEmpty,
+                    separatorBefore: column == 0 ? "\n\n" : "\t"
                 )
                 .background(Palette.surfaceSunken)
             }
@@ -341,7 +356,8 @@ private struct MarkdownBlockView: View {
                         rung: Typo.label,
                         alignment: alignment(at: column, in: alignments),
                         isLastColumn: column == row.count - 1,
-                        isLastRow: index == rows.count - 1
+                        isLastRow: index == rows.count - 1,
+                        separatorBefore: column == 0 ? "\n" : "\t"
                     )
                 }
             }
@@ -358,9 +374,10 @@ private struct MarkdownBlockView: View {
         rung: ScaledFont,
         alignment: Alignment,
         isLastColumn: Bool,
-        isLastRow: Bool
+        isLastRow: Bool,
+        separatorBefore: String
     ) -> some View {
-        inlineText(inline, rung: rung, color: foreground)
+        inlineText(inline, rung: rung, color: foreground, separatorBefore: separatorBefore)
             .padding(.horizontal, Metrics.spacingWide)
             .padding(.vertical, Metrics.spacing)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)

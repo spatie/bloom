@@ -367,6 +367,11 @@ final class TranscriptModel {
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
 
+    /// An old result must not hide the live tail of a turn the agent has just started itself.
+    func isCurrentTurnResult(_ row: TranscriptRow) -> Bool {
+        row.kind == .result && (!isRunning || turnStartedAt.map { row.createdAt >= $0 } ?? true)
+    }
+
     init(session: Session, workspace: Workspace, app: AppModel) {
         self.session = session
         self.workspace = workspace

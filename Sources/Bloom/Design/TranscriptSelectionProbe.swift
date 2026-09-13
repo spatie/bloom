@@ -75,6 +75,8 @@ enum TranscriptSelectionProbe {
                 check(first.selectedRange().location == 6, "forward selection lost its starting offset")
                 check(last.selectedRange().length == 5, "forward selection lost its ending offset")
                 check(selection.selectedText.hasPrefix("paragraph"), "partial copy included unselected text")
+                check(selection.selectedText.contains("• First list item"), "partial copy lost the list marker")
+                check(selection.selectedText.contains("Name\tValue\nExample\tForty two"), "partial copy lost table cell boundaries")
                 let forward = selection.selectedText
                 selection.begin(in: last, offset: 5, extending: false)
                 selection.extend(to: first, offset: 6)

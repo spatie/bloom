@@ -47,6 +47,13 @@ struct TranscriptTableEntry: Identifiable {
     var shape: TranscriptRowShape = .other
     /// Space that is already known before an observed child completes its first layout.
     var minimumHeight: CGFloat = 0
+    /// A retired live slot is zero immediately, even if its child reports the previous layout.
+    var fixedHeight: CGFloat?
+    var sentArrival: MessageArrival?
+
+    func resolvedHeight(_ measured: CGFloat) -> CGFloat {
+        fixedHeight ?? max(minimumHeight, measured)
+    }
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
     let content: @MainActor () -> AnyView
@@ -304,6 +311,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// reader's place was written down against still means something. See
         /// `TranscriptRowHeights`.
         private var heights = TranscriptRowHeights()
+        private let sentMotion = TranscriptSentMotion()
         private var settleWork: Task<Void, Never>?
         /// Preparing the rows just above the screen while nobody is moving. See `warmAhead`.
         private var warmWork: Task<Void, Never>?
@@ -711,7 +719,7 @@ struct TranscriptTable: NSViewRepresentable {
             // returns early. See `TranscriptHoldCensus.cellSeconds`.
             let started = TranscriptHoldCensus.clock()
             let rebuilt = cell.apply(
-                entry: entry, environment: rowEnvironment, generation: cellGeneration
+                entry: entry, environment: rowEnvironment, generation: cellGeneration, sentMotion: sentMotion
             )
             TranscriptHoldCensus.askedCell(
                 rebuilt: rebuilt, seconds: TranscriptHoldCensus.since(started)
@@ -748,7 +756,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// months on the strength of how plausible it sounds.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard heights.isReady else { return Self.hair }
-            return max(entry.minimumHeight, CGFloat(heights.assumed(
+            return entry.resolvedHeight(CGFloat(heights.assumed(
                 for: entry.contentKey, shape: entry.shape, drawsNothing: entry.drawsNothing
             )))
         }
@@ -797,7 +805,7 @@ struct TranscriptTable: NSViewRepresentable {
             ).height
             // Nought is a real answer, and `TranscriptRowHeights` carries what pretending
             // otherwise cost.
-            return max(entry.minimumHeight, height)
+            return entry.resolvedHeight(height)
         }
 
         /// **What the row turned out to be when it was drawn, which outranks anything measured off
@@ -828,7 +836,7 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row),
                   entries[row].contentKey == contentKey else { return }
-            let height = max(entries[row].minimumHeight, size.height)
+            let height = entries[row].resolvedHeight(size.height)
             // Counted before it is refused, and counted whatever the height was: what is being
             // watched for is a cell laid out at a width the table is not, and a report that
             // happens to agree about the height is the same event.
@@ -2276,6 +2284,9 @@ final class TranscriptTableCell: NSView {
     /// built here is always behind and is always applied. See `Coordinator.cellGeneration`.
     private var appliedGeneration: Int?
     private var unclip: Task<Void, Never>?
+    private var sentMotion: TranscriptSentMotion?
+    private var sentArrival: MessageArrival?
+    private var animatedArrival: MessageArrival?
     /// The content a height was measured for goes back with it, because an entry id alone does
     /// not say which conversation it belongs to. See `Coordinator.noted`.
     var onMeasured: (@MainActor (TranscriptEntryID, TranscriptContentKey, CGSize) -> Void)?
@@ -2316,8 +2327,17 @@ final class TranscriptTableCell: NSView {
     /// half worth timing. See `TranscriptHoldCensus.cellSeconds`.
     @discardableResult
     func apply(
-        entry: TranscriptTableEntry, environment: TranscriptRowEnvironment, generation: Int
+        entry: TranscriptTableEntry, environment: TranscriptRowEnvironment, generation: Int,
+        sentMotion: TranscriptSentMotion? = nil
     ) -> Bool {
+        self.sentMotion = sentMotion
+        let arrival = environment.reduceMotion ? nil : entry.sentArrival
+        if arrival != sentArrival {
+            host.layer?.removeAnimation(forKey: TranscriptSentMotion.animationKey)
+            animatedArrival = nil
+            sentArrival = arrival
+            needsLayout = true
+        }
         // The recycling. A cell that already holds this content is left exactly as it is, which
         // is what a table buys over a stack that rebuilds every realised row on every pass. The
         // three entries that re-render themselves are NOT excepted, and used to be: handing the
@@ -2342,6 +2362,15 @@ final class TranscriptTableCell: NSView {
             report: { [weak self] size in self?.onMeasured?(id, key, size) }
         )
         return true
+    }
+
+    override func layout() {
+        super.layout()
+        guard window != nil, bounds.height > 1, let sentArrival,
+              animatedArrival != sentArrival, let sentMotion else { return }
+        if sentMotion.animate(host, in: self, arrival: sentArrival) {
+            animatedArrival = sentArrival
+        }
     }
 
     /// Clips this cell for as long as its row is travelling to a new height.

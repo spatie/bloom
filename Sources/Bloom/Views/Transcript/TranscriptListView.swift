@@ -68,7 +68,8 @@ struct TranscriptListView: View {
                 remembered,
                 tailStart: TranscriptTail.start(in: rows.lazy.map(\.kind)),
                 rowCount: rows.count
-            )
+            ),
+            rowCount: rows.count
         ))
         _resumed = State(
             initialValue: TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
@@ -218,6 +219,7 @@ struct TranscriptListView: View {
     private struct Drawn: Equatable {
         var session: SessionID
         var window: TranscriptWindow
+        var rowCount: Int
     }
 
     @State private var drawn: Drawn
@@ -307,7 +309,7 @@ struct TranscriptListView: View {
                 mustReach: mustReachIndex
             )
         }
-        let held = drawn.window.clamped(rowCount: rows.count)
+        let held = drawn.window.includingAppendedRows(previousCount: drawn.rowCount, rowCount: rows.count)
         guard let mustReach = mustReachIndex, mustReach < held.start || mustReach >= held.end else {
             return held
         }
@@ -437,6 +439,7 @@ struct TranscriptListView: View {
         let home = transcript.home
         let projectName = transcript.projectName
         let rows = transcript.rows
+        let sending = transcript.sending
         let permissionMode = transcript.session.permissionMode
         let agentKind = transcript.session.agentKind
         let recoveredRuns = transcript.recoveredRuns
@@ -462,7 +465,10 @@ struct TranscriptListView: View {
         // and a fold from landing as one edit. See `TranscriptFold.mayAdopt`, which is the rule,
         // and the `onChange` at the foot of `body`, which is the pass.
         let folds = foldsForThisPass(drawn: drawnRange)
-        let lastVisibleSeq = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })?.seq
+        let lastVisibleRow = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })
+        let lastVisibleSeq = lastVisibleRow?.seq
+        let hasCompletedTurn = drawnRange.upperBound == rows.count && sending == nil
+            && lastVisibleRow.map { transcript.isCurrentTurnResult($0) } == true
         // The group the loop is inside, so its line is emitted once, and the indices of its
         // completed rows. Pending rows can sit between hidden ones.
         var foldSeq: Int?
@@ -555,7 +561,9 @@ struct TranscriptListView: View {
             let isExpanded = expanded.contains(row.seq)
             let wasStopped = row.seq == stoppedTurnSeq
             let recovered = recoveredRuns[row.seq]
-            let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq
+            // The echo already follows this footer. Waiting for its stored row to land added
+            // the inter-turn gap halfway through the send and pushed the travelling bubble down.
+            let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq && sending == nil
             let stillRunning = closesTranscript ? backgroundWork : nil
             // The same fields `TranscriptRowView.==` compared, and for the same reason: the
             // payload is never read, because comparing it is 1.6MB of `Data` per pass.
@@ -624,6 +632,7 @@ struct TranscriptListView: View {
             } else {
                 out.append(TranscriptTableEntry(
                     id: .row(row.seq), contentKey: key, drawsNothing: blank, shape: shape,
+                    sentArrival: row.kind == .user ? transcript.messageArrivals.row(row.seq) : nil,
                     content: {
                         AnyView(
                             TranscriptRowView(
@@ -653,7 +662,6 @@ struct TranscriptListView: View {
         // Where the stored row for it will be, which is above the answer to it. The sentence is
         // drawn here from the moment Return is pressed and is replaced by its `messages` row in
         // the same place, at the same measure: see `TranscriptModel.sending`.
-        let sending = transcript.sending
         out.append(TranscriptTableEntry(
             id: .sending,
             // The session is in the key for the reason `streaming` below carries: a pane visits
@@ -663,6 +671,8 @@ struct TranscriptListView: View {
                 $0.combine(transcript.session.id)
                 $0.combine(sending?.id)
             },
+            drawsNothing: sending == nil,
+            sentArrival: sending.flatMap { transcript.messageArrivals.delivery($0.id) },
             content: {
                 guard let sending else { return AnyView(EmptyView()) }
                 let review = ReviewTurn.split(sending.body)
@@ -692,7 +702,7 @@ struct TranscriptListView: View {
 
         // The live tail's child can still report its previous empty layout for a pass after
         // sending starts. Reserve the known status height outside that observed child.
-        let reservesActivity = transcript.isRunning || sending != nil
+        let reservesActivity = !hasCompletedTurn && (transcript.isRunning || sending != nil)
         let activityMinimumHeight = reservesActivity ? TranscriptLayout.rowHeight * fontScale + TranscriptLayout.block : 0
         // The one entry that changes height without anything telling this view so, which is why
         // `TranscriptRowHeights` takes a correction from a drawn row as authoritative.
@@ -710,11 +720,13 @@ struct TranscriptListView: View {
                 // A late zero-height report from the idle tail must not replace the activity
                 // line measured alongside a newly sent bubble. The key stays stable per turn.
                 $0.combine(reservesActivity)
+                $0.combine(hasCompletedTurn)
             },
             minimumHeight: activityMinimumHeight,
+            fixedHeight: hasCompletedTurn ? 0 : nil,
             content: {
                 AnyView(
-                    StreamingTailView(transcript: transcript)
+                    StreamingTailView(transcript: transcript, hasCompletedTurn: hasCompletedTurn)
                         .frame(minHeight: activityMinimumHeight, alignment: .topLeading)
                         .padding(.horizontal, TranscriptLayout.inset)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -746,6 +758,7 @@ struct TranscriptListView: View {
                     // swaps one caption for none. A key that missed it left the old one drawn.
                     $0.combine(holdSentence)
                 },
+                sentArrival: transcript.messageArrivals.delivery(delivery.id),
                 content: {
                     // A message an agent wrote, waiting its turn in the same queue. It is drawn as
                     // itself rather than as the owner's pending bubble: they did not write it,
@@ -1006,7 +1019,8 @@ struct TranscriptListView: View {
                     remembered,
                     tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
                     rowCount: transcript.rows.count
-                )
+                ),
+                rowCount: transcript.rows.count
             )
             writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
             resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
@@ -1042,7 +1056,8 @@ struct TranscriptListView: View {
                     memory?.remembered(session: transcript.session.id),
                     tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
                     rowCount: transcript.rows.count
-                )
+                ),
+                rowCount: transcript.rows.count
             )
             TranscriptDrawn.note(drawn.window.count)
             writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
@@ -1096,7 +1111,7 @@ struct TranscriptListView: View {
             let settled = TranscriptWindow.settling(
                 from: drawn.window, rowCount: transcript.rows.count
             )
-            drawn = Drawn(session: transcript.session.id, window: settled)
+            drawn = Drawn(session: transcript.session.id, window: settled, rowCount: transcript.rows.count)
             TranscriptDrawn.note(settled.count)
             SwitchTrace.mark("transcript.window", workspace: transcript.workspace?.id)
             SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace?.id)
@@ -1316,6 +1331,7 @@ struct TranscriptListView: View {
         if drawn.session == transcript.session.id,
            drawn.window.canGrowDown(rowCount: transcript.rows.count) {
             drawn.window = TranscriptWindow.liveEnd(rowCount: transcript.rows.count)
+            drawn.rowCount = transcript.rows.count
             TranscriptDrawn.note(drawn.window.count)
             // **No travel when the window moved.** The rows a glide would pass through are not in
             // the table yet: they go in on the next pass over this body, and a travel aimed at the
@@ -1396,7 +1412,8 @@ struct TranscriptListView: View {
                 session: transcript.session.id,
                 window: TranscriptWindow.opening(
                     rowCount: rows.count, tailStart: tailStart, mustReach: index
-                )
+                ),
+                rowCount: rows.count
             )
             TranscriptDrawn.note(drawn.window.count)
         }
@@ -1443,7 +1460,7 @@ struct TranscriptListView: View {
         // The window this opening is resolved against, pinned before anything below can take the
         // reason for it away. `drawnWindow` moves to hold a search result or an unread mark, and
         // both of those are gone moments from now.
-        drawn = Drawn(session: transcript.session.id, window: drawnWindow)
+        drawn = Drawn(session: transcript.session.id, window: drawnWindow, rowCount: transcript.rows.count)
         TranscriptDrawn.note(drawn.window.count)
 
         // A pane coming back to a session it has already drawn is put back where the reader left
@@ -1571,7 +1588,8 @@ struct TranscriptListView: View {
         guard drawn.session == transcript.session.id,
               drawn.window.canGrowDown(rowCount: transcript.rows.count)
         else { return }
-        drawn.window = drawn.window.grownDown(rowCount: transcript.rows.count)
+        drawn.window = drawnWindow.grownDown(rowCount: transcript.rows.count)
+        drawn.rowCount = transcript.rows.count
         TranscriptDrawn.note(drawn.window.count)
     }
 
