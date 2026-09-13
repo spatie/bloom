@@ -47,7 +47,7 @@ struct InspectorToolbar: View {
     /// the pane's default width instead of dropping to its pop-up form.
     private var trailing: some View {
         HStack(spacing: Metrics.spacingTight) {
-            if model.inspectorTab == .changes {
+            if model.inspectorTab == .changes || model.inspectorTab == .history {
                 Button {
                     isTree.toggle()
                 } label: {
@@ -97,10 +97,7 @@ struct InspectorToolbar: View {
 
     /// The compact fallback for a width that cannot hold the tab labels.
     private var tabPicker: some View {
-        // Whichever tabs this workspace has, rather than all three. Checks is only offered when
-        // GitHub has reported a run for the branch, so a workspace with no pull request draws two
-        // segments and no gap where a third used to be. `InspectorTab.available` is where that is
-        // decided and why it is decided there.
+        // Checks is appended only when GitHub has reported a run.
         Picker("Inspector view", selection: $model.inspectorTab) {
             ForEach(model.availableInspectorTabs, id: \.self) { tab in
                 Text(title(for: tab)).tag(tab)
@@ -167,6 +164,7 @@ struct InspectorToolbar: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(tab == .history ? "Commit history" : title(for: tab))
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
@@ -181,7 +179,7 @@ struct InspectorToolbar: View {
     /// one file inside it, and the field holding a word is what says the list below is showing
     /// fewer.
     private func title(for tab: InspectorTab) -> String {
-        guard tab == .changes, !model.changedFiles.isEmpty else { return tab.rawValue }
+        guard tab == .changes, model.inspectorTab != .history, !model.changedFiles.isEmpty else { return tab.rawValue }
         return "\(tab.rawValue) (\(Set(model.changedFiles.map(\.path)).count))"
     }
 

@@ -55,7 +55,8 @@ final class WorkspaceModel {
     private var transcripts: [SessionID: TranscriptModel] = [:]
 
     // Inspector.
-    var showsCommitHistory = false
+    private var lastChangesScope: DiffScope = .all
+    private var lastHistoryCommit: BranchCommit?
     /// The comparison and its file list are adopted together after a refresh. Resolving the
     /// scope in a getter could label the last commit's files as all branch changes after a rebase.
     private var storedDiffScope: DiffScope = .all
@@ -91,9 +92,22 @@ final class WorkspaceModel {
     /// The tabs the strip may draw for this workspace, and the one it is showing.
     var availableInspectorTabs: [InspectorTab] { InspectorTab.available(for: pullRequest) }
 
+    private var rememberedHistoryCommit: BranchCommit? {
+        guard let lastHistoryCommit, branchCommits.canOffer(.commit(lastHistoryCommit)) else { return nil }
+        return lastHistoryCommit
+    }
+
     var inspectorTab: InspectorTab {
         get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
-        set { chosenInspectorTab = newValue }
+        set {
+            chosenInspectorTab = newValue
+            if newValue == .changes, case .commit = diffScope {
+                setDiffScope(lastChangesScope)
+            } else if newValue == .history,
+                      let commit = rememberedHistoryCommit ?? branchCommits.commits.first {
+                setDiffScope(.commit(commit))
+            }
+        }
     }
     var changedFiles: [ChangedFile] = [] {
         didSet {
@@ -1508,6 +1522,11 @@ final class WorkspaceModel {
     /// compared against, so which files differ, and by how many lines, is a different question for
     /// each one and only git can answer it.
     func setDiffScope(_ scope: DiffScope) {
+        if case .commit(let commit) = scope {
+            lastHistoryCommit = commit
+        } else {
+            lastChangesScope = scope
+        }
         guard scope != storedDiffScope else { return }
         changesTask?.cancel()
         storedDiffScope = scope

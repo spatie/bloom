@@ -55,8 +55,7 @@ enum ChangesReviewProbe {
             window.appearance = NSAppearance(named: .darkAqua)
             window.contentView = host
             await settle(window)
-            save(host, at: directory + "/changes-history-collapsed.png")
-            model.showsCommitHistory = true
+            save(host, at: directory + "/changes-default-tab.png")
             for layer in [ChangeLayer.staged, .unstaged] {
                 model.selectedChangeLayer = layer
                 model.selectedFilePath = "Source.swift"
@@ -76,6 +75,8 @@ enum ChangesReviewProbe {
             }
             save(host, at: directory + "/changes-all-sections.png")
             CenterTabStore.shared.setShowsAllFiles(false, for: tab)
+            model.inspectorTab = .history
+            check(model.diffScope == .commit(newest), "History did not select the newest commit")
             model.setDiffScope(.commit(oldest))
             await Task.yield()
             await model.refreshChanges()
@@ -86,10 +87,14 @@ enum ChangesReviewProbe {
             check(oldText.contains("let value = 1"), "historical patch did not render")
             check(!oldText.contains("let value = 3"), "historical view opened today's edit buffer")
             save(host, at: directory + "/changes-commit.png")
-            model.showsCommitHistory = false
+            model.inspectorTab = .changes
+            check(model.diffScope == .uncommitted, "Changes did not restore the previous scope")
+            await model.refreshChanges()
             await settle(window)
-            save(host, at: directory + "/changes-commit-collapsed.png")
-            model.showsCommitHistory = true
+            save(host, at: directory + "/changes-return-from-history.png")
+            model.inspectorTab = .history
+            check(model.diffScope == .commit(oldest), "History did not remember the selected commit")
+            await model.refreshChanges()
             model.selectedFilePath = "Source.swift"
             try await git(["add", "."])
             try await git(["commit", "-m", "Another agent commit"])

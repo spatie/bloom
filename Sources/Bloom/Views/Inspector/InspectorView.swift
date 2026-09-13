@@ -138,7 +138,7 @@ struct InspectorView: View {
         switch model.inspectorTab {
         case .allFiles:
             FileTreeView(model: model)
-        case .changes:
+        case .changes, .history:
             ChangesBrowser(model: model)
         case .checks:
             ChecksView(model: model)

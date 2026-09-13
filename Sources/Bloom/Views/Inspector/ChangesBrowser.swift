@@ -1,8 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// Keep the file list's space until history is requested. The collapsed header has only its
-/// natural height; hiding rows inside the old split view would leave their empty pane behind.
+/// Changes keeps its full file-list height; only the History tab shares that space with commits.
 struct ChangesBrowser: View {
     let model: WorkspaceModel
 
@@ -11,7 +10,12 @@ struct ChangesBrowser: View {
             ChangesHistoryList(model: model)
             Hairline()
             Group {
-                if model.diffScope == .uncommitted {
+                if model.inspectorTab == .history, !model.diffScope.isHistorical {
+                    Text("Select a commit to review its changed files.")
+                        .font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(InspectorLayout.inset)
+                } else if model.diffScope == .uncommitted {
                     UncommittedFileList(model: model)
                 } else {
                     ChangedFileList(model: model)
@@ -29,17 +33,13 @@ struct ChangesHistoryList: View {
     @State private var armToken = 0
 
     private var scopes: [DiffScope] {
-        [.all, .uncommitted] + (model.showsCommitHistory ? model.branchCommits.commits.map(DiffScope.commit) : [])
+        model.inspectorTab == .history ? model.branchCommits.commits.map(DiffScope.commit) : [.all, .uncommitted]
     }
 
     var body: some View {
         ScrollViewReader { reader in
             VStack(spacing: 0) {
-                scopeRow(.all, glyph: "square.stack.3d.up")
-                scopeRow(.uncommitted, glyph: "pencil.line")
-                Hairline()
-                historyDisclosure
-                if model.showsCommitHistory {
+                if model.inspectorTab == .history {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(model.branchCommits.commits) { commit in
@@ -92,6 +92,9 @@ struct ChangesHistoryList: View {
                     .onChange(of: model.diffScope) { _, scope in
                         if hasKeyboard { reader.scrollTo(scope) }
                     }
+                } else {
+                    scopeRow(.all, glyph: "square.stack.3d.up")
+                    scopeRow(.uncommitted, glyph: "pencil.line")
                 }
                 if let notice = model.historyNotice {
                     Text(notice).font(Typo.caption).foregroundStyle(Palette.textSecondary)
@@ -106,33 +109,7 @@ struct ChangesHistoryList: View {
         .background(Palette.surface)
         .listKeyboard(hasKeyboard: $hasKeyboard, armToken: armToken, onKey: handle)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Review history, newest commits first")
-    }
-
-    private var historyDisclosure: some View {
-        Button {
-            model.showsCommitHistory.toggle()
-        } label: {
-            HStack(spacing: Metrics.spacingSmall) {
-                Image(systemName: model.showsCommitHistory ? "chevron.down" : "chevron.right")
-                    .font(Typo.micro)
-                    .accessibilityHidden(true)
-                Text("Commit history")
-                Spacer(minLength: 0)
-                if case .commit(let commit) = model.diffScope {
-                    Text(commit.abbreviated).monospaced()
-                }
-            }
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
-            .padding(.horizontal, InspectorLayout.inset)
-            .padding(.vertical, Metrics.spacingSmall)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(model.showsCommitHistory ? "Hide commit history" : "Show commit history")
-        .accessibilityValue(model.showsCommitHistory ? "Expanded" : "Collapsed")
-        .help(model.showsCommitHistory ? "Hide the commit list" : "Show this branch's commits")
+        .accessibilityLabel(model.inspectorTab == .history ? "Commit history, newest first" : "Change scope")
     }
 
     private func scopeRow(_ scope: DiffScope, glyph: String) -> some View {
@@ -165,8 +142,6 @@ struct ChangesHistoryList: View {
     }
 
     private func handle(_ key: ListKey) -> Bool {
-        if key == .right { model.showsCommitHistory = true; return true }
-        if key == .left { model.showsCommitHistory = false; return true }
         let available = scopes
         let index = available.firstIndex(of: model.diffScope)
         switch keyboard.outcome(for: key, titles: available.map(\.title), current: index) {
