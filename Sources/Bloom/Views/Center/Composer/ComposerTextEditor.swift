@@ -224,6 +224,8 @@ struct ComposerTextEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        _ = ColourThemePreference.shared.choice
+        scrollView.documentView?.needsDisplay = true
         guard let textView = scrollView.documentView as? ComposerTextView else { return }
         context.coordinator.parent = self
         handle?.textView = textView

@@ -319,6 +319,9 @@ id_type_allowed_names=(
 # The remaining stored `String` ids, each one a deliberate decision. This list
 # should only ever get shorter.
 id_type_allowed_lines=(
+  'Sources/BloomCore/Presentation/CodeScheme.swift'              # a portable colour scheme key
+  'Sources/BloomCore/Presentation/TerminalScheme.swift'          # a portable colour scheme key
+  'Sources/BloomCore/Presentation/ColourTheme.swift'             # a theme definition key, not a database row
   'Sources/BloomCore/Presentation/HomeList.swift'                  # a date bucket key, not a row
   'Sources/BloomCore/Presentation/ChatFontCatalogue.swift'          # a font family, which macOS names
   'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings

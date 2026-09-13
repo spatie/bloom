@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Deliberately not an AppKit colour: BloomCore has no UI, and the whole point of reading Ghostty
 /// is to reproduce fixed bytes rather than something that shifts with appearance or contrast.
-public struct GhosttyColor: Sendable, Hashable {
+public struct GhosttyColor: Codable, Sendable, Hashable {
     public var red: UInt8
     public var green: UInt8
     public var blue: UInt8
@@ -37,7 +37,7 @@ public enum GhosttyAppearance: String, Sendable, Hashable {
 ///
 /// Every colour is optional and `nil` means "Ghostty said nothing about this", which is what lets
 /// a machine with no Ghostty config keep Bloom's own appearance untouched.
-public struct GhosttyTheme: Sendable, Hashable {
+public struct GhosttyTheme: Codable, Sendable, Hashable {
     public var background: GhosttyColor?
     public var foreground: GhosttyColor?
     public var cursorColor: GhosttyColor?
@@ -62,6 +62,19 @@ public struct GhosttyTheme: Sendable, Hashable {
             && palette.isEmpty
             && fontFamily == nil
             && fontSize == nil
+    }
+
+    // Ghostty's defaults, including inverted selection colours: src/config/Config.zig.
+    public func resolvingColourDefaults() -> Self {
+        var value = self
+        value.background = background ?? GhosttyColor(red: 0x28, green: 0x2C, blue: 0x34)
+        value.foreground = foreground ?? GhosttyColor(red: 0xFF, green: 0xFF, blue: 0xFF)
+        value.cursorColor = cursorColor ?? value.foreground
+        value.cursorTextColor = cursorTextColor ?? value.background
+        value.selectionBackground = selectionBackground ?? value.foreground
+        value.selectionForeground = selectionForeground ?? value.background
+        for slot in 0..<16 where value.palette[slot] == nil { value.palette[slot] = Self.defaultPalette[slot] }
+        return value
     }
 
     /// The sixteen ANSI slots, Ghostty's own defaults wherever the config was silent.

@@ -83,7 +83,8 @@ struct ComposerView: View {
                 ),
                 bounds: Double(ComposerTextEditor.lineHeight)...Double(maxEditorHeight),
                 reset: Double(automaticEditorHeight),
-                label: "Message height"
+                label: "Message height",
+                color: .clear
             )
             .help("Drag to resize. Double-click to fit the text.")
 

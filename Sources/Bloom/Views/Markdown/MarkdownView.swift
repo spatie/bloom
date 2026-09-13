@@ -283,7 +283,6 @@ private struct MarkdownBlockView: View {
                     )
                 ),
                 linkColor: Palette.linkNSColor,
-                selectionColor: .selectedTextBackgroundColor,
                 actions: linkActions
             )
         } else {

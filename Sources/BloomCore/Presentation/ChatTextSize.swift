@@ -10,7 +10,7 @@ import Foundation
 /// The multipliers are chosen so that every rung of `Typo` still lands on a different whole point
 /// at every step. At 0.85 the caption and the micro rung both round to 9 and the transcript loses
 /// a level of hierarchy, which is why the small step is 0.9.
-public enum ChatTextSize: String, CaseIterable, Identifiable, Sendable {
+public enum ChatTextSize: String, Codable, CaseIterable, Identifiable, Sendable {
     case small
     case standard
     case large
@@ -46,14 +46,6 @@ public enum ChatTextSize: String, CaseIterable, Identifiable, Sendable {
 }
 
 extension ChatTextSize {
-    /// Read and written outside SwiftUI, by the View menu. `@AppStorage` keeps a raw-value enum as
-    /// its raw string, so this is the same slot the Settings picker binds to and every open window
-    /// follows a change to it at once.
-    public static var current: ChatTextSize {
-        get { read(from: .standard) }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
-    }
-
     public static func read(from defaults: UserDefaults) -> Self {
         defaults.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? defaultChoice
     }

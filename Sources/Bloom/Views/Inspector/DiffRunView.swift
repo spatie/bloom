@@ -201,7 +201,7 @@ struct DiffRunView: View, Equatable {
         .background(alignment: .trailing) {
             if entry.line == nil {
                 Rectangle()
-                    .fill(Palette.surfaceSunken)
+                    .fill(Palette.codeBackground)
                     .frame(width: max(0, width - DiffGutter.width(for: numbers)))
             }
         }

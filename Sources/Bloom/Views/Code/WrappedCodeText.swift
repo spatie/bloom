@@ -9,6 +9,7 @@ enum WrappedCodeLayout {
     private struct Key: Hashable {
         var text: String
         var width: CGFloat
+        var typography: ThemeTypography
     }
     private static var heights: [Key: CGFloat] = [:]
 
@@ -25,7 +26,7 @@ enum WrappedCodeLayout {
 
     static func height(of text: String, width: CGFloat) -> CGFloat {
         let width = max(1, width)
-        let key = Key(text: text, width: width)
+        let key = Key(text: text, width: width, typography: ColourThemePreference.shared.codeTypography)
         if let height = heights[key] { return height }
         let height: CGFloat
         if !text.contains("\t"), (text as NSString).size(withAttributes: [.font: CodeMetrics.font]).width <= width {
@@ -120,9 +121,17 @@ struct WrappedCodeText: NSViewRepresentable {
         view.onEdit = onEdit
         view.commentable = commentable
         view.editableRows = editable
+        if view.font != CodeMetrics.font { view.font = CodeMetrics.font }
+        view.insertionPointColor = NSColor(Palette.codeCaret)
+        view.selectedTextAttributes = [.backgroundColor: NSColor(Palette.codeSelection), .foregroundColor: NSColor(Palette.codeForeground)]
+        let codeScheme = ColourThemePreference.shared.codeScheme
+        let typography = ColourThemePreference.shared.codeTypography
         let previous = context.coordinator
         guard previous.lines != lines || previous.language != language || previous.width != width
-                || previous.heights != heights || previous.scheme != colorScheme || previous.wraps != wraps else { return }
+                || previous.heights != heights || previous.scheme != colorScheme || previous.wraps != wraps
+                || previous.codeScheme != codeScheme || previous.typography != typography else { return }
+        previous.codeScheme = codeScheme
+        previous.typography = typography
         previous.lines = lines
         previous.language = language
         previous.width = width
@@ -131,16 +140,19 @@ struct WrappedCodeText: NSViewRepresentable {
         previous.wraps = wraps
 
         let value = NSMutableAttributedString(string: "")
+        let colours = Palette.codeColours
+        let schemeHash = codeScheme.hashValue
         for (index, line) in lines.enumerated() {
             let highlighted = CodeText.attributed(
                 line: line.text, language: language, carry: line.carry,
-                emphasis: line.emphasis, emphasisColor: line.emphasisColor
+                emphasis: line.emphasis, emphasisColor: line.emphasisColor,
+                scheme: codeScheme, colours: colours, schemeHash: schemeHash
             )
             let text = line.text + (index + 1 < lines.count ? "\n" : "")
             let spacing = wraps ? max(0, heights[index] - WrappedCodeLayout.height(of: line.text, width: width)) : 0
             let paragraph = NSMutableAttributedString(string: text, attributes: [
                 .font: CodeMetrics.font, .paragraphStyle: WrappedCodeLayout.paragraph(spacing: spacing),
-                .foregroundColor: NSColor(Palette.textPrimary),
+                .foregroundColor: NSColor(Palette.codeForeground),
             ])
             var offset = 0
             for run in highlighted.runs {
@@ -181,6 +193,8 @@ struct WrappedCodeText: NSViewRepresentable {
         var width: CGFloat = 0
         var heights: [CGFloat] = []
         var scheme: ColorScheme?
+        var codeScheme: CodeScheme?
+        var typography: ThemeTypography?
         var wraps = true
     }
 

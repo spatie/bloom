@@ -21,7 +21,7 @@ enum MergeContrastProbe {
 
     private static func render(name: String, appearance: NSAppearance.Name, titlebar: Bool) async {
         let host = NSHostingView(rootView: MergeSplitButton(
-            method: .merge, fill: Color(red: 0, green: 0.45, blue: 0.4),
+            method: .merge,
             canMerge: true, choose: { _ in }, merge: {}
         ).padding(20).background(Color.white).environment(\.controlActiveState, .active))
         host.appearance = NSAppearance(named: appearance)

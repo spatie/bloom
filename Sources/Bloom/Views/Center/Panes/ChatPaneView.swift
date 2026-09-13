@@ -42,12 +42,12 @@ struct ChatPaneView: View {
     /// The conversation's text size, applied here because this pane is exactly what the setting is
     /// scoped to: what was said and what you are about to say. The sidebar, the inspector and the
     /// toolbar are chrome and keep the size macOS gives them.
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
+    private var textSize: ChatTextSize { ColourThemePreference.shared.chatTextSize }
     /// And the face, scoped to exactly the same subtree for exactly the same reason.
-    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
+    private var chatFontID: String { ColourThemePreference.shared.chatFont }
     /// And the line height, which is the third thing the appearance pane moves about the
     /// conversation and is scoped with the other two.
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
+    private var lineHeight: ChatLineHeight { ColourThemePreference.shared.chatLineHeight }
 
     /// What the transcript has nothing to draw for, and nil the moment its rows are on screen.
     ///

@@ -44,6 +44,7 @@ struct DiffView: View {
         var width: CGFloat?
         var revision: Int
         var collapsed: Bool
+        var typography: ThemeTypography
     }
 
     private struct WrappedPresentation {
@@ -316,7 +317,7 @@ struct DiffView: View {
                 }
             }
         }
-        .background(Palette.surface)
+        .background(Palette.codeBackground)
         .background {
             if embeddedWidth == nil { shortcut }
         }
@@ -331,7 +332,8 @@ struct DiffView: View {
             }
             await load()
         }
-        .task(id: WrapRequest(width: embeddedWidth, revision: rowRevision, collapsed: isCollapsed)) {
+        .task(id: WrapRequest(width: embeddedWidth, revision: rowRevision, collapsed: isCollapsed,
+                              typography: ColourThemePreference.shared.codeTypography)) {
             await prepareWrappedRows()
         }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
@@ -659,10 +661,13 @@ struct DiffView: View {
         let language = document.language
         let lines = document.linesToPrime(limit: Self.primeLimit)
         priming?.cancel()
+        let scheme = ColourThemePreference.shared.codeScheme
+        let colours = Palette.codeColours
+        let schemeHash = scheme.hashValue
         priming = Task.detached(priority: .utility) {
             for line in lines {
                 guard !Task.isCancelled else { return }
-                _ = SyntaxCache.attributed(line: DiffLineDisplay.text(line.text), language: language, carry: line.carry)
+                _ = SyntaxCache.attributed(line: DiffLineDisplay.text(line.text), language: language, carry: line.carry, scheme: scheme, colours: colours, schemeHash: schemeHash)
             }
         }
     }
@@ -998,6 +1003,7 @@ struct DiffView: View {
     private func prepareWrappedRows() async {
         guard let width = embeddedWidth, !isCollapsed, case let .ready(document) = phase else { return }
         let currentRows = rows
+        let typography = ColourThemePreference.shared.codeTypography
         let revision = rowRevision
         var heights: [String: [CGFloat]] = [:]
         for row in currentRows {
@@ -1006,6 +1012,7 @@ struct DiffView: View {
             await Task.yield()
         }
         guard !Task.isCancelled else { return }
+        guard typography == ColourThemePreference.shared.codeTypography else { return }
         wrappedPresentation = WrappedPresentation(
             revision: revision, document: document, rows: currentRows, width: width, heights: heights,
             codeHeight: heights.values.reduce(0) { $0 + $1.reduce(0, +) }

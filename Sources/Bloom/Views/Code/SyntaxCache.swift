@@ -25,18 +25,18 @@ enum SyntaxCache {
         return cache
     }()
 
-    static func attributed(line: String, language: Language, carry: LexState) -> AttributedString {
-        let key = SyntaxCacheKey(line: line, language: language, carry: carry)
+    static func attributed(line: String, language: Language, carry: LexState, scheme: CodeScheme, colours: [TokenKind: Color], schemeHash: Int? = nil) -> AttributedString {
+        let key = SyntaxCacheKey(line: line, language: language, carry: carry, scheme: scheme, schemeHash: schemeHash)
         if let hit = storage.object(forKey: key) { return hit.value }
 
-        let value = build(line: line, language: language, carry: carry)
+        let value = build(line: line, language: language, carry: carry, colours: colours)
         storage.setObject(SyntaxBox(value), forKey: key)
         return value
     }
 
-    private static func build(line: String, language: Language, carry: LexState) -> AttributedString {
+    private static func build(line: String, language: Language, carry: LexState, colours: [TokenKind: Color]) -> AttributedString {
         var value = AttributedString(line)
-        value.foregroundColor = Palette.textPrimary
+        value.foregroundColor = colours[.plain]
         guard !line.isEmpty else { return value }
 
         var state = carry
@@ -46,7 +46,7 @@ enum SyntaxCache {
             guard let range = CodeText.attributedRange(
                 forUTF16: token.range, of: line, in: value
             ) else { continue }
-            value[range].foregroundColor = CodeText.color(for: token.kind)
+            value[range].foregroundColor = colours[token.kind]
         }
         return value
     }

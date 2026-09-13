@@ -6,11 +6,6 @@ import SwiftTerm
 /// SwiftTerm values.
 @MainActor
 enum TerminalGhostty {
-    /// Shared by the terminal and the switch in Settings. It defaults to on: following the
-    /// terminal the user already configured beats inventing a second look, and a machine without
-    /// Ghostty is unaffected either way.
-    static let defaultsKey = "useGhosttyTerminalTheme"
-
     /// Read once per appearance per launch. Ghostty itself only re-reads on an explicit reload, and
     /// every terminal in the window asks for this on every appearance change, so re-reading four
     /// files each time would buy nothing.
@@ -21,7 +16,7 @@ enum TerminalGhostty {
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
         if let cached = cache[key] { return cached }
 
-        let loaded = GhosttyConfigLoader.load(appearance: key)
+        let loaded = GhosttyConfigLoader.load(appearance: key)?.resolvingColourDefaults()
         cache[key] = loaded
         return loaded
     }

@@ -31,10 +31,11 @@ struct TerminalSplitView: View {
 
     /// The same switch the terminal itself reads, so turning the Ghostty theme off also turns off
     /// Ghostty's way of fading the panes that do not have the keyboard.
-    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
+    private var usesGhosttyTheme: Bool { ColourThemePreference.shared.followsGhostty }
 
     /// Read for the restart strip's slide, the same courtesy the setup strip above a terminal gets.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     private var splits: TerminalSplitStore { .shared }
 
@@ -95,7 +96,16 @@ struct TerminalSplitView: View {
                 }
             }
         }
-        .background(Palette.surfaceSunken)
+        .background(terminalBackground)
+    }
+
+    private var terminalBackground: Color {
+        let preference = ColourThemePreference.shared
+        let scheme = preference.terminalScheme
+        let fallback = colorScheme == .dark ? scheme.dark : scheme.light
+        let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
+        let theme = usesGhosttyTheme ? appearance.flatMap { TerminalGhostty.theme(for: $0) } : nil
+        return (theme?.background ?? fallback.background).map { Color(nsColor: NSColor($0)) } ?? Palette.surfaceSunken
     }
 
     /// `remembered` is what this pane was running when Bloom last stopped, and only for a pane that

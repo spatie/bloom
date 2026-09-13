@@ -107,35 +107,25 @@ final class BloomTerminalView: LocalProcessTerminalView {
 
     private let processObserver = TerminalProcessObserver()
 
-    /// Whether the user's Ghostty configuration is in charge of the font and the colours. Owned by
-    /// SwiftUI through `@AppStorage`, so flipping the switch in Settings reaches every live shell.
-    var usesGhosttyTheme = true {
-        didSet {
-            guard usesGhosttyTheme != oldValue else { return }
-            applyFont()
-            applyAppearanceColors()
-        }
+    private var terminalScheme: TerminalScheme = .bloom
+    private var typography = ThemeTypography()
+    private var usesGhosttyTheme = false
+
+    var fontSize: CGFloat {
+        CGFloat(typography.fontSize ?? ghostty?.fontSize ?? Double(TerminalTextSize.systemDefault))
     }
 
-    /// The size the user asked for, or nil to follow Ghostty. Owned by SwiftUI through
-    /// `@AppStorage`, so the stepper in Settings and a Cmd+Plus pressed in any one shell both reach
-    /// every shell in every window rather than only the one with the keyboard.
-    var fontSizeOverride: CGFloat? {
-        didSet {
-            guard fontSizeOverride != oldValue else { return }
-            applyFont()
-        }
-    }
-
-    /// What is on screen, which is what the two shortcuts step from. Readable from outside because
-    /// the View menu steps from it too, and stepping from the stored override instead would make
-    /// the menu item and the keystroke disagree on any terminal following Ghostty.
-    var fontSize: CGFloat { fontSizeOverride ?? defaultFontSize }
-
-    /// Ghostty's `font-size` when it has one, so a terminal opens at the size the user reads
-    /// everywhere else rather than at Bloom's own body size.
-    private var defaultFontSize: CGFloat {
-        ghostty?.fontSize.map { CGFloat($0) } ?? TerminalTextSize.systemDefault
+    func updateTheme() {
+        let preference = ColourThemePreference.shared
+        let scheme = preference.terminalScheme
+        let typography = preference.terminalTypography
+        let followsGhostty = preference.followsGhostty
+        guard terminalScheme != scheme || self.typography != typography || usesGhosttyTheme != followsGhostty else { return }
+        terminalScheme = scheme
+        self.typography = typography
+        usesGhosttyTheme = followsGhostty
+        applyFont()
+        applyAppearanceColors()
     }
 
     override init(frame: CGRect) {
@@ -151,18 +141,22 @@ final class BloomTerminalView: LocalProcessTerminalView {
     private func configure() {
         processObserver.owner = self
         processDelegate = processObserver
+        updateTheme()
         applyFont()
         applyAppearanceColors()
     }
 
     private func applyFont() {
-        font = terminalFont(size: fontSize)
+        let desired = terminalFont(size: fontSize)
+        if font != desired { font = desired }
+        let spacing = CGFloat(typography.lineHeight ?? 1)
+        if lineSpacing != spacing { lineSpacing = spacing }
     }
 
     /// Ghostty's `font-family` when there is one and it is installed, the monospaced system font
     /// otherwise.
     private func terminalFont(size: CGFloat) -> NSFont {
-        TerminalGhostty.font(family: ghostty?.fontFamily, size: size)
+        TerminalGhostty.font(family: typography.fontFamily ?? ghostty?.fontFamily, size: size)
     }
 
     // MARK: - Process
@@ -269,6 +263,7 @@ final class BloomTerminalView: LocalProcessTerminalView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        applyFont()
         applyAppearanceColors()
     }
 
@@ -280,123 +275,22 @@ final class BloomTerminalView: LocalProcessTerminalView {
         usesGhosttyTheme ? TerminalGhostty.theme(for: effectiveAppearance) : nil
     }
 
-    /// SwiftTerm ships a palette that looks nothing like the rest of Bloom, so both the sixteen
-    /// ANSI slots and the default foreground and background are replaced here.
     func applyAppearanceColors() {
-        if let ghostty {
-            applyGhosttyColors(ghostty)
-        } else {
-            applyBloomColors()
-        }
-        needsDisplay = true
-    }
-
-    /// Whatever Ghostty says, with Ghostty's own defaults behind it. Bloom's colours are not
-    /// blended in: a terminal that is half the user's theme and half something else reads as a bug,
-    /// not as a compromise.
-    private func applyGhosttyColors(_ theme: GhosttyTheme) {
+        let fallback = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? terminalScheme.dark : terminalScheme.light
+        let theme = ghostty ?? fallback
         installColors(theme.ansiColors().map(SwiftTerm.Color.init))
-
-        let foreground = theme.foreground.map(NSColor.init)
-        let background = theme.background.map(NSColor.init)
-        nativeForegroundColor = foreground ?? resolved(Palette.textPrimary).withAlphaComponent(1)
-        nativeBackgroundColor = background ?? resolved(Palette.surfaceSunken)
-        // Ghostty falls back to the foreground for the cursor, and to the system for a selection it
-        // was never told about.
-        caretColor = theme.cursorColor.map(NSColor.init) ?? foreground ?? .textInsertionPointColor
-        if let cursorText = theme.cursorTextColor {
-            caretTextColor = NSColor(cursorText)
+        nativeForegroundColor = (theme.foreground ?? fallback.foreground).map(NSColor.init) ?? .labelColor
+        nativeBackgroundColor = (theme.background ?? fallback.background).map(NSColor.init) ?? .textBackgroundColor
+        let background = nativeBackgroundColor.usingColorSpace(.deviceRGB)
+        for scroller in subviews.compactMap({ $0 as? NSScroller }) {
+            scroller.knobStyle = (background?.brightnessComponent ?? 1) < 0.5 ? .light : .dark
         }
-        selectedTextBackgroundColor = theme.selectionBackground.map(NSColor.init)
-            ?? .selectedTextBackgroundColor
-        if let selectionForeground = theme.selectionForeground {
-            selectedTextForegroundColor = NSColor(selectionForeground)
-        }
-    }
-
-    private func applyBloomColors() {
-        installColors(ansiColors.map(swiftTermColor))
-        // Flattened to opaque. `labelColor` is 85% ink, and a terminal foreground that is not
-        // fully opaque prints every character faintly over the panel behind it.
-        nativeForegroundColor = resolved(Palette.textPrimary).withAlphaComponent(1)
-        // The panel's own surface, so the shell sits on the same colour as the setup and run logs
-        // it shares a tab strip with.
-        nativeBackgroundColor = resolved(Palette.surfaceSunken)
-        caretColor = .textInsertionPointColor
-        selectedTextBackgroundColor = .selectedTextBackgroundColor
-    }
-
-    /// The sixteen ANSI slots.
-    ///
-    /// Red, yellow and blue are Bloom's, so a failing test's red in the terminal is the same red
-    /// as a failed step everywhere else in the window. Green is NOT, and that is the one to
-    /// understand: the app's `positive` is the accent, because the brand ramp says to reuse the
-    /// accent rather than invent a green. That is right for a tick beside a passing check, and
-    /// wrong here, because ANSI green and ANSI blue are two different slots and a program that
-    /// prints both would print them in one colour. So this palette keeps a green of its own,
-    /// which is what every terminal theme does.
-    ///
-    /// The four greyscale slots cannot be the label colours either: those differ from each other
-    /// in alpha and in nothing else, and SwiftTerm stores a colour as three opaque bytes.
-    /// Dropping the alpha collapsed black, white, bright black and bright white to one identical
-    /// value, so black-on-white, which is most of what a Powerline prompt draws, came out as a
-    /// solid block with nothing legible inside it.
-    ///
-    /// They stay ordered dark to light within each appearance, because every program that colours
-    /// its own output assumes slot 8 is a lighter slot 0 and slot 15 a lighter slot 7.
-    private var ansiColors: [SwiftUI.Color] {
-        [
-            Self.black,
-            Palette.negative,
-            Self.green,
-            Palette.warning,
-            Palette.accent,
-            Color(nsColor: .systemPurple),
-            Color(nsColor: .systemTeal),
-            Self.white,
-            Self.brightBlack,
-            Palette.negative,
-            Self.green,
-            Palette.warning,
-            Palette.accent,
-            Color(nsColor: .systemPurple),
-            Color(nsColor: .systemTeal),
-            Self.brightWhite,
-        ]
-    }
-
-    /// ANSI slot 2. Tuned to sit beside `Palette.negative` and `Palette.warning` at the same
-    /// volume they do, rather than to be `systemGreen`, which is a step brighter than everything
-    /// else this terminal prints.
-    private static let green = Palette.dynamic(light: 0x2E7D32, dark: 0x6FCF7B)
-
-    // Per appearance, because the terminal's background follows the system: a fixed #FFFFFF for
-    // bright white would be invisible on a light panel, and a fixed #000000 black unreadable on a
-    // dark one.
-    private static let black = Palette.dynamic(light: 0x000000, dark: 0x1C1C1E)
-    private static let brightBlack = Palette.dynamic(light: 0x4D4D4D, dark: 0x636366)
-    private static let white = Palette.dynamic(light: 0x8E8E93, dark: 0xAEAEB2)
-    private static let brightWhite = Palette.dynamic(light: 0xB0B0B5, dark: 0xFFFFFF)
-
-    private func resolved(_ color: SwiftUI.Color) -> NSColor {
-        var native = NSColor(color)
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            native = NSColor(color)
-        }
-        return native
-    }
-
-    /// SwiftTerm stores terminal colours as three opaque byte channels, while Bloom keeps dynamic
-    /// AppKit colours so they follow appearance, contrast and accent changes. Alpha is lost in the
-    /// crossing, which is why nothing in `ansiColors` may rely on it to tell two slots apart.
-    private func swiftTermColor(_ color: SwiftUI.Color) -> SwiftTerm.Color {
-        let resolved = resolved(color)
-        let native = resolved.usingColorSpace(NSColorSpace.deviceRGB) ?? resolved
-        return SwiftTerm.Color(
-            red8: UInt16(clamping: Int((native.redComponent * 255).rounded())),
-            green8: UInt16(clamping: Int((native.greenComponent * 255).rounded())),
-            blue8: UInt16(clamping: Int((native.blueComponent * 255).rounded()))
-        )
+        caretColor = theme.cursorColor.map(NSColor.init) ?? nativeForegroundColor
+        caretTextColor = theme.cursorTextColor.map(NSColor.init)
+        selectedTextBackgroundColor = theme.selectionBackground.map(NSColor.init) ?? .selectedTextBackgroundColor
+        selectedTextForegroundColor = theme.selectionForeground.map(NSColor.init) ?? nativeForegroundColor
+        needsDisplay = true
     }
 
     // MARK: - Keyboard
@@ -594,13 +488,6 @@ struct TerminalView: NSViewRepresentable {
     var onExit: (@MainActor (TerminalExit) -> Void)?
     var onContextMenu: (@MainActor () -> NSMenu?)?
 
-    /// Read here rather than inside the terminal so SwiftUI reruns `updateNSView` when the switch
-    /// in Settings moves, which is what pushes the change into a shell that is already running.
-    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
-
-    /// Zero is "no override, follow Ghostty". See `TerminalTextSize`.
-    @AppStorage(TerminalTextSize.defaultsKey) private var fontSize = 0.0
-
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
         configure(host)
@@ -614,8 +501,7 @@ struct TerminalView: NSViewRepresentable {
     private func configure(_ host: TerminalHostView) {
         let session = self.session
         host.attach(session)
-        session.usesGhosttyTheme = usesGhosttyTheme
-        session.fontSizeOverride = fontSize > 0 ? CGFloat(fontSize) : nil
+        session.updateTheme()
         session.onFocus = onFocus
         session.onCommand = onCommand
         session.onContextMenu = onContextMenu

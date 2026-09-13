@@ -1,33 +1,6 @@
 import SwiftUI
 import BloomCore
 
-/// What the user asked for, as one side of a conversation.
-///
-/// A filled bubble in the brand blue, with light text, drawn the way iMessage draws the messages
-/// you sent. It replaced a near white plate with a hairline around it, which sat on a near white
-/// transcript and separated from the reply under it by almost nothing: you scrolled past your own
-/// question without noticing it went by. A fill is the cheapest thing that says "this half is
-/// yours" without adding a second border to a column that already has enough lines in it.
-///
-/// **Only this side is bubbled, and that is deliberate.** The agent's replies stay unbubbled prose
-/// and must not be "finished off" later. iMessage works because both sides are a sentence long. An
-/// agent turn is paragraphs, tool rows, code blocks and a footer, and wrapping that in a tinted
-/// plate would put a box around ninety percent of the window, cap prose at the bubble's measure and
-/// leave the tool rows either inside a bubble they do not belong in or outside one, breaking the
-/// column they align on. The asymmetry IS the design: one side is a remark, the other is a report.
-///
-/// Files attached to the turn are drawn as the same chips the composer showed a moment before it
-/// was sent, rather than as the list of paths the agent was handed. The agent needs paths in the
-/// text and always will, but the reader already knows what they attached and a scratch path under
-/// `.bloom/attachments` tells them nothing they did not know. See `AttachmentTrailer` for the one
-/// place that format is written and read.
-///
-/// Instructions Bloom appended to a turn it composed itself are drawn the same way, as a chip
-/// where the block sits, and hovering one shows the words the agent was given. They used to be a
-/// button under the bubble with a popover behind a click, next to a pull request's instructions
-/// which were a pill in the sentence with a card on hover: one thing, drawn twice, and only one of
-/// the two answered the pointer. See `SentTurn` for the cut and `InlineChip` for the chip that
-/// takes either a file or a body.
 struct UserTurnRowView: View {
     var text: String
     /// The files this turn carried, worktree relative, in the order they were attached.
@@ -115,32 +88,11 @@ struct UserTurnRowView: View {
                 bubble.padding(Self.padding)
             }
             .padding(.bottom, OutgoingBubbleShape.tailDrop)
-            .background(Palette.accentFill, in: OutgoingBubbleShape(cornerRadius: Self.corner))
-            // No stroke around the fill. A border on a filled shape is a control's outline,
-            // and the fill already separates the turn from the ground in both appearances.
-            //
-            // Everything inside is told it is sitting on the accent fill, which is the same
-            // signal a selected sidebar row sends. `Chip`, `DiffStatLabel`, `RepoIcon` and now
-            // `AttachmentChip` all read it and swap to the variant that survives the
-            // inversion, so a chip inside a user turn needs no knowledge of this view.
-            .environment(\.isOnEmphasizedSelection, true)
-            // And that the ground under them is dark, which on a light page it now is.
-            //
-            // This is not a stylistic flourish, it is what makes the text selectable in any
-            // useful sense. Selecting text in a `Text` paints `selectedTextBackgroundColor`
-            // BEHIND the glyphs and leaves the foreground exactly as it was: on the light ramp
-            // that colour is a pale blue, so dragging over a white sentence on this fill wrote
-            // it in white on near white and the selection was unreadable while it was being
-            // made. Measured off a probe of this exact bubble: the highlight comes out
-            // #BAD6FB and white on it is 1.5 to 1.
-            //
-            // Naming the scheme resolves that colour, and every other appearance-dependent
-            // colour inside the bubble, on the dark ramp, where it is a muted slate that sits
-            // clearly on Spatie Blue and leaves the white text alone: #466288, which carries the
-            // same white text at 6.2 to 1. The claim is honest rather than a trick: this bubble IS
-            // a dark surface whatever the page around it is doing, and the selection is simply the
-            // one piece of it that had to be told.
-            .environment(\.colorScheme, .dark)
+            .background(Palette.surfaceSunken, in: OutgoingBubbleShape(cornerRadius: Self.corner))
+            .overlay {
+                OutgoingBubbleShape(cornerRadius: Self.corner)
+                    .stroke(Palette.border, lineWidth: Metrics.outline)
+            }
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
@@ -185,26 +137,20 @@ struct UserTurnRowView: View {
                 // `TranscriptTextView` exists: a link inside a selectable `Text` is decoration.
                 // Measured on a real window, the cursor over one was an I-beam and a press routed
                 // nothing at all. See the note on that type.
-                    TranscriptTextView(
+                TranscriptTextView(
                     text: TranscriptLink.attributedString(
                         sent: text,
                         font: font,
-                        // White, the same ink a selected row uses on the same fill. Measured 5.2
-                        // to 1 on Spatie Blue, which passes AA for body text in both appearances.
-                        color: .alternateSelectedControlTextColor,
+                        color: .labelColor,
                         // The reader's line height, and handing it in is also what keeps the
                         // bubble's own cache honest: `SentTurnKey` is keyed on this number, so a
                         // step just moved is a miss rather than a bubble redrawn at the old one.
                         lineSpacing: TranscriptLayout.proseLeading(
                             Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
                         ),
-                        chipGround: .userBubble
+                        chipGround: .composer
                     ),
-                    linkColor: NSColor(Palette.linkInverted),
-                    // The measured value from the note above: on the dark ramp the selection is a
-                    // muted slate that sits clearly on Spatie Blue and leaves white text alone.
-                    // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
-                    selectionColor: Palette.bubbleTextSelection,
+                    linkColor: Palette.linkNSColor,
                     alignsBubbleInk: true,
                     actions: linkActions.opening(
                         file: open, hovering: { hovered = $0 },

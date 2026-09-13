@@ -33,7 +33,7 @@ public struct CodeBlockView: View {
                 // at the floor of the scale, a rung under the smallest thing it names.
                 Text(Self.displayName(for: language))
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(Palette.codeGutter)
                 Spacer(minLength: MarkdownMetrics.blockGap)
                 CopyButton(text: code, title: "Copy code", size: MarkdownMetrics.iconButton)
             }
@@ -44,8 +44,9 @@ public struct CodeBlockView: View {
 
             ScrollView(.horizontal) {
                 Text(highlighted(prepared, upTo: visibleCount))
-                    .font(Typo.code)
-                    .foregroundStyle(Palette.textPrimary)
+                    .font(CodeMetrics.measuredFont)
+                    .lineSpacing(CodeMetrics.rowSpacing)
+                    .foregroundStyle(Palette.codeForeground)
                     .textSelection(.enabled)
                     .padding(MarkdownMetrics.blockGap)
             }
@@ -64,7 +65,7 @@ public struct CodeBlockView: View {
                 .padding(.vertical, Metrics.spacing)
             }
         }
-        .background(Palette.surfaceSunken)
+        .background(Palette.codeBackground)
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
@@ -93,12 +94,16 @@ public struct CodeBlockView: View {
     /// the way `SetupLineHeight` gives the setup log one. Worth writing when something asks for it.
     private func highlighted(_ prepared: CodeBlockPreparation, upTo count: Int) -> AttributedString {
         var output = AttributedString()
+        let scheme = ColourThemePreference.shared.codeScheme
+        let colours = Palette.codeColours
+        let schemeHash = scheme.hashValue
         for offset in 0..<count {
             if offset > 0 { output += AttributedString("\n") }
             output += SyntaxCache.attributed(
                 line: prepared.lines[offset],
                 language: language,
-                carry: prepared.carries[offset]
+                carry: prepared.carries[offset],
+                scheme: scheme, colours: colours, schemeHash: schemeHash
             )
         }
         return output
