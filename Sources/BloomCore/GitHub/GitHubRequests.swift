@@ -133,7 +133,16 @@ extension GitHub {
         let family = arguments.first ?? ""
         let action = arguments.dropFirst().first ?? ""
         let acceptsRepo = family == "pr" || (family == "run" && action == "view")
-        guard acceptsRepo,
+        // A pull request command with no selector resolves the pull request from the checked out
+        // branch's own config, and gh refuses that outright once `--repo` is given: "argument
+        // required when using the --repo flag". `snapshotOfCheckedOutBranch` is that unnamed
+        // lookup, so adding the repository here turned every branch without a pull request into a
+        // "GitHub could not refresh" banner that no refresh could clear. Only `create`, `list` and
+        // `status` work out their subject without the current branch.
+        let resolvesCurrentBranch = family == "pr"
+            && !["create", "list", "status"].contains(action)
+            && (arguments.count < 3 || arguments[2].hasPrefix("-"))
+        guard acceptsRepo, !resolvesCurrentBranch,
               repositoryOption(in: arguments) == nil,
               !arguments.contains("--repo"), !arguments.contains("-R"),
               let context, let base = repositorySpecifier(context.baseRemoteURL) else { return arguments }

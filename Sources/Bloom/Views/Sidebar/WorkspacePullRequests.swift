@@ -28,7 +28,11 @@ final class WorkspacePullRequests {
     private var states: [WorkspaceID: PullRequestRefreshState] = [:]
     @ObservationIgnored private var generations: [WorkspaceID: UInt64] = [:]
 
-    func failure(for workspaceID: WorkspaceID) -> GitHubReadFailure? { states[workspaceID]?.failure }
+    func failure(for workspaceID: WorkspaceID) -> GitHubReadFailure? { states[workspaceID]?.visibleFailure }
+
+    func dismissFailure(for workspaceID: WorkspaceID) {
+        states[workspaceID]?.dismissFailure()
+    }
 
     func record(_ read: PullRequestRead, for workspaceID: WorkspaceID) {
         generations[workspaceID, default: 0] &+= 1

@@ -182,6 +182,10 @@ final class WorkspaceModel {
         WorkspacePullRequests.shared.failure(for: workspace.id)
     }
 
+    func dismissPullRequestRefreshFailure() {
+        WorkspacePullRequests.shared.dismissFailure(for: workspace.id)
+    }
+
     var isLoadingPullRequest = false
     /// Whether any refresh has come back for this workspace this launch, whatever it said.
     ///

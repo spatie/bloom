@@ -32,19 +32,31 @@ struct InspectorView: View {
                 Hairline()
             }
             if let failure = model.pullRequestRefreshFailure {
-                VStack(alignment: .leading, spacing: InspectorLayout.tight) {
-                    Text(model.pullRequest == nil ? "GitHub could not refresh" : "Showing the last GitHub update")
-                        .font(Typo.captionEmphasis)
-                        .foregroundStyle(Palette.textPrimary)
-                    Text(failure.message).font(Typo.micro).foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                    if let retryAt = failure.retryAt {
-                        Text("Next refresh after \(retryAt.formatted(date: .omitted, time: .shortened))")
-                            .font(Typo.micro).foregroundStyle(Palette.textSecondary)
+                HStack(alignment: .top, spacing: InspectorLayout.gap) {
+                    VStack(alignment: .leading, spacing: InspectorLayout.tight) {
+                        Text(model.pullRequest == nil ? "GitHub could not refresh" : "Showing the last GitHub update")
+                            .font(Typo.captionEmphasis)
+                            .foregroundStyle(Palette.textPrimary)
+                        Text(failure.message).font(Typo.micro).foregroundStyle(Palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        if let retryAt = failure.retryAt {
+                            Text("Next refresh after \(retryAt.formatted(date: .omitted, time: .shortened))")
+                                .font(Typo.micro).foregroundStyle(Palette.textSecondary)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Polling does not stop while the banner is closed; the same failure stays
+                    // hidden and a different one, or a success, resets it. See
+                    // `PullRequestRefreshState.visibleFailure`.
+                    Button("Dismiss", systemImage: "xmark") { model.dismissPullRequestRefreshFailure() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .foregroundStyle(Palette.textTertiary)
+                        .help("Dismiss")
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, InspectorLayout.inset)
                 .padding(.vertical, Metrics.spacing)
                 .accessibilityElement(children: .contain)
