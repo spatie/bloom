@@ -16,6 +16,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private let origin: String
     private let placeholder = BloomTheme.label("Message your agent", secondary: true)
     private var composerHeight: NSLayoutConstraint?
+    private var placeholderTop: NSLayoutConstraint?
     private var normalSendWidth: NSLayoutConstraint?
     private let composerPanel = UIView()
     private let composerRow = UIView()
@@ -84,8 +85,9 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         composer.delegate = self
         placeholder.translatesAutoresizingMaskIntoConstraints = false
         composer.addSubview(placeholder)
+        placeholderTop = placeholder.topAnchor.constraint(equalTo: composer.topAnchor, constant: 10)
         NSLayoutConstraint.activate([
-            placeholder.topAnchor.constraint(equalTo: composer.topAnchor, constant: 10),
+            placeholderTop!,
             placeholder.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 15),
             placeholder.widthAnchor.constraint(equalTo: composer.widthAnchor, constant: -30),
         ])
@@ -214,11 +216,20 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         let measured = (text as NSString).boundingRect(
             with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font], context: nil)
-        let height = ceil(measured.height) + 20
+        placeholder.font = font
+        let height = ceil(measured.height)
         let maximum = min(220, max(110, view.bounds.height * 0.28))
-        let hintHeight = placeholder.isHidden ? 0 : placeholder.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude)).height + 20
-        composerHeight?.constant = min(maximum, max(44, height, hintHeight))
-        composer.isScrollEnabled = max(height, hintHeight) > maximum
+        let hintHeight = placeholder.isHidden ? 0 : ceil(placeholder.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude)).height)
+        let contentHeight = max(height, hintHeight)
+        let fieldHeight = min(maximum, max(44, contentHeight + 20))
+        // The minimum field height leaves extra space around a single line. Share that space
+        // above and below both the text/caret and placeholder, instead of pinning them to the top.
+        let verticalInset = max(10, (fieldHeight - contentHeight) / 2)
+        let insets = UIEdgeInsets(top: verticalInset, left: 10, bottom: verticalInset, right: 10)
+        if composer.textContainerInset != insets { composer.textContainerInset = insets }
+        placeholderTop?.constant = verticalInset
+        composerHeight?.constant = fieldHeight
+        composer.isScrollEnabled = contentHeight + 20 > maximum
         send.isEnabled = model.canSend && model.address == origin && !isSending && (hasPendingSubmission || !composer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         send.accessibilityLabel = hasPendingSubmission ? "Retry message" : "Send message"
         options.isHidden = hasPendingSubmission
