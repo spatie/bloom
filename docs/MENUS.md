@@ -94,7 +94,7 @@ contribute for free.
 | Pin / Unpin | | a live workspace is the subject |
 | Mark as Unread / Mark as Read | | a live workspace is the subject |
 | Colour > None and ten colours | | a live workspace is the subject |
-| Archive Workspace | `⌘⌫` | a live workspace is the subject |
+| Archive Workspace | `⇧⌘⌫` | a live workspace is the subject |
 | Restore Workspace | | an archived workspace is the subject |
 | Open in Editor | `⇧⌘E` | a live workspace is the subject |
 | Reveal in Finder | `⇧⌘R` | a live workspace is the subject |
@@ -189,7 +189,7 @@ only by trying it.
 | Mark as Read / Mark as Unread | **no** | none |
 | Colour > None and ten colours | **no** | none |
 | Rename | yes | none |
-| Archive | yes | `⌘⌫` |
+| Archive | yes | `⇧⌘⌫` |
 
 An archived row (`HomeRowMenu`) offers Open, Restore Workspace and Copy Branch Name. Restore and
 Copy Branch Name are in the menu bar; **Open, which opens an archived transcript for reading, is
@@ -255,7 +255,7 @@ A browser with no Back in any menu is the second most obvious gap after the spli
 | Open on GitHub, Copy link (pull request) | summary menu | **no** | none |
 | Merge, Squash and merge, Rebase and merge | the band's split button | **no**, deliberately | none |
 | Choose the merge method | the split button's chevron | **no**, deliberately | none |
-| Create pull request, Continue, Archive, Fix merge conflicts | buttons | Archive only | `⌘⌫` |
+| Create pull request, Continue, Archive, Fix merge conflicts | buttons | Archive only | `⇧⌘⌫` |
 | Save an edited file | hidden button | greyed, always | `⌘S` |
 
 `⌘E` and `⌘S` are both hidden `keyboardShortcut` buttons with no menu item, which is the exact
@@ -301,7 +301,7 @@ in its own doc comment.
 | What the sidebar glyphs mean | status bar button | **no** | none |
 | Settings | status bar button | yes | `⌘,` |
 | Reorder projects, reorder workspaces | drag | **no** | none |
-| Archive a workspace, with a confirmation | row hover button | yes, without the confirmation | `⌘⌫` |
+| Archive a workspace, with a confirmation | row hover button | yes, without the confirmation | `⇧⌘⌫` |
 | Resize the sidebar, the inspector, the composer, a pane | drag a divider | **no** | none |
 
 ### Settings and the project settings window

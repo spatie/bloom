@@ -163,7 +163,9 @@ public enum MenuBarCatalogue {
             alternateTitle: UnreadMarkAction.markRead.title, availability: .needsWorkspaceSubject
         ),
         MenuBarItem(.colour, in: .workspace, "Colour", availability: .needsWorkspaceSubject),
-        MenuBarItem(.archive, in: .workspace, "Archive Workspace", key: .init(.delete, .command), availability: .needsWorkspaceSubject),
+        // Plain Command-Backspace belongs to text editing, including fields that do not publish
+        // a focus value to disable Archive. Require Shift so those fields cannot trigger it.
+        MenuBarItem(.archive, in: .workspace, "Archive Workspace", key: .init(.delete, .command, .shift), availability: .needsWorkspaceSubject),
         MenuBarItem(.restore, in: .workspace, "Restore Workspace", availability: .needsWorkspaceSubject),
         MenuBarItem(.openInEditor, in: .workspace, "Open in Editor", key: .init("e", .command, .shift), availability: .needsWorkspaceSubject),
         MenuBarItem(.revealInFinder, in: .workspace, "Reveal in Finder", key: .init("r", .command, .shift), availability: .needsWorkspaceSubject),

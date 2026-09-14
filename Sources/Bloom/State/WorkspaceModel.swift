@@ -1264,7 +1264,8 @@ final class WorkspaceModel {
 
         let workspace = workspace
         let port = port
-        let run = Task {
+        // A weak exit callback alone still lets the outer task retain the model.
+        let run = Task { [weak self] in
             await manager.runSetup(
                 workspace: workspace, repo: repo, port: port, operationLease: lease,
                 onExit: { [weak self] status in

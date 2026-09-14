@@ -509,12 +509,8 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // **Greyed while somebody is typing, and that is not tidiness.** Command-Backspace
-            // deletes to the start of the line in every text box on macOS, and AppKit checks a
-            // menu's key equivalents before the responder chain sees the key, so the text view
-            // never gets the chance to refuse it. A user reached for it mid-prompt and archived
-            // the workspace he was writing in. The item stands down instead; see
-            // `FocusedValues.isTypingProse`.
+            // Keep Archive disabled in prose editors. Its shortcut also requires Shift because
+            // fields without a published focus value must keep Command-Backspace for editing.
             MenuCommand(.archive) {
                 guard let workspace = workspace(for: .archive) else { return }
                 archive(workspace)
