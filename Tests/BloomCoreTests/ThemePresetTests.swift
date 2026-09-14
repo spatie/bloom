@@ -20,10 +20,10 @@ struct ThemePresetTests {
         #expect(typography.chatTextSize == .largest)
         #expect(typography.chatLineHeight == .looser)
         #expect(typography.terminalTypography.fontSize == 18)
-        #expect(migrated.terminalSource == .ghostty)
+        #expect(ThemeOverrides.followsGhostty(migrating: nil, from: defaults))
         defaults.set(false, forKey: "useGhosttyTerminalTheme")
         defaults.set(0, forKey: "terminal.fontSize")
-        #expect(ThemeOverrides.migrating(from: defaults).terminalSource == nil)
+        #expect(!ThemeOverrides.followsGhostty(migrating: nil, from: defaults))
         #expect(TypographyOverrides.migrating(from: defaults).terminalTypography.fontSize == nil)
         #expect(defaults.string(forKey: ChatFontCatalogue.defaultsKey) == "Charter")
     }
@@ -115,6 +115,7 @@ struct ThemePreferenceStateTests {
         state.overrides.codeScheme = "bloom"
         state.overrides.terminalSource = .builtin("charcoal")
         state.glassOverride = .regular
+        state.followsGhostty = false
         state.chatTextSize = .largest
         state.typographyOverrides.codeTypography.fontSize = 20
         state.choice = .bloom
@@ -133,6 +134,7 @@ struct ThemePreferenceStateTests {
         reloaded.restoreDefaults()
         let reset = ColourThemePreference(defaults: defaults)
         #expect(reset.glass == .thick && reset.codeScheme == .charcoal)
+        // Following Ghostty is the person's, like typography, so a preset's reset keeps it.
         #expect(!reset.followsGhostty)
         // Restoring a preset's defaults is about its look, so the reading size survives it.
         #expect(reset.chatTextSize == .largest)
@@ -178,6 +180,27 @@ struct ThemePreferenceStateTests {
         #expect(defaults.data(forKey: "themeOverrides.unreadableBackup") == nil)
     }
 
+    @Test func followingGhosttyInOnePresetFollowsItInAll() throws {
+        let domain = "bloom-theme-ghostty-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        // What the first theme preset build wrote for somebody who followed Ghostty and then
+        // picked Charcoal Glass: Ghostty on the preset selected at upgrade, and nowhere else.
+        let older = Data(#"{"schemaVersion":1,"themes":{"bloom":{"terminalSource":{"ghostty":{}}},"neutral":{"glass":"thin"}}}"#.utf8)
+        defaults.set(older, forKey: "themeOverrides")
+        defaults.set("neutral", forKey: ColourTheme.defaultsKey)
+        let state = ColourThemePreference(defaults: defaults)
+        #expect(state.followsGhostty)
+        #expect(state.glass == .thin && state.terminalScheme == .charcoal)
+        state.choice = .bloom
+        #expect(state.overrides.terminalSource == nil && state.followsGhostty)
+        #expect(defaults.data(forKey: "themeOverrides.unreadableBackup") == nil)
+
+        let without = try JSONEncoder().encode(ThemeOverrides.Archive(themes: ["bloom": ThemeOverrides()]))
+        let neverFollowed = try ThemeOverrides.Archive.decode(without)
+        #expect(!ThemeOverrides.followsGhostty(migrating: neverFollowed, from: defaults))
+    }
+
     @Test func ghosttyColourDefaultsStayTogether() {
         var partial = GhosttyTheme()
         partial.foreground = GhosttyColor(red: 0xAA, green: 0xBB, blue: 0xCC)
@@ -188,5 +211,44 @@ struct ThemePreferenceStateTests {
         #expect(resolved.selectionBackground == partial.foreground)
         #expect(resolved.selectionForeground == resolved.background)
         #expect(resolved.palette.count == 16)
+    }
+}
+
+@Suite("Ghostty over a theme")
+struct GhosttyLayeringTests {
+    private let scheme = TerminalScheme.charcoal.light
+
+    /// The config that prompted this: one palette line and nothing else. It used to come out as
+    /// Ghostty's dark ground in a light window.
+    @Test func aPaletteOnlyConfigKeepsTheThemesPanel() {
+        var config = GhosttyTheme()
+        config.palette[2] = GhosttyColor(red: 0x5C, green: 0xCD, blue: 0x86)
+        let layered = config.layered(over: scheme)
+        #expect(layered.background == scheme.background)
+        #expect(layered.foreground == scheme.foreground)
+        #expect(layered.selectionBackground == scheme.selectionBackground)
+        #expect(layered.ansiColors()[2] == GhosttyColor(red: 0x5C, green: 0xCD, blue: 0x86))
+        #expect(layered.ansiColors()[1] == GhosttyTheme.defaultPalette[1])
+    }
+
+    @Test func aConfigWithItsOwnGroundIsAWholeTerminal() {
+        var config = GhosttyTheme()
+        config.background = GhosttyColor(red: 0x10, green: 0x10, blue: 0x10)
+        config.cursorColor = GhosttyColor(red: 0xFF, green: 0x00, blue: 0x00)
+        let layered = config.layered(over: scheme)
+        #expect(layered.background == config.background)
+        #expect(layered.foreground == GhosttyColor(red: 0xFF, green: 0xFF, blue: 0xFF))
+        #expect(layered.cursorColor == config.cursorColor)
+        #expect(layered.selectionForeground == config.background)
+    }
+
+    @Test func coloursTheConfigNamesWinOverTheTheme() {
+        var config = GhosttyTheme()
+        config.cursorColor = GhosttyColor(red: 0xFF, green: 0x00, blue: 0x00)
+        config.fontFamily = "Menlo"
+        let layered = config.layered(over: scheme)
+        #expect(layered.cursorColor == config.cursorColor)
+        #expect(layered.cursorTextColor == scheme.cursorTextColor)
+        #expect(layered.fontFamily == "Menlo")
     }
 }

@@ -36,14 +36,16 @@ terminal, and the existing conversation font fallback. Sizes are bounded to 9...
 code and terminal spacing uses a 1...2 multiplier. An empty code/terminal font name explicitly
 selects system monospace; an absent name inherits the default.
 
-My Ghostty configuration is a terminal source, distinct from a built-in scheme. It continues
-to use the existing lazy, per-appearance Ghostty loader, including its font defaults. Explicit
-font choices override that source. Terminal split appearance follows the same source selection.
-The migration preserves the old default of following Ghostty. Partial Ghostty palettes use
-Ghostty colour defaults, including inverted selection colours, rather than mixing window colours.
-The built-in Charcoal terminal uses the preset's sunken panel colour. Terminal padding follows
-the selected terminal background, including an explicit Ghostty palette. Native scrollbar knobs
-use a light or dark style to suit that background.
+Use my Ghostty configuration is one setting for every theme, like typography. Terminals then
+draw with the user's Ghostty configuration laid over the selected terminal scheme, through
+`GhosttyTheme.layered(over:)`. A config that sets its own background or foreground is a whole
+terminal and gets Ghostty's defaults for everything it leaves out. A config that sets neither,
+typically a palette slot or two, keeps the scheme's background, foreground, cursor and selection
+and takes Ghostty's sixteen ANSI colours. Ghostty's font defaults still apply unless a font is
+chosen here. Archives written while Ghostty was a per theme scheme follow Ghostty if any theme
+did; with no archive, the setting from before presets decides, and it defaulted to on. The
+built-in Charcoal terminal uses the preset's sunken panel colour. Terminal padding follows the
+drawn terminal background. Native scrollbar knobs use a light or dark style to suit it.
 
 ## Rendering
 

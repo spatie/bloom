@@ -27,6 +27,13 @@ public final class ColourThemePreference {
         didSet { persist() }
     }
 
+    /// Whether terminals draw with the user's Ghostty configuration, laid over the selected
+    /// preset's terminal scheme. One setting for every preset: a person's terminal is theirs
+    /// whichever window colours they picked.
+    public var followsGhostty: Bool {
+        didSet { persist() }
+    }
+
     public var glassOverride: ThemeGlass? {
         get { overrides.glass }
         set { overrides.glass = newValue }
@@ -34,8 +41,6 @@ public final class ColourThemePreference {
     public var glass: ThemeGlass { glassOverride ?? choice.glass }
     public var codeScheme: CodeScheme { overrides.codeScheme(for: choice) }
     public var terminalScheme: TerminalScheme { overrides.terminalScheme(for: choice) }
-    public var terminalSource: TerminalSource { overrides.terminalSource ?? .builtin(choice.terminalScheme) }
-    public var followsGhostty: Bool { terminalSource == .ghostty }
     public var codeTypography: ThemeTypography { typographyOverrides.codeTypography.inheriting(choice.codeTypography) }
     public var terminalTypography: ThemeTypography {
         typographyOverrides.terminalTypography.inheriting(choice.terminalTypography)
@@ -60,15 +65,22 @@ public final class ColourThemePreference {
         if let data = defaults.data(forKey: Self.overridesKey) {
             do {
                 let archive = try ThemeOverrides.Archive.decode(data)
-                saved = archive.themes
+                followsGhostty = ThemeOverrides.followsGhostty(migrating: archive, from: defaults)
+                saved = archive.themes.mapValues { theme in
+                    var theme = theme
+                    if theme.terminalSource == .ghostty { theme.terminalSource = nil }
+                    return theme
+                }
                 typographyOverrides = archive.typography ?? .migrating(from: defaults, theme: initialChoice)
             } catch {
+                followsGhostty = ThemeOverrides.followsGhostty(migrating: nil, from: defaults)
                 saved = [initialChoice.id: ThemeOverrides.migrating(from: defaults, theme: initialChoice)]
                 typographyOverrides = .migrating(from: defaults, theme: initialChoice)
                 defaults.set(data, forKey: "themeOverrides.unreadableBackup")
                 NSLog("Could not read theme settings: %@", error.localizedDescription)
             }
         } else {
+            followsGhostty = ThemeOverrides.followsGhostty(migrating: nil, from: defaults)
             saved = [initialChoice.id: ThemeOverrides.migrating(from: defaults, theme: initialChoice)]
             typographyOverrides = .migrating(from: defaults, theme: initialChoice)
             persist()
@@ -84,7 +96,9 @@ public final class ColourThemePreference {
 
     private func persist() {
         do {
-            let archive = ThemeOverrides.Archive(themes: saved, typography: typographyOverrides)
+            let archive = ThemeOverrides.Archive(
+                themes: saved, typography: typographyOverrides, followsGhostty: followsGhostty
+            )
             defaults.set(try JSONEncoder().encode(archive), forKey: Self.overridesKey)
         } catch {
             NSLog("Could not save theme settings: %@", error.localizedDescription)

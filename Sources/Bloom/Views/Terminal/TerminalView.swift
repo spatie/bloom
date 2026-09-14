@@ -284,12 +284,10 @@ final class BloomTerminalView: LocalProcessTerminalView {
     /// SwiftTerm ships a palette that looks nothing like the rest of Bloom, so both the sixteen
     /// ANSI slots and the default foreground and background are replaced here.
     func applyAppearanceColors() {
-        let fallback = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? terminalScheme.dark : terminalScheme.light
-        let theme = ghostty ?? fallback
+        let theme = TerminalGhostty.colours(for: effectiveAppearance)
         installColors(theme.ansiColors().map(SwiftTerm.Color.init))
-        nativeForegroundColor = (theme.foreground ?? fallback.foreground).map(NSColor.init) ?? .labelColor
-        nativeBackgroundColor = (theme.background ?? fallback.background).map(NSColor.init) ?? .textBackgroundColor
+        nativeForegroundColor = theme.foreground.map(NSColor.init) ?? .labelColor
+        nativeBackgroundColor = theme.background.map(NSColor.init) ?? .textBackgroundColor
         let background = nativeBackgroundColor.usingColorSpace(.deviceRGB)
         for scroller in subviews.compactMap({ $0 as? NSScroller }) {
             scroller.knobStyle = (background?.brightnessComponent ?? 1) < 0.5 ? .light : .dark

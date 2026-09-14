@@ -100,12 +100,9 @@ struct TerminalSplitView: View {
     }
 
     private var terminalBackground: Color {
-        let preference = ColourThemePreference.shared
-        let scheme = preference.terminalScheme
-        let fallback = colorScheme == .dark ? scheme.dark : scheme.light
         let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
-        let theme = usesGhosttyTheme ? appearance.flatMap { TerminalGhostty.theme(for: $0) } : nil
-        return (theme?.background ?? fallback.background).map { Color(nsColor: NSColor($0)) } ?? Palette.surfaceSunken
+        let background = appearance.flatMap { TerminalGhostty.colours(for: $0).background }
+        return background.map { Color(nsColor: NSColor($0)) } ?? Palette.surfaceSunken
     }
 
     /// `remembered` is what this pane was running when Bloom last stopped, and only for a pane that

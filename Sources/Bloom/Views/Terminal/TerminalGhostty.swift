@@ -16,9 +16,21 @@ enum TerminalGhostty {
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
         if let cached = cache[key] { return cached }
 
-        let loaded = GhosttyConfigLoader.load(appearance: key)?.resolvingColourDefaults()
+        // Raw, with no defaults filled in: which gaps get Ghostty's defaults and which get the
+        // theme's depends on what the config set, and that is `GhosttyTheme.layered(over:)`.
+        let loaded = GhosttyConfigLoader.load(appearance: key)
         cache[key] = loaded
         return loaded
+    }
+
+    /// The colours a terminal in this appearance draws with: the selected scheme, with the user's
+    /// Ghostty configuration over it when they follow one.
+    static func colours(for appearance: NSAppearance) -> GhosttyTheme {
+        let preference = ColourThemePreference.shared
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let scheme = isDark ? preference.terminalScheme.dark : preference.terminalScheme.light
+        guard preference.followsGhostty, let ghostty = theme(for: appearance) else { return scheme }
+        return ghostty.layered(over: scheme)
     }
 
     /// How Ghostty fades the panes that do not have the keyboard. Read once per launch, because

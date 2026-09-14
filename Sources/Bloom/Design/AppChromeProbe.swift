@@ -86,7 +86,9 @@ enum AppChromeProbe {
         preference.choice = .charcoalGlass
         let originalOverrides = preference.overrides
         let originalTypography = preference.typographyOverrides
+        let originalFollowsGhostty = preference.followsGhostty
         defer {
+            preference.followsGhostty = originalFollowsGhostty
             preference.typographyOverrides = originalTypography
             preference.overrides = originalOverrides
             preference.choice = originalChoice
@@ -122,6 +124,9 @@ enum AppChromeProbe {
 
         let terminal = BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 600, height: 240))
         terminal.feed(text: "theme probe")
+        // Off, so the checks below measure the built-in schemes rather than whatever Ghostty
+        // configuration the Mac running the probe happens to have.
+        preference.followsGhostty = false
         preference.overrides.terminalSource = .builtin("bloom")
         preference.typographyOverrides.terminalTypography = ThemeTypography(fontSize: 18, lineHeight: 1.4)
         terminal.updateTheme()

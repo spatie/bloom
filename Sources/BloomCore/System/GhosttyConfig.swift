@@ -77,6 +77,29 @@ public struct GhosttyTheme: Codable, Sendable, Hashable {
         return value
     }
 
+    /// What a terminal draws with when it follows this configuration inside a Bloom theme.
+    ///
+    /// **A config that sets its own background or foreground is a whole terminal**, and gets
+    /// Ghostty's defaults for everything else, because a dark ground of the user's with Bloom's
+    /// light selection on it would read as a bug. **A config that sets neither is a few colours**,
+    /// most often a palette slot or two, and those are laid over the theme's panel: the ground,
+    /// ink, cursor and selection come from `scheme` unless the config names them, and the sixteen
+    /// ANSI slots come from Ghostty. Filling that second case with Ghostty's dark `#282C34` put a
+    /// black block in a light window for a config whose only line was `palette = 2=#5ccd86`,
+    /// which is what the terminal looked like before theme presets and had to look like again.
+    public func layered(over scheme: GhosttyTheme) -> Self {
+        guard background == nil, foreground == nil else { return resolvingColourDefaults() }
+        var value = scheme
+        value.cursorColor = cursorColor ?? scheme.cursorColor
+        value.cursorTextColor = cursorTextColor ?? scheme.cursorTextColor
+        value.selectionBackground = selectionBackground ?? scheme.selectionBackground
+        value.selectionForeground = selectionForeground ?? scheme.selectionForeground
+        value.palette = Dictionary(uniqueKeysWithValues: ansiColors().enumerated().map { ($0.offset, $0.element) })
+        value.fontFamily = fontFamily
+        value.fontSize = fontSize
+        return value
+    }
+
     /// The sixteen ANSI slots, Ghostty's own defaults wherever the config was silent.
     ///
     /// Filling the gaps from Ghostty rather than from Bloom's palette matters: a user who

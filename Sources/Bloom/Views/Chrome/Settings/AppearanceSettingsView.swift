@@ -41,13 +41,17 @@ struct AppearanceSettingsView: View {
             }
 
             Section("Terminal") {
+                Toggle("Use my Ghostty configuration", isOn: $colourTheme.followsGhostty)
+                Text(colourTheme.followsGhostty
+                    ? "Colours and fonts your Ghostty config sets are used in every theme. Anything it leaves out comes from the colour scheme below."
+                    : "Terminals use the colour scheme below.")
+                    .settingsFootnote()
                 Picker("Colour scheme", selection: $colourTheme.overrides.terminalSource) {
                     Text("Theme default (\(TerminalScheme.find(colourTheme.choice.terminalScheme).title))")
                         .tag(nil as TerminalSource?)
                     ForEach(TerminalScheme.all) { scheme in
                         Text(scheme.title).tag(TerminalSource.builtin(scheme.id) as TerminalSource?)
                     }
-                    Text("My Ghostty configuration").tag(TerminalSource.ghostty as TerminalSource?)
                 }
                 typographyControls(terminal: true)
                 Text(verbatim: "~/dev/bloom $ swift build")
@@ -175,7 +179,8 @@ struct AppearanceSettingsView: View {
         return TerminalGhostty.theme(for: appearance)
     }
     private var terminalPalette: GhosttyTheme {
-        ghostty ?? (colorScheme == .dark ? colourTheme.terminalScheme.dark : colourTheme.terminalScheme.light)
+        NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua).map { TerminalGhostty.colours(for: $0) }
+            ?? (colorScheme == .dark ? colourTheme.terminalScheme.dark : colourTheme.terminalScheme.light)
     }
     private var terminalFamily: String? { colourTheme.terminalTypography.fontFamily ?? ghostty?.fontFamily }
     private var terminalSize: Double {
