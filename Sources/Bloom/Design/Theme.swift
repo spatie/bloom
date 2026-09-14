@@ -945,8 +945,8 @@ enum Motion {
     /// rest arriving.
     static let arrival: Animation = .easeOut(duration: 0.18)
 
-    /// A transcript being drawn again after it has been held back: at its new width when a divider
-    /// is let go, and at all when the conversation a pane was pointed at has landed in it.
+    /// A transcript being drawn again after it has been held back, when the conversation a pane was
+    /// pointed at has landed in it.
     ///
     /// A duration rather than an `Animation` because what plays it is a `CATransition` on a layer.
     /// The same length as `pane`, deliberately: both are a pane's own movement finishing rather
