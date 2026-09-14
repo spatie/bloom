@@ -17,14 +17,19 @@ struct FileEditPane: View {
     let session: FileEditSession
     /// Called after a save lands, for a pane whose other half is now showing stale text.
     var onSaved: () -> Void = {}
+    var isEditable = true
+    var absolutePathOverride: String?
 
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isConfirmingReload = false
 
     private var absolutePath: String {
-        (model.workspace.path as NSString).appendingPathComponent(path)
+        absolutePathOverride ?? (model.workspace.path as NSString).appendingPathComponent(path)
     }
+
+    private var state: SourceEditorState { SourceEditorState.file(absolutePath) }
+    @State private var comparing = false
 
     private var filename: String { (path as NSString).lastPathComponent }
 
@@ -39,7 +44,7 @@ struct FileEditPane: View {
             case let .unavailable(reason):
                 EmptyStateView(
                     glyph: "doc.badge.gearshape",
-                    title: "Cannot edit this file",
+                    title: isEditable ? "Cannot edit this file" : "Cannot read this file",
                     message: reason
                 )
             default:
@@ -47,22 +52,71 @@ struct FileEditPane: View {
             }
         }
         .background(Palette.surface)
-        .task(id: absolutePath) { await session.load(path: absolutePath) }
+        .focusedValue(\.saveAction, isEditable ? SaveAction(subject: absolutePath, isEnabled: isDirty && !session.saving.contains(absolutePath), perform: save) : nil)
+        .focusedValue(\.isTypingProse, isEditable)
+        .onDisappear { state.navigationTask?.cancel() }
+        .confirmationDialog(
+            "Discard your edits to \(filename)?",
+            isPresented: $isConfirmingReload,
+            titleVisibility: .visible
+        ) {
+            Button("Discard and reload", role: .destructive) {
+                Task { await session.reload(path: absolutePath) }
+            }
+            // Escape keeps the edits. See the archive confirmation in `RootView` for why no
+            // cancel button in this app carries `.keyboardShortcut(.defaultAction)`.
+            Button("Keep editing", role: .cancel) {}
+        } message: {
+            Text("The file on disk replaces what you typed. There is no undo for this.")
+        }
+        .task(id: absolutePath) {
+            await session.load(path: absolutePath)
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                await session.refresh(path: absolutePath)
+            }
+        }
+        .sheet(isPresented: $comparing) { comparison }
     }
 
     @ViewBuilder
     private var editor: some View {
         if session.draft(for: absolutePath) != nil {
             VStack(spacing: 0) {
+                SourceTools(model: model, path: path, state: state)
+                Hairline()
                 SourceEditor(
                     text: session.binding(for: absolutePath),
-                    language: Language.detect(path: path),
-                    colorScheme: colorScheme
+                    language: state.languageOverride ?? Language.detect(path: path),
+                    colorScheme: colorScheme,
+                    isEditable: isEditable,
+                    editorState: state,
+                    onOpenReference: { SourceActions.open($0, at: $1, path: path, model: model, state: state, newTab: $2) },
+                    onDefinition: { SourceActions.definition(at: $0, path: path, model: model, state: state) },
+                    onReferences: { SourceActions.references(at: $0, path: path, model: model, state: state) },
+                    onNavigateSymbol: { SourceActions.navigate(at: $0, path: path, model: model, state: state, newTab: $1) },
+                    onAsk: { SourceActions.ask(path: path, model: model, state: state) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Hairline()
-                footer
+                if let message = state.message {
+                    HStack {
+                        Text(message).font(Typo.caption).textSelection(.enabled)
+                        Spacer()
+                        Button("Dismiss") { state.message = nil }
+                    }.padding(InspectorLayout.inset)
+                }
+                if session.diskVersions[absolutePath] != nil {
+                    HStack {
+                        Text("Changed on disk. Your edits are safe.").font(Typo.caption)
+                        Spacer()
+                        Button("Compare") { comparing = true }
+                    }.padding(InspectorLayout.inset)
+                }
+                if isEditable { footer } else if case let .failed(reason) = session.status(for: absolutePath) {
+                    Text(reason).font(Typo.caption).foregroundStyle(Palette.negative).padding(InspectorLayout.inset)
+                }
             }
         } else {
             LoadingView("Reading the file")
@@ -78,6 +132,7 @@ struct FileEditPane: View {
 
             if isDirty {
                 Button("Discard") { isConfirmingReload = true }
+                    .disabled(session.saving.contains(absolutePath))
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .help("Throw away your unsaved edits and read the file again")
@@ -86,25 +141,54 @@ struct FileEditPane: View {
             Button("Save", action: save)
                 .controlSize(.small)
                 .keyboardShortcut("s", modifiers: .command)
-                .disabled(!isDirty)
+                .disabled(!isDirty || session.saving.contains(absolutePath))
         }
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
         .background(Palette.surfaceSunken)
-        .confirmationDialog(
-            "Discard your edits to \(filename)?",
-            isPresented: $isConfirmingReload,
-            titleVisibility: .visible
-        ) {
-            Button("Discard and reload", role: .destructive) {
-                Task { await session.reload(path: absolutePath) }
+
+    }
+
+    private var comparison: some View {
+        VStack(spacing: Metrics.spacing) {
+            Text("\(filename) changed on disk").font(Typo.bodyEmphasis)
+            HSplitView {
+                VStack {
+                    Text("Your draft")
+                    SourceEditor(text: session.binding(for: absolutePath),
+                                 language: state.languageOverride ?? Language.detect(path: path), colorScheme: colorScheme)
+                }
+                VStack {
+                    Text("Current file on disk")
+                    SourceEditor(text: .constant(session.diskVersions[absolutePath]?.text ?? ""),
+                                 language: state.languageOverride ?? Language.detect(path: path), colorScheme: colorScheme,
+                                 isEditable: false)
+                }
             }
-            // Escape keeps the edits. See the archive confirmation in `RootView` for why no
-            // cancel button in this app carries `.keyboardShortcut(.defaultAction)`.
-            Button("Keep editing", role: .cancel) {}
-        } message: {
-            Text("The file on disk replaces what you typed. There is no undo for this.")
-        }
+            HStack {
+                Button("Keep editing") { comparing = false }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Use disk version") {
+                    comparing = false
+                    isConfirmingReload = true
+                }
+                Button("Save my version over disk") {
+                    Task {
+                        await session.keepDraftOverDisk(path: absolutePath)
+                        if case .saved = session.status(for: absolutePath) {
+                            comparing = false
+                            model.forgetHeldDiff(for: path)
+                            await model.refreshChanges()
+                            onSaved()
+                        }
+                    }
+                }
+                .disabled(session.diskVersions[absolutePath] == nil || session.saving.contains(absolutePath))
+            }
+            if case let .failed(reason) = session.status(for: absolutePath) {
+                Text(reason).foregroundStyle(Palette.negative).font(Typo.caption)
+            }
+        }.padding(Metrics.inset).frame(width: 950, height: 580)
     }
 
     /// A save changes the worktree, so the file list's counts and the diff behind this pane are

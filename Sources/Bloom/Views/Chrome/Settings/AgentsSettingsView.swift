@@ -18,7 +18,7 @@ struct AgentsSettingsView: View {
     @State private var isLoading = true
     @State private var isRefreshing = false
     @State private var saveFailure: String?
-    @State private var loginFailure: String?
+    @State private var loginRequest: AgentSignInSheet.Request?
     @State private var pathDraft = ""
     /// Which agent `pathDraft` belongs to. `selection` has already moved on by the time the
     /// change handler runs, so committing against it would file one agent's path under another.
@@ -29,6 +29,7 @@ struct AgentsSettingsView: View {
 
     var body: some View {
         Form {
+            ProviderIdleSettingsSection()
             Section {
                 // Plain labels. A segmented control paints its own text colour and takes either a
                 // title or an image per segment, so a coloured state dot cannot ride along inside
@@ -51,14 +52,6 @@ struct AgentsSettingsView: View {
                 Section {
                     ErrorBanner(title: "Could not save", message: saveFailure) {
                         self.saveFailure = nil
-                    }
-                }
-            }
-
-            if let loginFailure {
-                Section {
-                    ErrorBanner(title: "Could not start sign-in", message: loginFailure) {
-                        self.loginFailure = nil
                     }
                 }
             }
@@ -96,6 +89,11 @@ struct AgentsSettingsView: View {
         }
         .settingsForm()
         .task { await bootstrap() }
+        .sheet(item: $loginRequest, onDismiss: { Task { await refresh() } }) { request in
+            AgentSignInSheet(request: request) {
+                Task { await refresh() }
+            }
+        }
         .onDisappear { commitPathDraft() }
         .onChange(of: selection) { _, kind in
             commitPathDraft()
@@ -146,7 +144,7 @@ struct AgentsSettingsView: View {
 
             if status.connection != .notInstalled {
                 Button(status.connection == .connected ? "Sign in with another account…" : "Sign in…", action: runLogin)
-                    .help("Opens Terminal to sign in to \(selection.label).")
+                    .help("Sign in to \(selection.label) in Bloom.")
             }
         } header: {
             Text(selection.label)
@@ -292,14 +290,13 @@ struct AgentsSettingsView: View {
 
     // MARK: - Actions
 
-    /// Detection may have found an override or an installation the external terminal cannot find
-    /// on PATH. Run that exact binary, with the directory and arguments kept separate throughout.
+    /// Capture the detected binary and agent together so a settings change cannot redirect a login.
     private func runLogin() {
         guard let executable = status?.executablePath else { return }
-        loginFailure = Reveal.inTerminal(
-            directory: AgentScratchDirectory.current(),
+        loginRequest = AgentSignInSheet.Request(
+            kind: selection,
             executable: executable,
-            arguments: selection.loginArguments
+            isSwitchingAccount: status?.connection == .connected
         )
     }
 
@@ -373,6 +370,7 @@ struct AgentsSettingsView: View {
             if let store = app.store {
                 do {
                     try await store.setSetting(AgentCatalog.executablePathSettingKey(kind), value)
+                    if kind == .grok { ComposerModelCatalog.shared.refresh() }
                     saveFailure = nil
                 } catch {
                     saveFailure = "The executable path for \(kind.label) could not be stored."

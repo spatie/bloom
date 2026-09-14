@@ -59,6 +59,23 @@ struct AttachmentCard: View {
                     .frame(maxWidth: .infinity, alignment: isImage ? .center : .leading)
                     .padding(Metrics.inset)
 
+                if let comment = attachment.imageComment {
+                    Hairline()
+                    HStack(alignment: .firstTextBaseline, spacing: Metrics.spacing) {
+                        Image(systemName: "text.bubble")
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                        Text(comment.body)
+                            .font(Typo.body)
+                            .foregroundStyle(Palette.textPrimary)
+                            .lineLimit(8)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(Metrics.inset)
+                    .background(Palette.reviewBand)
+                }
+
                 // A picture answers the question the hover asked, so a path and a byte count
                 // under it are furniture. Everything else leaves "which file is this" open,
                 // and for those the path is the useful half.

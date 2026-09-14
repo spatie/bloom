@@ -22,15 +22,8 @@ import Foundation
 /// strength of what the CLI said. Both captures are kept as fixtures, and
 /// `Tests/fixtures/codex-model-list-astra.json` is the newer one.
 ///
-/// **What is on the wire and deliberately not read here.** Every model in that capture also
-/// carries `serviceTiers` and `additionalSpeedTiers`: a `priority` tier the CLI calls "Fast",
-/// worth 2x speed on `gpt-6-astra` and 1.5x on the `gpt-5.6` family, for more of the account's
-/// usage allowance. `turn/start` takes it as `serviceTier` and `serviceTierForTurn`, so it is a
-/// real control rather than an unreachable field, and Bloom sends neither, so every Codex turn
-/// runs at standard speed. It is left out on purpose and not for want of a place to put it: it
-/// spends the user's allowance faster, and Bloom's own "Fast mode" switch is already a different
-/// thing on the other backend (Claude Code's `--thinking disabled`, see `AgentRunner`), so a
-/// second control by that name needs a decision about both rather than a field being decoded.
+/// Service tiers also come from the catalogue. `CodexSpeed` combines them with the merged
+/// configuration so the composer reflects an inherited fast default before a session exists.
 public struct CodexModel: Sendable, Hashable, Identifiable {
     public let id: String
     public let displayName: String
@@ -43,6 +36,8 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
     public let defaultEffort: String
     public let inputModalities: [String]
     public let supportsPersonality: Bool
+    public let fastServiceTier: String?
+    public let defaultServiceTier: String?
 
     public init(
         id: String,
@@ -53,7 +48,9 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
         supportedEfforts: [CodexReasoningEffort] = [],
         defaultEffort: String = "",
         inputModalities: [String] = [],
-        supportsPersonality: Bool = false
+        supportsPersonality: Bool = false,
+        fastServiceTier: String? = nil,
+        defaultServiceTier: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -64,18 +61,28 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
         self.defaultEffort = defaultEffort
         self.inputModalities = inputModalities
         self.supportsPersonality = supportsPersonality
+        self.fastServiceTier = fastServiceTier
+        self.defaultServiceTier = defaultServiceTier
     }
 
     public var acceptsImages: Bool { inputModalities.contains("image") }
 
     public var effortIDs: [String] { supportedEfforts.map(\.id) }
 
-    /// The effort to use when a session has one that this model does not take. Falls back to the
-    /// model's own default, which is why the default is carried rather than assumed to be "high".
+    public var agentModel: AgentModel {
+        AgentModel(
+            id: id,
+            displayName: displayName,
+            isDefault: isDefault,
+            hidden: hidden,
+            supportedEfforts: supportedEfforts.map { AgentModelEffort(id: $0.id, label: $0.label) },
+            defaultEffort: defaultEffort
+        )
+    }
+
+    /// Falls back to the model's own default when a session requests an unsupported effort.
     public func resolvedEffort(preferring wanted: String) -> String {
-        if effortIDs.contains(wanted) { return wanted }
-        if !defaultEffort.isEmpty { return defaultEffort }
-        return effortIDs.first ?? ""
+        agentModel.resolvedEffort(preferring: wanted)
     }
 
     static func decode(_ json: JSONValue) -> CodexModel? {
@@ -91,7 +98,12 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
             supportedEfforts: efforts,
             defaultEffort: json["defaultReasoningEffort"]?.stringValue ?? "",
             inputModalities: (json["inputModalities"] ?? .null).stringArray,
-            supportsPersonality: json["supportsPersonality"]?.boolValue ?? false
+            supportsPersonality: json["supportsPersonality"]?.boolValue ?? false,
+            fastServiceTier: (json["serviceTiers"]?.arrayValue ?? []).first {
+                ["fast", "priority"].contains($0["id"]?.stringValue ?? "")
+            }?["id"]?.stringValue
+                ?? ((json["additionalSpeedTiers"] ?? .null).stringArray.contains("fast") ? "priority" : nil),
+            defaultServiceTier: json["defaultServiceTier"]?.stringValue
         )
     }
 
@@ -147,25 +159,17 @@ public actor CodexModelCatalog {
     /// How long a fetched list is trusted before it is fetched again. Long enough that opening the
     /// picker repeatedly costs nothing, short enough that a model added to the account shows up in
     /// the same sitting.
-    public static let freshness: TimeInterval = 15 * 60
+    public static let freshness = AgentModelCache<CodexModel>.freshness
 
-    private let fetch: @Sendable () async throws -> [CodexModel]
-    private let now: @Sendable () -> Date
+    private let cache: AgentModelCache<CodexModel>
 
-    private var cached: [CodexModel] = []
-    private var fetchedAt: Date?
-    private var inFlight: Task<[CodexModel], Error>?
-
-    /// How many real fetches have happened, as opposed to cache hits and joins. Exists so the
-    /// sharing can be asserted on rather than assumed.
-    public private(set) var fetchCount = 0
+    public var fetchCount: Int { get async { await cache.fetchCount } }
 
     public init(
         fetch: @escaping @Sendable () async throws -> [CodexModel],
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.fetch = fetch
-        self.now = now
+        cache = AgentModelCache(fetch: { Self.sorted(try await fetch()) }, now: now)
     }
 
     /// The catalog the app uses: one short-lived `codex app-server` connection per fetch.
@@ -189,35 +193,12 @@ public actor CodexModelCatalog {
         })
     }
 
-    /// Everything, hidden models included, sorted with the account default first.
+    /// Everything, hidden models included, in the backend's capability order.
     public func models() async throws -> [CodexModel] {
-        if let fetchedAt, now().timeIntervalSince(fetchedAt) < Self.freshness, !cached.isEmpty {
-            return cached
-        }
-
-        let task: Task<[CodexModel], Error>
-        if let running = inFlight {
-            task = running
-        } else {
-            fetchCount += 1
-            let fetch = self.fetch
-            task = Task { try await fetch() }
-            inFlight = task
-        }
-
-        let models = try await task.value
-        // Only file the result if this is still the fetch the catalog is waiting for: an
-        // `invalidate()` during the await means somebody asked for a fresh look, and caching an
-        // answer gathered before they asked would defeat exactly that.
-        if inFlight == task {
-            inFlight = nil
-            cached = Self.sorted(models)
-            fetchedAt = now()
-        }
-        return Self.sorted(models)
+        try await cache.models()
     }
 
-    /// What a picker shows: the visible ones, default first.
+    /// What a picker shows: the visible models, preserving their capability order.
     public func pickerModels() async throws -> [CodexModel] {
         try await models().filter { !$0.hidden }
     }
@@ -230,15 +211,13 @@ public actor CodexModelCatalog {
     }
 
     /// Drops the cache so a Refresh button does real work.
-    public func invalidate() {
-        cached = []
-        fetchedAt = nil
-        inFlight = nil
+    public func invalidate() async {
+        await cache.invalidate()
     }
 
     /// Whatever was last fetched, without fetching. For a picker that must draw now and would
     /// rather show a stale list than an empty one.
-    public var lastKnown: [CodexModel] { cached }
+    public var lastKnown: [CodexModel] { get async { await cache.lastKnown } }
 
     /// Most capable first. See `CodexModelRank`, which holds the rules and the reason the
     /// account's default no longer jumps the queue.

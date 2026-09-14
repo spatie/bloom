@@ -32,7 +32,7 @@ struct WelcomeView: View {
     @State private var expanded: SetupTool?
     @State private var copied: SetupTool?
     /// The login running inside this window, and which row asked for it.
-    @State private var login: (tool: SetupTool, session: GitHubLoginSession)?
+    @State private var login: (tool: SetupTool, session: LoginTerminalSession)?
 
     init(
         inspection: SetupInspection,
@@ -72,6 +72,8 @@ struct WelcomeView: View {
                 )
             case .checks:
                 checksStep
+            case .keepAwake:
+                keepAwakeStep
             case .commandLine:
                 commandLineStep
             case .promptSubmission:
@@ -88,6 +90,10 @@ struct WelcomeView: View {
         // asked would be asking on every redraw of a screen with four probes settling on it.
         .onChange(of: registration.isOffered, initial: true) { _, isOffered in
             flow.offerCommandLine(isOffered)
+        }
+        // A Mac with no lid is never asked, and neither is one whose helper is already approved.
+        .onAppear {
+            flow.offerKeepAwake(Machine.isPortable && SleepSwitch.shared.standing != .ready)
         }
         .onAppear {
             inspection.revealsInstantly = reduceMotion
@@ -131,6 +137,18 @@ struct WelcomeView: View {
     /// this screen, which nothing produces: `AppModel.bridge` is cleared during the quit sequence
     /// and nowhere else. There is no consolation copy for it, because the footer is still drawn
     /// and its button still moves the window on.
+    /// The lid step, in the same three bands as the rest.
+    private var keepAwakeStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            WelcomeKeepAwake()
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
+    }
+
     private var commandLineStep: some View {
         VStack(spacing: 0) {
             plinth
@@ -527,7 +545,7 @@ struct WelcomeView: View {
     /// The login, running here. Nothing reads what scrolls past: the CLI is talking to the person
     /// in front of it, and the one-time code on screen is its output, never Bloom's to store, log
     /// or copy. See `GitHubSignInSheet`, which is where this pattern is argued out at length.
-    private func loginTerminal(_ check: SetupCheck, session: GitHubLoginSession) -> some View {
+    private func loginTerminal(_ check: SetupCheck, session: LoginTerminalSession) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: Metrics.spacingWide) {
                 // Present tense only while it is true. This used to say "Running gh auth login"
@@ -560,7 +578,7 @@ struct WelcomeView: View {
 
             Hairline()
 
-            GitHubLoginTerminal(session: session)
+            LoginTerminal(session: session)
                 .frame(height: 220)
         }
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
@@ -578,7 +596,7 @@ struct WelcomeView: View {
         // argument that could hold a space.
         let parts = (fix.command ?? "").split(separator: " ").map(String.init)
         guard let executable = parts.first else { return }
-        guard let session = GitHubLoginSession(
+        guard let session = LoginTerminalSession(
             executable: executable,
             arguments: Array(parts.dropFirst()),
             // Not the home directory. This is the first launch, before Bloom has been shown a
@@ -632,7 +650,7 @@ struct WelcomeView: View {
                 //
                 // It stops a running login on the way out rather than leaving it behind. Walking
                 // off this step would otherwise leave a `gh auth login` waiting on a pty with
-                // nothing on screen, which is the orphan `GitHubLoginSession.stop` exists to
+                // nothing on screen, which is the orphan `LoginTerminalSession.stop` exists to
                 // prevent, and it would be waiting for an answer nobody could give it.
                 Button(title, systemImage: "chevron.left") { move { stopLogin(); flow.goBack() } }
                     .buttonStyle(.plain)

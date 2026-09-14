@@ -915,7 +915,7 @@ enum Snapshot {
         // scene here whose whole point is what a CLI actually answered, and a picture of invented
         // percentages would be a picture of nothing. A machine with neither CLI installed renders
         // the panel's own empty state, which is also worth a photograph.
-        let board = QuotaBoard.make(from: await AgentQuotaSources.readAll())
+        let report = await AgentQuotaSources.report()
 
         let scenes: [(String, AnyView, CGSize)] = [
             ("workspace-setup", AnyView(WorkspaceSetupOptionGallery()), CGSize(width: 760, height: 200)),
@@ -986,16 +986,12 @@ enum Snapshot {
             // same directory, so whichever ran second replaced a real photograph with a yellow
             // bar, and they disagreed about the width while doing it (800 here, 820 there).
 
-            // On the menu's own ground rather than the window's, because every colour in this
-            // panel is an AppKit semantic one chosen to sit on a menu. See `QuotaPanel`.
+            // The usage panel's dashboard on its own ground, drawn from what the two CLIs answered.
+            // See `UsagePanelView`.
             (
                 "limits",
-                AnyView(
-                    QuotaPanel(board: board, freshness: QuotaFreshness.of(board))
-                        .padding(.vertical, 8)
-                        .background(Color(nsColor: .windowBackgroundColor))
-                ),
-                CGSize(width: QuotaPanel.width + 43, height: 300)
+                AnyView(UsagePanelSnapshot(quotas: report.quotas, accounts: report.accounts, now: Date())),
+                CGSize(width: UsageMenuBlock.width + 28, height: 900)
             ),
             // And the states a real ask cannot produce on the machine this runs on: a window
             // nobody measured, a provider absent, extra usage switched on, a window past its wall.
@@ -1008,7 +1004,7 @@ enum Snapshot {
                     LimitsStateGallery()
                         .background(Color(nsColor: .windowBackgroundColor))
                 ),
-                CGSize(width: QuotaPanel.width + 43, height: 1500)
+                CGSize(width: UsageMenuBlock.width + 28, height: 2400)
             ),
         ]
 
@@ -1273,12 +1269,12 @@ private struct LimitsStateGallery: View {
         )
     }
 
-    private static let scenes: [(String, [AgentQuota], QuotaFreshness)] = [
+    private static let scenes: [(String, [AgentQuota])] = [
         ("Quiet", [
             quota(.claudeCode, .named("five_hour"), 0.12, after: 15_600),
             quota(.claudeCode, .named("seven_day"), 0.09, after: week * 0.85),
             quota(.codex, .lasting(week, key: "primary"), 0.03, after: week * 0.7),
-        ], .current),
+        ]),
         ("The ramp, and the owner's own figures", [
             quota(.claudeCode, .named("five_hour"), 0.04, after: 3900),
             quota(.claudeCode, .named("seven_day"), 0.60, after: week * 0.535),
@@ -1289,16 +1285,16 @@ private struct LimitsStateGallery: View {
                 after: week * 0.535
             ),
             quota(.codex, .lasting(week, key: "primary"), 0, after: week * 0.9),
-        ], .current),
+        ]),
         ("Nobody measured the session window", [
             quota(.claudeCode, .named("five_hour"), nil, after: 9600),
             quota(.claudeCode, .named("seven_day"), 0.44, after: week * 0.6),
             quota(.codex, .lasting(week, key: "primary"), 0, after: week * 0.9),
-        ], .current),
+        ]),
         ("Codex absent, and one window spent", [
             quota(.claudeCode, .named("five_hour"), 1, after: 2900),
             quota(.claudeCode, .named("seven_day"), 0.88, after: week * 0.3),
-        ], .stale(11_000)),
+        ]),
         ("Model scoped rows and extra usage, both present", [
             quota(.claudeCode, .named("five_hour"), 0.22, after: 7900),
             quota(.claudeCode, .named("seven_day"), 0.66, after: week * 0.6),
@@ -1316,8 +1312,8 @@ private struct LimitsStateGallery: View {
                 observedAt: now
             ),
             quota(.codex, .lasting(week, key: "primary"), 0.58, after: week * 0.45),
-        ], .current),
-        ("Nothing reported at all", [], .current),
+        ]),
+        ("Nothing reported at all", []),
     ]
 
     var body: some View {
@@ -1326,16 +1322,31 @@ private struct LimitsStateGallery: View {
                 Text(scene.0)
                     .font(Font(NSFont.menuFont(ofSize: 0)).weight(.semibold))
                     .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                    .padding(.leading, 29)
+                    .padding(.leading, 22)
                     .padding(.top, 20)
-                    .padding(.bottom, 6)
-                QuotaPanel(
-                    board: QuotaBoard.make(from: scene.1, at: Self.now),
-                    freshness: scene.2,
-                    now: Self.now
-                )
+                UsagePanelSnapshot(quotas: scene.1, now: Self.now)
             }
         }
         .padding(.bottom, 20)
+    }
+}
+
+/// The limits block drawn from quotas handed to it, which is what hangs in the middle of the menu.
+/// The menu's own model supplies the layout and the display settings, as it does on screen.
+private struct UsagePanelSnapshot: View {
+    let quotas: [AgentQuota]
+    var accounts: [AgentAccount] = []
+    let now: Date
+
+    var body: some View {
+        let byProvider = Dictionary(accounts.map { ($0.provider, $0) }, uniquingKeysWith: { first, _ in first })
+        UsageMenuBlock(
+            model: UsageMenuModel.shared,
+            metrics: UsageCatalogue.metrics(quotas: quotas, accounts: byProvider, at: now),
+            accounts: byProvider,
+            now: now,
+            canReorder: false
+        )
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

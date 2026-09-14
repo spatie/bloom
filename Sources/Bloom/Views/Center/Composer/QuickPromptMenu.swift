@@ -22,12 +22,20 @@ import BloomCore
 /// Number keys are not available and no shortcut hint pretends otherwise. The composer's text view
 /// never resigns first responder while a menu is open, which `SlashCommandMenu` documents; this
 /// panel takes the keyboard for its own field, so what is left is the arrows, Return and Escape.
+///
+/// **A project's own prompts come under the owner's**, beneath a Project heading, when the
+/// repository's settings file offers any. With none the panel is drawn exactly as it was, heading
+/// and all absent. The ranking, the empty states and what a project row does when chosen are all
+/// `QuickPromptPanelMatches` and `QuickPromptPanelRow` in the core.
 struct QuickPromptMenu: View {
     var catalog: QuickPromptCatalog
+    /// What the workspace's repository offers, in file order. Empty wherever there is no
+    /// workspace to read a settings file for.
+    var projectPrompts: [ProjectQuickPrompt] = []
     @Binding var draft: QuickPromptFormDraft?
-    /// What a chosen prompt does. The panel closes itself first, so the caret is put back in the
+    /// What a chosen row does. The panel closes itself first, so the caret is put back in the
     /// composer rather than into a field that is about to go away.
-    var onPick: @MainActor (QuickPrompt) -> Void
+    var onPick: @MainActor (QuickPromptPanelRow) -> Void
     var onClose: @MainActor () -> Void
 
     @Environment(AppModel.self) private var app
@@ -36,8 +44,9 @@ struct QuickPromptMenu: View {
     /// The highlighted row, held as the row itself and never as an index into the list. A ranked
     /// list reorders under every keystroke, so an index highlights whatever has since moved into
     /// that slot and Return inserts something other than what is drawn. `WorkspaceSourcePicker`
-    /// carries the same note over the same failure.
-    @State private var selected: QuickPrompt?
+    /// carries the same note over the same failure. Compared by `QuickPromptPanelRow.id`, which is
+    /// what lets the highlight cross from the owner's section into the project's.
+    @State private var selected: QuickPromptPanelRow?
     /// Hover for the row that writes a new prompt, which is not part of the ranked list and so has
     /// no `QuickPromptRow` to keep it.
     @State private var isNewHovered = false
@@ -71,8 +80,8 @@ struct QuickPromptMenu: View {
     /// About eight rows, which is the cap a completion menu keeps in this app.
     private static let listHeight: CGFloat = 260
 
-    private var matches: QuickPromptMatches {
-        QuickPromptMatches.ranking(catalog.prompts, query: query)
+    private var matches: QuickPromptPanelMatches {
+        QuickPromptPanelMatches.ranking(personal: catalog.prompts, project: projectPrompts, query: query)
     }
 
     var body: some View {
@@ -109,8 +118,8 @@ struct QuickPromptMenu: View {
             searchRow
             Hairline()
 
-            if matches.isEmpty {
-                empty
+            if let notice = matches.notice(isLoaded: catalog.isLoaded) {
+                empty(notice)
             } else {
                 rows(matches)
             }
@@ -122,9 +131,16 @@ struct QuickPromptMenu: View {
             // A fresh query every time it opens. The panel is a way of finding one thing, not a
             // filter somebody set and left.
             query = ""
-            selected = QuickPromptMatches.ranking(catalog.prompts, query: "").prompts.first
+            selected = QuickPromptPanelMatches.ranking(
+                personal: catalog.prompts, project: projectPrompts, query: ""
+            ).rows.first
         }
         .onChange(of: catalog.prompts) { _, _ in
+            selected = matches.settled(after: selected)
+        }
+        // The settings file is read again while the panel is up (it is asked to be when the panel
+        // opens), so the highlight has to follow that list as well as the owner's.
+        .onChange(of: projectPrompts) { _, _ in
             selected = matches.settled(after: selected)
         }
     }
@@ -163,28 +179,26 @@ struct QuickPromptMenu: View {
     /// still scrolls instead of growing past the window. `LazyVStack` reports the height of what it
     /// has realised, which is why this is a plain `VStack`: the list is a handful of prompts
     /// somebody wrote by hand, and laziness here bought nothing and cost the measurement.
-    private func rows(_ matches: QuickPromptMatches) -> some View {
+    private func rows(_ matches: QuickPromptPanelMatches) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(matches.prompts) { prompt in
-                        QuickPromptRow(
-                            prompt: prompt,
-                            isSelected: prompt.id == selected?.id,
-                            onPick: { pick(prompt) },
-                            onHover: { selected = prompt },
-                            onEdit: { draft = QuickPromptFormDraft(editing: prompt) },
-                            onDelete: { deleting = prompt }
-                        )
-                        // Identity is the thing the row names, never its position. See `selected`.
-                        .id(prompt.id)
+                    ForEach(matches.personal) { prompt in
+                        row(.personal(prompt))
+                    }
+
+                    if matches.showsProjectHeading {
+                        projectHeading(below: !matches.personal.isEmpty)
+                        ForEach(matches.project) { prompt in
+                            row(.project(prompt))
+                        }
                     }
                 }
                 .padding(.horizontal, Self.listInset)
                 .padding(.vertical, Metrics.spacingSmall)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .frame(height: height(for: matches.prompts.count))
+            .frame(height: height(for: matches))
             .onChange(of: selected) { _, row in
                 guard let row else { return }
                 proxy.scrollTo(row.id)
@@ -192,16 +206,60 @@ struct QuickPromptMenu: View {
         }
     }
 
-    /// Two different nothings. A list nobody has written to yet is worth a sentence saying what one
-    /// of these is for, which is why it is not `MenuEmptyRow`: that draws a single quiet line, and
-    /// a person who has never seen this panel needs the second one.
+    private func row(_ row: QuickPromptPanelRow) -> some View {
+        QuickPromptRow(
+            row: row,
+            isSelected: row.id == selected?.id,
+            onPick: { pick(row) },
+            onHover: { selected = row },
+            onEdit: {
+                guard case .personal(let prompt) = row else { return }
+                draft = QuickPromptFormDraft(editing: prompt)
+            },
+            onDelete: {
+                guard case .personal(let prompt) = row else { return }
+                deleting = prompt
+            },
+            onCopy: {
+                guard case .project(let prompt) = row else { return }
+                copy(prompt)
+            }
+        )
+        // Identity is the thing the row names, never its position. See `selected`.
+        .id(row.id)
+    }
+
+    /// The line over the project's rows. Set the way the sidebar's section headers are, small and
+    /// a step quieter than the names under it, so it reads as a label on a group rather than as a
+    /// row that cannot be chosen. Indented to `rowInset` inside the list, which puts it in the same
+    /// column as the marks.
+    ///
+    /// Air above it only when there is a section above it to be held apart from: with the owner's
+    /// section empty it sits directly under the search field, where the list's own padding is
+    /// already enough.
+    private func projectHeading(below hasSectionAbove: Bool) -> some View {
+        Text("Project")
+            .font(Typo.captionEmphasis)
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.horizontal, Self.rowInset)
+            .padding(.top, hasSectionAbove ? Metrics.spacing : Metrics.spacingTight)
+            .padding(.bottom, Metrics.spacingTight)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Three different nothings. A list nobody has written to yet is worth a sentence saying what
+    /// one of these is for, which is why it is not `MenuEmptyRow`: that draws a single quiet line,
+    /// and a person who has never seen this panel needs the second one. Which of the three is
+    /// `QuickPromptPanelNotice`, because a project's prompts made one of them wrong to show.
     @ViewBuilder
-    private var empty: some View {
-        if !query.isEmpty {
+    private func empty(_ notice: QuickPromptPanelNotice) -> some View {
+        switch notice {
+        case .noMatches(let query):
             MenuEmptyRow(text: "Nothing matches \(query)", inset: Self.contentInset)
-        } else if !catalog.isLoaded {
+        case .loading:
             MenuEmptyRow(text: "Looking for quick prompts\u{2026}", inset: Self.contentInset)
-        } else {
+        case .nothingYet:
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text("Nothing here yet.")
                     .font(Typo.label)
@@ -256,14 +314,18 @@ struct QuickPromptMenu: View {
     /// Without the guess the first frame is one row tall, because `onGeometryChange` cannot report
     /// a height until after a layout has happened, and the panel visibly grew on opening. The guess
     /// only has to be close enough that nobody sees the correction.
-    private func height(for count: Int) -> CGFloat {
-        let measured = contentHeight > 0 ? contentHeight : Self.estimatedHeight(rows: count)
+    private func height(for matches: QuickPromptPanelMatches) -> CGFloat {
+        let measured = contentHeight > 0
+            ? contentHeight
+            : Self.estimatedHeight(rows: matches.rows.count, heading: matches.showsProjectHeading)
         return min(max(measured, Metrics.rowHeight), Self.listHeight)
     }
 
-    /// A two line row and the list's own padding, which is what a prompt with a name draws.
-    private static func estimatedHeight(rows: Int) -> CGFloat {
+    /// A two line row and the list's own padding, which is what a prompt with a name draws, and
+    /// about a caption's line for the Project heading when there is one.
+    private static func estimatedHeight(rows: Int, heading: Bool) -> CGFloat {
         CGFloat(rows) * (Metrics.rowHeight + Metrics.gutter) + Metrics.spacingWide
+            + (heading ? Metrics.rowHeight - Metrics.spacingSmall : 0)
     }
 
     private var newRowTitle: String {
@@ -290,9 +352,22 @@ struct QuickPromptMenu: View {
 
     // MARK: - Actions
 
-    private func pick(_ prompt: QuickPrompt) {
+    private func pick(_ row: QuickPromptPanelRow) {
         onClose()
-        onPick(prompt)
+        onPick(row)
+    }
+
+    /// Copy to My Quick Prompts: the project's words become a prompt of the owner's, which they
+    /// can then edit and let send. The copy is highlighted when it lands, for the reason a newly
+    /// written prompt is: it is the one somebody just asked for. It matches whatever the search
+    /// says, because it has the same name and words as the row it was copied from.
+    private func copy(_ prompt: ProjectQuickPrompt) {
+        let catalog = catalog
+        let store = app.store
+        Task {
+            let written = await catalog.add(prompt.personalFields, in: store)
+            if let written { selected = .personal(written) }
+        }
     }
 
     private func save(_ editing: QuickPrompt?, _ fields: QuickPrompt.Fields) {
@@ -306,7 +381,7 @@ struct QuickPromptMenu: View {
                 let written = await catalog.add(fields, in: store)
                 // The prompt somebody has just written is the one they were looking for, so the
                 // list comes back with it highlighted and Return away from being used.
-                if let written { selected = written }
+                if let written { selected = .personal(written) }
             }
         }
     }
@@ -319,8 +394,8 @@ struct QuickPromptMenu: View {
 
     // MARK: - Keys
 
-    /// The panel's whole keyboard. Where the highlight lands is `QuickPromptMatches`, in the core,
-    /// because it is a decision and a decision taken in a view is one nothing can test.
+    /// The panel's whole keyboard. Where the highlight lands is `QuickPromptPanelMatches`, in the
+    /// core, because it is a decision and a decision taken in a view is one nothing can test.
     private func handle(key: ComposerKey) -> Bool {
         switch key {
         case .up:
@@ -337,7 +412,9 @@ struct QuickPromptMenu: View {
                 draft = QuickPromptFormDraft(suggestedName: query)
                 return true
             }
-            pick(selected)
+            // The row as the list holds it now rather than as it was when it was highlighted, so a
+            // settings file re-read in between cannot put yesterday's words in the box.
+            pick(matches.rows.first { $0.id == selected.id } ?? selected)
             return true
         case .escape:
             onClose()

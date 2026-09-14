@@ -48,8 +48,10 @@ public struct PullRequestStatus: Sendable, Hashable {
 
     /// What to do about this state, as far as one button can express it.
     public enum Remedy: Sendable, Hashable {
-        /// Land it. What every state GitHub reports on its own offers.
+        /// Land it once the pull request is ready.
         case merge
+        /// A draft must be ready for review before GitHub allows a merge.
+        case markReadyForReview
         /// Get the worktree onto the remote first. Committing is part of it or it is not,
         /// depending on whether anything is uncommitted, and the label follows.
         case commitAndPush
@@ -234,7 +236,8 @@ public extension PullRequest {
                 text: "Draft",
                 detail: checksDetail,
                 canMerge: false,
-                blockedReason: "This pull request is still a draft."
+                blockedReason: "This pull request is still a draft.",
+                remedy: .markReadyForReview
             )
         }
 

@@ -25,7 +25,8 @@ enum ReviewWrappingProbe {
                     let lines = view.string.components(separatedBy: "\n")
                     let expected = Fixture.texts.map { $0 ?? "" }.joined(separator: "\n")
                     let opposite = Fixture.opposite.map { $0 ?? "" }.joined(separator: "\n")
-                    check(view.string == expected || view.string == opposite, "wrapping changed the source text")
+                    check(view.string.utf8.elementsEqual(expected.utf8) || view.string.utf8.elementsEqual(opposite.utf8),
+                          "wrapping changed the source text")
                     guard let manager = view.layoutManager, let container = view.textContainer else {
                         check(false, "wrapped code has no text layout")
                         continue
@@ -106,10 +107,13 @@ enum ReviewWrappingProbe {
             "let unicode = \"café 👩🏽‍💻 漢字\"",
             "\tlet values = [" + String(repeating: "12345, ", count: 16) + "]",
             "return result",
+            // Cache the longer encoding first to catch attributes extending past the shorter one.
+            "// cafe\u{301}",
+            "// caf\u{e9}",
         ]
         static let opposite: [String?] = [
             "let message = input", "// The other half contains a line here.",
-            String(repeating: "// another longer comment ", count: 12), nil, "return newResult",
+            String(repeating: "// another longer comment ", count: 12), nil, "return newResult", nil, nil,
         ]
 
         var body: some View {

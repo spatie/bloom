@@ -306,8 +306,9 @@ public enum RepositoryStarter {
         // Asked only of a folder that is there. `Git.isRepository` answers false for a missing
         // path anyway, because the process cannot be launched in it, so this is a subprocess
         // saved rather than an answer changed.
-        var isRepository = false
-        if exists, isDirectory.boolValue { isRepository = await Git.isRepository(normalized) }
+        var answer = GitRepositoryAnswer.notARepository
+        if exists, isDirectory.boolValue { answer = await Git.repositoryAnswer(normalized) }
+        let isRepository = answer == .repository
 
         // Asked only of a repository, because it is the only branch of the verdict that reads it
         // and because it is a subprocess. Nil from a repository that will not answer falls back
@@ -328,7 +329,8 @@ public enum RepositoryStarter {
             isAbsolute: expanded.hasPrefix("/"),
             homeDirectory: home,
             workspacesRoot: workspacesRoot,
-            childRepositories: childRepositories(of: normalized)
+            childRepositories: childRepositories(of: normalized),
+            gitProblem: answer.problem
         )
     }
 

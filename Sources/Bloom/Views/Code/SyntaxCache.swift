@@ -2,34 +2,6 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-private final class SyntaxKey: NSObject {
-    let line: String
-    let language: Language
-    let carry: LexState
-    private let cachedHash: Int
-
-    init(line: String, language: Language, carry: LexState) {
-        self.line = line
-        self.language = language
-        self.carry = carry
-        var hasher = Hasher()
-        hasher.combine(line)
-        hasher.combine(language)
-        hasher.combine(carry)
-        self.cachedHash = hasher.finalize()
-    }
-
-    override var hash: Int { cachedHash }
-
-    override func isEqual(_ object: Any?) -> Bool {
-        guard let other = object as? SyntaxKey else { return false }
-        return cachedHash == other.cachedHash
-            && line == other.line
-            && language == other.language
-            && carry == other.carry
-    }
-}
-
 private final class SyntaxBox {
     let value: AttributedString
 
@@ -47,24 +19,24 @@ enum SyntaxCache {
     private static let limit = 4_000
 
     // NSCache is documented as thread safe, which is the whole reason it is used here.
-    nonisolated(unsafe) private static let storage: NSCache<SyntaxKey, SyntaxBox> = {
-        let cache = NSCache<SyntaxKey, SyntaxBox>()
+    nonisolated(unsafe) private static let storage: NSCache<SyntaxCacheKey, SyntaxBox> = {
+        let cache = NSCache<SyntaxCacheKey, SyntaxBox>()
         cache.countLimit = limit
         return cache
     }()
 
-    static func attributed(line: String, language: Language, carry: LexState) -> AttributedString {
-        let key = SyntaxKey(line: line, language: language, carry: carry)
+    static func attributed(line: String, language: Language, carry: LexState, scheme: CodeScheme, colours: [TokenKind: Color], schemeHash: Int? = nil) -> AttributedString {
+        let key = SyntaxCacheKey(line: line, language: language, carry: carry, scheme: scheme, schemeHash: schemeHash)
         if let hit = storage.object(forKey: key) { return hit.value }
 
-        let value = build(line: line, language: language, carry: carry)
+        let value = build(line: line, language: language, carry: carry, colours: colours)
         storage.setObject(SyntaxBox(value), forKey: key)
         return value
     }
 
-    private static func build(line: String, language: Language, carry: LexState) -> AttributedString {
+    private static func build(line: String, language: Language, carry: LexState, colours: [TokenKind: Color]) -> AttributedString {
         var value = AttributedString(line)
-        value.foregroundColor = Palette.textPrimary
+        value.foregroundColor = colours[.plain]
         guard !line.isEmpty else { return value }
 
         var state = carry
@@ -74,7 +46,7 @@ enum SyntaxCache {
             guard let range = CodeText.attributedRange(
                 forUTF16: token.range, of: line, in: value
             ) else { continue }
-            value[range].foregroundColor = CodeText.color(for: token.kind)
+            value[range].foregroundColor = colours[token.kind]
         }
         return value
     }

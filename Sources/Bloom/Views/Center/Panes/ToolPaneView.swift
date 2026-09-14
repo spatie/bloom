@@ -35,6 +35,7 @@ struct ToolPaneView: View {
 
     /// Read for the setup strip's slide. See the `.animation` in `body`.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         switch tab.kind {
@@ -53,8 +54,11 @@ struct ToolPaneView: View {
                             repo: model.repo,
                             port: model.port,
                             directory: tab.directory,
+                            runScript: runScript,
                             onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
-                            splitColumn: splitColumn
+                            splitColumn: splitColumn,
+                            terminalLabel: tab.title,
+                            onAddToChat: terminalHandoff
                         )
                         .id(tab.id)
                     } else {
@@ -73,7 +77,7 @@ struct ToolPaneView: View {
             .task(id: tab.id) { await prepareTerminal() }
 
         case .browser:
-            BrowserTabView(model: model, tab: tab, paneMenu: paneMenu)
+            BrowserTabView(model: model, tab: tab, paneMenu: paneMenu, siblings: siblings)
                 .id(tab.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -96,6 +100,14 @@ struct ToolPaneView: View {
         }
     }
 
+    /// The run script this tab was opened for, as the settings file says it now. Nil for an
+    /// ordinary terminal, and for a tab whose script has been taken out of the file since, which
+    /// goes back to being an ordinary terminal rather than offering a command nobody can see.
+    private var runScript: RunScript? {
+        guard let id = tab.runScriptID else { return nil }
+        return model.settings.runScripts.first { $0.id == id }
+    }
+
     /// Whether this worktree is finished being built, which is the one thing a shell standing in
     /// it cannot tell you itself. The rule and both sentences are `WorktreeReadiness`, in the
     /// core; the two facts it reads are the live run and the row's own verdict.
@@ -104,6 +116,18 @@ struct ToolPaneView: View {
             isRunningSetup: model.isRunningSetup,
             setupState: model.workspace.setupState
         )
+    }
+
+    private var terminalHandoff: (@MainActor (TerminalExcerpt) -> Void)? {
+        guard let sessionID = model.activeSession?.id else { return nil }
+        let destination = model
+        return { excerpt in
+            Task { @MainActor in
+                if let failure = await TerminalExcerptHandoff.attach(excerpt, to: destination, sessionID: sessionID) {
+                    app.notice = BloomNotice(message: failure)
+                }
+            }
+        }
     }
 
     /// The store a shell's environment is built from, and the workspace's port, which is the one

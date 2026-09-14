@@ -40,9 +40,11 @@ public struct PaneOpenTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: "pane_open",
         description: """
-            Open a pane in a new tab of the workspace you are in: a chat, a terminal, or a \
-            browser. Use it when the person asks for one, and when what you are about to explain \
-            would be easier for them with the thing already open in front of them.
+            Create a NEW TAB in the top tab strip, containing a chat, terminal or browser.
+            A tab is a switchable arrangement; a pane is a visible region inside that arrangement.
+            Use pane_open when the person asks for a "new tab" or "separate tab". For "add a pane", \
+            "split pane in this chat", or something "next to this chat", use pane_split instead: \
+            it keeps this conversation visible and adds a pane on its right by default.
 
             'kind' is one of \(PaneOrder.kindList). 'url' is for a browser and is optional. \
             'title' is what the tab is called and is optional: pass one when you know what the \

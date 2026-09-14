@@ -116,6 +116,9 @@ public actor CodexClient {
     private var nextRequestID = 1
     private var pending: [CodexRequestID: CheckedContinuation<JSONValue, Error>] = [:]
     private var handshakeCompleted = false
+    private var collaborationModeSupported: Bool?
+    public var planningIsSupported: Bool? { collaborationModeSupported }
+    public func resetPlanningSupport() { collaborationModeSupported = nil }
     private var closedReason: String?
 
     /// stderr, kept short. It only ever surfaces when the process dies without answering, which is
@@ -193,9 +196,9 @@ public actor CodexClient {
                     "name": .string(configuration.clientName),
                     "version": .string(configuration.clientVersion),
                 ]),
-                // Experimental methods are not opted into: everything Bloom needs is in the stable
-                // surface, and opting in would mean fields that can change without notice.
-                "capabilities": .object(["experimentalApi": .bool(false)]),
+                // codex-cli 0.153.4 exposes collaborationMode only in its experimental schema.
+                // Opting in is required for the independent Plan/Build control to reach the wire.
+                "capabilities": .object(["experimentalApi": .bool(true)]),
             ])
         )
         notify("initialized", params: nil)
@@ -320,7 +323,8 @@ public actor CodexClient {
         model: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
         sandbox: CodexSandboxMode? = nil,
-        approvalsReviewer: CodexApprovalsReviewer? = nil
+        approvalsReviewer: CodexApprovalsReviewer? = nil,
+        developerInstructions: String? = nil
     ) async throws -> CodexThreadHandle {
         let result = try await send("thread/start", params: .object(omittingNil: [
             "cwd": .string(cwd ?? configuration.cwd),
@@ -328,6 +332,7 @@ public actor CodexClient {
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
             "sandbox": sandbox.map { .string($0.rawValue) },
             "approvalsReviewer": approvalsReviewer.map { .string($0.rawValue) },
+            "developerInstructions": developerInstructions.map(JSONValue.string),
         ]))
         guard let id = result["thread"]?["id"]?.stringValue else {
             throw CodexClientError.unexpectedResult(method: "thread/start")
@@ -346,10 +351,12 @@ public actor CodexClient {
         _ threadID: String,
         cwd: String? = nil,
         model: String? = nil,
-        sandbox: CodexSandboxMode? = nil
+        sandbox: CodexSandboxMode? = nil,
+        developerInstructions: String? = nil
     ) async throws -> CodexThreadHandle {
         let result = try await send("thread/resume", params: .object(omittingNil: [
             "threadId": .string(threadID),
+            "developerInstructions": developerInstructions.map(JSONValue.string),
             "cwd": .string(cwd ?? configuration.cwd),
             "model": model.map(JSONValue.string),
             "sandbox": sandbox.map { .string($0.rawValue) },
@@ -359,6 +366,16 @@ public actor CodexClient {
             model: result["model"]?.stringValue ?? "",
             effort: result["reasoningEffort"]?.stringValue
         )
+    }
+
+    public func readConfiguration(cwd: String) async throws -> JSONValue {
+        let result = try await send("config/read", params: .object([
+            "cwd": .string(cwd), "includeLayers": .bool(false),
+        ]))
+        guard let config = result["config"], config != .null else {
+            throw CodexClientError.unexpectedResult(method: "config/read")
+        }
+        return config
     }
 
     /// Sends one turn and returns as soon as the server has accepted it.
@@ -379,17 +396,40 @@ public actor CodexClient {
         effort: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
         sandboxPolicy: JSONValue? = nil,
-        approvalsReviewer: CodexApprovalsReviewer? = nil
+        approvalsReviewer: CodexApprovalsReviewer? = nil,
+        interactionMode: InteractionMode? = nil,
+        serviceTier: String? = nil
     ) async throws -> CodexTurn {
-        let result = try await send("turn/start", params: .object(omittingNil: [
+        if interactionMode == .plan, collaborationModeSupported == false {
+            throw InteractionModeFailure.unsupported
+        }
+        if interactionMode != nil, model?.isEmpty != false { throw InteractionModeFailure.missingModel }
+        var params = JSONValue.object(omittingNil: [
             "threadId": .string(threadID),
             "input": .array(input.map(\.json)),
+            "serviceTier": serviceTier.map(JSONValue.string),
             "model": model.map(JSONValue.string),
             "effort": effort.flatMap { $0.isEmpty ? nil : .string($0) },
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
             "sandboxPolicy": sandboxPolicy,
             "approvalsReviewer": approvalsReviewer.map { .string($0.rawValue) },
-        ]))
+            "collaborationMode": collaborationModeSupported == false ? nil : interactionMode.flatMap { mode in
+                model.map { mode.codexSettings(model: $0, effort: effort) }
+            },
+        ])
+        let result: JSONValue
+        do {
+            result = try await send("turn/start", params: params)
+        } catch let rejection as CodexRPCError where CodexPlanningCapability.isUnsupportedField(rejection) {
+            // Invalid parameters are an explicit rejection before acceptance. No timeout,
+            // disconnect, internal error or accepted turn can enter this retry path.
+            collaborationModeSupported = false
+            guard interactionMode == .build else { throw InteractionModeFailure.unsupported }
+            var fields = params.objectValue ?? [:]
+            fields.removeValue(forKey: "collaborationMode")
+            params = .object(fields)
+            result = try await send("turn/start", params: params)
+        }
         return CodexTurn.decode(result["turn"] ?? .null, threadID: threadID, raw: Data())
     }
 
@@ -416,11 +456,13 @@ public actor CodexClient {
 
     /// Stops a running turn. Both ids are required: `turn/interrupt` with only a thread id is
     /// refused with "missing field `turnId`".
-    public func interruptTurn(threadID: String, turnID: String) async throws {
+    public func interruptTurn(
+        threadID: String, turnID: String, timeout: Duration = CodexClient.requestTimeout
+    ) async throws {
         _ = try await send("turn/interrupt", params: .object([
             "threadId": .string(threadID),
             "turnId": .string(turnID),
-        ]))
+        ]), timeout: timeout)
     }
 
     /// The models this account may use, with each one's own reasoning efforts.

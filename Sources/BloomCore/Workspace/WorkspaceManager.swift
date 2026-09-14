@@ -2,12 +2,17 @@ import Foundation
 import os
 
 public enum WorkspaceError: Error, CustomStringConvertible {
+    case projectFolderMissing
     case notARepository(String)
+    /// git could not say whether it is one. Kept apart from the case above, because reporting a
+    /// git that does not run as a folder that is not a repository sent a user round in circles.
+    case gitCannotRead(GitRepositoryProblem)
     case pathInUse(String)
     /// Archiving would destroy work that exists nowhere else. Carries the full report so the UI
     /// can list what is at stake instead of asking "are you sure?" about nothing in particular.
     case unsafeToArchive(WorkspaceSafetyReport)
     case archiveScriptFailed(status: Int32, output: String)
+    case archiveScriptIncomplete(ShellFailure)
     /// The row was read, the work was done, and by the time it came to write the result there was
     /// no such workspace in the database any more. Only reachable when the project it belonged to
     /// was removed while this was running, which cascades its workspaces away.
@@ -15,13 +20,17 @@ public enum WorkspaceError: Error, CustomStringConvertible {
 
     public var description: String {
         switch self {
+        case .projectFolderMissing: "The project folder is no longer on disk."
         case .notARepository(let path): "\(path) is not a git repository"
+        case .gitCannotRead(let problem): problem.sentence
         case .pathInUse(let path): "\(path) already exists"
         case .unsafeToArchive(let report):
             "archiving would permanently destroy " + report.losses.joined(separator: ", ")
         case .archiveScriptFailed(let status, let output):
             "the archive script exited \(status), so nothing was removed: "
                 + output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(500)
+        case .archiveScriptIncomplete(let failure):
+            "The archive script did not finish, so nothing was removed: \(failure.description)"
         case .workspaceGone(let name): "\(name) is no longer in the database"
         }
     }
@@ -63,8 +72,10 @@ public struct WorkspaceManager: Sendable {
     @discardableResult
     public func addRepository(at path: String) async throws -> Repo {
         let expanded = (path as NSString).expandingTildeInPath
-        guard await Git.isRepository(expanded) else {
-            throw WorkspaceError.notARepository(expanded)
+        switch await Git.repositoryAnswer(expanded) {
+        case .repository: break
+        case .notARepository: throw WorkspaceError.notARepository(expanded)
+        case .problem(let problem): throw WorkspaceError.gitCannotRead(problem)
         }
         let root = try await Git.topLevel(of: expanded)
 
@@ -173,7 +184,9 @@ public struct WorkspaceManager: Sendable {
         // running at once in one project decide on the same branch and the same directory and the
         // second one loses. See `WorktreeCutQueue` for why this is serialised rather than
         // coalesced.
-        try await WorktreeCutQueue.shared.cut(in: repo.path) {
+        let repositoryKey = Git.repositoryPaths(in: repo.path)?.commonDirectory
+            ?? URL(fileURLWithPath: repo.path).resolvingSymlinksInPath().standardized.path
+        return try await WorktreeCutQueue.shared.cut(in: repositoryKey) {
             if let checkout {
                 return try await open(
                     checkout, id: id, repo: repo, name: name, origin: origin, setupPolicy: setupPolicy
@@ -200,6 +213,9 @@ public struct WorkspaceManager: Sendable {
     ) async throws -> Workspace {
         let settings = SettingsLoader.load(repo: repo.path)
         let base = baseBranch ?? repo.defaultBranch
+        let repository = try await Git.repositoryContext(in: repo.path, baseBranch: base)
+        let start = await Git.revision(of: base, in: repo.path) == nil
+            ? (repository.baseTrackingRef ?? base) : base
 
         let existingBranches = Set(try await Git.branches(of: repo.path))
         let stem = Git.branchStem(prompt: prompt, prefix: settings.branchPrefix, branch: branch)
@@ -219,8 +235,9 @@ public struct WorkspaceManager: Sendable {
         // name that is not in `existingBranches` by construction. This is the one path where that
         // is known, and it is the path a person is waiting on. See `Git.addWorktree`.
         try await Git.addWorktree(
-            repo: repo.path, path: worktreePath, branch: finalBranch, base: base, branchIsNew: true
+            repo: repo.path, path: worktreePath, branch: finalBranch, base: start, branchIsNew: true
         )
+        try await Git.recordBase(repository, for: finalBranch, in: worktreePath)
 
         try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
 
@@ -235,7 +252,7 @@ public struct WorkspaceManager: Sendable {
             branch: finalBranch,
             path: worktreePath,
             baseBranch: base,
-            setupState: setupPolicy.initialState(script: settings.setupScript),
+            setupState: setupPolicy.initialState(script: settings.setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin
         )
@@ -313,7 +330,7 @@ public struct WorkspaceManager: Sendable {
                 try? await Git.removeWorktree(repo: repo.path, path: worktreePath, force: true)
                 throw error
             }
-        case .branch:
+        case .branch(let existing):
             // Asked of git here rather than read off `ExistingBranch.isLocal`, which is what the
             // picker measured when the sheet was opened. A branch fetched by hand in between, or
             // one the picker listed from the remote while a local copy already existed, took the
@@ -325,7 +342,7 @@ public struct WorkspaceManager: Sendable {
                 )
             } else {
                 try await Git.addTrackingWorktree(
-                    repo: repo.path, path: worktreePath, branch: branch
+                    repo: repo.path, path: worktreePath, branch: branch, remote: existing.remoteName
                 )
             }
         }
@@ -339,7 +356,7 @@ public struct WorkspaceManager: Sendable {
             branch: branch,
             path: worktreePath,
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),
-            setupState: setupPolicy.initialState(script: settings.setupScript),
+            setupState: setupPolicy.initialState(script: settings.setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin,
             // Written now rather than waited for. A review workspace knows its pull request before
@@ -450,7 +467,17 @@ public struct WorkspaceManager: Sendable {
         return env
     }
 
+    /// What the setup log says when a run was stopped before the script exited.
+    public static let setupStoppedNote = "[bloom] Setup was stopped before it finished. "
+        + "Run setup again to finish it."
+
+    /// How long a stopped setup script has to exit after SIGTERM before it is killed.
+    static let setupStopGrace: Duration = .seconds(5)
+
     /// Runs the setup script, streaming output line by line. Returns whether it succeeded.
+    ///
+    /// Cancelling the calling task stops the script, and the run is filed as failed with
+    /// `setupStoppedNote` at the end of its log.
     ///
     /// - Parameter onExit: the status the script ended on, reported once and only when one
     ///   exists. A run that never started a process has no status, and reporting a made up zero
@@ -461,16 +488,54 @@ public struct WorkspaceManager: Sendable {
         workspace: Workspace,
         repo: Repo,
         port: Int,
+        operationLease: WorkspaceOperationLease? = nil,
         onExit: (@Sendable (Int) -> Void)? = nil,
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> Bool {
+        guard let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path),
+              lease.isValid(in: workspace.path) else {
+            onOutput("Setup cannot run while another setup is using this worktree.")
+            return false
+        }
+        defer { if operationLease == nil { lease.release() } }
+        guard !Task.isCancelled else {
+            onOutput("Setup was cancelled before it began, so nothing was started.")
+            return false
+        }
         let settings = SettingsLoader.load(repo: repo.path)
         let launch = ScriptLaunch.resolve(
             text: settings.setupScript, file: settings.scriptFiles[.setup], repo: repo.path
         )
 
+        let hasSubmodules = Git.hasSubmodules(in: workspace.path)
+        var preparationLog = ""
+        if hasSubmodules {
+            _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runStarted) }
+            preparationLog = "Preparing this worktree's submodules.\n"
+            onOutput(preparationLog.trimmingCharacters(in: .newlines))
+            do {
+                let output = try await Git.initialiseSubmodules(in: workspace.path)
+                preparationLog += output
+                if !output.isEmpty { onOutput(output) }
+            } catch {
+                let note = "Submodule setup failed. Some files may be missing. Run setup again to retry.\n"
+                    + error.readableMessage
+                onOutput(note)
+                let log = preparationLog + note
+                _ = try? await store.update(workspaceID: workspace.id) {
+                    $0.apply(.runFinished(succeeded: false, log: log))
+                }
+                onExit?(1)
+                return false
+            }
+        }
+
         guard let launch else {
-            _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runSkipped(note: nil)) }
+            let log = preparationLog
+            _ = try? await store.update(workspaceID: workspace.id) {
+                $0.apply(hasSubmodules ? .runFinished(succeeded: true, log: log) : .runSkipped(note: nil))
+            }
+            if hasSubmodules { onExit?(0) }
             return true
         }
 
@@ -482,7 +547,10 @@ public struct WorkspaceManager: Sendable {
             let note = "The settings file names \(path) as the setup script and there is nothing "
                 + "there, so nothing ran."
             onOutput(note)
-            _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runSkipped(note: note)) }
+            let log = preparationLog + note
+            _ = try? await store.update(workspaceID: workspace.id) {
+                $0.apply(hasSubmodules ? .runFinished(succeeded: true, log: log) : .runSkipped(note: note))
+            }
             return true
         case .executable, .source:
             break
@@ -498,20 +566,45 @@ public struct WorkspaceManager: Sendable {
             environment: Shell.environment(extra: env)
         )
 
-        var log = ""
-        do {
-            for try await line in runner.lines {
-                log += line + "\n"
-                onOutput(line)
+        var log = preparationLog
+        var didStart = false
+        await withTaskCancellationHandler {
+            do {
+                try Task.checkCancellation()
+                let lines = runner.lines
+                didStart = true
+                try Task.checkCancellation()
+                for try await line in lines {
+                    try Task.checkCancellation()
+                    log += line + "\n"
+                    onOutput(line)
+                }
+            } catch {
+                if Task.isCancelled { runner.terminate() }
+                log += "\n\(error)\n"
+                onOutput("\(error)")
             }
-        } catch {
-            log += "\n\(error)\n"
-            onOutput("\(error)")
+        } onCancel: {
+            runner.terminate()
+            Task.detached {
+                try? await Task.sleep(for: Self.setupStopGrace)
+                runner.kill()
+            }
         }
 
-        let status = await runner.exitStatus
-        onExit?(Int(status))
-        let succeeded = status == 0
+        // Stopped rather than finished: the reader pressed Stop, or the workspace is being archived
+        // or the app is quitting. Cancelling ends `lines`, and its termination handler sends
+        // SIGTERM to the script's process group. A seeder or a watcher that ignores it would hold
+        // `exitStatus` for ever and leave the row `running`, so it gets SIGKILL after a grace
+        // period. The line in the log is what tells a reader later that nobody's script failed.
+        if Task.isCancelled {
+            log += Self.setupStoppedNote + "\n"
+            onOutput(Self.setupStoppedNote)
+        }
+
+        let status: Int32? = didStart ? await runner.exitStatus : nil
+        if let status { onExit?(Int(status)) }
+        let succeeded = status == 0 && !Task.isCancelled
         let printed = log
         // The whole `workspace` value here is as old as the run, and a run can take minutes, so
         // upserting it would clobber every other write to the row made in the meantime. `update`
@@ -697,10 +790,15 @@ public struct WorkspaceManager: Sendable {
             // holding since before the block was allocated.
             let stored = try? await store.workspace(id: workspace.id)
             let env = environment(for: workspace, repo: repo, port: stored?.port ?? workspace.port)
-            let result = try await Shell.run(
-                archiveLaunch.executable, archiveLaunch.arguments,
-                cwd: workspace.path, env: env, timeout: archiveScriptTimeout
-            )
+            let result: ShellResult
+            do {
+                result = try await Shell.run(
+                    archiveLaunch.executable, archiveLaunch.arguments,
+                    cwd: workspace.path, env: env, timeout: archiveScriptTimeout
+                )
+            } catch let failure as ShellFailure {
+                throw WorkspaceError.archiveScriptIncomplete(failure)
+            }
             guard result.ok else {
                 throw WorkspaceError.archiveScriptFailed(
                     status: result.status,
@@ -751,19 +849,24 @@ public struct WorkspaceManager: Sendable {
 
     /// Deliberately leaves the stored counts alone when git fails, rather than writing zeroes.
     /// A stale count is a small lie; "0 files changed" on a workspace full of work is a big one.
-    public func refreshDiffStat(workspace: Workspace) async {
+    @discardableResult
+    public func refreshDiffStat(workspace: Workspace) async -> Bool {
         // Branch discovery must survive a missing base ref: an agent may rename that ref too,
         // which makes the diff fail but leaves HEAD perfectly readable.
         await refreshBranch(workspace: workspace)
         guard let stat = try? await Git.diffStat(worktree: workspace.path, base: workspace.baseBranch) else {
-            return
+            return false
         }
-        try? await store.updateDiffStat(
-            workspaceID: workspace.id,
-            additions: stat.additions,
-            deletions: stat.deletions,
-            files: stat.files
-        )
+        do {
+            try Task.checkCancellation()
+            try await store.updateDiffStat(
+                workspaceID: workspace.id,
+                additions: stat.additions,
+                deletions: stat.deletions,
+                files: stat.files
+            )
+            return true
+        } catch { return false }
     }
 }
 

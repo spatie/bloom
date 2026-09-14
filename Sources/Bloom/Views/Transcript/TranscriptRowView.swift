@@ -203,6 +203,8 @@ struct TranscriptRowView: View, Equatable {
         case .system:
             if let info = initInfo {
                 SessionStartRowView(info: info)
+            } else if let wake = backgroundWake {
+                BackgroundWakeRowView(wake: wake)
             }
 
         // A result row is a turn boundary, and the footer that renders it needs the rows around it,
@@ -267,6 +269,12 @@ struct TranscriptRowView: View, Equatable {
     private var initInfo: AgentInit? {
         guard case .initialized(let info)? = event else { return nil }
         return info
+    }
+
+    /// Only ever stored when it opened a turn, so any row that decodes to one is drawn.
+    private var backgroundWake: BackgroundWake? {
+        guard case .subagent(.reported(let report))? = event else { return nil }
+        return BackgroundWake(report)
     }
 
     /// Only decoded once a row is open, because a tool result is the largest payload in the file.
