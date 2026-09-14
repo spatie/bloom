@@ -446,7 +446,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             model: model,
             metrics: metrics,
             accounts: app.accounts,
-            observedAt: Self.oldestReadings(app.quotas),
             now: Date()
         ))
         host.frame = CGRect(origin: .zero, size: host.fittingSize)
@@ -456,10 +455,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         item.isEnabled = false
         item.setAccessibilityLabel(MenuBarSummary.limitSentence(for: QuotaBoard.make(from: app.quotas)))
         return item
-    }
-
-    static func oldestReadings(_ quotas: [AgentQuota]) -> [AgentKind: Date] {
-        Dictionary(grouping: quotas, by: \.provider).compactMapValues { $0.map(\.observedAt).min() }
     }
 
     // MARK: Workspaces
