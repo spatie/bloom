@@ -119,36 +119,12 @@ public enum TranscriptFollow {
         case settle(Double)
     }
 
-    /// Where the travel starts from, when content has just grown under a reader at the end.
-    ///
-    /// Called with what the view grew by since the last frame. A view that is away from the end
-    /// and is not the caller's own is left exactly where it is, which is the same rule `step`
-    /// follows and is why this cannot yank anybody: growth is only ever taken back from somebody
-    /// who was watching the end of it.
-    ///
-    /// It returns the offset unchanged rather than an optional so that a caller cannot honour the
-    /// take-back and skip the guard.
-    ///
-    /// **`ownsGap` is also what stops a gap of this object's own running away**, which is the
-    /// stranding in the header. Content growing does not move the offset, so an arrival mid travel
-    /// simply adds its own height to a gap that was already open, and enough of them in a row put
-    /// the view further from the end than the following was ever willing to travel.
-    ///
-    /// So what is taken back is how far behind the view already is or how much has just arrived,
-    /// whichever is the more, capped either way. The two are the same number in the case this was
-    /// written for, because something else pins the view to the end on the pass that grows the
-    /// content and the arrival is then the whole of the distance. They come apart mid travel, and
-    /// there the larger one is the gap: below the cap the arithmetic hands back the offset it was
-    /// given, which is the coalescing rule unchanged, and above it the excess is given up in one
-    /// step so that what is left is a travel rather than a tour.
+    /// Keep an arriving row's existing gap, limiting only a large forward catch-up.
+    /// The follower takes ownership before layout now. Rewinding an already pinned view used
+    /// to move the conversation down and then up again whenever "Working" changed its height.
     public static func start(offset: Double, end: Double, grew: Double, ownsGap: Bool) -> Double {
-        guard grew > 0, end > 0 else { return offset }
-        let gap = end - offset
-        // Somebody else's open gap is somebody reading further up, and taking a growth back from
-        // them is the one thing this file may never do. Ours, or a view the content has just been
-        // pinned under, is the only thing there is to take back from.
-        guard ownsGap || gap <= arrived else { return offset }
-        return max(0, end - min(max(gap, grew), takeBack))
+        guard grew > 0, end > 0, ownsGap, end - offset > ScrollEnd.threshold else { return offset }
+        return max(offset, end - takeBack)
     }
 
     /// This frame's offset, or `rest`.

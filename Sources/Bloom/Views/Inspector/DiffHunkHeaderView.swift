@@ -22,14 +22,14 @@ struct DiffHunkHeaderView: View {
                 // this column is already hidden.
                 .accessibilityHidden(true)
             Text(text)
-                .font(Typo.codeTiny)
+                .font(Font(CodeMetrics.numberFont))
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .foregroundStyle(Palette.textTertiary)
+        .foregroundStyle(Palette.codeGutter)
         .padding(.horizontal, CodeMetrics.textInset)
         .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
-        .background(Palette.surfaceSunken)
+        .background(Palette.codeBackground)
     }
 }

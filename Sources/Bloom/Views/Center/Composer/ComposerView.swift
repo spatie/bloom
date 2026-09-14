@@ -24,6 +24,8 @@ struct ComposerView: View {
     /// passes its own, because a conversation that cannot change a file should not open by
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
+    var onDismiss: (() -> Void)?
+    var includesReviewComments = true
     var destinationLabel: String?
     /// The chats this composer may be pointed at, when the caller is offering a choice. Empty,
     /// the default, leaves the strip above the box a plain sentence. See
@@ -38,8 +40,8 @@ struct ComposerView: View {
     /// The space a short pane keeps for the conversation when the draft grows.
     private static let minTranscriptHeight: CGFloat = 120
 
-    /// What the wrapped text occupies, already clamped by `ComposerTextEditor` to its line window.
     @State private var contentHeight = ComposerTextEditor.lineHeight
+    @State private var draggedHeight: CGFloat?
     /// Everything in the composer that is not the editor: the footer, the box and the
     /// padding. Measured rather than assumed, because the footer's height comes from its controls.
     ///
@@ -74,6 +76,21 @@ struct ComposerView: View {
                 )
             }
 
+            PaneDivider(
+                axis: .vertical,
+                length: Binding(
+                    get: { Double(editorHeight) },
+                    set: { draggedHeight = $0 == Double(automaticEditorHeight) ? nil : CGFloat($0) }
+                ),
+                bounds: Double(ComposerTextEditor.lineHeight)...Double(maxEditorHeight),
+                reset: Double(automaticEditorHeight),
+                label: "Message height",
+                color: .clear
+            )
+            .help("Drag to resize. Double-click to fit the text.")
+
+            TurnHistoryNotice(transcript: transcript)
+            ComposerPlansView(transcript: transcript, model: model, controls: controls)
             composer
         }
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
@@ -134,35 +151,50 @@ struct ComposerView: View {
                 project: transcript.cwd,
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
+                // Read off the workspace model, which is where the Workspace menu reads its run
+                // scripts from: one parse of the settings file serves both. Nil model, no project.
+                projectQuickPrompts: model?.settings.quickPrompts ?? [],
+                onOpenQuickPrompts: { [model] in model?.refreshSettings() },
                 onSend: send,
-                onStop: transcript.stop
+                onStop: transcript.stop,
+                onSideConversation: canOpenSideConversation ? openSideConversation : nil
             )
         }
         .task(id: transcript.session.id) { await prepare() }
+        .task(id: "planning:\(transcript.session.id):\(transcript.rows.last?.seq ?? -1)") {
+            if let store = app.store { await ComposerPlanningSupport.shared.refresh(from: store) }
+        }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
         // a queued message. The caret goes to the start rather than the end, because the words that
         // just arrived are at the front and are the ones the button was pressed to change.
         .onChange(of: transcript.composerFocusRequests) { _, _ in
             isFocused = true
-            caret = 0
+            caret = transcript.composerFocusCaretAtEnd
+                ? (SlashCommandDraft.parse(transcript.draft).body as NSString).length
+                : 0
         }
+        .focusedValue(\.composerTranscript, isFocused ? transcript : nil)
         .onDisappear(perform: saveDraftNow)
     }
 
     // MARK: - Height
 
-    /// The text editor measures up to ten lines, then scrolls internally. A short pane may
-    /// cap it earlier so the conversation always keeps some room above the writing surface.
     private var editorHeight: CGFloat {
-        let minimum = ComposerTextEditor.lineHeight
-        let maximum = PaneMeasure.editorCap(
+        min(max(draggedHeight ?? automaticEditorHeight, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    private var automaticEditorHeight: CGFloat {
+        min(max(contentHeight, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    private var maxEditorHeight: CGFloat {
+        PaneMeasure.editorCap(
             room: room.height,
             chrome: chromeHeight + ComposerLayout.bottomInset + ComposerLayout.textClearance,
             floor: Self.minTranscriptHeight,
-            atLeast: minimum
+            atLeast: ComposerTextEditor.lineHeight
         )
-        return min(max(contentHeight, minimum), maximum)
     }
 
     // MARK: - Derived state
@@ -196,7 +228,7 @@ struct ComposerView: View {
 
     /// The pending review, which rides with whatever is sent next from this workspace.
     private var reviewComments: [ReviewComment] {
-        model?.reviewComments ?? []
+        includesReviewComments ? (model?.reviewComments ?? []) : []
     }
 
     /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
@@ -218,11 +250,39 @@ struct ComposerView: View {
             send()
             return true
         case .escape:
-            isFocused = false
+            if let onDismiss { onDismiss() } else { isFocused = false }
             return true
-        case .up, .down, .tab:
+        case .up:
+            return recall(.older)
+        case .down:
+            return recall(.newer)
+        case .tab:
             return false
         }
+    }
+
+    /// Up or Down in an empty composer, or in one still holding a prompt they brought back.
+    ///
+    /// The guard in front is about cost rather than rules, which are `PromptRecall`'s: reading the
+    /// sent prompts decodes every user row in the session, and an arrow key pressed in a draft
+    /// somebody is writing has no business paying for that.
+    private func recall(_ direction: PromptRecall.Direction) -> Bool {
+        let draft = transcript.draft
+        guard draft.isEmpty || transcript.promptRecall.isBrowsing else { return false }
+
+        // The caret counts the body, the draft counts the `/command` in front of it too.
+        let body = SlashCommandDraft.parse(draft).body
+        let lead = (draft as NSString).length - (body as NSString).length
+        let sent = transcript.rows.lazy
+            .filter { $0.kind == .user }
+            .map { UserTurnPrompt.text(in: $0.payload) }
+        guard let text = transcript.promptRecall.step(
+            direction, prompts: PromptRecall.prompts(from: Array(sent)), draft: draft, caret: caret + lead
+        ) else { return false }
+
+        transcript.draft = text
+        caret = (SlashCommandDraft.parse(text).body as NSString).length
+        return true
     }
 
     // MARK: - Actions
@@ -299,6 +359,7 @@ struct ComposerView: View {
             || new.effort != session.effort
             || new.agentKind != session.agentKind
             || new.permissionMode != session.permissionMode
+            || new.interactionMode != session.interactionMode
         else { return }
 
         sessionEditor.apply {
@@ -306,6 +367,7 @@ struct ComposerView: View {
             $0.effort = new.effort
             $0.agentKind = new.agentKind
             $0.permissionMode = new.permissionMode
+            $0.interactionMode = new.interactionMode
         }
     }
 
@@ -373,9 +435,41 @@ struct ComposerView: View {
     /// `TranscriptModel.submit`'s decision, not this view's: they join the chat's queue and go
     /// when the queue is allowed to move. Deciding it here would be a second copy of the rule, and
     /// the rule already exists in a place the suite can reach it. See `DeliveryHold`.
+    private var canOpenSideConversation: Bool {
+        model != nil && transcript.session.sideConversationParentID == nil && onDismiss == nil
+    }
+
+    private func openSideConversation() {
+        model?.openSideConversation(from: transcript)
+    }
+
     private func send() {
         guard canSend else { return }
         draftSaveTask?.cancel()
+
+        if let question = SideConversation.question(in: transcript.draft) {
+            guard canOpenSideConversation, let model else {
+                app.notice = BloomNotice(message: "Use /btw in a workspace chat to open a side conversation.")
+                return
+            }
+            // The command itself belongs to Bloom. Leave review comments on the main chat.
+            guard model.openSideConversation(from: transcript, question: question) else { return }
+            transcript.draft = ""
+            caret = 0
+            saveDraftNow()
+            return
+        }
+
+        if onDismiss != nil,
+           ChatClearCommand.matches(transcript.draft) || ChatCloseCommand.matches(transcript.draft) {
+            app.notice = BloomNotice(message: "Use Keep and start new in the side conversation menu.")
+            return
+        }
+
+        if ChatCloseCommand.matches(transcript.draft) {
+            startFreshChat(closingPrevious: true)
+            return
+        }
 
         if ChatClearCommand.matches(transcript.draft) {
             startFreshChat()
@@ -388,25 +482,31 @@ struct ComposerView: View {
         // and a file that fails it is taken out of the sentence rather than sent as a path to
         // nothing.
         let worktree = transcript.cwd
-        let text = AttachmentDraft
-            .parse(transcript.draft, paths: attachments.map(\.path))
+        let sourceDraft = transcript.draft
+        let draftText = AttachmentDraft
+            .parse(sourceDraft, paths: attachments.map(\.path))
             .keeping { path in
                 FileManager.default.fileExists(
                     atPath: PromptAttachment.sent(path: path).url(in: worktree).path
                 )
             }
 
+        let imageComments = Dictionary(attachments.compactMap { attachment in
+            attachment.imageComment.map { (attachment.path, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+        let text = BrowserImageComment.expand(draftText, comments: imageComments)
+
         // The records go and the files the message names stay. The prompt the agent is now reading
         // names those paths, and deleting them out from under it would break the one thing they
         // were for.
         PromptAttachmentStore.shared.settle(
-            sent: text, sessionID: transcript.session.id.rawValue, workspace: worktree
+            sent: draftText, sessionID: transcript.session.id.rawValue, workspace: worktree
         )
         caret = 0
         let transcript = transcript
         let comments = reviewComments
         guard !comments.isEmpty else {
-            Task { await transcript.submit(text) }
+            Task { await transcript.submit(text, clearingDraft: sourceDraft) }
             return
         }
 
@@ -427,7 +527,7 @@ struct ComposerView: View {
                     template: template
                 )
             }.value
-            await transcript.submit(composed)
+            await transcript.submit(composed, clearingDraft: sourceDraft)
             await model?.removeReviewComments(ids: comments.map(\.id))
         }
     }
@@ -446,10 +546,12 @@ struct ComposerView: View {
     /// `canOpenNewChat` is a real question rather than a constant: this composer is dropped in
     /// wherever a transcript exists, and without the workspace model there is no strip to open a
     /// second chat on. A prompt that asked for one then writes into this box instead.
-    private func fire(_ prompt: QuickPrompt, insert: @MainActor (QuickPrompt) -> Void) {
-        switch QuickPromptDelivery.decided(
-            for: prompt, canSend: true, canOpenNewChat: model != nil
-        ) {
+    ///
+    /// A project's prompt comes through the same switch and can only ever land on the two compose
+    /// cases, because `QuickPromptPanelRow.delivery` asks `ProjectQuickPrompt` rather than the
+    /// owner's rule, and that one has no send to answer with.
+    private func fire(_ prompt: QuickPromptPanelRow, insert: @MainActor (QuickPromptPanelRow) -> Void) {
+        switch prompt.delivery(canSend: true, canOpenNewChat: model != nil) {
         case .compose:
             insert(prompt)
         case .send:
@@ -474,7 +576,7 @@ struct ComposerView: View {
     /// store. Written the other way round, the load lands afterwards and puts the empty box back.
     /// Both are written, so a load that had already finished is not left holding nothing, and the
     /// two agree because the store now says the same words.
-    private func openChat(for prompt: QuickPrompt, sending: Bool) {
+    private func openChat(for prompt: QuickPromptPanelRow, sending: Bool) {
         guard let model else { return }
         let text = prompt.text
         Task { @MainActor in
@@ -488,7 +590,7 @@ struct ComposerView: View {
         }
     }
 
-    private func startFreshChat() {
+    private func startFreshChat(closingPrevious: Bool = false) {
         guard !isClearingChat else { return }
         isClearingChat = true
         let previous = transcript
@@ -496,14 +598,35 @@ struct ComposerView: View {
         Task { @MainActor in
             defer { isClearingChat = false }
             if let model {
-                guard await model.createSession(controls: controls) != nil else { return }
+                let tabs = WorkspaceTabsStore.shared
+                let order = tabs.entries(in: model)
+                let owner = order.first { tab in
+                    tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                }
+                let pane = owner.flatMap { tab in
+                    tabs.layout(of: tab).panes.first { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                }
+                let next = closingPrevious
+                    ? await model.replaceSession(previous.session, controls: controls)
+                    : await model.createSession(controls: controls)
+                guard let next else { return }
+                if closingPrevious {
+                    if let owner, let pane {
+                        tabs.replace(pane: pane, of: owner, with: .chat(next.id), in: model)
+                    }
+                    tabs.forget(.chat(previous.session.id), workspaceID: model.workspace.id)
+                    tabs.reorder(order.map { entry in
+                        entry == .chat(previous.session.id) ? .chat(next.id) : entry
+                    }, in: model)
+                }
+                tabs.reveal(.chat(next.id), in: model, focusing: true)
             } else {
                 await app.ask.startFresh(controls: controls)
                 guard let current = app.ask.session, current.id != previous.session.id else { return }
             }
             // Only remove the command after the new conversation exists. Previous messages,
             // pending attachments and review comments are not discarded by this action.
-            if ChatClearCommand.matches(previous.draft) {
+            if ChatClearCommand.matches(previous.draft) || ChatCloseCommand.matches(previous.draft) {
                 previous.draft = ""
                 await previous.saveDraft()
             }
@@ -578,7 +701,7 @@ struct ComposerView: View {
             model: session.model,
             on: session.agentKind,
             hasSpoken: hasSpoken,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         ) else { return }
 
         sessionEditor.apply {
@@ -665,7 +788,7 @@ struct ComposerView: View {
             // Everything else is decided by the model, including the permission mode, so "start in
             // plan mode" still cannot write Plan onto a Codex row.
             running: transcript.session.agentKind,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         )
 
         if appDefaults.fastMode != isFastMode {
@@ -707,7 +830,8 @@ struct ComposerView: View {
         if session.model != resolved.model
             || session.effort != resolved.effort
             || session.agentKind != resolved.backend
-            || session.permissionMode != resolved.permissionMode {
+            || session.permissionMode != resolved.permissionMode
+            || session.interactionMode != resolved.interactionMode {
             // The backend moves with the model, and it can only move here: this runs once, before
             // the chat has said anything, so there is no transcript in the old backend's
             // vocabulary and no thread on its server to strand. A chat that has spoken forks
@@ -717,6 +841,7 @@ struct ComposerView: View {
                 $0.effort = resolved.effort
                 $0.agentKind = resolved.backend
                 $0.permissionMode = resolved.permissionMode
+                $0.interactionMode = resolved.interactionMode
             }
         }
 

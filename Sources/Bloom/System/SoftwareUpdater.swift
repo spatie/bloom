@@ -41,6 +41,11 @@ final class SoftwareUpdater: NSObject, SPUUpdaterDelegate {
     /// the app and not the other way round.
     @ObservationIgnored private weak var app: AppModel?
 
+    /// SwiftUI owns `NSApp.delegate` and forwards callbacks to its adapted delegate. Casting that
+    /// proxy to `BloomAppDelegate` silently fails, leaving the quit confirmation enabled during
+    /// an immediate install. Keep the actual delegate supplied at startup instead.
+    @ObservationIgnored private weak var appDelegate: BloomAppDelegate?
+
     @ObservationIgnored private var canCheckObservation: NSKeyValueObservation?
     @ObservationIgnored private var automaticChecksObservation: NSKeyValueObservation?
 
@@ -56,8 +61,9 @@ final class SoftwareUpdater: NSObject, SPUUpdaterDelegate {
     /// Called once, from the app delegate, after launching has finished. Sparkle schedules its
     /// first background check off the back of `startUpdater`, so starting it any earlier would put
     /// a network request in the middle of the launch it is supposed to stay out of.
-    func start(app: AppModel) {
+    func start(app: AppModel, appDelegate: BloomAppDelegate) {
         self.app = app
+        self.appDelegate = appDelegate
         guard controller == nil else { return }
 
         availability = SoftwareUpdate.availability(in: .main)
@@ -238,6 +244,6 @@ final class SoftwareUpdater: NSObject, SPUUpdaterDelegate {
     /// in more detail, so asking it again would only be a way to leave Sparkle's installer waiting
     /// on an answer the user thought they had given.
     private func allowTerminationWithoutAsking() {
-        (NSApp.delegate as? BloomAppDelegate)?.isInstallingUpdate = true
+        appDelegate?.isInstallingUpdate = true
     }
 }

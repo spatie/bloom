@@ -18,12 +18,16 @@ public struct ProcessTable: Sendable, Equatable {
         public let pid: Int32
         public let parent: Int32
         public let group: Int32
+        /// The foreground process group of the terminal this process is attached to, which `ps`
+        /// calls `tpgid`. Zero for a process with no terminal at all, which is most of the table.
+        public let terminalGroup: Int32
         public let command: String
 
-        public init(pid: Int32, parent: Int32, group: Int32, command: String) {
+        public init(pid: Int32, parent: Int32, group: Int32, terminalGroup: Int32 = 0, command: String) {
             self.pid = pid
             self.parent = parent
             self.group = group
+            self.terminalGroup = terminalGroup
             self.command = command
         }
     }
@@ -36,9 +40,9 @@ public struct ProcessTable: Sendable, Equatable {
 
     /// The arguments and the parser live next to each other so the two cannot drift. `=` after each
     /// column suppresses the header, which is the one line here that is not a process.
-    public static let arguments = ["-Ao", "pid=,ppid=,pgid=,args="]
+    public static let arguments = ["-Ao", "pid=,ppid=,pgid=,tpgid=,args="]
 
-    /// A line is three integers and then the command. Anything else is skipped rather than guessed
+    /// A line is four integers and then the command. Anything else is skipped rather than guessed
     /// at: a partial read or a future `ps` that prints a warning to stdout must produce fewer rows,
     /// never a wrong one, because a wrong row here is a command offered to somebody who never ran it.
     public init(psOutput: String) {
@@ -46,10 +50,13 @@ public struct ProcessTable: Sendable, Equatable {
             var rest = Substring(line)
             guard let pid = Self.takeNumber(&rest),
                   let parent = Self.takeNumber(&rest),
-                  let group = Self.takeNumber(&rest) else { return nil }
+                  let group = Self.takeNumber(&rest),
+                  let terminalGroup = Self.takeNumber(&rest) else { return nil }
             let command = rest.trimmingCharacters(in: .whitespaces)
             guard !command.isEmpty else { return nil }
-            return Row(pid: pid, parent: parent, group: group, command: command)
+            return Row(
+                pid: pid, parent: parent, group: group, terminalGroup: terminalGroup, command: command
+            )
         }
     }
 
@@ -88,5 +95,22 @@ public struct ProcessTable: Sendable, Equatable {
         let children = rows.filter { $0.parent == shell && $0.pid != shell }
         let leaders = children.filter { $0.pid == $0.group }
         return (leaders.isEmpty ? children : leaders).last?.command
+    }
+
+    /// Whether a shell has handed its terminal to something else, or nil when the shell is not in
+    /// the table at all.
+    ///
+    /// A different question from `foregroundCommand`, and a cheaper one to be right about. That one
+    /// names what is running and has to pick a leader out of the shell's children; this one only
+    /// asks who holds the terminal, which is a single number the kernel keeps. A shell at its
+    /// prompt is its own terminal's foreground group. The moment it starts a job, the job's group
+    /// is, and it gets the terminal back when the job ends. That is the whole of job control, and
+    /// it is how a run script is told to be running without an exit status to wait for.
+    ///
+    /// A terminal group of zero or below is a process with no terminal, which reads as nothing
+    /// running rather than as busy: it cannot be holding a terminal it does not have.
+    public func isBusy(shell: Int32) -> Bool? {
+        guard shell > 0, let row = rows.first(where: { $0.pid == shell }) else { return nil }
+        return row.terminalGroup > 0 && row.terminalGroup != shell
     }
 }

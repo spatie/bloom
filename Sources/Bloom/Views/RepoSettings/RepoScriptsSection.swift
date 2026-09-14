@@ -88,9 +88,17 @@ struct RepoScriptsSection: View {
 
     private var runSection: some View {
         Section {
-            ForEach($model.draft.runScripts) { $script in
-                RepoRunScriptRow(model: model, script: $script) {
-                    model.draft.runScripts.removeAll { $0.id == script.id }
+            // Values, and a binding by identity, never `ForEach($model.draft.runScripts)`. See
+            // `RepoSettingsDraft.runScript(id:)` for the crash that binding by index caused.
+            ForEach(model.draft.runScripts) { script in
+                RepoRunScriptRow(
+                    model: model,
+                    script: Binding(
+                        get: { model.draft.runScript(id: script.id) ?? script },
+                        set: { model.draft.updateRunScript($0) }
+                    )
+                ) {
+                    model.draft.removeRunScript(id: script.id)
                 }
             }
 

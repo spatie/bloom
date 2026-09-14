@@ -8,17 +8,24 @@ import BloomCore
 /// thing, a filtered floating list somebody arrows through, and a second idiom for the third one is
 /// how a window grows three.
 ///
+/// **A project's prompt is drawn by this same row**, because it is the same thing to arrow through
+/// and a second row type would drift from this one a padding at a time. What differs is the button
+/// in the pencil's slot: a project's prompt is a line in a committed file and is changed there, so
+/// the slot offers a copy into the owner's own library instead, and the context menu says the same.
+///
 /// **The pencil is on the hovered row or the highlighted one**, so arrowing down with the keyboard
 /// reveals it as surely as the pointer does. It is not a `\u{22EF}` menu: editing has one
 /// destination, and reaching a menu with the pointer also moves the keyboard highlight, so an
 /// `NSMenu` over a live popover would be an argument about which of the two owns the next click.
 struct QuickPromptRow: View {
-    var prompt: QuickPrompt
+    var row: QuickPromptPanelRow
     var isSelected: Bool
     var onPick: @MainActor () -> Void
     var onHover: @MainActor () -> Void
     var onEdit: @MainActor () -> Void
     var onDelete: @MainActor () -> Void
+    /// Copy to My Quick Prompts, which is what a project's row offers where an owner's has a pencil.
+    var onCopy: @MainActor () -> Void = {}
 
     @State private var isHovered = false
 
@@ -32,10 +39,10 @@ struct QuickPromptRow: View {
                 // `QuickPromptMarkView` rather than an `Image`, because the mark is an SF Symbol
                 // on most rows and an emoji on some, and the two are not the same size at the same
                 // point size. See its own note.
-                QuickPromptMarkView(stored: prompt.symbol, points: Metrics.repoIcon)
+                QuickPromptMarkView(stored: row.symbol, points: Metrics.repoIcon)
 
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                    Text(prompt.resolvedName)
+                    Text(row.name)
                         // `label` and not `body`: the scale's own note calls this rung the
                         // workhorse for row labels and anything scanned rather than read, which is
                         // what a menu row is. At `body` the panel was set a rung above the controls
@@ -47,8 +54,8 @@ struct QuickPromptRow: View {
                     // The words themselves, so a name chosen badly six weeks ago is still
                     // recoverable from the row. Absent when the prompt has no name of its own,
                     // because then the line above IS the preview and the row said it twice.
-                    if prompt.hasSeparatePreview {
-                        Text(prompt.preview)
+                    if let secondLine = row.secondLine {
+                        Text(secondLine)
                             .font(Typo.caption)
                             .foregroundStyle(Palette.textTertiary)
                             .lineLimit(1)
@@ -58,11 +65,11 @@ struct QuickPromptRow: View {
 
                 Spacer(minLength: Metrics.spacingSmall)
 
-                // The space is always taken, and only the pencil comes and goes. Shown and hidden
+                // The space is always taken, and only the button comes and goes. Shown and hidden
                 // by presence, a name long enough to need the room lost forty points of it the
                 // moment the row was arrowed onto: the text reflowed into an ellipsis under the
                 // highlight and back out again as it left, on every press of Down.
-                pencil
+                trailingAction
                     .opacity(isHovered || isSelected ? 1 : 0)
                     .allowsHitTesting(isHovered || isSelected)
             }
@@ -73,14 +80,10 @@ struct QuickPromptRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(prompt.resolvedName)
-        .accessibilityValue(
-            // The quiet combination has no sentence of its own to read out, which is the same
-            // reason the form no longer prints one under its switches.
-            [prompt.preview, QuickPromptDelivery(prompt).sentence]
-                .compactMap { $0 }
-                .joined(separator: ". ")
-        )
+        .accessibilityLabel(row.name)
+        // The quiet combination has no sentence of its own to read out, which is the same reason
+        // the form no longer prints one under its switches. See `QuickPromptPanelRow`.
+        .accessibilityValue(row.accessibilityValue)
         // The labels above set no emphasized colour, and that is the other half of this decision.
         // They used to switch to white whenever the row was selected and the window was active,
         // which was right while the fill was the accent one and became white text on light grey the
@@ -102,10 +105,14 @@ struct QuickPromptRow: View {
             if hovering { onHover() }
         }
         // A free accelerator for anybody who tries it. Nothing depends on it being discovered: the
-        // pencil above is the affordance, and the form it opens owns Delete.
+        // button in the trailing slot is the affordance, and the form the pencil opens owns Delete.
         .contextMenu {
-            Button("Edit", action: onEdit)
-            Button("Delete", role: .destructive, action: onDelete)
+            if row.isEditable {
+                Button("Edit", action: onEdit)
+                Button("Delete", role: .destructive, action: onDelete)
+            } else {
+                Button("Copy to My Quick Prompts", action: onCopy)
+            }
         }
     }
 
@@ -116,13 +123,17 @@ struct QuickPromptRow: View {
     // looked at the row and asked for the pencil alone, so the sentence they stood for is carried
     // by the row's accessibility value and by the form the pencil opens, which is where the
     // switches are set in the first place. Three marks in a row of two lines was the complaint,
-    // and it is a fair one: the pencil is the only one of the three that does anything.
+    // and it is a fair one: the pencil is the only one of the three that does anything. A
+    // project's row follows the same rule, so its New chat switch is read out rather than drawn.
 
     /// A button inside the row's own button, which AppKit resolves the way it looks: a click on the
-    /// pencil edits, a click anywhere else on the row inserts.
-    private var pencil: some View {
-        Button(action: onEdit) {
-            Image(systemName: "pencil")
+    /// pencil edits, a click anywhere else on the row inserts. A project's row puts its copy in the
+    /// same slot at the same size, so neither kind of row reflows on being highlighted.
+    private var trailingAction: some View {
+        Button {
+            if row.isEditable { onEdit() } else { onCopy() }
+        } label: {
+            Image(systemName: row.isEditable ? "pencil" : "doc.on.doc")
                 .imageScale(.small)
                 .foregroundStyle(Palette.textTertiary)
                 .frame(width: Metrics.rowHeight - Metrics.spacingWide,
@@ -133,7 +144,9 @@ struct QuickPromptRow: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Edit this quick prompt")
-        .accessibilityLabel("Edit \(prompt.resolvedName)")
+        .help(row.isEditable ? "Edit this quick prompt" : "Copy to My Quick Prompts")
+        .accessibilityLabel(
+            row.isEditable ? "Edit \(row.name)" : "Copy \(row.name) to My Quick Prompts"
+        )
     }
 }

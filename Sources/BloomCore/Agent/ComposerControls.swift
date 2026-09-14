@@ -32,7 +32,10 @@ public struct ComposerControls: Equatable, Sendable {
     /// workspace start, and the app-wide "start in plan mode" default, which is chosen in Settings
     /// long before any backend is. See `PermissionMode.nearest(on:)` for where each one lands.
     public var agentKind: AgentKind {
-        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+        didSet {
+            permissionMode = permissionMode.nearest(on: agentKind)
+            interactionMode = interactionMode.nearest(on: agentKind)
+        }
     }
     /// The mode, which can never be one this backend does not have. Assigning one this backend
     /// has no row for lands it on the nearest mode that backend does have, by the same rule the
@@ -41,6 +44,8 @@ public struct ComposerControls: Equatable, Sendable {
     public var permissionMode: PermissionMode {
         didSet { permissionMode = permissionMode.nearest(on: agentKind) }
     }
+    public var interactionMode: InteractionMode
+    public var offersInteractionMode: Bool { InteractionMode.supports(agentKind) }
     public var isFastMode: Bool
     /// Nil inherits Codex configuration. Kept separate from the older Claude thinking preference.
     public var codexFastMode: Bool?
@@ -65,7 +70,8 @@ public struct ComposerControls: Equatable, Sendable {
         outputStyle: String = OutputStyle.defaultName,
         codexContextWindow: Int = CodexContextWindow.modelDefault,
         hasWorktree: Bool = true,
-        codexFastMode: Bool? = nil
+        codexFastMode: Bool? = nil,
+        interactionMode: InteractionMode = .build
     ) {
         self.model = model
         self.effort = effort
@@ -79,6 +85,7 @@ public struct ComposerControls: Equatable, Sendable {
         self.outputStyle = outputStyle
         self.codexContextWindow = codexContextWindow
         self.hasWorktree = hasWorktree
+        self.interactionMode = interactionMode.nearest(on: agentKind)
     }
 
     public init(
@@ -99,15 +106,15 @@ public struct ComposerControls: Equatable, Sendable {
             // Read off the row rather than passed in, so the one caller that has a chat with no
             // worktree cannot forget to say so.
             hasWorktree: session.workspaceID != nil,
-            codexFastMode: codexFastMode
+            codexFastMode: codexFastMode,
+            interactionMode: session.interactionMode
         )
     }
 
     /// The modes this backend actually has.
     ///
-    /// Codex has no Plan. Its permission story is an approval policy crossed with a sandbox, and
-    /// there is nothing in that grid that means "work it out and do not touch anything". Offering
-    /// the mode anyway would be a control that silently does nothing.
+    /// Codex planning is a separate interaction mode, not a permission setting. Its permission
+    /// picker therefore excludes the legacy Plan case used by the other providers.
     ///
     /// Claude Code has no Approve for me, and loses nothing by it: its own Auto mode is that mode
     /// under another name, so a second row would be two names for one `--permission-mode auto`.
@@ -115,7 +122,7 @@ public struct ComposerControls: Equatable, Sendable {
     public var availablePermissionModes: [PermissionMode] {
         switch agentKind {
         case .codex: PermissionMode.allCases.filter { $0 != .plan }
-        case .claudeCode, .cursor, .openCode: PermissionMode.allCases.filter { $0 != .autoReview }
+        case .claudeCode, .grok, .cursor, .openCode: PermissionMode.allCases.filter { $0 != .autoReview }
         }
     }
 
@@ -192,7 +199,8 @@ public struct ComposerControls: Equatable, Sendable {
             isFastMode: isFastMode,
             outputStyle: outputStyle,
             codexContextWindow: codexContextWindow,
-            codexFastMode: codexFastMode
+            codexFastMode: codexFastMode,
+            interactionMode: defaults.interactionMode
         )
     }
 

@@ -71,14 +71,10 @@ private func scriptedBox(onWrite: @escaping @Sendable (String) -> Void = { _ in 
 private func eventually(
     _ description: String,
     within seconds: Double = 2,
+    sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @Sendable () async -> Bool
 ) async {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
-    while ContinuousClock.now < deadline {
-        if await condition() { return }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    Issue.record("timed out waiting for \(description)")
+    await waitUntil(Comment(rawValue: description), within: .seconds(seconds), sourceLocation: sourceLocation, condition)
 }
 
 // MARK: - Tests
@@ -197,6 +193,31 @@ private func eventually(
         let stored = try await store.session(id: session.id)
         #expect(stored?.agentSessionID == "01a02144-3b7e-7233-97f2-73ebd5105085")
         #expect(stored?.state == .running)
+    }
+
+    @Test("Ask Bloom sends host instructions when starting and resuming Codex",
+          arguments: [false, true], [false, true])
+    func askBloomInstructions(hasWorkspace: Bool, resumed: Bool) async throws {
+        let store = try makeTestStore("codex-ask-instructions")
+        var session: Session
+        if hasWorkspace {
+            (session, _) = try await makeCodexSession(store)
+        } else {
+            session = Session(workspaceID: nil, agentKind: .codex)
+        }
+        if resumed { session.agentSessionID = "existing-chat" }
+        session = try await store.upsert(session)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("create a workspace and explore the project")
+
+        let method = resumed ? "thread/resume" : "thread/start"
+        let frame = try #require(box.process.sentFrame { $0["method"]?.stringValue == method })
+        #expect(frame["params"]?["developerInstructions"]?.stringValue ==
+                (hasWorkspace ? nil : AskConversation.instructions))
+        #expect(frame["params"]?["baseInstructions"] == nil)
+        await runner.shutdown()
     }
 
     @Test func childOutputAndCompletionNeverEnterOrFinishTheParentChat() async throws {
@@ -325,22 +346,26 @@ private func eventually(
         #expect(json["message"]?["content"]?[0]?["text"]?.stringValue == "write the tests first")
     }
 
-    @Test(arguments: ["0", "1"])
-    func sendsExplicitCodexSpeedChoice(value: String) async throws {
+    @Test(arguments: ["0", "1"], [InteractionMode.build, .plan])
+    func sendsExplicitCodexSpeedChoice(value: String, mode: InteractionMode) async throws {
         let store = try Store(path: ":memory:")
-        let (session, _) = try await makeCodexSession(store)
+        let (original, _) = try await makeCodexSession(store)
+        var session = original
+        session.interactionMode = mode
         try await store.setSetting("session.\(session.id).codexFastMode", value)
         let box = scriptedBox()
         let runner = makeRunner(store: store, session: session, box: box)
         try await runner.send("hello")
         let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
         #expect(turn["params"]?["serviceTier"]?.stringValue == (value == "1" ? "priority" : "default"))
+        #expect(turn["params"]?["collaborationMode"]?["mode"]?.stringValue == (mode == .plan ? "plan" : "default"))
         runner.cancelNow()
         try await store.setSetting("session.\(session.id).codexFastMode", value == "1" ? "0" : "1")
         try await runner.send("next turn")
         let turns = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/start" }
         #expect(turns.count == 2)
         #expect(turns.last?["params"]?["serviceTier"]?.stringValue == (value == "1" ? "default" : "priority"))
+        #expect(turns.last?["params"]?["collaborationMode"]?["mode"]?.stringValue == (mode == .plan ? "plan" : "default"))
         await runner.shutdown()
     }
 
@@ -683,7 +708,8 @@ private func eventually(
 
         try await runner.send("hello")
         runner.terminateNow()
-        // The connection is dropped by the bookkeeping behind the signal, not by the signal.
+        // Cancellation must only be published after detaching the dying connection. CI caught
+        // a new send finding that client while the old shutdown was still awaiting its stop.
         await eventually("the teardown to finish") {
             (try? await store.session(id: session.id))??.state == .cancelled
         }
@@ -861,5 +887,128 @@ private func eventually(
         #expect(sessions.first?.id == session.id)
         // Replaying must not put the column back to its default either.
         #expect(sessions.first?.agentKind == .codex)
+    }
+}
+
+@Suite("Side conversation Codex transport", .scratchDirectory)
+struct SideConversationCodexRunnerTests {
+    @Test func failedStartRetriesWithContextWithoutChangingTheEditableQuestion() async throws {
+        let store = try makeTestStore("side-codex-wire")
+        let (createdParent, _) = try await makeCodexSession(store, agentSessionID: "parent-thread")
+        let parent = try #require(try await store.session(id: createdParent.id))
+        let child = try await store.openSideConversation(parentID: parent.id, streamingText: "Original context")
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: child, box: box)
+        box.fail("turn/start", code: -32000, message: "Try again")
+        do {
+            try await runner.send("Why?")
+            Issue.record("Expected the scripted first start to fail")
+        } catch {
+            #expect((error as? CodexRPCError)?.message == "Try again")
+        }
+        #expect(try await store.setting(SideConversation.contextDeliveredKey(child.id)) == nil)
+        await runner.shutdown()
+        let resumed = try #require(try await store.session(id: child.id))
+        let retryBox = scriptedBox()
+        let retryRunner = makeRunner(store: store, session: resumed, box: retryBox)
+        try await retryRunner.send("Why?")
+        let frames = box.process.stdin + retryBox.process.stdin
+        let starts = frames.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/start" }
+        #expect(starts.count == 2)
+        for start in starts {
+            #expect(start["params"]?["input"]?[0]?["text"]?.stringValue?.contains("Original context") == true)
+        }
+        #expect(!box.process.sentMethods.contains("thread/resume"))
+        #expect(try await store.setting(SideConversation.contextDeliveredKey(child.id)) == "1")
+        let messages = try await store.messages(sessionID: child.id).filter { $0.kind == .user }
+        #expect(messages.allSatisfy { UserTurnPrompt.text(in: $0.payload) == "Why?" })
+        #expect(try await store.session(id: parent.id) == parent)
+        await retryRunner.shutdown()
+    }
+}
+
+extension CodexRunnerTests {
+    @Test func deliveryAcceptanceLinksTheExistingPromptToTheProviderTurn() async throws {
+        let store = try makeTestStore("codex-delivery-acceptance")
+        let (session, _) = try await makeCodexSession(store)
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "Only once"))
+        let claimed = try await store.claimDelivery(id: delivery.id)
+        #expect(claimed)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.sendDelivery(delivery)
+        #expect(try await store.delivery(id: delivery.id)?.state == .accepted)
+        #expect(try await store.delivery(id: delivery.id)?.providerTurnID == "01a02144-3bab-7fe3-a92c-6eec594d84fd")
+        #expect(try await store.messages(sessionID: session.id).filter { $0.kind == .user }.count == 1)
+        await runner.shutdown()
+    }
+
+    @Test func stopInterruptsOwnedChildrenAsWellAsTheParent() async throws {
+        let store = try makeTestStore("codex-family-stop")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("Start a child")
+        box.process.emit(#"{"method":"turn/started","params":{"threadId":"child","turn":{"id":"child-turn","status":"inProgress","items":[]}}}"#)
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"01a02144-3bab-7fe3-a92c-6eec594d84fd","item":{"id":"spawn-child","type":"subAgentActivity","agentPath":"/root/child","agentThreadId":"child","kind":"started"}}}"#)
+        await eventually("registered child") { runner.presentationFeed?.hasBackgroundWork == true }
+        runner.cancelNow()
+        await eventually("family interrupts") {
+            let frames = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/interrupt" }
+            return frames.contains { $0["params"]?["threadId"]?.stringValue == "child" }
+                && frames.contains { $0["params"]?["threadId"]?.stringValue == "01a02144-3b7e-7233-97f2-73ebd5105085" }
+        }
+        await runner.shutdown()
+    }
+
+    @Test func idleEvictionPreservesRunningTurnsAndPendingDeliveries() async throws {
+        let store = try makeTestStore("codex-idle-guard")
+        let (session, _) = try await makeCodexSession(store, agentSessionID: "resumable")
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "waiting"))
+        let queuedEviction = await runner.evictIfIdle(for: .zero)
+        #expect(!queuedEviction)
+        _ = try await store.cancelDelivery(id: delivery.id)
+        try await runner.send("working")
+        let activeEviction = await runner.evictIfIdle(for: .zero)
+        #expect(!activeEviction)
+        box.process.emit(#"{"method":"turn/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turn":{"id":"01a02144-3bab-7fe3-a92c-6eec594d84fd","status":"completed","items":[]}}}"#)
+        await eventually("idle turn") { await runner.currentSession.state == .idle }
+        let idleEviction = await runner.evictIfIdle(for: .zero)
+        #expect(idleEviction)
+        await #expect(throws: ProviderIdleError.self) { try await runner.send("must use a new runner") }
+        await runner.shutdown()
+    }
+}
+
+extension CodexRunnerTests {
+    @Test func anAmbiguousSteerFailureDoesNotStartTheSameMessageAgain() async throws {
+        let store = try makeTestStore("codex-ambiguous-steer")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("first")
+        box.fail("turn/steer", code: -32603, message: "internal failure after dispatch")
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "follow up"))
+        _ = try await store.claimDelivery(id: delivery.id)
+        await #expect(throws: CodexRPCError.self) { try await runner.sendDelivery(delivery) }
+        #expect(box.process.sentMethods.filter { $0 == "turn/start" }.count == 1)
+        #expect(try await store.delivery(id: delivery.id)?.state == .uncertain)
+        await runner.shutdown()
+    }
+
+    @Test func anExplicitTurnRejectionReturnsThePromptToPending() async throws {
+        let store = try makeTestStore("codex-definitive-rejection")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        box.fail("turn/start", code: -32602, message: "invalid model parameter")
+        let runner = makeRunner(store: store, session: session, box: box)
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "safe to retry"))
+        _ = try await store.claimDelivery(id: delivery.id)
+        await #expect(throws: CodexRPCError.self) { try await runner.sendDelivery(delivery) }
+        #expect(try await store.delivery(id: delivery.id)?.state == .pending)
+        #expect(try await store.messages(sessionID: session.id).filter { $0.kind == .user }.count == 1)
+        await runner.shutdown()
     }
 }

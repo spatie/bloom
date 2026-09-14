@@ -47,9 +47,17 @@ struct ComposerFooterView: View {
     /// What choosing a quick prompt does, or nil where there is nowhere to put one. Nil hides the
     /// button rather than disabling it: a control that can never do anything is not worth the room
     /// in a row that already loses its words at 420 points.
-    var onQuickPrompt: (@MainActor (QuickPrompt) -> Void)?
+    var onQuickPrompt: (@MainActor (QuickPromptPanelRow) -> Void)?
+    /// What the workspace's repository offers under the owner's own prompts. Empty in the create
+    /// window, which has no workspace model to have read a settings file.
+    var projectQuickPrompts: [ProjectQuickPrompt] = []
+    /// Called as the panel opens, so the settings file behind `projectQuickPrompts` can be read
+    /// again. Somebody who has just pulled a teammate's new prompt opens the panel to find it,
+    /// and until now nothing re-read that file short of switching workspace.
+    var onOpenQuickPrompts: (@MainActor () -> Void)?
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
+    var onSideConversation: (@MainActor () -> Void)?
     /// Whether the row carries the choices the agent runs on.
     ///
     /// False for a terminal workspace, which has no agent: the create window was offering a model,
@@ -263,7 +271,8 @@ struct ComposerFooterView: View {
                     },
                     onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
                     codexSpeed: codexSpeed,
-                    codexSpeedFailed: loadedSpeedRequest == speedRequest && speedFailed
+                    codexSpeedFailed: loadedSpeedRequest == speedRequest && speedFailed,
+                    onInteractionMode: { mode in edit { $0.interactionMode = mode } }
                 )
             }
 
@@ -291,6 +300,7 @@ struct ComposerFooterView: View {
             // already about an AI, so a sparkle would distinguish nothing.
             if showsAgentControls, onQuickPrompt != nil {
                 Button {
+                    onOpenQuickPrompts?()
                     isShowingQuickPrompts = true
                 } label: {
                     ComposerControlLabel(
@@ -314,6 +324,7 @@ struct ComposerFooterView: View {
                     if let onQuickPrompt {
                         QuickPromptMenu(
                             catalog: QuickPromptCatalog.shared,
+                            projectPrompts: projectQuickPrompts,
                             draft: $quickPromptDraft,
                             onPick: onQuickPrompt,
                             onClose: { isShowingQuickPrompts = false }
@@ -325,6 +336,15 @@ struct ComposerFooterView: View {
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"
             // in the tab strip directly above, and it says nothing about what is being added.
+            if let onSideConversation {
+                Button(action: onSideConversation) {
+                    Image(systemName: "arrow.turn.down.right")
+                }
+                .buttonStyle(.plain)
+                .help("Ask a side question (/btw)")
+                .accessibilityLabel("Ask a side question")
+            }
+
             // Gone with the rest when there is no agent: nothing reads an attachment into a shell.
             if showsAgentControls {
                 Button(action: onAttach) {

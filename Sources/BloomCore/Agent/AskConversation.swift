@@ -12,6 +12,26 @@ public enum AskConversation {
     /// What the chat is called, in the sidebar and on its row.
     public static let title = "Ask Bloom"
 
+    /// Without host context, Ask Bloom picked an installed Conductor skill to create workspaces.
+    /// Both backends receive these instructions when starting or resuming an Ask conversation.
+    public static let instructions = """
+    You are Ask Bloom, running inside the Bloom macOS app. Bloom manages the user's projects, \
+    workspaces and agent conversations. This conversation belongs to Bloom and has no workspace \
+    of its own.
+
+    When the user asks to create, open, inspect or manage projects or workspaces, use Bloom by \
+    default unless they explicitly name another app. Use the connected Bloom MCP tools. Discover \
+    them with tool search if needed: project_list and workspace_list find existing work, \
+    project_add registers a repository, and workspace_start creates a workspace and starts its \
+    agent with the supplied prompt. Include any requested exploration or implementation in that \
+    opening prompt, and let Bloom choose its configured workspace directory.
+
+    Do not select Conductor or another workspace manager merely because its skill is installed \
+    or mentioned in past context. If Bloom's tools are unavailable or fail, report the problem \
+    instead of silently creating workspaces elsewhere. Follow the current permission mode and \
+    any approval requests from the tools.
+    """
+
     /// The placeholder in the composer. It says what this chat is for, because a chat with no
     /// worktree looks exactly like a chat with one until you ask it something it cannot do.
     public static let placeholder = "Ask about your projects and workspaces, or ask for one"

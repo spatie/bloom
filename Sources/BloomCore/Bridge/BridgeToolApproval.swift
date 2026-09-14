@@ -166,6 +166,10 @@ public enum BridgeToolApproval {
         // already, none of it is the contents of a page, a diff or a note, and it is the first
         // call of any turn that then does something useful.
         "workspace_tabs",
+        // Stored conversations inside the caller's own workspace. Reading one does not select
+        // a tab, start a turn or reach another workspace, and both handlers enforce that scope.
+        "chat_list",
+        "chat_read",
         // Clicking a tab, which is `pane_open` with less in it: that one makes a tab AND brings it
         // to the front and is on this list, so a rule that asked before an agent could bring an
         // existing tab forward would cost a hung turn and protect nothing. What it changes is

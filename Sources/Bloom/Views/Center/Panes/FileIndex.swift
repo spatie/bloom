@@ -28,13 +28,7 @@ actor FileIndex {
         }
 
         let task = Task<[String], Never> {
-            let result = try? await Shell.run(
-                "git",
-                ["ls-files", "--cached", "--others", "--exclude-standard"],
-                cwd: workspacePath,
-                timeout: .seconds(10)
-            )
-            return result?.lines ?? []
+            (try? await WorkspaceFileSearch.paths(in: workspacePath)) ?? []
         }
         inFlight[workspacePath] = task
         let paths = await task.value

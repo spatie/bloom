@@ -9,6 +9,7 @@ import Foundation
 public enum InspectorTab: String, Hashable, CaseIterable, Sendable {
     case allFiles = "All files"
     case changes = "Changes"
+    case history = "History"
     case checks = "Checks"
 
     /// The pane a selection falls back to when the tab it names is not on offer.
@@ -23,7 +24,7 @@ public enum InspectorTab: String, Hashable, CaseIterable, Sendable {
     ///
     /// Checks is the only conditional one, and it is deliberately **last**. A segmented control
     /// sizes each segment to its own label and lays them out from the leading edge, so a tab
-    /// appended at the end arrives without moving the two before it: a pull request landing
+    /// appended at the end arrives without moving the three before it: a pull request landing
     /// mid-session cannot shift a segment out from under a click already on its way to it, and
     /// neither can one going away.
     public static func available(for pullRequest: PullRequest?) -> [InspectorTab] {

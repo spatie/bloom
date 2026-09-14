@@ -5,11 +5,23 @@ public struct RunScript: Identifiable, Sendable, Hashable {
     public var id: String
     public var name: String
     public var command: String
+    /// An SF Symbol name the file chose for the script's tab and menu row, or nil for the one a
+    /// terminal gets anyway. Not checked against the symbol catalogue here: the core cannot ask
+    /// AppKit whether a name exists, and a name that does not resolve is the drawing side's call.
+    public var icon: String?
+    /// Whether opening a workspace starts it without being asked to. Off unless a file says so,
+    /// and never honoured until the owner has approved exactly these commands. See
+    /// `RunScriptAutostart`, which is why a `git pull` cannot start a process on its own.
+    public var autostart: Bool
 
-    public init(id: String, name: String, command: String) {
+    public init(
+        id: String, name: String, command: String, icon: String? = nil, autostart: Bool = false
+    ) {
         self.id = id
         self.name = name
         self.command = command
+        self.icon = icon
+        self.autostart = autostart
     }
 }
 
@@ -115,6 +127,17 @@ public struct RepoSettings: Sendable, Hashable {
     /// shadowed by an invisible copy somewhere else. See `SettingsWriter.destination`.
     public var origins: [SettingsKey: String] = [:]
 
+    /// Prompts the repository's own files offer, in the order the winning file states them. Never
+    /// from a machine-wide file: a personal prompt belongs in the app's own library, where it can
+    /// be edited, and a home file stating one would put it in every project on the machine.
+    public var quickPrompts: [ProjectQuickPrompt] = []
+
+    /// What was wrong with the files, entry by entry. A committed settings file arrives by
+    /// `git pull`, so a mistake in it is somebody else's and must never stop a workspace from
+    /// opening: the entry is skipped, the rest of the file still applies, and the sentence here is
+    /// how the owner finds out rather than wondering where a run script went.
+    public var issues: [SettingsIssue] = []
+
     public init() {}
 }
 
@@ -150,9 +173,9 @@ public enum SettingsLoader {
         var settings = RepoSettings()
 
         for path in homePaths() {
-            guard let toml = try? TOML.parse(contentsOf: path) else { continue }
+            guard let document = read(path, into: &settings) else { continue }
             settings.sources.append(path)
-            apply(toml, from: path, to: &settings, repo: repo)
+            apply(document.value, outline: document.outline, from: path, to: &settings, repo: repo)
         }
 
         // Everything a home file said about the model belongs to the home layer. Moving it aside
@@ -163,12 +186,40 @@ public enum SettingsLoader {
         settings.defaultEffort = nil
 
         for path in repoPaths(repo: repo) {
-            guard let toml = try? TOML.parse(contentsOf: path) else { continue }
+            guard let document = read(path, into: &settings) else { continue }
             settings.sources.append(path)
-            apply(toml, from: path, to: &settings, repo: repo)
+            apply(document.value, outline: document.outline, from: path, to: &settings, repo: repo)
+            applyQuickPrompts(document.value, outline: document.outline, from: path, to: &settings)
         }
 
         return settings
+    }
+
+    /// One file, or nil when there is none or it will not parse.
+    ///
+    /// A file that will not parse is still skipped whole, as it always was: there is no telling
+    /// which of its values survived a syntax error. What changed is that it no longer disappears
+    /// without a word. It used to be `try? TOML.parse`, so a stray quote in a committed file took
+    /// every script in it away and nothing on screen said why.
+    private static func read(_ path: String, into settings: inout RepoSettings) -> TOMLDocument? {
+        do {
+            return try TOML.parseOutlined(contentsOf: path)
+        } catch let error as TOMLError {
+            settings.issues.append(SettingsIssue(
+                path: path,
+                message: "This file was skipped: line \(error.line) could not be read (\(error.message)).",
+                entry: .file,
+                line: error.line
+            ))
+            return nil
+        } catch {
+            settings.issues.append(SettingsIssue(
+                path: path,
+                message: "This file was skipped: it could not be read.",
+                entry: .file
+            ))
+            return nil
+        }
     }
 
     /// The absolute path a settings file's script reference points at.
@@ -202,8 +253,12 @@ public enum SettingsLoader {
         return (text.isEmpty ? nil : text, nil)
     }
 
+    /// `outline` is the order the file stated its keys in, which is the order run scripts are
+    /// listed in. Nil falls back to sorting by id, which is what a caller holding only a parsed
+    /// value has always had.
     static func apply(
-        _ toml: TOMLValue, from source: String, to settings: inout RepoSettings, repo: String = ""
+        _ toml: TOMLValue, outline: TOMLOutline? = nil, from source: String,
+        to settings: inout RepoSettings, repo: String = ""
     ) {
         /// Records which file had the last word about a key, so an edit can be written back to it.
         func note(_ key: SettingsKey) { settings.origins[key] = source }
@@ -232,38 +287,8 @@ public enum SettingsLoader {
             note(.runMode)
         }
 
-        if let run = toml["scripts.run"] {
-            switch run {
-            case .string(let command) where !command.isEmpty:
-                settings.runScripts = [RunScript(id: "run", name: "Run", command: command)]
-                note(.runScripts)
-            case .table(let named):
-                var files: [ScriptLocation: ScriptFile] = [:]
-                let scripts = named
-                    .sorted { $0.key < $1.key }
-                    .compactMap { key, value -> RunScript? in
-                        let name = value["name"]?.stringValue ?? key.capitalizedFirst
-                        // A run script is usually one command and stays a string. It gets a file
-                        // of its own on the same terms as the setup script: when it is long
-                        // enough to be a program. See `SettingsWriter.wantsAFile`.
-                        if let stated = value["file"]?.stringValue, !stated.isEmpty {
-                            let full = resolve(stated, repo: repo)
-                            let text = try? String(contentsOfFile: full, encoding: .utf8)
-                            files[.run(key)] = ScriptFile(path: stated, isMissing: text == nil)
-                            return RunScript(id: key, name: name, command: text ?? "")
-                        }
-                        let command = value["command"]?.stringValue ?? value.stringValue
-                        guard let command, !command.isEmpty else { return nil }
-                        return RunScript(id: key, name: name, command: command)
-                    }
-                if !scripts.isEmpty {
-                    settings.runScripts = scripts
-                    for (location, file) in files { settings.scriptFiles[location] = file }
-                    note(.runScripts)
-                }
-            default:
-                break
-            }
+        if toml["scripts.run"] != nil {
+            applyRunScripts(toml, outline: outline, from: source, to: &settings, repo: repo)
         }
 
         // `file_include_globs` is what Conductor's own repository schema calls this, and it was

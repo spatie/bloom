@@ -2,48 +2,46 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-/// Whether the pull request strip may act on the branch.
-///
-/// The report: the green Merge button, and the red Fix merge conflicts button beside the same
-/// headline, were both live while the workspace's agent was mid turn. Merging there lands a
-/// branch whose commits may not all be pushed yet and deletes it on the server, which is the one
-/// thing this app offers that cannot be undone from inside it.
 @Suite("Whether the branch may be acted on")
 struct BranchActionAvailabilityTests {
-    @Test("An idle workspace may act, and says nothing about it")
-    func idleAllows() {
-        let availability = BranchActionAvailability.mayActOnBranch(isAgentBusy: false)
-        #expect(availability.isAllowed)
+    @Test("Creating a pull request can submit a message while idle or busy", arguments: [false, true])
+    func creationAllows(isAgentBusy: Bool) {
+        let availability = BranchActionAvailability.mayActOnBranch(
+            isAgentBusy: isAgentBusy, pullRequest: nil
+        )
+        #expect(availability == .allowed)
+    }
+
+    @Test("Open pull request actions can submit messages while idle or busy", arguments: [false, true])
+    func openAllows(isAgentBusy: Bool) {
+        let availability = BranchActionAvailability.mayActOnBranch(
+            isAgentBusy: isAgentBusy, pullRequest: pullRequest(state: "OPEN")
+        )
+        #expect(availability == .allowed)
         #expect(availability.note == nil)
         #expect(availability.reason == nil)
     }
 
-    @Test("A running agent holds every branch action back")
-    func busyBlocks() {
-        #expect(!BranchActionAvailability.mayActOnBranch(isAgentBusy: true).isAllowed)
-    }
-
-    /// Both of them, because they are two different readers. The note is read off the strip by
-    /// somebody who never hovers anything; the reason is what the disabled control answers with
-    /// when they do.
-    @Test("It says why, on the strip and in the tooltip")
-    func busyExplainsItself() {
-        let availability = BranchActionAvailability.mayActOnBranch(isAgentBusy: true)
+    @Test("Immediate workspace actions still wait for the agent", arguments: ["MERGED", "CLOSED"])
+    func finishedBlocksWhileBusy(state: String) {
+        let availability = BranchActionAvailability.mayActOnBranch(
+            isAgentBusy: true, pullRequest: pullRequest(state: state)
+        )
+        #expect(!availability.isAllowed)
         #expect(availability.note?.isEmpty == false)
-        #expect(availability.reason?.isEmpty == false)
-        #expect(availability.reason?.contains("worktree") == true)
+        #expect((availability.note?.count ?? 0) <= 40)
+        #expect(availability.reason?.contains("Continue and Archive") == true)
     }
 
-    /// The note shares one line of a strip that is exactly one row tall, beside a headline that
-    /// must not be the thing that truncates. A sentence is not what goes there.
-    @Test("The note is short enough for the line it takes over")
-    func noteIsShort() {
-        let note = BranchActionAvailability.mayActOnBranch(isAgentBusy: true).note ?? ""
-        #expect(note.count <= 40)
+    @Test("Immediate workspace actions become available when idle", arguments: ["MERGED", "CLOSED"])
+    func finishedAllowsWhenIdle(state: String) {
+        let availability = BranchActionAvailability.mayActOnBranch(
+            isAgentBusy: false, pullRequest: pullRequest(state: state)
+        )
+        #expect(availability == .allowed)
     }
 
-    @Test("Allowed is the same answer as an idle workspace")
-    func allowedMatchesIdle() {
-        #expect(BranchActionAvailability.mayActOnBranch(isAgentBusy: false) == .allowed)
+    private func pullRequest(state: String) -> PullRequest {
+        PullRequest(number: 42, title: "Ship it", url: "https://github.com/acme/app/pull/42", state: state)
     }
 }

@@ -61,16 +61,7 @@ struct StreamingRowView: View {
             }
 
             if !transcript.streamingText.isEmpty {
-                MarkdownView(transcript.streamingText, isStreaming: true)
-                    .font(Typo.body)
-                    .proseLeading()
-                    .textSelection(.enabled)
-                    // The same measure the stored prose row uses, or the line the user is
-                    // watching rewraps the instant it is replaced by its persisted twin.
-                    .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, TranscriptLayout.inset)
-                    .padding(.vertical, TranscriptLayout.inset)
+                ProseRowView(text: transcript.streamingText, isStreaming: true)
                     // Streamed text arrives many times a second, and every one of those deltas
                     // runs through here. Nothing inside this block may carry an animation: see
                     // the note under `body`.
@@ -92,8 +83,13 @@ struct StreamingRowView: View {
             } else if let tool = transcript.streamingToolName {
                 StreamingStatusView(glyph: "gearshape", text: "Running \(tool)")
                     .transaction { $0.animation = nil }
-            } else if transcript.isRunning, !hasVisibleStream {
-                StreamingStatusView(glyph: nil, text: transcript.statusLabel ?? "Working")
+            } else if transcript.isRunning || transcript.sending != nil, !hasVisibleStream {
+                // Reserve the activity line with the instant echo so starting the agent does
+                // not insert another row underneath a bubble that is still arriving.
+                StreamingStatusView(
+                    glyph: nil,
+                    text: transcript.statusLabel ?? (transcript.isRunning ? "Working" : "Starting")
+                )
                     .transaction { $0.animation = nil }
             }
         }

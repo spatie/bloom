@@ -322,7 +322,7 @@ extension AppModel {
         let resolved = ComposerDefaults.resolve(
             repo: repoSettings,
             app: appDefaults,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         )
 
         // The backend comes from the model now. It used to be left at its default here, with a
