@@ -104,6 +104,7 @@ struct SessionTabsView: View {
         // This is `SidebarRepoGroup`'s bug and `SidebarRepoGroup`'s fix: derive it once, pass it
         // as a parameter, and let the helpers say what they need rather than reach for it.
         let entries = self.entries
+        let numbered = TabCycle.numbered(entries)
         // **One** answer, where `CenterPaneStore.isShowing` gave the strip as many marks as the
         // column had panes: a tab owns the panes now, so being in a tab is a single fact about the
         // workspace again.
@@ -136,12 +137,12 @@ struct SessionTabsView: View {
                     switch entry {
                     case .chat(let id):
                         if let session = session(id) {
-                            sessionTab(session, selected: selected)
+                            sessionTab(session, ordinal: numbered[index].ordinal, selected: selected)
                                 .id(id)
                         }
                     case .tool(let id):
                         if let tab = tool(id) {
-                            toolTab(tab, selected: selected)
+                            toolTab(tab, ordinal: numbered[index].ordinal, selected: selected)
                                 .id(id)
                         }
                     }
@@ -238,7 +239,7 @@ struct SessionTabsView: View {
     // MARK: - Tabs
 
     private func sessionTab(
-        _ session: Session, selected: PaneContent?
+        _ session: Session, ordinal: Int?, selected: PaneContent?
     ) -> some View {
         SessionTabView(
             session: session,
@@ -247,6 +248,7 @@ struct SessionTabsView: View {
             ),
             isActive: selected == .chat(session.id),
             isRunning: model.isRunning(session),
+            shortcutOrdinal: ordinal,
             isAtPaneEdge: false,
             isRenaming: renamingID == session.id.rawValue,
             // Always. The workspace's last conversation IS closable, and hiding the cross was the
@@ -274,12 +276,13 @@ struct SessionTabsView: View {
     }
 
     private func toolTab(
-        _ tab: CenterTab, selected: PaneContent?
+        _ tab: CenterTab, ordinal: Int?, selected: PaneContent?
     ) -> some View {
         TabItemView(
             title: tabs.displayTitle(of: tab, in: model),
             icon: icon(for: tab),
             isActive: selected == .tool(tab.id),
+            shortcutOrdinal: ordinal,
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             // What is on the tab, not what the tab is filed under. A browser showing "Spatie"

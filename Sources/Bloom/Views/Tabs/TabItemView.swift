@@ -22,6 +22,7 @@ struct TabItemView: View {
     var icon: TabItemIcon?
     var isActive: Bool
     var isRunning = false
+    var shortcutOrdinal: Int?
     /// Whether this tab's leading edge is the leading edge of the pane itself, which is true of
     /// the first tab in a strip that begins at the pane's own edge and of nothing else.
     ///
@@ -157,6 +158,18 @@ struct TabItemView: View {
                     .lineLimit(1)
             }
 
+            if let shortcutOrdinal {
+                HStack(spacing: 2) {
+                    Image(systemName: "command")
+                    Text("\(shortcutOrdinal)")
+                }
+                .font(Typo.caption)
+                .foregroundStyle(isActive ? surface.inkMuted : Palette.textSecondary)
+                .fixedSize()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+
             closeButton
         }
         // One type size AND one weight for the whole row, set once above the branches, so
@@ -231,7 +244,7 @@ struct TabItemView: View {
             isHovered = $0
             if !$0 { isCloseHovered = false }
         }
-        .help(title)
+        .help(shortcutOrdinal.map { "\(title) (⌘\($0))" } ?? title)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
