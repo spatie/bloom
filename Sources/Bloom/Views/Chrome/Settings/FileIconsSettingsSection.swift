@@ -2,33 +2,41 @@ import SwiftUI
 import BloomCore
 
 struct FileIconsSettingsSection: View {
-    @AppStorage(VSCodeIconsInstaller.defaultsKey) private var enabled = false
-    private var model: FileIconThemeModel { .shared }
+    @AppStorage(FileIconPack.defaultsKey) private var storedChoice = FileIconPack.defaultChoice.rawValue
+    private var choice: FileIconPack { FileIconPack.resolve(storedChoice) }
+    private var library: FileIconPackLibrary { FileIconThemeModel.shared.library }
 
     var body: some View {
         Section("All files icons") {
-            if model.pack != nil {
-                Toggle("Use vscode-icons", isOn: $enabled)
-            } else {
-                HStack {
-                    Text("vscode-icons")
-                    Spacer()
-                    if model.isInstalling {
-                        ProgressView().controlSize(.small)
-                        Text("Installing…").foregroundStyle(.secondary)
-                    } else {
-                        Button("Install vscode-icons") { model.install() }
-                    }
+            Picker("Icon pack", selection: selection) {
+                ForEach(FileIconPack.allCases) { pack in
+                    Text(pack.title).tag(pack.rawValue)
                 }
             }
-            Text("File and folder icons for the All files tree. Installing also enables the icons.")
+            Text("vscode-icons is selected by default. Each pack downloads once when selected, then works offline.")
                 .settingsFootnote()
-            if let error = model.error {
-                Text(error).foregroundStyle(.red).settingsFootnote()
+            if library.loading.contains(choice) {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Installing \(choice.title)…").foregroundStyle(.secondary)
+                }
+            } else if let error = library.errors[choice] {
+                Text("Could not install \(choice.title): \(error)")
+                    .foregroundStyle(.red)
+                    .settingsFootnote()
+                Button("Retry installation") { library.prepare(choice, retry: true) }
+            } else if library.packs[choice] != nil {
+                Text("Installed").settingsFootnote()
             }
-            Link("vscode-icons · Icon credits and licences", destination: VSCodeIconsInstaller.marketplaceURL)
-                .settingsFootnote()
+            if let download = choice.download {
+                Link("\(choice.title) · Icon credits and licences", destination: download.marketplaceURL)
+                    .settingsFootnote()
+            }
         }
-        .task { await model.load() }
+        .task(id: choice) { library.prepare(choice) }
+    }
+
+    private var selection: Binding<String> {
+        Binding(get: { choice.rawValue }, set: { storedChoice = $0 })
     }
 }

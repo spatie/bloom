@@ -15,6 +15,23 @@ public struct FileIconTheme: Decodable, Sendable {
         var languageIds: [String: String]?
         var folderNames: [String: String]?
         var folderNamesExpanded: [String: String]?
+
+        var normalised: Self {
+            var result = self
+            result.fileNames = Self.lowercasedKeys(fileNames)
+            result.fileExtensions = Self.lowercasedKeys(fileExtensions)
+            result.folderNames = Self.lowercasedKeys(folderNames)
+            result.folderNamesExpanded = Self.lowercasedKeys(folderNamesExpanded)
+            return result
+        }
+
+        private static func lowercasedKeys(_ values: [String: String]?) -> [String: String]? {
+            values.map { entries in
+                entries.keys.sorted().reduce(into: [:]) { result, key in
+                    result[key.lowercased()] = entries[key]
+                }
+            }
+        }
     }
 
     public let iconDefinitions: [String: Definition]
@@ -26,8 +43,8 @@ public struct FileIconTheme: Decodable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         iconDefinitions = try container.decode([String: Definition].self, forKey: .iconDefinitions)
-        light = try container.decodeIfPresent(Associations.self, forKey: .light)
-        associations = try Associations(from: decoder)
+        light = try container.decodeIfPresent(Associations.self, forKey: .light)?.normalised
+        associations = try Associations(from: decoder).normalised
     }
 
     public func iconID(name: String, isDirectory: Bool, expanded: Bool, isLight: Bool) -> String? {
@@ -42,7 +59,9 @@ public struct FileIconTheme: Decodable, Sendable {
         if isDirectory {
             if expanded {
                 return overrides?.folderNamesExpanded?[name] ?? associations.folderNamesExpanded?[name]
+                    ?? overrides?.folderNames?[name] ?? associations.folderNames?[name]
                     ?? overrides?.folderExpanded ?? associations.folderExpanded
+                    ?? overrides?.folder ?? associations.folder
             }
             return overrides?.folderNames?[name] ?? associations.folderNames?[name]
                 ?? overrides?.folder ?? associations.folder

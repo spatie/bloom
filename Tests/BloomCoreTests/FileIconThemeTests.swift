@@ -55,4 +55,25 @@ struct FileIconThemeTests {
         #expect(theme.iconID(name: "unknown", isDirectory: false, expanded: false, isLight: true) == "file")
         #expect(theme.iconID(name: "other", isDirectory: true, expanded: true, isLight: true) == "open")
     }
+    @Test("Symbols keeps folder artwork when the manifest has no expanded variants")
+    func foldersWithoutExpandedVariants() throws {
+        let manifest = #"""
+        {"iconDefinitions":{"folder":{"iconPath":"icons/folder.svg"},"source":{"iconPath":"icons/source.svg"}},
+         "folder":"folder","folderNames":{"src":"source"}}
+        """#
+        let theme = try JSONDecoder().decode(FileIconTheme.self, from: Data(manifest.utf8))
+        #expect(theme.iconID(name: "src", isDirectory: true, expanded: true, isLight: false) == "source")
+        #expect(theme.iconID(name: "other", isDirectory: true, expanded: true, isLight: false) == "folder")
+    }
+
+    @Test("Material Icon Theme filename associations match regardless of letter case")
+    func mixedCaseAssociations() throws {
+        let manifest = #"""
+        {"iconDefinitions":{"file":{"iconPath":"icons/file.svg"},"cmake":{"iconPath":"icons/cmake.svg"}},
+         "file":"file","fileNames":{"CMakePresets.json":"cmake"}}
+        """#
+        let theme = try JSONDecoder().decode(FileIconTheme.self, from: Data(manifest.utf8))
+        #expect(theme.iconID(name: "CMakePresets.json", isDirectory: false, expanded: false, isLight: false) == "cmake")
+    }
+
 }

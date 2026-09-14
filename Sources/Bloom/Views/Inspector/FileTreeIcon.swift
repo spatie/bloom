@@ -6,7 +6,8 @@ struct FileTreeIcon: View {
     let name: String
     let isDirectory: Bool
     let isExpanded: Bool
-    @AppStorage(VSCodeIconsInstaller.defaultsKey) private var enabled = false
+    @AppStorage(FileIconPack.defaultsKey) private var storedChoice = FileIconPack.defaultChoice.rawValue
+    private var choice: FileIconPack { FileIconPack.resolve(storedChoice) }
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -21,8 +22,8 @@ struct FileTreeIcon: View {
                     .animation(TreeDisclosureMotion.chevron(reduceMotion: reduceMotion).animation, value: isExpanded)
                     .frame(width: InspectorLayout.glyphWidth, alignment: .leading)
             }
-            if enabled, let image = FileIconThemeModel.shared.image(
-                name: name, isDirectory: isDirectory, expanded: isExpanded, isLight: colorScheme == .light
+            if let image = FileIconThemeModel.shared.image(
+                pack: choice, name: name, isDirectory: isDirectory, expanded: isExpanded, isLight: colorScheme == .light
             ) {
                 Image(nsImage: image)
                     .resizable()
@@ -37,8 +38,6 @@ struct FileTreeIcon: View {
             }
         }
         .accessibilityHidden(true)
-        .task(id: enabled) {
-            if enabled { await FileIconThemeModel.shared.load() }
-        }
+        .task(id: choice) { FileIconThemeModel.shared.library.prepare(choice) }
     }
 }

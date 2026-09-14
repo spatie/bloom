@@ -1,55 +1,31 @@
 import AppKit
-import Observation
 import BloomCore
 
-@MainActor @Observable
+/// The core library owns downloads; this layer turns its bytes into cached AppKit images.
+@MainActor
 final class FileIconThemeModel {
     static let shared = FileIconThemeModel()
 
-    private(set) var pack: VSCodeIconsInstaller.Pack?
-    private(set) var isInstalling = false
-    private(set) var error: String?
-    private var hasLoaded = false
-    @ObservationIgnored private var images: [String: NSImage?] = [:]
-    @ObservationIgnored private var installTask: Task<Void, Never>?
-    private let installer = VSCodeIconsInstaller(
-        directory: Store.defaultDirectory.appendingPathComponent("File Icons/vscode-icons-\(VSCodeIconsInstaller.version)")
-    )
+    let library: FileIconPackLibrary
+    private var images: [FileIconPack: [String: NSImage?]] = [:]
 
-    func load() async {
-        guard !hasLoaded, !isInstalling else { return }
-        hasLoaded = true
-        pack = try? await installer.load()
-    }
-
-    // The shared model owns installation so closing Settings does not abandon the download.
-    func install() {
-        guard !isInstalling else { return }
-        isInstalling = true
-        error = nil
-        installTask = Task {
-            defer {
-                isInstalling = false
-                installTask = nil
-            }
-            do {
-                pack = try await installer.install()
-                images.removeAll()
-                hasLoaded = true
-                UserDefaults.standard.set(true, forKey: VSCodeIconsInstaller.defaultsKey)
-            } catch {
-                self.error = error.localizedDescription
-            }
+    init() {
+        library = FileIconPackLibrary { choice in
+            guard let download = choice.download else { throw CocoaError(.fileReadUnsupportedScheme) }
+            let directory = Store.defaultDirectory.appendingPathComponent("File Icons/\(download.directoryName)")
+            let installer = try FileIconPackInstaller(choice: choice, directory: directory)
+            if let pack = try? await installer.load() { return pack }
+            return try await installer.install()
         }
     }
 
-    func image(name: String, isDirectory: Bool, expanded: Bool, isLight: Bool) -> NSImage? {
-        guard let pack,
+    func image(pack choice: FileIconPack, name: String, isDirectory: Bool, expanded: Bool, isLight: Bool) -> NSImage? {
+        guard let pack = library.packs[choice],
               let identifier = pack.theme.iconID(name: name, isDirectory: isDirectory, expanded: expanded, isLight: isLight)
         else { return nil }
-        if let cached = images[identifier] { return cached }
+        if let cached = images[choice]?[identifier] { return cached }
         let image = pack.artwork[identifier].flatMap { NSImage(data: $0) }
-        images[identifier] = image
+        images[choice, default: [:]][identifier] = image
         return image
     }
 }

@@ -1,13 +1,7 @@
 import Foundation
 
 /// Downloads artwork only. The extension's executable code is never extracted or launched.
-public actor VSCodeIconsInstaller {
-    public static let version = "12.19.0"
-    public static let defaultsKey = "useVSCodeIcons"
-    public static let marketplaceURL = URL(string: "https://marketplace.visualstudio.com/items?itemName=vscode-icons-team.vscode-icons")!
-    public static let downloadURL = URL(string: "https://github.com/vscode-icons/vscode-icons/releases/download/v\(version)/vscode-icons-\(version).vsix")!
-    public static let manifestPath = "extension/dist/src/vsicons-icon-theme.json"
-
+public actor FileIconPackInstaller {
     public struct Pack: Sendable {
         public let theme: FileIconTheme
         public let artwork: [String: Data]
@@ -15,14 +9,19 @@ public actor VSCodeIconsInstaller {
 
     private let directory: URL
     private let archiveURL: URL
+    private let choice: FileIconPack
+    private let download: FileIconPack.Download
 
-    public init(directory: URL, archiveURL: URL = VSCodeIconsInstaller.downloadURL) {
+    public init(choice: FileIconPack, directory: URL, archiveURL: URL? = nil) throws {
+        guard let download = choice.download else { throw InstallError.builtInPack }
         self.directory = directory
-        self.archiveURL = archiveURL
+        self.choice = choice
+        self.download = download
+        self.archiveURL = archiveURL ?? download.archiveURL
     }
 
     public func load() throws -> Pack {
-        try Self.readPack(at: directory)
+        try readPack(at: directory)
     }
 
     public func install() async throws -> Pack {
@@ -36,30 +35,31 @@ public actor VSCodeIconsInstaller {
             "--output", archive.path, archiveURL.absoluteString,
         ], timeout: .seconds(130))
         let listing = try await Shell.check("/usr/bin/unzip", ["-Z1", archive.path], timeout: .seconds(30))
-        let entries = listing.lines.filter(Self.isArtworkEntry)
-        guard entries.contains(Self.manifestPath), entries.contains("extension/LICENSE.txt") else {
+        let entries = listing.lines.filter { Self.isArtworkEntry($0, for: choice) }
+        guard entries.contains(download.manifestPath), entries.contains(download.licencePath) else {
             throw InstallError.invalidArchive
         }
         let extracted = staging.appendingPathComponent("unpacked")
         try await Shell.check("/usr/bin/unzip", ["-q", archive.path] + entries + ["-d", extracted.path], timeout: .seconds(30))
-        let pack = try Self.readPack(at: extracted)
+        let pack = try readPack(at: extracted)
         try Task.checkCancellation()
         if manager.fileExists(atPath: directory.path) { try manager.removeItem(at: directory) }
         try manager.moveItem(at: extracted, to: directory)
         return pack
     }
 
-    public static func isArtworkEntry(_ path: String) -> Bool {
-        if path == manifestPath || path == "extension/LICENSE.txt" { return true }
+    public static func isArtworkEntry(_ path: String, for choice: FileIconPack) -> Bool {
+        guard let download = choice.download else { return false }
+        if path == download.manifestPath || path == download.licencePath { return true }
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        return parts.count == 3 && parts[0] == "extension" && parts[1] == "icons"
-            && parts[2].hasSuffix(".svg") && !parts[2].contains("\\")
+        return path.hasPrefix(download.artworkDirectory + "/") && path.hasSuffix(".svg")
+            && !path.contains("\\") && parts.allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
     }
 
-    private static func readPack(at root: URL) throws -> Pack {
-        let manifest = root.appendingPathComponent(manifestPath)
+    private func readPack(at root: URL) throws -> Pack {
+        let manifest = root.appendingPathComponent(download.manifestPath)
         let theme = try JSONDecoder().decode(FileIconTheme.self, from: Data(contentsOf: manifest))
-        let icons = root.appendingPathComponent("extension/icons").resolvingSymlinksInPath().path + "/"
+        let icons = root.appendingPathComponent(download.artworkDirectory).resolvingSymlinksInPath().path + "/"
         var artwork: [String: Data] = [:]
         for (identifier, definition) in theme.iconDefinitions {
             guard !definition.iconPath.isEmpty else { continue }
@@ -75,7 +75,13 @@ public actor VSCodeIconsInstaller {
 
     private enum InstallError: LocalizedError {
         case invalidArchive
+        case builtInPack
 
-        var errorDescription: String? { "The vscode-icons download does not contain a valid icon theme. Please try again." }
+        var errorDescription: String? {
+            switch self {
+            case .invalidArchive: "The download does not contain a valid icon theme. Please try again."
+            case .builtInPack: "Bloom's default icons do not need to be downloaded."
+            }
+        }
     }
 }
