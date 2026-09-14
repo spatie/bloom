@@ -113,7 +113,7 @@ struct InspectorToolbar: View {
                     model.inspectorTab = tab
                 } label: {
                     Text(title(for: tab))
-                        .font(Typo.label)
+                        .font(isSelected ? Typo.labelEmphasis : Typo.label)
                         .foregroundStyle(
                             isSelected ? Palette.textPrimary : Palette.textSecondary
                         )
@@ -135,6 +135,11 @@ struct InspectorToolbar: View {
                                         )
                                 }
                                 .padding(.bottom, Metrics.outline)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle()
+                                        .fill(Palette.controlAccent)
+                                        .frame(height: Metrics.spacingTight)
+                                }
                                 .matchedGeometryEffect(
                                     id: "inspector.tab.selection",
                                     in: tabSelection

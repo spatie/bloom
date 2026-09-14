@@ -112,6 +112,7 @@ struct BloomApp: App {
         if MenuProbe.isRequested { MenuProbe.schedule() }
         if MenuActionProbe.isRequested { MenuActionProbe.schedule() }
         #endif
+        Log.launchStep("app initialised")
     }
 
     /// The thicknesses the window's minimum width is built out of.

@@ -94,9 +94,7 @@ final class WorkspaceTabsStore {
     /// conversation and it still does.
     private var selected: [WorkspaceID: PaneContent] = [:]
 
-    /// The order each workspace's strip has been dragged into, over the two runs it would otherwise
-    /// read as. Absent for a workspace nobody has arranged, which reads exactly as it always did.
-    /// See `BloomCore.StripOrder`, which carries the rule and what a lost defaults file costs.
+    /// Opening order across chats and tools, updated when either list changes or a tab is dragged.
     private var stripOrders: [WorkspaceID: [PaneContent]] = [:]
 
     /// Read in one pass at launch rather than lazily per workspace. A getter may not mutate, and
@@ -189,6 +187,32 @@ final class WorkspaceTabsStore {
             claimed: claimed(sessions: sessions, tools: tools),
             stored: stripOrders[model.workspace.id] ?? []
         )
+    }
+
+    /// Both stores report arrivals here. An unloaded store keeps its saved positions until it
+    /// can supply a real list, so launch order cannot discard half of an interleaved strip.
+    func updateOrder(
+        sessions: [SessionID]? = nil, tools: [String]? = nil, workspaceID: WorkspaceID
+    ) {
+        let previous = stripOrders[workspaceID] ?? []
+        let order = StripOrder.updated(sessions: sessions, tools: tools, stored: previous)
+        guard order != previous else { return }
+        stripOrders[workspaceID] = order
+        persistStrip(workspaceID)
+    }
+
+    /// Capture selection before removing the content. A background close must not fall back to
+    /// the workspace's active conversation, and a split tab keeps its surviving panes.
+    func prepareToClose(_ content: PaneContent, in model: WorkspaceModel) {
+        let entries = entries(in: model)
+        guard let current = selectedTab(in: model, entries: entries) else { return }
+        if selected[model.workspace.id] != current { selected[model.workspace.id] = current }
+        guard current == content,
+              layout(of: current).panes.allSatisfy({ self.content(of: $0, in: current) == content })
+        else { return }
+        if let next = TabClosure.selectionAfterClosing(content, selected: current, tabs: entries) {
+            select(next, in: model)
+        }
     }
 
     /// Writes down the order the user has just dragged the strip into.
@@ -552,7 +576,7 @@ final class WorkspaceTabsStore {
     /// be a pane of a tab the user is not looking at, and a pane holding a dead pointer would show
     /// an empty state until something else happened to reload the workspace.
     ///
-    /// No `WorkspaceModel`, because `CenterTabStore.close` has none to give.
+    /// The caller chooses a neighbouring tab before removal when the whole active tab closes.
     func forget(_ content: PaneContent, workspaceID: WorkspaceID) {
         for arrangement in arrangements.values {
             guard let stored = arrangement.stored else { continue }

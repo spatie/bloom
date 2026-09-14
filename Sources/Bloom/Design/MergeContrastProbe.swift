@@ -21,9 +21,11 @@ enum MergeContrastProbe {
 
     private static func render(name: String, appearance: NSAppearance.Name, titlebar: Bool) async {
         let host = NSHostingView(rootView: MergeSplitButton(
-            method: .merge,
+            method: .merge, fill: Color(red: 0, green: 0.45, blue: 0.4),
             canMerge: true, choose: { _ in }, merge: {}
-        ).padding(20).background(Color.white).environment(\.controlActiveState, .active))
+        // Inactive on purpose: a window that is not key is where the fill used to go grey, and
+        // asking for the active state here is how the probe missed it.
+        ).padding(20).background(Color.white).environment(\.controlActiveState, .inactive))
         host.appearance = NSAppearance(named: appearance)
         host.frame = NSRect(x: 0, y: 0, width: 220, height: 80)
         let window = NSWindow(

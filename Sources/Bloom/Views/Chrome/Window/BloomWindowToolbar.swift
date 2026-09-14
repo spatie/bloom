@@ -1,72 +1,19 @@
 import SwiftUI
 import BloomCore
 
-/// The window toolbar.
-///
-/// A `ToolbarContent` type rather than a `@ToolbarContentBuilder` property on `RootView`, so the
-/// toolbar takes the model as an input rather than reaching for it as ambient environment.
-///
-/// It is attached to the DETAIL column, never to the `NavigationSplitView`. See `RootView` for the
-/// crash that taught us the difference.
-///
-/// The navigation pane toggle lives here beside the traffic lights. The inspector control lives
-/// at the leading edge of `TitleBarStrip`, after the native search item and beside its own pane.
-/// Both use `WindowPaneToggle`, so their geometry and interaction remain a matched pair.
-///
-/// **Nor is there a `+` any more.** It appeared only while the sidebar was folded away, on the
-/// argument that nothing else in the window starts work in that state. What the owner saw was a
-/// split button with a bare caret beside the traffic lights, which is a control the eye has to
-/// stop on before it can be dismissed. Command N and Option Command N still start a workspace and
-/// a project from anywhere, in either state, so nothing is only reachable from a pointer that has
-/// folded the pane away.
-///
-/// And the window's title, which is here because AppKit no longer draws it: a title of our own is
-/// what lets a double click on the NAME start a rename without stealing the double click on the
-/// BAR that Desktop & Dock has already spent. See `WindowTitleControl`.
-///
-/// There is no Refresh Changes either. The changed file list polls every six seconds and redraws
-/// itself, so the command could only ever do what had already happened, and a control that does
-/// nothing teaches the user that the list is not to be trusted.
+/// The detail column's toolbar. NavigationSplitView owns the sidebar toggle so it stays over
+/// the sidebar while expanded. Search and the inspector use standard toolbar buttons; only the
+/// pull request band needs a title-bar accessory to follow the inspector's width.
 struct BloomWindowToolbar: ToolbarContent {
     let app: AppModel
-    let isSidebarVisible: Bool
-    let toggleSidebar: @MainActor @Sendable () -> Void
     let startFreshAskConversation: () -> Void
 
     var body: some ToolbarContent {
-        // NavigationSplitView's default sidebar item offers a label-style context menu on macOS
-        // 26. Bloom always shows this control as an icon, so a choice between "Icon and Text" and
-        // "Icon Only" has no useful effect. RootView removes that default item and this image-only
-        // button keeps the native placement and action without advertising a setting Bloom ignores.
-        ToolbarItem(placement: .navigation) {
-            WindowPaneToggle(
-                edge: .leading,
-                isVisible: isSidebarVisible,
-                action: toggleSidebar
-            )
-        }
-        .sharedBackgroundVisibility(.hidden)
-
-        // The window's title, drawn by us rather than by AppKit.
-        //
-        // A toolbar item and not a title bar accessory, which is what the strip at the other end
-        // is. A leading accessory is placed "adjacent and to the right of the close/minimize/
-        // maximize buttons", per `NSTitlebarAccessoryViewController.h`, so it would sit BEFORE the
-        // `+` above rather than after it, and an accessory is sized from its view's frame rather
-        // than from its content, so the width of a name would have to be measured by hand and
-        // measured again on every keystroke while it is being edited. A toolbar item is laid out
-        // in the order written and sizes itself, which is both of those for free.
-        //
-        // Second in the group, so the `+` keeps the leading edge on the one screen it appears on.
-        // See `WindowTitleControl` for why the title is a view of ours at all.
         ToolbarItem(placement: .navigation) {
             WindowTitleControl(app: app)
+                .padding(.leading, Metrics.spacingWide)
         }
-        // No plate behind the name. AppKit gives every toolbar item a shared background, which
-        // put a glass capsule around the window's title; next to the bare `Home`/`Ask Bloom` rows
-        // and the plain search field it read as a control you could press, and the name is not
-        // one. The switch is the one `WindowTitleControl`'s notes name: it turns the plate off
-        // rather than dividing it, so the item still sits where it sat.
+        // The editable window title is text, so it does not need a button's background.
         .sharedBackgroundVisibility(.hidden)
 
         if app.selection == .ask, app.ask.session != nil {
@@ -79,28 +26,23 @@ struct BloomWindowToolbar: ToolbarContent {
             }
         }
 
-        // The elastic middle of the bar. It was put here for the search field, which used to be
-        // the last item in the toolbar: `.searchable` contributed an `NSSearchToolbarItem` after
-        // everything written above, and an `NSToolbar` packs from the leading edge with no gap
-        // unless something between the items can stretch. What usually stretches is AppKit's own
-        // title item, and `RootView` takes that away with `.toolbar(removing: .title)` because the
-        // name is drawn here instead, so removing the second title also removed the toolbar's only
-        // slack. Measured offscreen at 1440 points: without this the field's capsule started at
-        // x=416, a third of the way across the bar, and with it at x=727.
-        //
-        // **The field has gone to a panel and the spacer stays**, because what it does now is hold
-        // these items against the leading edge rather than letting a toolbar with nothing at its
-        // other end lay them out somewhere else. The window's search is a glyph in the title bar
-        // accessory now: see `SearchToolbarButton` and `TitleBarStrip`.
         ToolbarSpacer(.flexible, placement: .navigation)
 
-        // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the
-        // window's own edge, which put it directly above the inspector's pull request strip: two
-        // stacked rows in the top right corner, both describing the same workspace. The strip has
-        // taken the top row, since it is the one with a state in it, and the menu moved one place
-        // left to where the centre column ends. Both now live in `TitleBarStrip`, which is a title
-        // bar accessory rather than a toolbar item, because a toolbar item is sized by its content
-        // and this band has to be as wide as the pane under it.
-    }
+        ToolbarItem(placement: .primaryAction) {
+            Button("Search", systemImage: "magnifyingglass") {
+                SearchPanelModel.shared.open(app: app)
+            }
+            .help("Search workspaces, transcripts and commands")
+        }
 
+        if app.selectedWorkspace != nil {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Inspector", systemImage: "sidebar.right") {
+                    app.isInspectorVisible.toggle()
+                }
+                .accessibilityValue(app.isInspectorVisible ? "Shown" : "Hidden")
+                .help(app.isInspectorVisible ? "Hide the changed files" : "Show the changed files")
+            }
+        }
+    }
 }

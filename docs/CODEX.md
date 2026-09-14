@@ -49,12 +49,10 @@ a fresh app-server process so it can use an updated executable instead of the ol
 Fake-peer regressions cover the handshake, payload, field rejection and retained permissions;
 no paid end-to-end Plan turn was run for this change.
 
-The same installed version supports two conversation-history contracts. Bloom reads
-`thread.historyMode` first. Paginated threads use `thread/revert` with an exact `beforeTurnId`;
-legacy threads use the deprecated `thread/rollback` after locating that exact ID in their full
-turn list. Rewind status queries treat a failed or malformed read as unavailable, never as
-evidence that a turn disappeared. These history methods affect conversation context only.
-Bloom owns the independent file/index snapshots and recovery journal.
+The same installed version supports two conversation-history contracts, told apart by
+`thread.historyMode`. Paginated threads take `thread/revert` with an exact `beforeTurnId`;
+legacy threads take the deprecated `thread/rollback` with a turn count. Bloom used both for a
+conversation rewind that has since been removed, and calls neither now.
 
 ```
 codex app-server generate-json-schema --out <dir>

@@ -130,6 +130,9 @@ final class DetailSplitViewController: NSSplitViewController {
     /// AppKit may report an expanded frame during restoration or a closing animation.
     /// Those frames must not reopen the title-bar band after the app has hidden the pane.
     private var isInspectorPresented = false
+    private var isUpdating = false
+    private var collapseObservation: NSKeyValueObservation?
+    var onInspectorPresentationChanged: ((Bool) -> Void)?
 
     /// What the centre column refuses to go below. The inspector's ceiling is the other side of the
     /// same coin, and AppKit derives it rather than us: with both minimums declared a drag simply
@@ -224,6 +227,24 @@ final class DetailSplitViewController: NSSplitViewController {
         splitView.autosaveName = Self.autosaveName
 
         watchInspectorWidth()
+        // A divider drag changes the native item without going through `update`. Frame
+        // notifications alone miss a collapse when AppKit keeps the pane's previous frame.
+        collapseObservation = inspectorItem.observe(\.isCollapsed) { [weak self] _, _ in
+            // AppKit changes this split item on the main thread, including during a drag.
+            MainActor.assumeIsolated { self?.inspectorCollapseChanged() }
+        }
+    }
+
+    private func inspectorCollapseChanged() {
+        guard lastContent != nil, !isUpdating else { return }
+        let presented = !inspectorItem.isCollapsed
+        // `update` sets this before asking AppKit to collapse, so only native changes come back.
+        guard presented != isInspectorPresented else { return }
+        isInspectorPresented = presented
+        // Update the model before publishing geometry. Deferring this let a SwiftUI refresh
+        // reapply the old state, so the next toolbar click tried to close an already hidden pane.
+        onInspectorPresentationChanged?(presented)
+        publishInspectorWidth(collapsed: !presented, sliding: false)
     }
 
     /// Tells the title bar how wide the inspector currently is.
@@ -231,11 +252,8 @@ final class DetailSplitViewController: NSSplitViewController {
     /// The pull request strip sits above this pane now rather than inside it, and a band that does
     /// not end where the pane ends reads as a misalignment rather than as a heading.
     ///
-    /// Two sources, because neither covers the other. A divider drag and a window resize move the
-    /// pane's frame and post a notification for it; collapsing the pane does not, since a collapsed
-    /// item here keeps the frame it had and is simply not drawn, so that half is published from
-    /// `update` where the collapse is asked for. `viewDidLayout` was the first attempt at a single
-    /// source and it is neither: it fired three times during launch and never again.
+    /// Both notifications matter: the pane can resize, or the split view can clip its container
+    /// while leaving the pane's frame unchanged. `viewDidLayout` missed divider drags entirely.
     private func watchInspectorWidth() {
         inspectorHost.view.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -244,12 +262,23 @@ final class DetailSplitViewController: NSSplitViewController {
             name: NSView.frameDidChangeNotification,
             object: inspectorHost.view
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(paneFrameChanged),
+            name: NSSplitView.didResizeSubviewsNotification,
+            object: splitView
+        )
     }
 
     /// A drag or a resize. Never a slide: the pane is where it is, and the title bar should follow
     /// it this frame rather than a quarter of a second from now.
     @objc private func paneFrameChanged() {
-        publishInspectorWidth(collapsed: !isInspectorPresented || inspectorItem.isCollapsed, sliding: false)
+        // AppKit can shrink the item's container while its hosted view keeps its minimum width.
+        // The header follows the part still visible, including a drag that clips it to zero.
+        let visibleWidth = inspectorHost.view.visibleRect.width
+        let collapsed = !isInspectorPresented || inspectorItem.isCollapsed || visibleWidth <= 0
+        let width = collapsed ? 0 : visibleWidth + splitView.dividerThickness
+        InspectorGeometry.shared.setInspectorWidth(width, sliding: false)
     }
 
     /// `collapsed` is passed in rather than read back off the item, because the animated setter
@@ -267,6 +296,8 @@ final class DetailSplitViewController: NSSplitViewController {
         animated: Bool,
         content: SidebarSelection
     ) {
+        isUpdating = true
+        defer { isUpdating = false }
         self.isInspectorPresented = isInspectorPresented
         detailHost.rootView = detail
         inspectorHost.rootView = inspector
@@ -285,7 +316,7 @@ final class DetailSplitViewController: NSSplitViewController {
         guard inspectorItem.isCollapsed != shouldCollapse else {
             // The restored native state can already be correct while the title bar still holds
             // an earlier width. An unchanged collapse still needs to reconcile that geometry.
-            publishInspectorWidth(collapsed: shouldCollapse, sliding: false)
+            paneFrameChanged()
             return
         }
         if !shouldCollapse { makeRoomForInspector(animated: animated) }
@@ -413,6 +444,9 @@ struct DetailSplitView: NSViewControllerRepresentable {
     }
 
     func updateNSViewController(_ controller: DetailSplitViewController, context: Context) {
+        controller.onInspectorPresentationChanged = { [weak app] presented in
+            app?.isInspectorVisible = presented
+        }
         controller.update(
             detail: detail,
             inspector: inspector,

@@ -22,25 +22,6 @@ struct TabItemView: View {
     var icon: TabItemIcon?
     var isActive: Bool
     var isRunning = false
-    /// Whether this tab's leading edge is the leading edge of the pane itself, which is true of
-    /// the first tab in a strip that begins at the pane's own edge and of nothing else.
-    ///
-    /// Such a tab has no line of its own to draw down that side, because the pane already has
-    /// one there. In the centre column that line is the rule down the sidebar's trailing edge,
-    /// and it is a point wide. The tab's outline is a point wide too and is drawn INSIDE the
-    /// tab, so the two sat side by side: measured off a two times capture, the rule beside the
-    /// selected first tab was four device pixels across where the same rule a row lower, beside
-    /// the pane, was two. The tab's fill therefore began a point to the right of the content it
-    /// is the top of, and the join between the two read as a step in the line.
-    ///
-    /// So the leading side is dropped and the leading corner is squared, and the pane's rule
-    /// becomes this tab's left edge: one unbroken point of it from the toolbar to the foot of the
-    /// window, with the tab's fill starting exactly where the pane's does.
-    ///
-    /// Only the strip's own first tab, and only where the strip has no control before it. The
-    /// bottom panel opens with the chevron that collapses it, so its first tab is nowhere near
-    /// the edge and keeps both corners.
-    var isAtPaneEdge = false
     /// The ground of the pane this tab opens and the ink that reads on it, worn while the tab is
     /// the selected one. `TabPane.content.surface` for the centre column, `.sunken` for the bottom
     /// panel, and the user's own Ghostty colours for a terminal running their theme.
@@ -76,7 +57,9 @@ struct TabItemView: View {
     /// drawn rather than grown.
     var namespace: Namespace.ID
 
-    /// A tab stops growing here so one long title cannot push every other tab out of the strip.
+    /// Short titles still need enough room to read as tabs and keep the close target clear.
+    static let minimumWidth: CGFloat = 110
+    /// A standalone tab preview has no strip to assign its width.
     private static let maximumWidth: CGFloat = 200
     /// Wide enough for the titles tabs actually get, and the same width whichever tab is being
     /// renamed, so the strip does not jump as the editor opens.
@@ -85,25 +68,16 @@ struct TabItemView: View {
     /// is a point or two taller than a label, and a tab that grew as its editor opened put its
     /// text on a different line from the tabs beside it.
     private static let labelHeight: CGFloat = 20
-    /// The top corners only, because the bottom ones are not there: the tab runs into the pane.
-    /// Measured off Safari, whose selected tab is a full capsule floating inside its own inset
-    /// track. A tab that reaches the content below it cannot be a capsule, and half a capsule is
-    /// a dome, so this is the editor-tab radius the window already uses everywhere else.
-    private static let cornerRadius = Metrics.corner
+    /// Native window tabs use a 24-point capsule inside their track.
+    static let tabHeight: CGFloat = 24
     /// One highlight for the whole strip, so `matchedGeometryEffect` has something to match on.
     private static let selectionID = "tabItem.selection"
 
-    /// How much wider the close cross's hit box is than the cross, on every side.
-    ///
-    /// `Metrics.glyph` is 13 and its own doc calls it "the box a sidebar row's state glyph sits
-    /// in, matching the cap height of the text beside it", which is a metric for lining marks up
-    /// down a column and not one for aiming at. Safari's cross is a 16 point target. Taken as
-    /// padding under a `contentShape` and then taken straight back off, so the target grows and
-    /// the strip's layout does not: every tab would otherwise be three points wider, and at the
-    /// 200 point ceiling three points come off the title instead.
-    private static let closeSlop: CGFloat = 1.5
+    private static let closeSize: CGFloat = 20
 
+    @Environment(\.tabItemWidth) private var tabItemWidth
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.appearsActive) private var appearsActive
 
     @State private var isHovered = false
     /// The pointer on the close cross itself rather than on the tab around it.
@@ -123,7 +97,7 @@ struct TabItemView: View {
                             .accessibilityLabel("Running")
                     } else if let icon {
                         TabItemIconView(
-                            icon: icon, ink: isActive ? surface.ink : Palette.textSecondary
+                            icon: icon, ink: isActive ? surface.ink : Palette.textPrimary
                         )
                     }
                 }
@@ -138,72 +112,33 @@ struct TabItemView: View {
                     .textFieldStyle(.plain)
                     .foregroundStyle(isActive ? surface.ink : Palette.textPrimary)
                     .focused($isRenameFocused)
-                    .frame(width: Self.renameWidth)
+                    .frame(minWidth: 0, idealWidth: Self.renameWidth, maxWidth: Self.renameWidth)
                     .onSubmit { onCommitRename(renameText) }
                     .onExitCommand(perform: onCancelRename)
             } else {
-                // One weight for every tab, selected or not. Safari's own strip sets both at the
-                // same weight and the same colour and lets the shape carry the whole answer;
-                // measured on a 26 window, a selected title and an unselected one are the same
-                // ink. Bolding the selected one here was doing the shape's job badly: it moved
-                // the text a point as the selection landed, and it left the tab reading as a
-                // label that had been emphasised rather than as a tab that had come forward.
-                //
-                // The colour step stays. Bloom's strip is denser than Safari's and its tabs are
-                // leading aligned rather than centred, so dropping to the secondary label is what
-                // keeps an unselected run from competing with the pane it is sitting above.
                 Text(title)
-                    .foregroundStyle(isActive ? surface.ink : Palette.textSecondary)
+                    .foregroundStyle(isActive ? surface.ink : Palette.textPrimary)
                     .lineLimit(1)
             }
-
-            closeButton
         }
-        // One type size AND one weight for the whole row, set once above the branches, so
-        // selection cannot change the metrics of anything. Everything a tab can hold is then on
-        // the same line as everything a neighbouring tab holds, whatever each of them is showing,
-        // and a tab that becomes selected does not reflow as it does so.
-        .font(Typo.body)
+        .font(Typo.caption)
+        .opacity(labelOpacity)
         .frame(height: Self.labelHeight)
-        .padding(.horizontal, Metrics.inset)
-        .frame(maxWidth: Self.maximumWidth)
+        // Equal space on both sides centres the label independently of the leading close button.
+        .padding(.horizontal, Self.closeSize + Metrics.spacingWide)
+        .frame(minWidth: tabItemWidth ?? Self.minimumWidth, maxWidth: tabItemWidth ?? Self.maximumWidth)
+        .frame(height: Self.tabHeight)
+        // Decoration must not intercept the press that starts a tab drag. The closure also keeps
+        // the fill inside the tab's bounds instead of extending into the unified toolbar inset.
+        .background {
+            background
+                .padding(.horizontal, Metrics.spacingSmall / 2)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .leading) {
+            closeButton.padding(.leading, Metrics.spacingSmall * 1.5)
+        }
         .frame(height: Metrics.barHeight)
-        // The selected tab takes the content colour and covers the strip's lower rule. Its own
-        // neutral outline still closes the tab, while the activity colour remains visible only
-        // outside the selection.
-        // A rounded capsule of selection grey floating in a strip is a browser chrome idiom, and
-        // it read as a solid block rather than as a tab.
-        //
-        // Rounded at the top and square at the bottom for the same reason. Safari's selected tab
-        // is the toolbar's own colour where the rest of its strip is a recess about five per cent
-        // darker, and that difference, not the type, is the whole of what marks it; Bloom's fill
-        // was already the right colour but was drawn as a plain rectangle, so in a light
-        // appearance it came out the same white as the strip and marked nothing at all. Two
-        // corners and a line down three sides give the fill an edge to be seen by.
-        //
-        // A closure rather than `.background(background)`. Handed a `Color`, that call resolves to
-        // the `ShapeStyle` overload, whose `ignoresSafeAreaEdges` defaults to every edge, and the
-        // strip sits directly under a unified toolbar. The selected tab's fill was therefore drawn
-        // up through the whole toolbar inset, a block of it floating above the strip. The `View`
-        // overload paints the tab's own bounds and nothing else.
-        //
-        // **And it takes no clicks.** The owner could drag any tab along the strip except the one
-        // he was in, and the reordering hangs off `.draggable`, which `SessionTabsView` applies to
-        // the whole tab: the press has to reach the TAB for a drag to begin, where a press the
-        // framework resolves onto a subview reaches that subview, which has no drag on it. The
-        // ancestor's tap gestures below are `simultaneous` and hear it either way, which is why
-        // the selected tab still selected and still renamed while refusing to be picked up.
-        //
-        // Which subview is the one the selected tab has and the others do not was reached by
-        // elimination rather than by measurement, and it is worth saying so. A selected tab and an
-        // unselected one differ in the ink they wear, in one accessibility trait, and here. Every
-        // tab draws a plate under the pointer while it is hovered, and a hovered tab drags, so the
-        // plate is not it; what is left is the `matchedGeometryEffect` this branch hangs off the
-        // plate, which is a geometry effect standing between the pointer and the tab.
-        //
-        // Either way a fill and an outline are decoration, and no press has ever been meant for
-        // them: selecting, renaming and closing are all on the row or on the cross above it.
-        .background { background.allowsHitTesting(false) }
         .contentShape(Rectangle())
         // A single click selects and a double click renames, which is one gesture with two
         // meanings rather than a button, so it cannot be expressed as one.
@@ -253,44 +188,26 @@ struct TabItemView: View {
                 .disabled(!canClose)
         }
         .task(id: isRenaming) { await startEditing() }
+        .transition(.opacity)
     }
 
-    /// Nothing at rest on an unselected tab, which is why this is a builder rather than a colour.
-    /// A `.clear` fill is still a view, and a view is still a thing `matchedGeometryEffect` can
-    /// try to match, so the unselected case has to be absent rather than transparent.
-    ///
-    /// The hover fill wears the same top corners as the selected one so the two are obviously the
-    /// same shape, but it moves the other way: over the strip's recess, selection lightens towards
-    /// the pane in a light appearance and darkens towards it in a dark one, while hover always
-    /// goes the opposite way. That is what stops a hovered tab from being read as a selected one.
+    private var labelOpacity: Double {
+        appearsActive || contrast == .increased ? 1 : 0.55
+    }
+
+    /// Keep enough of the pane's colour under the glass for custom terminal labels to stay legible.
+    /// Inactive windows lose the glass finish but retain a visible selection.
     @ViewBuilder
     private var background: some View {
         if isActive {
-            shape
-                .fill(surface.fill)
-                .overlay {
-                    TabItemOutline(radius: Self.cornerRadius, skipsLeadingEdge: isAtPaneEdge)
-                        .strokeBorder(Palette.border.opacity(contrast == .increased ? 1 : 0.65), lineWidth: Metrics.outline)
-                }
+            TabGlassBackground(shape: Capsule(), fill: surface.fill)
                 .matchedGeometryEffect(id: Self.selectionID, in: namespace)
         } else if isHovered {
-            shape.fill(Palette.hover)
+            Capsule().fill(Palette.hover)
         }
     }
 
-    /// The fill's shape, and the hover plate's, so a hovered tab and a selected one are obviously
-    /// the same object in two states. Square at the leading corner for a tab at the pane's edge,
-    /// for the reason written out on `isAtPaneEdge`: a corner that curved away there would leave
-    /// the same step against the pane's rule, only rounded.
-    private var shape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: isAtPaneEdge ? 0 : Self.cornerRadius,
-            topTrailingRadius: Self.cornerRadius,
-            style: .circular
-        )
-    }
-
-    /// Kept in the layout even when it is invisible, so no label moves when the pointer enters.
+    /// The label reserves this target's width even when the close button is invisible.
     ///
     /// Hover only, including on the selected tab. It used to sit on the selected tab at all times,
     /// on the argument that the tab you are looking at is the one you are most likely to close,
@@ -315,17 +232,20 @@ struct TabItemView: View {
                 // entirely, so a hover-revealed control was one VoiceOver could never find. Clear
                 // ink draws the same nothing and the element stays.
                 .foregroundStyle(closeInk)
-                .frame(width: Metrics.glyph, height: Metrics.glyph)
-                // Out and back again: the hit box is `closeSlop` bigger on every side, and the
-                // space the cross takes in the row is unchanged. See `closeSlop`.
-                .padding(Self.closeSlop)
+                .frame(width: Self.closeSize, height: Self.closeSize)
+                .background {
+                    if isVisible && isCloseHovered {
+                        Circle()
+                            .fill((isActive ? surface.ink : Palette.textPrimary)
+                                .opacity(contrast == .increased ? 0.2 : 0.1))
+                    }
+                }
                 .contentShape(Rectangle())
-                .padding(-Self.closeSlop)
         }
         .buttonStyle(.borderless)
         // What the tab's own tap gesture asks before it selects. See the gestures on the row.
         .onHoverChange { isCloseHovered = $0 }
-        // Hit testing still follows the hover, and deliberately: this sits at a tab's trailing
+        // Hit testing still follows the hover, and deliberately: this sits at a tab's leading
         // edge, and a close button that takes a click while invisible closes tabs somebody meant
         // to select.
         .allowsHitTesting(isVisible)
@@ -335,7 +255,10 @@ struct TabItemView: View {
 
     private var closeInk: Color {
         guard isVisible else { return .clear }
-        return isActive ? surface.inkMuted : Palette.textSecondary
+        let ink = isCloseHovered
+            ? (isActive ? surface.ink : Palette.textPrimary)
+            : (isActive ? surface.inkMuted : Palette.textSecondary)
+        return ink.opacity(labelOpacity)
     }
 
     private var isVisible: Bool {

@@ -61,7 +61,7 @@ struct ToolPaneView: View {
                                        let session = model.sessions.first(where: { $0.id == sessionID }) {
                                         await model.closeSession(session)
                                     } else {
-                                        await CenterTabStore.shared.close(tab)
+                                        await CenterTabStore.shared.close(tab, in: model)
                                     }
                                 }
                             },

@@ -397,7 +397,8 @@ final class CenterTabStore {
 
     /// Closes a tab and stops whatever it was running. Any pane showing it goes with it, and the
     /// tab it was a pane of settles around the gap. See `TabSurgery`.
-    func close(_ tab: CenterTab) async {
+    func close(_ tab: CenterTab, in model: WorkspaceModel) async {
+        WorkspaceTabsStore.shared.prepareToClose(.tool(tab.id), in: model)
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
         WorkspaceTabsStore.shared.forget(.tool(tab.id), workspaceID: tab.workspaceID)
 
@@ -476,6 +477,7 @@ final class CenterTabStore {
         // it: from here the list in hand is the list on disk.
         unreadable.remove(workspaceID)
         tabsByWorkspace[workspaceID] = tabs
+        WorkspaceTabsStore.shared.updateOrder(tools: tabs.map(\.id), workspaceID: workspaceID)
         Self.persist(tabs, workspaceID: workspaceID)
     }
 

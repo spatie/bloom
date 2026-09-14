@@ -514,11 +514,18 @@ struct PullRequestSummary: View {
     /// all; asking this workspace's agent in the composer still lands one, which is all this
     /// button does anyway.
     ///
+    /// **The tint measurement that used to live here has moved to `MergeSplitButton`,** because
+    /// it is the reason that control is drawn the way it is. The short version is unchanged: the
+    /// system will not tint a menu, prominent or otherwise, so the band's colour is painted behind
+    /// it. When the window loses key, AppKit draws the menu as a neutral capsule that covers that
+    /// fill, so `MergeSplitButton` pins its control to the active state rather than going grey.
+    ///
     /// Every path through it opens the confirmation. Nothing here performs a merge, and since
     /// merging moved onto the agent nothing anywhere in this target does either.
     private var mergeControl: some View {
         MergeSplitButton(
             method: mergeMethod,
+            fill: status.tone.fill,
             // Queueing a request does not bypass GitHub's merge restrictions.
             canMerge: status.canMerge,
             help: blockedReason,

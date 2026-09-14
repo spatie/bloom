@@ -116,107 +116,85 @@ struct SidebarView: View {
                 askRow
             }
 
-            // A plain row rather than a `Section` header, because the things it heads are
-            // themselves sections and a list cannot nest one inside another. It carries no tag
-            // and refuses selection, so it stays a label. Home keeps its own section above it,
-            // which is what stops it reading as the first project.
-            SidebarProjectsHeader(onStartProject: startProject)
-                .selectionDisabled()
-                .listRowSeparator(.hidden)
-
-            // One `ForEach` over every project and every workspace, rather than a `Section` per
-            // project, and the reason is the `onMove` at the foot of it. `onMove` on a `ForEach`
-            // of `Section`s moves nothing at all: a section header is not a row the outline will
-            // pick up, so the projects could not be dragged while each was a section of its own,
-            // and there is no second `onMove` that reaches them. One flat run is the shape the
-            // mechanism can move, and it moves both things: the source offset is what says
-            // whether a project or a workspace was picked up. See `SidebarReorder.destination`.
-            ForEach(paneRows) { row in
-                switch row {
-                case .project(let group):
-                    RepoHeaderRow(
-                        repo: group.repo,
-                        hasUnreadWork: group.hasUnreadWork,
-                        workspaceCount: group.workspaces.count,
-                        onCreateWorkspace: presentCreate
-                    )
-                    // A project is never the selection. The pane selects work, not the folder the
-                    // work is in, and this row carries no tag. Refusing selection does NOT refuse
-                    // the drag, which is the whole reason the projects can be reordered at all.
-                    .selectionDisabled()
-                case .workspace(let workspace, let projectName):
-                    // The fill and the ink are the same two lines every selectable row carries,
-                    // and they are applied in `workspaceRow` rather than here: written inline,
-                    // this `switch` stopped type checking in reasonable time.
-                    workspaceRow(workspace, projectName: projectName)
-                case .crew(let member, let workspaceID, _):
-                    CrewSidebarRow(row: member)
-                        // The owner's own way to be finished with a subagent, which the agent
-                        // above it has in `agent_stop` and the person watching it did not.
-                        .contextMenu {
-                            Button("Stop Subagent") { askToStop(member, in: workspaceID) }
-                        }
-                        // Always selectable, unlike the subagent row below it: a crew member is a
-                        // conversation, so there is always something to open, whatever it is
-                        // doing and whether or not it is still running.
-                        //
-                        // Never something to pick up. A crew member is where it is because of the
-                        // worktree it shares, not because of an order anybody chose.
-                        .moveDisabled(true)
-                        .tag(SidebarSelection.crew(workspaceID, member.id))
-                        .listRowBackground(selectionFill(for: .crew(workspaceID, member.id)))
-                        .selectedRowInk(
-                            isEmphasized: isEmphasized(.crew(workspaceID, member.id))
+            // One native section supplies the Projects heading's font and spacing. The rows
+            // stay in one ForEach so dragging still uses the same indices in `paneRows`.
+            Section {
+                // One `ForEach` over every project and every workspace, rather than a `Section` per
+                // project, and the reason is the `onMove` at the foot of it. `onMove` on a `ForEach`
+                // of `Section`s moves nothing at all: a section header is not a row the outline will
+                // pick up, so the projects could not be dragged while each was a section of its own,
+                // and there is no second `onMove` that reaches them. One flat run is the shape the
+                // mechanism can move, and it moves both things: the source offset is what says
+                // whether a project or a workspace was picked up. See `SidebarReorder.destination`.
+                ForEach(paneRows) { row in
+                    switch row {
+                    case .project(let group):
+                        RepoHeaderRow(
+                            repo: group.repo,
+                            hasUnreadWork: group.hasUnreadWork,
+                            workspaceCount: group.workspaces.count,
+                            onCreateWorkspace: presentCreate
                         )
-                case .subagent(let subagent, let workspaceID, _):
-                    SubagentSidebarRow(row: subagent)
-                        // A row with no file to open refuses selection rather than taking it and
-                        // showing an empty pane, which is the worse of the two.
-                        .selectionDisabled(!subagent.opensOutput)
-                        // Never something to pick up. A subagent has no place in the pane of its
-                        // own: it is where it is because of what spawned it.
-                        .moveDisabled(true)
-                        .tag(SidebarSelection.subagent(workspaceID, subagent.id))
-                        // A subagent that CAN be selected selects like everything else in the
-                        // pane. It shares the same semantic selection as every other selected row.
-                        .listRowBackground(
-                            selectionFill(for: .subagent(workspaceID, subagent.id))
-                        )
-                        .selectedRowInk(
-                            isEmphasized: isEmphasized(.subagent(workspaceID, subagent.id))
-                        )
-                case .pending(let pending):
-                    // A workspace that does not exist yet, so there is nothing to select, nothing
-                    // to open and nothing to write a `sort_order` onto. Refused here and again in
-                    // `SidebarReorder.destination`, on the same belt-and-braces footing as the
-                    // notice below. It fades in like any other row that turns up: the tracker was
-                    // handed its id in `regroup`, which is also what stops the stored row fading
-                    // in over the top of it a moment later. See `PendingWorkspaceRow`.
-                    PendingWorkspaceRow(pending: pending)
-                        .arrivingRow(arrival.isArriving(pending.id))
+                        // A project is never the selection. The pane selects work, not the folder the
+                        // work is in, and this row carries no tag. Refusing selection does NOT refuse
+                        // the drag, which is the whole reason the projects can be reordered at all.
                         .selectionDisabled()
-                        .moveDisabled(true)
+                    case .workspace(let workspace, let projectName):
+                        workspaceRow(workspace, projectName: projectName)
+                    case .crew(let member, let workspaceID, _):
+                        CrewSidebarRow(row: member)
+                            // The owner's own way to be finished with a subagent, which the agent
+                            // above it has in `agent_stop` and the person watching it did not.
+                            .contextMenu {
+                                Button("Stop Subagent") { askToStop(member, in: workspaceID) }
+                            }
+                            // Always selectable, unlike the subagent row below it: a crew member is a
+                            // conversation, so there is always something to open, whatever it is
+                            // doing and whether or not it is still running.
+                            //
+                            // Never something to pick up. A crew member is where it is because of the
+                            // worktree it shares, not because of an order anybody chose.
+                            .moveDisabled(true)
+                            .tag(SidebarSelection.crew(workspaceID, member.id))
+                    case .subagent(let subagent, let workspaceID, _):
+                        SubagentSidebarRow(row: subagent)
+                            // A row with no file to open refuses selection rather than taking it and
+                            // showing an empty pane, which is the worse of the two.
+                            .selectionDisabled(!subagent.opensOutput)
+                            // Never something to pick up. A subagent has no place in the pane of its
+                            // own: it is where it is because of what spawned it.
+                            .moveDisabled(true)
+                            .tag(SidebarSelection.subagent(workspaceID, subagent.id))
+                    case .pending(let pending):
+                        // A workspace that does not exist yet, so there is nothing to select, nothing
+                        // to open and nothing to write a `sort_order` onto. Refused here and again in
+                        // `SidebarReorder.destination`, on the same belt-and-braces footing as the
+                        // notice below. It fades in like any other row that turns up: the tracker was
+                        // handed its id in `regroup`, which is also what stops the stored row fading
+                        // in over the top of it a moment later. See `PendingWorkspaceRow`.
+                        PendingWorkspaceRow(pending: pending)
+                            .arrivingRow(arrival.isArriving(pending.id))
+                            .selectionDisabled()
+                            .moveDisabled(true)
 
-                case .notice:
-                    // A sentence about a project, so it is neither selectable nor something to
-                    // pick up. `SidebarReorder` refuses it a second time, in case the outline
-                    // offers it anyway.
-                    SidebarEmptyNoticeRow(isFiltered: filter != .all)
-                        .selectionDisabled()
-                        .moveDisabled(true)
+                    case .notice:
+                        // A sentence about a project, so it is neither selectable nor something to
+                        // pick up. `SidebarReorder` refuses it a second time, in case the outline
+                        // offers it anyway.
+                        SidebarEmptyNoticeRow(isFiltered: filter != .all)
+                            .selectionDisabled()
+                            .moveDisabled(true)
+                    }
                 }
+                // The list's own row reordering, which is `NSOutlineView`'s: the insertion line, the
+                // drag image, the autoscroll at the pane's edges, the snap back on a cancel and the
+                // settle on drop are all AppKit's, and none of it is drawn here.
+                .onMove(perform: move)
+            } header: {
+                SidebarProjectsHeader(onStartProject: startProject)
             }
-            // The list's own row reordering, which is `NSOutlineView`'s: the insertion line, the
-            // drag image, the autoscroll at the pane's edges, the snap back on a cancel and the
-            // settle on drop are all AppKit's, and none of it is drawn here.
-            .onMove(perform: move)
         }
-        // The list draws its own row height, and that is left to it. Its selection is not.
-        //
-        // Selection is painted through `listRowBackground` on the selected row, using the same
-        // semantic system accent as other emphasized selections. Keyboard navigation remains the
-        // list's responsibility. `selectedRowInk` restores the matching semantic label colour and
-        // `backgroundProminence` that the custom background would otherwise suppress.
+        // The native list owns selection drawing, row height and keyboard navigation.
         //
         // Row height: 32 points, where `Metrics.rowHeight` is 28 and the reference render is 28
         // as well. It is not ours to set. `listRowInsets`, an explicit `frame(height:)` on the
@@ -224,8 +202,7 @@ struct SidebarView: View {
         // all four left the pitch at exactly 32; `listRowInsets(leading:)` did not even move the
         // rows sideways. Reaching 28 means giving up `.listStyle(.sidebar)`, and with it the
         // selection above, keyboard navigation and the standard insets. Four points is not worth
-        // that. What was in reach was making the rhythm EVEN, which is what a project header's
-        // own top padding is spent on. See `SidebarMetrics.headerLead`.
+        // that. Project rows use the list's own vertical insets too.
         .listStyle(.sidebar)
         .confirmation($stoppingCrew) { pending in
             Confirmation(
@@ -596,7 +573,7 @@ struct SidebarView: View {
         }
     }
 
-    /// One workspace in the pane, with the fill and the ink the top level rows also take.
+    /// One workspace in the native sidebar list.
     private func workspaceRow(_ workspace: Workspace, projectName: String) -> some View {
         let target = SidebarSelection.workspace(workspace.id)
         return SidebarWorkspaceRow(
@@ -607,10 +584,6 @@ struct SidebarView: View {
             archivePresentation: $archivePresentation
         )
         .tag(target)
-        // The same fill the three top level rows take. A row of one kind selecting in one blue and
-        // a row of another kind in a second was the whole complaint.
-        .listRowBackground(selectionFill(for: target))
-        .selectedRowInk(isEmphasized: isEmphasized(target))
     }
 
     /// The root of the pane, as a row of the list. There used to be three of these.
@@ -620,8 +593,6 @@ struct SidebarView: View {
     private func navRow(_ target: SidebarSelection, title: String, icon: String) -> some View {
         SidebarNavRow(title: title, icon: icon)
             .tag(target)
-            .listRowBackground(selectionFill(for: target))
-            .selectedRowInk(isEmphasized: isEmphasized(target))
     }
 
     /// Home's row is a name. This one also says what the conversation is doing, because it is the
@@ -631,45 +602,8 @@ struct SidebarView: View {
     /// The same mark the workspace rows below carry, from the same type, so the column says
     /// "working" and "waiting on you" in one shape throughout.
     private var askRow: some View {
-        HStack(spacing: 0) {
-            SidebarNavRow(title: AskConversation.title, icon: PaneGlyph.chat)
-            Spacer(minLength: Metrics.spacingSmall)
-            if let status = app.askStatus {
-                WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized(.ask))
-            }
-        }
-        .tag(SidebarSelection.ask)
-        .listRowBackground(selectionFill(for: .ask))
-        .selectedRowInk(isEmphasized: isEmphasized(.ask))
-    }
-
-    /// The fill under one row, or nothing at all when that row is not the selection.
-    ///
-    /// Nothing rather than `Color.clear`, deliberately: a `listRowBackground` of clear REPLACES
-    /// the list's own drawing, so an unselected row handed one loses its hover wash.
-    ///
-    /// Always the quiet fill; see `isEmphasized(_:)` for why the sidebar no longer uses the accent.
-    @ViewBuilder
-    private func selectionFill(for target: SidebarSelection) -> some View {
-        if listSelection == target {
-            SidebarSelectionFill(isEmphasized: isEmphasized(target))
-        }
-    }
-
-    /// Whether this row is the one wearing the loud fill. In the sidebar, never.
-    ///
-    /// The selected workspace used to be painted in the accent whenever the window was active,
-    /// with its label, counts and status mark inverted to white. The owner compared it with
-    /// Finder's sidebar, where the selected item sits on a quiet grey in its ordinary ink, and asked
-    /// for the quieter one: the sidebar is glanced at all day while the work happens elsewhere,
-    /// and a saturated bar there outshouts the conversation it only points at. So the selected row
-    /// always takes `Palette.sidebarSelected`, active window or not.
-    ///
-    /// Kept as the one answer the fill and the ink both read, for the reason it was written: the
-    /// first version asked the two questions separately and painted Spatie Blue under a label
-    /// that had never been told to invert.
-    private func isEmphasized(_ target: SidebarSelection) -> Bool {
-        false
+        SidebarNavRow(title: AskConversation.title, icon: PaneGlyph.chat, status: app.askStatus)
+            .tag(SidebarSelection.ask)
     }
 
     // MARK: - Empty
@@ -766,69 +700,33 @@ struct SidebarView: View {
     }
 }
 
-/// One of the pane's three top level rows, with its mark inked by hand.
+/// A top level navigation row with an accent-coloured icon.
 ///
 /// A view of its own rather than a `Label` built in `SidebarView`, because reading
 /// `backgroundProminence` needs somewhere to read it: the value is set on the ROW, so a function
 /// returning a label cannot see it and a `SidebarView` that read it would be reading the whole
 /// list's.
-///
-/// Neutral rather than `Palette.accent`. The accent is the right token for a tinted glyph and it
-/// is a pair, so it would have been correct in both appearances, but it is a different member of
-/// the ramp from the fill, and the pane would have gone from two blues to a blue and a green.
-/// Colour in this pane already means three things: which project a tile belongs to, what a
-/// workspace is doing, and where you are. A permanent tint on three rows means none of them. The
-/// marks on the workspace rows below are already neutral, and these now match them.
 struct SidebarNavRow: View {
     var title: String
     var icon: String
+    var status: WorkspaceStatus?
 
     @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
-        Label {
-            Text(title)
-        } icon: {
-            Image(systemName: icon)
-                .foregroundStyle(
-                    prominence == .increased ? Palette.selectedEmphasizedText : Palette.textSecondary
-                )
+        HStack(spacing: 0) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: icon)
+                    .foregroundStyle(
+                        prominence == .increased ? Palette.selectedEmphasizedText : Palette.controlAccent
+                    )
+            }
+            if let status {
+                Spacer(minLength: Metrics.spacingSmall)
+                WorkspaceStatusGlyph(status: status, isOnSelection: prominence == .increased)
+            }
         }
-    }
-}
-
-/// What a selected row in the pane is painted with.
-///
-/// Two fills, though `SidebarView.isEmphasized(_:)` only ever asks for the quiet one now.
-///
-/// The loud one is `Palette.selectedEmphasized`, as in `RowBackground`. The quiet one is
-/// `Palette.sidebarSelected` rather than `Palette.selected`, because this pane is glass and the
-/// opaque fill vanished into it; see that colour for the measurement. This view exists rather
-/// than a call to `rowBackground(isSelected:isHovered:isFocused:)` because a `listRowBackground`
-/// is handed a view to draw and not a modifier to apply to a row.
-struct SidebarSelectionFill: View {
-    /// Whether this window is the one being used. See `SidebarView.selectionFill(for:)` for why
-    /// this is passed in rather than read from the environment here.
-    var isEmphasized: Bool
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-            .fill(isEmphasized ? Palette.selectedEmphasized : Palette.sidebarSelected)
-            .padding(.horizontal, SidebarMetrics.selectionInset)
-    }
-}
-
-extension View {
-    /// Inverts a row's ink, and everything the row draws from it, while it wears the loud fill.
-    ///
-    /// Two things at once, on purpose. `foregroundStyle` is what the label and the symbol read, and
-    /// `backgroundProminence` is what everything further in reads: the status mark, the running
-    /// figure's breathing rings, the project tile and the diff stat all key off it, and every one
-    /// of them already knows to switch to `Palette.selectedEmphasizedText` on a fill. The table used to set
-    /// that environment value for us because the table drew the fill. Bloom draws it now, so Bloom
-    /// sets it, and the two can never say different things about the same row.
-    func selectedRowInk(isEmphasized: Bool) -> some View {
-        environment(\.backgroundProminence, isEmphasized ? .increased : .standard)
-            .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary)
     }
 }

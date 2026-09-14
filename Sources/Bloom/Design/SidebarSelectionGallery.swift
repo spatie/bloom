@@ -2,23 +2,7 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// The sidebar's selection fill, its marks and the button underneath them, on one page.
-///
-/// It exists because the question it answers cannot be looked at any other way. The pane's
-/// selection is drawn into an `NSTableView`, so `ImageRenderer` cannot photograph it: an offscreen
-/// render has no table, no key window and no first responder, and the loud fill is exactly what
-/// those three produce. `--snapshot-window` cannot reach it either. A capture run never clicks a
-/// row, so every picture of the real window shows the RESTING selection, and the question is about
-/// the other one.
-///
-/// So this is a real `List` with the real `.listStyle(.sidebar)` in a real window, drawing the
-/// app's own `SidebarNavRow` and `SidebarSelectionFill`, with the table made first responder by
-/// hand and with a top level row and a workspace row selected at once so both fills are in one
-/// photograph. Multiple selection is not a state the pane itself offers; it is here only so that
-/// the two rows can be compared without flicking between two files.
-///
-/// The prominent button at the foot uses the same semantic system accent as the selected rows, so
-/// this page also catches a custom control drifting away from AppKit's selection colour.
+/// Native sidebar selection and row content, captured together in a real list.
 ///
 ///     Bloom --snapshot-gallery <dir> --gallery sidebar-selection
 struct SidebarSelectionGallery: View {
@@ -57,24 +41,9 @@ struct SidebarSelectionGallery: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// The app's own row and the app's own fill, so the page cannot flatter the pane.
-    ///
-    /// Emphasized always, which is a true statement about THIS page rather than a shortcut: the
-    /// probe below hands the table the keyboard, so the list really is the loud case. The resting
-    /// fill is the one `--snapshot-window` can already photograph, since a capture run never
-    /// clicks a row, so it is not drawn twice here.
     private func row(_ title: String, _ icon: String, _ tag: String) -> some View {
         SidebarNavRow(title: title, icon: icon)
             .tag(tag)
-            .listRowBackground(fill(for: tag))
-            .selectedRowInk(isEmphasized: selection.contains(tag))
-    }
-
-    @ViewBuilder
-    private func fill(for tag: String) -> some View {
-        if selection.contains(tag) {
-            SidebarSelectionFill(isEmphasized: true)
-        }
     }
 }
 

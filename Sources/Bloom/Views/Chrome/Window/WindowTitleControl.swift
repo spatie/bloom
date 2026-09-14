@@ -124,7 +124,7 @@ struct WindowTitleControl: View {
     private var titleText: some View {
         // `WindowTitleText` rather than the workspace's name, so a labelled build keeps its mark.
         Text(WindowTitleText.shared.text)
-            .font(Typo.title)
+            .font(Typo.heading)
             .foregroundStyle(Palette.textPrimary)
             .lineLimit(1)
             .truncationMode(.tail)
@@ -154,12 +154,12 @@ struct WindowTitleControl: View {
             // moving when the label becomes a field, and it is what lets the field grow as you
             // type: a plain `TextField` has no width of its own and would take everything offered.
             Text(draft)
-                .font(Typo.title)
+                .font(Typo.heading)
                 .hidden()
 
             TextField("Workspace name", text: $draft)
                 .textFieldStyle(.plain)
-                .font(Typo.title)
+                .font(Typo.heading)
                 // Said rather than inherited, for the reason the sidebar's field says it: an
                 // editing field paints its own light background while focused.
                 .foregroundStyle(Palette.textPrimary)

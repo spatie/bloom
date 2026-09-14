@@ -108,20 +108,6 @@ enum Palette {
     /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
     @MainActor static var selected: Color { themed(\.selected) }
 
-    /// A resting selection in the sidebar, which is the one list not standing on a white page.
-    ///
-    /// `selected` is opaque and chosen against the page (`#DCE7EA` in the default light theme). The
-    /// sidebar is glass over the window's blue wash, which composites to within a few units of
-    /// that same value, so the selected workspace had a fill nobody could see and Finder's plain
-    /// grey sidebar was easier to read than ours. Ink at an alpha darkens whatever is underneath
-    /// by the same step. Nine percent black, Finder's figure, read as a heavy grey slab over the
-    /// glass once it was in the window, so it is six, and nine in dark.
-    static let sidebarSelected = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(white: 1, alpha: 0.09)
-            : NSColor(white: 0, alpha: 0.06)
-    })
-
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
     /// Selection and control emphasis supplied by macOS.
     ///
@@ -722,33 +708,9 @@ enum Metrics {
 
     static let gutter: CGFloat = 12
 
-    /// The box a small button at the trailing edge of a header is drawn and hit in: the project's
-    /// `+`, the button that adds a project, the project settings window's own header control.
-    ///
-    /// Fifteen points tall, not the twenty four an icon in a sixteen point frame with four points
-    /// of padding comes to. A sidebar section header is drawn in a band of nineteen points, and it
-    /// clips: a list row holds its 32 point pitch until the header's content passes nineteen and
-    /// then sizes to the content, so a twenty four point button put five points of extra air above
-    /// every project header, which read as a gap in the column rather than as the top of the next
-    /// project.
-    ///
-    /// The last four of those nineteen points are what this number spends. The button is drawn and
-    /// hit in the same box, and that box is also its hover plate, so an eighteen point plate filled
-    /// the band to within half a point of the bottom of the row. The list's selection fill takes
-    /// the WHOLE of the row under it, top edge included, so a hovered header above a selected
-    /// workspace put a grey plate and a grey pill half a point apart and the two read as one smear.
-    /// Fifteen leaves two points of ground above and below the plate, which is the tight rung of
-    /// the spacing scale and enough to see daylight at both edges. Measured off a window capture:
-    /// plate 24 by 15 at two points clear, selection fill the full 32 point row beneath it.
-    ///
-    /// Three points smaller is three points of click target gone, out of a row that is only
-    /// nineteen tall to begin with. Wider than it is tall, which is the shape of every small button
-    /// in a Mac toolbar, and still enough to hit without hunting.
-    ///
-    /// Here rather than in `SidebarMetrics`, where it started, because the project settings window
-    /// reads it and that window is not the sidebar: a constant named after one pane and used from
-    /// another is how the two drift.
-    static let headerButton = CGSize(width: 24, height: 15)
+    /// Square drawing and click target for header controls, including the project's `+`.
+    /// Twenty points leaves space around the hover fill in both section headers and project rows.
+    static let headerButton = CGSize(width: 20, height: 20)
     /// One point, which on Retina is two physical pixels.
     ///
     /// It was one physical pixel, which is an iOS and web idea rather than a Mac one: AppKit's own
@@ -1015,21 +977,8 @@ enum Motion {
 /// Content strips stay opaque. The window title bar and navigation sidebar use their existing
 /// native materials, not per-view effect layers added to the scrolling surfaces here.
 extension View {
-    /// The strip a tab bar sits in: the chrome colour with the pane's top edge already on it.
-    ///
-    /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the
-    /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip
-    /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
-    /// that break is what joins the tab to the content below.
-    ///
-    /// `busy` puts the activity signal on that rule, and it goes in this background rather than in
-    /// an overlay for exactly the reason the rule does: the lit rule has to be broken by the
-    /// selected tab on the same pixels the rule is broken on, or the tab reads as sitting on top of
-    /// a line rather than as part of it. See `ActivityRule`.
-    ///
-    /// `busy` and no longer `pulsing`, because the signal no longer pulses: it is a crest running
-    /// the rule, and a parameter named after a figure that has been replaced is the next reader's
-    /// wrong turn. The same rename took `RuleSweep` to `RulePulse` when the light stopped sweeping.
+    /// The tab strip's background and lower divider. The activity signal shares that divider
+    /// in the centre pane, below the inset tab capsules.
     func tabStripMaterial(busy: Bool = false) -> some View {
         background {
             ZStack(alignment: .bottom) {

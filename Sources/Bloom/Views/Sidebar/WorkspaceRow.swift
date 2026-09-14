@@ -402,7 +402,7 @@ struct WorkspaceRow: View {
         // the sentence. The app had three, and this row was the one that wrote two spaces and
         // no brackets. The other two were `SidebarProjectsHeader`, which already reads this
         // way, and `ComposerStopButton`, which spelled the keys out in words.
-        .help("Archive workspace (⌘⌫)")
+        .help("Archive workspace (\(MenuBarCatalogue[.archive].keyText))")
         .accessibilityLabel("Archive \(workspace.name)")
         .archiveConfirmation($archiveRequest, arrowEdge: .leading, onConfirm: onConfirmArchive)
     }
