@@ -644,8 +644,7 @@ struct BloomCommands: Commands {
         }
     }
 
-    /// The repository's run scripts, each of which opens a terminal tab named after itself with
-    /// its command already running.
+    /// The repository's run scripts, each of which runs in a terminal tab named after itself.
     ///
     /// In the Workspace menu because a run script runs in one worktree, against one port, and the
     /// project settings window that defines them is not about any particular workspace. They used
@@ -669,17 +668,16 @@ struct BloomCommands: Commands {
         }
     }
 
-    /// A new tab every time, rather than one that is reused. Two copies of a dev server is a thing
-    /// somebody does on purpose, and a tab that silently restarted the one already running would
-    /// throw away the log they were reading.
+    /// A running script is shown rather than started twice, and a stopped one runs again in the
+    /// tab it ran in.
+    ///
+    /// This used to open a new tab every time, on the argument that two copies of a dev server is
+    /// a thing somebody does on purpose. In practice it was the thing nobody meant: the second copy
+    /// fights the first for its port, and the error it prints reads as a broken app. So the menu
+    /// goes through the same launcher as the strip's `+`, which is `RunScriptPick`, and a stopped
+    /// script keeps its last output above the new run rather than in a tab of its own.
     private func run(_ script: RunScript, in workspace: WorkspaceModel) {
-        let tab = CenterTabStore.shared.add(
-            kind: .terminal, workspaceID: workspace.workspace.id, title: script.name
-        )
-        // Queued rather than sent: the shell is forked by `ToolPaneView`, once it has settled the
-        // port this script is about to bind. See `TerminalSessionStore.run(_:inPaneID:)`.
-        TerminalSessionStore.shared.run(script.command, inPaneID: tab.id)
-        WorkspaceTabsStore.shared.select(.tool(tab.id), in: workspace)
+        RunScriptLauncher.shared.pick(script, in: workspace)
     }
 
     // MARK: - Splitting the centre column

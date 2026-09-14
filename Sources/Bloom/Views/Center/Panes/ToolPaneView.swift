@@ -53,6 +53,7 @@ struct ToolPaneView: View {
                             repo: model.repo,
                             port: model.port,
                             directory: tab.directory,
+                            runScript: runScript,
                             onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
                             splitColumn: splitColumn
                         )
@@ -94,6 +95,14 @@ struct ToolPaneView: View {
                 .id(model.workspace.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// The run script this tab was opened for, as the settings file says it now. Nil for an
+    /// ordinary terminal, and for a tab whose script has been taken out of the file since, which
+    /// goes back to being an ordinary terminal rather than offering a command nobody can see.
+    private var runScript: RunScript? {
+        guard let id = tab.runScriptID else { return nil }
+        return model.settings.runScripts.first { $0.id == id }
     }
 
     /// Whether this worktree is finished being built, which is the one thing a shell standing in

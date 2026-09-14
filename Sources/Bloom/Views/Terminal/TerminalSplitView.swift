@@ -22,6 +22,9 @@ struct TerminalSplitView: View {
     /// The folder every pane of this tab forks in, empty for the worktree root. See
     /// `FolderTerminal`.
     var directory: String = ""
+    /// The run script this tab was opened for, as the settings file states it now, or nil for an
+    /// ordinary terminal. Only the tab's own pane is the script's: see `RunScriptPaneStrip`.
+    var runScript: RunScript?
     /// Called when the user closes the last pane, which is the tab asking to go away.
     var onCloseTab: @MainActor () -> Void
     /// Called when a split asks for something a shell tree cannot hold. See `handle`.
@@ -54,6 +57,10 @@ struct TerminalSplitView: View {
         // once: a command remembered from the last launch arrives after the pane has been drawn,
         // and a read that happens only in the layout pass would not bring the strip with it.
         let remembered = TerminalSessionStore.shared.recall.offers(inPanes: layout.panes)
+        // The same, for the one pane a run script was typed into. Read up here for the same reason.
+        let activity = runScript == nil
+            ? RunScriptActivity.State.idle
+            : TerminalSessionStore.shared.activity.state(inPane: ownerID)
 
         return GeometryReader { proxy in
             let geometry = layout.geometry(in: proxy.size, dividerThickness: Self.dividerThickness)
@@ -68,7 +75,11 @@ struct TerminalSplitView: View {
                             item.pane,
                             in: layout,
                             focusRequest: focusRequest,
-                            remembered: remembered[item.pane]
+                            strip: RunScriptPaneStrip.decide(
+                                offer: remembered[item.pane],
+                                activity: item.pane == ownerID ? activity : .idle,
+                                script: item.pane == ownerID ? runScript : nil
+                            )
                         )
                             .frame(width: item.frame.width, height: item.frame.height)
                             .position(x: item.frame.midX, y: item.frame.midY)
@@ -96,19 +107,32 @@ struct TerminalSplitView: View {
         .background(Palette.surfaceSunken)
     }
 
-    /// `remembered` is what this pane was running when Bloom last stopped, and only for a pane that
-    /// is not running it now. Nothing is started by drawing it; see `TerminalRestartStrip`.
+    /// `strip` is the one line above the shell: what this pane was running when Bloom last stopped,
+    /// or, for a run script's pane, that its command has stopped. Nothing is started by drawing
+    /// either; see `TerminalRestartStrip` and `RunScriptStoppedStrip`.
     private func pane(
-        _ id: String, in layout: SplitLayout, focusRequest: Int, remembered: String?
+        _ id: String, in layout: SplitLayout, focusRequest: Int, strip: RunScriptPaneStrip
     ) -> some View {
         let isFocused = layout.focus == id
+        let sessions = TerminalSessionStore.shared
 
         return VStack(spacing: 0) {
-            if let remembered {
+            switch strip {
+            case .none:
+                EmptyView()
+            case .restart(let command):
                 TerminalRestartStrip(
-                    command: remembered,
-                    onStart: { TerminalSessionStore.shared.startRemembered(remembered, inPane: id) },
-                    onDismiss: { TerminalSessionStore.shared.dismissRemembered(inPane: id) }
+                    command: command,
+                    onStart: { sessions.startRemembered(command, inPane: id) },
+                    onDismiss: { sessions.dismissRemembered(inPane: id) }
+                )
+            case .stopped(let caption, let command):
+                RunScriptStoppedStrip(
+                    caption: caption,
+                    command: command,
+                    onRunAgain: { _ = sessions.retype(command, inPane: id) },
+                    onCloseTab: onCloseTab,
+                    onDismiss: { sessions.activity.dismiss(inPane: id) }
                 )
             }
 
@@ -135,7 +159,7 @@ struct TerminalSplitView: View {
         // The strip arrives a moment after the pane is drawn, because the command is read back out
         // of the database. Gated for the same reason `ToolPaneView` gates the setup strip: what
         // moves is the shell under it.
-        .animation(reduceMotion ? nil : Motion.pane, value: remembered)
+        .animation(reduceMotion ? nil : Motion.pane, value: strip)
         .overlay {
             if !isFocused && layout.paneCount > 1 { dimming }
         }

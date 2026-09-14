@@ -117,3 +117,27 @@ public enum RunScriptAutostart: Sendable, Hashable {
         )
     }
 }
+
+extension RunScriptAutostart {
+    /// Whether now is the moment to act on autostart for a workspace that has just been shown.
+    ///
+    /// Not while its setup script is running, and not before a setup script that is about to run
+    /// has started: a dev server started ahead of `npm ci` fails on a missing module, and the
+    /// strip that says so would be the first thing a new workspace shows. The run that finishes
+    /// setup successfully asks again. A setup that failed does not hold autostart back for good:
+    /// the next time the workspace is shown, the scripts start, and whatever they print about a
+    /// missing dependency is in a terminal somebody can read.
+    ///
+    /// `.pending` with a setup script is a workspace whose setup has not run yet, which is the
+    /// first moments of a new one. It is also, rarely, a workspace made before its project had a
+    /// setup script at all; that one does not autostart until its setup is run once, which errs
+    /// towards starting nothing.
+    public static func isTimely(isRunningSetup: Bool, setupState: SetupState, hasSetupScript: Bool) -> Bool {
+        if isRunningSetup { return false }
+        switch setupState {
+        case .running: return false
+        case .pending: return !hasSetupScript
+        case .succeeded, .failed, .skipped: return true
+        }
+    }
+}

@@ -1048,6 +1048,15 @@ final class WorkspaceModel {
             // its way out is the one thing that must not happen here.
             guard !Task.isCancelled else { return }
 
+            // The worktree is built, so the run scripts that asked to start with it can. Not
+            // awaited: a dev server starting has nothing to do with the opening prompt going out.
+            if succeeded {
+                Task { [weak self] in
+                    guard let self else { return }
+                    await RunScriptLauncher.shared.considerAutostart(in: self)
+                }
+            }
+
             if !succeeded, !setupWasStopped {
                 // The one sentence every route says about a failed setup, rather than a second
                 // one written here that would drift from it. It names no tab, which is what makes
