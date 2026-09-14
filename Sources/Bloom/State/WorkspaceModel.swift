@@ -436,13 +436,20 @@ final class WorkspaceModel {
     func reloadSessions() async {
         guard let store else { return }
         SwitchTrace.mark("sessions.query.start", workspace: workspace.id)
-        let fresh = (try? await store.sessions(workspaceID: workspace.id)) ?? []
+        guard let fresh = try? await store.sessions(workspaceID: workspace.id) else { return }
         SwitchTrace.mark("sessions.query.done", workspace: workspace.id)
         if sessions != fresh { sessions = fresh }
         // Conditional for the reason every write here is, and raised only once the answer is in
         // hand: the guard above is the store not being there to ask, which is doubt rather than an
         // empty workspace.
         if !hasReadSessions { hasReadSessions = true }
+        let tabs = CenterTabStore.shared
+        tabs.load(workspaceID: workspace.id)
+        WorkspaceTabsStore.shared.updateOrder(
+            sessions: TabSet.tabbable(fresh),
+            tools: tabs.hasReadTabs(for: workspace.id) ? tabs.tabs(for: workspace.id).map(\.id) : nil,
+            workspaceID: workspace.id
+        )
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
             activeSessionID = sessions.first { $0.sideConversationParentID == nil }?.id

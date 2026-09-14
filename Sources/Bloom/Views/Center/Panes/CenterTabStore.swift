@@ -468,6 +468,7 @@ final class CenterTabStore {
         // it: from here the list in hand is the list on disk.
         unreadable.remove(workspaceID)
         tabsByWorkspace[workspaceID] = tabs
+        WorkspaceTabsStore.shared.updateOrder(tools: tabs.map(\.id), workspaceID: workspaceID)
         Self.persist(tabs, workspaceID: workspaceID)
     }
 

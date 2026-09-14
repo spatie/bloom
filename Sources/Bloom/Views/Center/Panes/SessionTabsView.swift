@@ -75,11 +75,7 @@ struct SessionTabsView: View {
     /// The strip in the order it is DRAWING, which is the live order while a tab is being dragged
     /// along it and the stored one otherwise.
     ///
-    /// **One list, not two runs.** The strip used to be conversations and then tools, because they
-    /// are two kinds of thing kept in two stores; `TabSet` still says so and is still the fallback,
-    /// but a user who has arranged their tabs is arranging one row and that is what this is. The
-    /// owner has one conversation and one terminal, so under the old rule every drag he could make
-    /// was one that could not be honoured.
+    /// Conversations and tools share one opening order. Dragging changes that same list.
     ///
     /// Reordering the `ForEach` rather than offsetting the tabs by hand, because the ids are stable
     /// and SwiftUI MOVES a view whose identity it already has rather than building a new one. That
@@ -118,11 +114,7 @@ struct SessionTabsView: View {
             EmptyView()
         } tabs: {
             HStack(spacing: 0) {
-                // One run over one list. A conversation and a terminal are two kinds of thing kept
-                // in two stores, which is why they used to be drawn by two `ForEach`es in that
-                // order, and it is still what the strip falls back to. It is not what the user is
-                // arranging, though: they are arranging one row, and drawing it as two made the one
-                // drag the owner could actually make into a drag that could not be honoured.
+                // Stable identities let conversations and tools move through the same row.
                 ForEach(Array(entries.enumerated()), id: \.element) { index, entry in
                     if index > 0 {
                         TabStripSeparator(

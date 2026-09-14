@@ -1,41 +1,39 @@
 import Foundation
 
-/// The order the user has dragged the strip into, laid over the order it would otherwise have.
+/// One opening order for conversations and tools, with manual reordering preserved.
 ///
-/// `TabSet` says the strip is conversations and then tools, and it says why: they are two kinds of
-/// thing kept in two stores with two lifetimes. That rule stays, as the FALLBACK. What this adds is
-/// one list of what the user themselves arranged, and a workspace with no such list reads exactly
-/// as it did before this existed.
+/// Both stores record arrivals in this list. Previously it was written only after a drag, so a
+/// new conversation jumped ahead of tools until the user first rearranged the strip.
 ///
-/// # What is lost if the list goes, and why that was accepted
-///
-/// It lives in user defaults, with the tool tab list, because it is about tool tabs as much as
-/// about conversations and because it is the same sort of state: worth restoring, not worth a table
-/// or a migration. A conversation is a SQLite row that outlives everything; a terminal or a page is
-/// a line in defaults that is better lost than migrated.
-///
-/// So the two halves of an interleaved strip do not have the same lifetime, and that asymmetry has
-/// a consequence worth writing down rather than leaving for whoever finds this key missing one day.
-/// **If the defaults are lost, the interleaving goes with them.** The workspace comes back with its
-/// conversations first and its tools after them, which is where they were before anybody dragged
-/// anything.
-///
-/// It is milder than it sounds, and deliberately so. Every drag writes the conversations' relative
-/// order back to `sessions.sort_order` and the tools' relative order back to their own list as
-/// well, so what a lost defaults file costs is only the INTERLEAVING: the conversations keep their
-/// order among themselves and the tools keep theirs. And it is recoverable by one drag.
-///
-/// The owner was told this before it was built and asked for the feature anyway. The alternative
-/// was giving both kinds one durable order, which means either putting tool tabs into SQLite,
-/// against the decision that they are better lost than migrated, or writing a number into two
-/// stores with two lifetimes and having a restored conversation carry a number that means nothing.
+/// The mixed order lives in user defaults. If it is missing, existing tabs retain the legacy
+/// conversations-then-tools order once; subsequent arrivals append. Each kind also keeps its own
+/// relative order in its source store, so losing defaults loses only their interleaving.
 public enum StripOrder {
-    /// The strip, left to right, with the user's own order laid over the two runs.
+    /// Record arrivals before the next tab opens, so alternating chats and tools keep their
+    /// opening order without requiring a drag. Nil means that store has not loaded yet.
+    public static func updated(
+        sessions: [SessionID]? = nil, tools: [String]? = nil, stored: [PaneContent]
+    ) -> [PaneContent] {
+        let chats = sessions.map { Set($0) }
+        let toolIDs = tools.map { Set($0) }
+        var seen: Set<PaneContent> = []
+        let kept = stored.filter { entry in
+            let present = switch entry {
+            case .chat(let id): chats?.contains(id) ?? true
+            case .tool(let id): toolIDs?.contains(id) ?? true
+            }
+            return present && seen.insert(entry).inserted
+        }
+        let arrivals = TabSet.all(sessions: sessions ?? [], tools: tools ?? [])
+            .filter { seen.insert($0).inserted }
+        return kept + arrivals
+    }
+
+    /// The strip, left to right, with the saved order applied to the available content.
     ///
     /// Anything the stored list has never heard of goes after everything it has, in the order
     /// `TabSet` would have put it in. That is what makes a new conversation or a new terminal
-    /// appear at the END of the strip rather than at the end of its own kind, which is where
-    /// somebody who has arranged their tabs by hand expects a new one to arrive.
+    /// appear at the end of the strip rather than at the end of its own kind.
     ///
     /// - Parameter stored: what the user arranged, which may name things that have since gone and
     ///   things a tab has since absorbed. Both are simply not in the answer.

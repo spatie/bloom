@@ -94,9 +94,7 @@ final class WorkspaceTabsStore {
     /// conversation and it still does.
     private var selected: [WorkspaceID: PaneContent] = [:]
 
-    /// The order each workspace's strip has been dragged into, over the two runs it would otherwise
-    /// read as. Absent for a workspace nobody has arranged, which reads exactly as it always did.
-    /// See `BloomCore.StripOrder`, which carries the rule and what a lost defaults file costs.
+    /// Opening order across chats and tools, updated when either list changes or a tab is dragged.
     private var stripOrders: [WorkspaceID: [PaneContent]] = [:]
 
     /// Read in one pass at launch rather than lazily per workspace. A getter may not mutate, and
@@ -189,6 +187,18 @@ final class WorkspaceTabsStore {
             claimed: claimed(sessions: sessions, tools: tools),
             stored: stripOrders[model.workspace.id] ?? []
         )
+    }
+
+    /// Both stores report arrivals here. An unloaded store keeps its saved positions until it
+    /// can supply a real list, so launch order cannot discard half of an interleaved strip.
+    func updateOrder(
+        sessions: [SessionID]? = nil, tools: [String]? = nil, workspaceID: WorkspaceID
+    ) {
+        let previous = stripOrders[workspaceID] ?? []
+        let order = StripOrder.updated(sessions: sessions, tools: tools, stored: previous)
+        guard order != previous else { return }
+        stripOrders[workspaceID] = order
+        persistStrip(workspaceID)
     }
 
     /// Writes down the order the user has just dragged the strip into.
