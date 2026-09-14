@@ -34,6 +34,9 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
     /// draws live buttons, and a row that offers buttons for a question already answered would
     /// write into a pipe nobody is reading.
     var permissionDecision: String?
+    /// Questions and their answers are conversation content, even after their controls settle.
+    /// Decoded when the row arrives so folding never reparses the question on a render pass.
+    var isQuestion = false
     /// What the transcript should say about how it was settled, when that is not obvious. Only
     /// ever set for a question a rule answered rather than a person.
     var permissionNote = ""
@@ -117,7 +120,8 @@ final class TranscriptModel {
                 seq: row.seq,
                 kind: row.kind,
                 failed: row.isError || row.refusal != nil,
-                featured: MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
+                featured: row.isQuestion
+                    || MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
                 drawsNothing: TranscriptNoise.isHidden(row)
                     || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
                 settled: settled,
@@ -472,6 +476,7 @@ final class TranscriptModel {
         if message.kind == .permissionAsk,
            let ask = PermissionAsk.decode(payload: message.payload) {
             row.permissionDecision = decisions[ask.requestID]
+            row.isQuestion = ask.isQuestion
         }
         rows.append(row)
         if message.kind == .toolUse, let refID = message.refID {

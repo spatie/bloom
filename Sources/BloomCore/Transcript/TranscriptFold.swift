@@ -12,7 +12,7 @@ import Foundation
 /// # The unit is consecutive activity
 ///
 /// Grey activity rows are the implementation log: tool calls, thinking, notices and settled
-/// questions. Consecutive rows of that kind fold into one line. Black assistant prose is the
+/// permissions. Consecutive rows of that kind fold into one line. Black assistant prose is the
 /// useful account of what the agent found or intends to do, so every prose row remains visible and
 /// divides the activity before and after it into separate groups.
 ///
@@ -54,9 +54,9 @@ import Foundation
 ///    is reading it. A tool call with no result yet, and a permission question nobody has answered
 ///    yet, are the same fact here. Completed actions after them can still join the fold.
 /// 2. **The agent stopping, and a row carrying content of its own.** An `error` row is the agent
-///    exiting in a way it did not choose, and inline media is deliberate content wearing an
-///    activity row's clothes. Both remain visible and divide the ordinary activity before and
-///    after them into separate compact groups.
+///    exiting in a way it did not choose. Inline media and agent question cards are conversation
+///    content wearing activity rows' clothes. They remain visible, including answered questions,
+///    and divide the ordinary activity before and after them into separate compact groups.
 ///
 ///    **A failed tool call is not one of these, and it used to be.** This rule said that a failed
 ///    command is the one you are scrolling to find, which read well and drew badly: an errored
@@ -74,7 +74,8 @@ import Foundation
 ///    an ordinary session, which teaches a reader nothing except to stop reading it.
 /// 3. **A permission question nobody has answered.** It is covered by 1, and it is written down
 ///    separately because burying a question the turn is stopped on would be the worst fault this
-///    file could have. Answered, it folds away with the rest.
+///    file could have. Settled tool permissions fold away; agent question cards stay visible
+///    under rule 2 so the reader can always see the questions and their answers.
 /// 4. **A row something has asked to be visible**: a tool result the reader opened, and the row
 ///    this session was opened on. The last of those is worse than cosmetic, because a scroll can
 ///    only find a row the table is DRAWING, so a search hit or an unread mark inside a fold is not
@@ -197,8 +198,8 @@ public enum TranscriptFold {
         /// **This settles a row rather than holding it out of the fold.** A failed call folds
         /// away with the ordinary work around it; see rule 2 for why it stopped being a boundary.
         public var failed: Bool
-        /// Deliberate content carried by an activity-shaped row, such as inline media. It remains
-        /// visible and separates the ordinary implementation log on either side.
+        /// Deliberate content carried by an activity-shaped row, such as inline media or an agent
+        /// question card. It stays visible after settling and separates the log on either side.
         public var featured: Bool
         /// What `TranscriptRowInk` says, which is that most `system` rows draw no view at all.
         public var drawsNothing: Bool
