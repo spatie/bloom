@@ -237,6 +237,21 @@ public actor Store {
             try db.execute(wanted.add)
             if let index = wanted.index { try db.execute(index) }
         }
+        try repairPermissionGrantScope(db)
+    }
+
+    /// Old grants have no trustworthy provider. Retain them for review without granting access.
+    private nonisolated static func repairPermissionGrantScope(_ db: SQLiteDatabase) throws {
+        let names = Set(try db.query("PRAGMA table_info(permission_grants);").compactMap { $0.string("name") })
+        guard !names.isEmpty else { return }
+        if !names.contains("agent_kind") {
+            try db.execute("ALTER TABLE permission_grants ADD COLUMN agent_kind TEXT NOT NULL DEFAULT '';")
+        }
+        try db.execute("""
+        DROP INDEX IF EXISTS permission_grants_rule;
+        CREATE UNIQUE INDEX IF NOT EXISTS permission_grants_provider_rule
+            ON permission_grants(repo_id, agent_kind, tool_name, rule_content);
+        """)
     }
 
     private nonisolated static func migrate(_ db: SQLiteDatabase) throws {
@@ -432,6 +447,7 @@ public actor Store {
             CREATE TABLE IF NOT EXISTS permission_grants (
                 id TEXT PRIMARY KEY,
                 repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+                agent_kind TEXT NOT NULL DEFAULT '',
                 tool_name TEXT NOT NULL,
                 rule_content TEXT NOT NULL DEFAULT '',
                 granted_at REAL NOT NULL,
@@ -439,8 +455,8 @@ public actor Store {
                 use_count INTEGER NOT NULL DEFAULT 0,
                 granted_for TEXT NOT NULL DEFAULT ''
             );
-            CREATE UNIQUE INDEX IF NOT EXISTS permission_grants_rule
-                ON permission_grants(repo_id, tool_name, rule_content);
+            CREATE UNIQUE INDEX IF NOT EXISTS permission_grants_provider_rule
+                ON permission_grants(repo_id, agent_kind, tool_name, rule_content);
 
             CREATE TABLE IF NOT EXISTS permission_asks (
                 id TEXT PRIMARY KEY,
@@ -1080,6 +1096,7 @@ public actor Store {
                     }
                 }
             },
+            { db in try repairPermissionGrantScope(db) },
         ]
 
         let current = Int(try db.readUserVersion())
@@ -3103,6 +3120,14 @@ public actor Store {
         ).map(Self.permissionGrant(from:))
     }
 
+    /// Only this provider's grants may answer a question. Unscoped legacy records are excluded.
+    public func permissionGrants(repoID: RepoID, agentKind: AgentKind) throws -> [PermissionGrant] {
+        try db.query(
+            "SELECT * FROM permission_grants WHERE repo_id = ? AND agent_kind = ? ORDER BY granted_at DESC, id",
+            [.text(repoID), .text(agentKind.rawValue)]
+        ).map(Self.permissionGrant(from:))
+    }
+
     /// Everything granted anywhere, for a settings pane that lists them by project.
     public func permissionGrants() throws -> [PermissionGrant] {
         try db.query("SELECT * FROM permission_grants ORDER BY repo_id, granted_at DESC, id")
@@ -3119,12 +3144,12 @@ public actor Store {
         try db.run(
             """
             INSERT INTO permission_grants (
-                id, repo_id, tool_name, rule_content, granted_at, last_used_at, use_count, granted_for
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(repo_id, tool_name, rule_content) DO NOTHING
+                id, repo_id, agent_kind, tool_name, rule_content, granted_at, last_used_at, use_count, granted_for
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(repo_id, agent_kind, tool_name, rule_content) DO NOTHING
             """,
             [
-                .text(grant.id), .text(grant.repoID), .text(grant.toolName),
+                .text(grant.id), .text(grant.repoID), .text(grant.agentKind?.rawValue ?? ""), .text(grant.toolName),
                 .text(grant.ruleContent ?? ""),
                 .double(grant.grantedAt.timeIntervalSince1970),
                 grant.lastUsedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
@@ -3134,8 +3159,8 @@ public actor Store {
         // Read back rather than returned as passed, so the caller ends up holding the row that is
         // actually in the table: on a conflict that is the older grant, with its own id.
         let stored = try db.query(
-            "SELECT * FROM permission_grants WHERE repo_id = ? AND tool_name = ? AND rule_content = ?",
-            [.text(grant.repoID), .text(grant.toolName), .text(grant.ruleContent ?? "")]
+            "SELECT * FROM permission_grants WHERE repo_id = ? AND agent_kind = ? AND tool_name = ? AND rule_content = ?",
+            [.text(grant.repoID), .text(grant.agentKind?.rawValue ?? ""), .text(grant.toolName), .text(grant.ruleContent ?? "")]
         ).first
         return stored.map(Self.permissionGrant(from:)) ?? grant
     }
@@ -3536,6 +3561,7 @@ public actor Store {
         return PermissionGrant(
             id: PermissionGrantID(row.string("id") ?? newID()),
             repoID: RepoID(row.string("repo_id") ?? ""),
+            agentKind: row.string("agent_kind").flatMap(AgentKind.init(rawValue:)),
             toolName: row.string("tool_name") ?? "",
             // Stored as an empty string because SQLite counts every NULL as distinct in a unique
             // index, which would have let the same whole-tool grant be inserted over and over.

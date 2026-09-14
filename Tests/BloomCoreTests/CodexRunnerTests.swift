@@ -261,7 +261,7 @@ private func eventually(
     @Test func childApprovalsCannotBorrowParentMetadataOrSendReasonsToTheParent() async throws {
         let store = try makeTestStore("codex-child-approval")
         let (session, repoID) = try await makeCodexSession(store)
-        try await store.upsert(PermissionGrant(repoID: repoID, toolName: "Bash", ruleContent: "echo parent"))
+        try await store.upsert(PermissionGrant(repoID: repoID, agentKind: .codex, toolName: "Bash", ruleContent: "echo parent"))
         let box = scriptedBox()
         box.reply(to: "turn/steer", with: .object([:]))
         let runner = makeRunner(store: store, session: session, box: box)
@@ -571,7 +571,7 @@ private func eventually(
         // have granted the whole tool, and this test would have passed for the wrong reason.
         let path = try #require(paths.first)
         try await store.upsert(PermissionGrant(
-            repoID: repoID,
+            repoID: repoID, agentKind: .codex,
             toolName: "ApplyPatch",
             ruleContent: path
         ))

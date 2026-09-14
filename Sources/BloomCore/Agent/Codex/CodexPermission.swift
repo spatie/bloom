@@ -7,7 +7,7 @@ import Foundation
 /// The surfaces should feel like one app. So a Codex question becomes a `PermissionAsk`, lands in
 /// the transcript where the call would have been, is stored in `permission_asks` so a workspace
 /// reopened mid question can still draw it, and a project-wide allow is stored in Bloom's own
-/// `permission_grants` keyed by repository and matched on exact equality. **No settings file is
+/// `permission_grants` keyed by repository and provider, then matched on exact equality. **No settings file is
 /// written by anybody**, which is the same promise the Claude Code side makes.
 ///
 /// ## What is different, and cannot be papered over

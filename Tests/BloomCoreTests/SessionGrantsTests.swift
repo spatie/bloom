@@ -39,7 +39,7 @@ struct SessionGrantsTests {
     func resolvesTheRepo() async throws {
         let store = try makeTestStore()
         let (repo, workspace) = try await Self.project(store)
-        let grants = SessionGrants(store: store, workspaceID: workspace.id)
+        let grants = SessionGrants(store: store, workspaceID: workspace.id, agentKind: .claudeCode)
 
         #expect(await grants.repoID() == repo.id)
         // Twice, because the second answer comes out of the cache and has to be the same one.
@@ -51,7 +51,7 @@ struct SessionGrantsTests {
     @Test("a chat with no worktree has no project to grant in")
     func chatWithNoWorkspace() async throws {
         let store = try makeTestStore()
-        let grants = SessionGrants(store: store, workspaceID: nil)
+        let grants = SessionGrants(store: store, workspaceID: nil, agentKind: .claudeCode)
 
         #expect(await grants.repoID() == nil)
         #expect(await grants.matching(Self.ask()) == nil)
@@ -66,9 +66,9 @@ struct SessionGrantsTests {
         let store = try makeTestStore()
         let (repo, workspace) = try await Self.project(store)
         try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id
+            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id, agentKind: .claudeCode
         ))
-        let grants = SessionGrants(store: store, workspaceID: workspace.id)
+        let grants = SessionGrants(store: store, workspaceID: workspace.id, agentKind: .claudeCode)
 
         let matched = try #require(await grants.matching(Self.ask()))
         #expect(matched.count == 1)
@@ -84,10 +84,10 @@ struct SessionGrantsTests {
         let (repo, _) = try await Self.project(store)
         let (_, elsewhere) = try await Self.project(store)
         try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id
+            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id, agentKind: .claudeCode
         ))
 
-        let grants = SessionGrants(store: store, workspaceID: elsewhere.id)
+        let grants = SessionGrants(store: store, workspaceID: elsewhere.id, agentKind: .claudeCode)
         #expect(await grants.matching(Self.ask()) == nil)
     }
 
@@ -95,7 +95,7 @@ struct SessionGrantsTests {
     func recordsOnlyProjectScope() async throws {
         let store = try makeTestStore()
         let (repo, workspace) = try await Self.project(store)
-        let grants = SessionGrants(store: store, workspaceID: workspace.id)
+        let grants = SessionGrants(store: store, workspaceID: workspace.id, agentKind: .claudeCode)
 
         await grants.record(.allow(scope: .once), from: Self.ask())
         #expect(try await store.permissionGrants(repoID: repo.id).isEmpty)
@@ -116,9 +116,9 @@ struct SessionGrantsTests {
         let store = try makeTestStore()
         let (repo, workspace) = try await Self.project(store)
         let grant = try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id
+            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id, agentKind: .claudeCode
         ))
-        let grants = SessionGrants(store: store, workspaceID: workspace.id)
+        let grants = SessionGrants(store: store, workspaceID: workspace.id, agentKind: .claudeCode)
 
         await grants.recordUse(of: [grant])
         await grants.recordUse(of: [grant])
@@ -135,9 +135,9 @@ struct SessionGrantsTests {
         let store = try makeTestStore()
         let (repo, workspace) = try await Self.project(store)
         let grant = try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id
+            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id, agentKind: .claudeCode
         ))
-        let grants = SessionGrants(store: store, workspaceID: workspace.id)
+        let grants = SessionGrants(store: store, workspaceID: workspace.id, agentKind: .claudeCode)
         #expect(await grants.matching(Self.ask()) != nil)
 
         try await store.deletePermissionGrant(id: grant.id)
@@ -152,9 +152,9 @@ struct SessionGrantsTests {
         let store = try makeTestStore()
         let (repo, workspace) = try await Self.project(store)
         try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id
+            PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"), repoID: repo.id, agentKind: .claudeCode
         ))
-        let grants = SessionGrants(store: store, workspaceID: workspace.id)
+        let grants = SessionGrants(store: store, workspaceID: workspace.id, agentKind: .claudeCode)
 
         var ask = Self.ask()
         ask.suppressesAlwaysAllow = true

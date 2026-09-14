@@ -159,7 +159,7 @@ public actor AgentRunner {
         self.mcpConfigPath = mcpConfigPath
         self.shutdownBudget = shutdownBudget
         self.makeProcess = makeProcess
-        self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
+        self.grants = SessionGrants(store: store, workspaceID: session.workspaceID, agentKind: .claudeCode)
     }
 
     /// The default factory. Separate so an injected one can replace it wholesale.

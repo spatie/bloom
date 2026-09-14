@@ -36,14 +36,14 @@ struct PermissionGrantTests {
     }
 
     static func grant(tool: String = "Bash", rule: String? = "bin/test:*") -> PermissionGrant {
-        PermissionGrant(repoID: RepoID("repo-1"), toolName: tool, ruleContent: rule)
+        PermissionGrant(repoID: RepoID("repo-1"), agentKind: .claudeCode, toolName: tool, ruleContent: rule)
     }
 
     // MARK: Matching
 
     @Test("the same rule, stored, answers the question")
     func exactMatch() {
-        let matched = PermissionGrantIndex.match(ask: Self.ask(), grants: [Self.grant()])
+        let matched = PermissionGrantIndex.match(ask: Self.ask(), agentKind: .claudeCode, grants: [Self.grant()])
 
         #expect(matched?.count == 1)
         #expect(matched?.first?.displayText == "Bash(bin/test:*)")
@@ -51,7 +51,7 @@ struct PermissionGrantTests {
 
     @Test("nothing stored means somebody has to answer")
     func noGrants() {
-        #expect(PermissionGrantIndex.match(ask: Self.ask(), grants: []) == nil)
+        #expect(PermissionGrantIndex.match(ask: Self.ask(), agentKind: .claudeCode, grants: []) == nil)
     }
 
     /// The wildcard works because it is in the string the CLI composed, not because Bloom knows
@@ -72,8 +72,8 @@ struct PermissionGrantTests {
         )
         let grants = [Self.grant(rule: "bin/test:*")]
 
-        #expect(PermissionGrantIndex.match(ask: first, grants: grants) != nil)
-        #expect(PermissionGrantIndex.match(ask: second, grants: grants) != nil)
+        #expect(PermissionGrantIndex.match(ask: first, agentKind: .claudeCode, grants: grants) != nil)
+        #expect(PermissionGrantIndex.match(ask: second, agentKind: .claudeCode, grants: grants) != nil)
     }
 
     // MARK: Never widening
@@ -94,7 +94,7 @@ struct PermissionGrantTests {
         ]
     )
     func neverWidens(stored: String) {
-        let matched = PermissionGrantIndex.match(ask: Self.ask(rule: "bin/test:*"), grants: [Self.grant(rule: stored)])
+        let matched = PermissionGrantIndex.match(ask: Self.ask(rule: "bin/test:*"), agentKind: .claudeCode, grants: [Self.grant(rule: stored)])
 
         #expect(matched == nil, "\(stored) was treated as Bash(bin/test:*)")
     }
@@ -102,7 +102,7 @@ struct PermissionGrantTests {
     @Test("a grant for one tool never answers for another")
     func toolNamesMustMatch() {
         let matched = PermissionGrantIndex.match(
-            ask: Self.ask(tool: "Bash", rule: "bin/test:*"),
+            ask: Self.ask(tool: "Bash", rule: "bin/test:*"), agentKind: .claudeCode,
             grants: [Self.grant(tool: "Edit", rule: "bin/test:*")]
         )
 
@@ -126,8 +126,8 @@ struct PermissionGrantTests {
             )]
         )
 
-        #expect(PermissionGrantIndex.match(ask: ask, grants: [Self.grant(rule: "bin/test:*")]) == nil)
-        #expect(PermissionGrantIndex.match(ask: ask, grants: [
+        #expect(PermissionGrantIndex.match(ask: ask, agentKind: .claudeCode, grants: [Self.grant(rule: "bin/test:*")]) == nil)
+        #expect(PermissionGrantIndex.match(ask: ask, agentKind: .claudeCode, grants: [
             Self.grant(rule: "bin/test:*"),
             Self.grant(rule: "bin/lint:*"),
         ])?.count == 2)
@@ -140,9 +140,9 @@ struct PermissionGrantTests {
     func respectsTheCLIFlags() {
         let grants = [Self.grant()]
 
-        #expect(PermissionGrantIndex.match(ask: Self.ask(suppressed: true), grants: grants) == nil)
-        #expect(PermissionGrantIndex.match(ask: Self.ask(needsInteraction: true), grants: grants) == nil)
-        #expect(PermissionGrantIndex.match(ask: Self.ask(rule: nil), grants: grants) == nil)
+        #expect(PermissionGrantIndex.match(ask: Self.ask(suppressed: true), agentKind: .claudeCode, grants: grants) == nil)
+        #expect(PermissionGrantIndex.match(ask: Self.ask(needsInteraction: true), agentKind: .claudeCode, grants: grants) == nil)
+        #expect(PermissionGrantIndex.match(ask: Self.ask(rule: nil), agentKind: .claudeCode, grants: grants) == nil)
     }
 
     // MARK: What the transcript says
@@ -167,7 +167,7 @@ struct PermissionGrantTests {
 
         let grant = try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"),
-            repoID: repo.id,
+            repoID: repo.id, agentKind: .claudeCode,
             for: "bin/test --filter Permission"
         ))
 
@@ -187,9 +187,9 @@ struct PermissionGrantTests {
         let repo = try await store.upsert(Repo(name: "Bloom", path: "/tmp/bloom-\(newID())"))
         let rule = PermissionRule(toolName: "Bash", ruleContent: "bin/test:*")
 
-        let first = try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id))
+        let first = try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id, agentKind: .claudeCode))
         try await store.recordPermissionGrantUse(id: first.id)
-        let second = try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id))
+        let second = try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id, agentKind: .claudeCode))
 
         #expect(second.id == first.id)
         #expect(second.useCount == 1)
@@ -204,8 +204,8 @@ struct PermissionGrantTests {
         let repo = try await store.upsert(Repo(name: "Bloom", path: "/tmp/bloom-\(newID())"))
         let rule = PermissionRule(toolName: "WebFetch", ruleContent: nil)
 
-        try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id))
-        try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id))
+        try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id, agentKind: .claudeCode))
+        try await store.upsert(PermissionGrant.granting(rule, repoID: repo.id, agentKind: .claudeCode))
 
         let listed = try await store.permissionGrants(repoID: repo.id)
         #expect(listed.count == 1)
@@ -220,7 +220,7 @@ struct PermissionGrantTests {
         let repo = try await store.upsert(Repo(name: "Bloom", path: "/tmp/bloom-\(newID())"))
         let grant = try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "swift build:*"),
-            repoID: repo.id
+            repoID: repo.id, agentKind: .claudeCode
         ))
 
         try await store.recordPermissionGrantUse(id: grant.id)
@@ -240,15 +240,15 @@ struct PermissionGrantTests {
         let repo = try await store.upsert(Repo(name: "Bloom", path: "/tmp/bloom-\(newID())"))
         let grant = try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"),
-            repoID: repo.id
+            repoID: repo.id, agentKind: .claudeCode
         ))
         let ask = Self.ask()
 
-        #expect(PermissionGrantIndex.match(ask: ask, grants: try await store.permissionGrants(repoID: repo.id)) != nil)
+        #expect(PermissionGrantIndex.match(ask: ask, agentKind: .claudeCode, grants: try await store.permissionGrants(repoID: repo.id)) != nil)
 
         try await store.deletePermissionGrant(id: grant.id)
 
-        #expect(PermissionGrantIndex.match(ask: ask, grants: try await store.permissionGrants(repoID: repo.id)) == nil)
+        #expect(PermissionGrantIndex.match(ask: ask, agentKind: .claudeCode, grants: try await store.permissionGrants(repoID: repo.id)) == nil)
     }
 
     /// A grant is about a project, not a worktree. That is the whole reason it does not live in
@@ -260,7 +260,7 @@ struct PermissionGrantTests {
         let flare = try await store.upsert(Repo(name: "Flare", path: "/tmp/flare-\(newID())"))
         try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"),
-            repoID: bloom.id
+            repoID: bloom.id, agentKind: .claudeCode
         ))
 
         #expect(try await store.permissionGrants(repoID: flare.id).isEmpty)
@@ -274,7 +274,7 @@ struct PermissionGrantTests {
         let repo = try await store.upsert(Repo(name: "Bloom", path: "/tmp/bloom-\(newID())"))
         try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "bin/test:*"),
-            repoID: repo.id
+            repoID: repo.id, agentKind: .claudeCode
         ))
 
         try await store.deleteRepo(id: repo.id)
@@ -484,7 +484,7 @@ struct PermissionGrantWritingTests {
                 PermissionRule(toolName: "Bash", ruleContent: "ls"),
                 PermissionRule(toolName: "Bash", ruleContent: "git status"),
             ]),
-            repoID: repoID
+            repoID: repoID, agentKind: .claudeCode
         )
 
         #expect(grants.count == 2)
@@ -497,15 +497,15 @@ struct PermissionGrantWritingTests {
     func narrowerScopesStoreNothing() {
         let question = ask(rules: [PermissionRule(toolName: "Bash", ruleContent: "ls")])
 
-        #expect(PermissionGrant.all(granting: .allow(scope: .once), from: question, repoID: repoID).isEmpty)
-        #expect(PermissionGrant.all(granting: .allow(scope: .session), from: question, repoID: repoID).isEmpty)
+        #expect(PermissionGrant.all(granting: .allow(scope: .once), from: question, repoID: repoID, agentKind: .claudeCode).isEmpty)
+        #expect(PermissionGrant.all(granting: .allow(scope: .session), from: question, repoID: repoID, agentKind: .claudeCode).isEmpty)
         #expect(
             PermissionGrant.all(
-                granting: .deny(message: "no", endsTurn: false), from: question, repoID: repoID
+                granting: .deny(message: "no", endsTurn: false), from: question, repoID: repoID, agentKind: .claudeCode
             ).isEmpty
         )
         #expect(
-            PermissionGrant.all(granting: .answer(input: .object([:])), from: question, repoID: repoID)
+            PermissionGrant.all(granting: .answer(input: .object([:])), from: question, repoID: repoID, agentKind: .claudeCode)
                 .isEmpty
         )
     }
@@ -516,7 +516,7 @@ struct PermissionGrantWritingTests {
     @Test("an ask carrying no rules stores nothing, even on a project allow")
     func nothingOfferedIsNothingStored() {
         #expect(
-            PermissionGrant.all(granting: .allow(scope: .project), from: ask(rules: []), repoID: repoID)
+            PermissionGrant.all(granting: .allow(scope: .project), from: ask(rules: []), repoID: repoID, agentKind: .claudeCode)
                 .isEmpty
         )
     }

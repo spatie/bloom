@@ -498,7 +498,7 @@ Each has its own response schema; `CodexApprovalDecision.result(for:)` already s
 The Claude Code side landed while this was being written, and the Codex mapping follows its shape
 deliberately, so the two feel like one app: the question becomes a transcript row where the call
 would have been, it is stored in `permission_asks` so a reopened workspace can still draw it, rules
-live in Bloom's own `permission_grants` keyed by repository and matched on **exact equality**, a
+live in Bloom's own `permission_grants` keyed by repository and provider and matched on **exact equality**, a
 matching grant is answered by Bloom itself with a note in the transcript saying so, and **no
 settings file is written by anybody**.
 

@@ -54,7 +54,7 @@ public actor GrokRunner: SessionRunner {
         self.store = store
         self.bridge = bridge
         self.makeClient = makeClient
-        self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
+        self.grants = SessionGrants(store: store, workspaceID: session.workspaceID, agentKind: .grok)
         self.translation = GrokTranslation(context: GrokTranslation.Context(
             model: ModelIdentifier.resolve(session.model).model,
             cwd: workspacePath,

@@ -1255,7 +1255,7 @@ struct AgentRunnerPermissionTests {
         let session = try await makeSession(store)
         try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
-            repoID: try await repoID(of: session, in: store)
+            repoID: try await repoID(of: session, in: store), agentKind: .claudeCode
         ))
         let (runner, process) = try await running(store, session: session)
 
@@ -1275,7 +1275,7 @@ struct AgentRunnerPermissionTests {
         let session = try await makeSession(store)
         try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
-            repoID: try await repoID(of: session, in: store)
+            repoID: try await repoID(of: session, in: store), agentKind: .claudeCode
         ))
         let recorder = ProcessRecorder()
         let runner = AgentRunner(
@@ -1309,7 +1309,7 @@ struct AgentRunnerPermissionTests {
         let session = try await makeSession(store)
         try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
-            repoID: try await repoID(of: session, in: store)
+            repoID: try await repoID(of: session, in: store), agentKind: .claudeCode
         ))
         let recorder = ProcessRecorder()
         let runner = AgentRunner(
@@ -1346,7 +1346,7 @@ struct AgentRunnerPermissionTests {
         let session = try await makeSession(store)
         try await store.upsert(PermissionGrant.granting(
             PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
-            repoID: try await repoID(of: session, in: store)
+            repoID: try await repoID(of: session, in: store), agentKind: .claudeCode
         ))
         let (runner, process) = try await running(store, session: session)
 
@@ -1367,7 +1367,7 @@ struct AgentRunnerPermissionTests {
         let session = try await makeSession(store)
         let repo = try await repoID(of: session, in: store)
         try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: repo
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: repo, agentKind: .claudeCode
         ))
         let (runner, _) = try await running(store, session: session)
 
@@ -1385,7 +1385,7 @@ struct AgentRunnerPermissionTests {
         let session = try await makeSession(store)
         let repo = try await repoID(of: session, in: store)
         let grant = try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: repo
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: repo, agentKind: .claudeCode
         ))
         let (runner, _) = try await running(store, session: session)
 
@@ -1407,7 +1407,7 @@ struct AgentRunnerPermissionTests {
         let session = try await makeSession(store)
         let other = try await store.upsert(Repo(name: "other", path: "/tmp/other-\(newID())"))
         try await store.upsert(PermissionGrant.granting(
-            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: other.id
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: other.id, agentKind: .claudeCode
         ))
         let (runner, _) = try await running(store, session: session)
 

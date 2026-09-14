@@ -52,7 +52,7 @@ struct ApprovalSettingsView: View {
                 } header: {
                     Text("Project approvals")
                 } footer: {
-                    Text("Approvals you allow for an entire project appear here. You can revoke them at any time.")
+                    Text("Approvals apply only to the provider you approved for this project. You can revoke them at any time.")
                         .settingsFootnote()
                 }
             }
@@ -103,6 +103,10 @@ struct ApprovalSettingsView: View {
                     .font(Typo.codeSmall)
                     .foregroundStyle(Palette.textPrimary)
                     .textSelection(.enabled)
+
+                Text(grant.agentKind?.label ?? "Provider unknown. Inactive; approve again when asked.")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
 
                 Text(provenance(grant))
                     .font(Typo.caption)

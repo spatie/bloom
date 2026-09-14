@@ -4,7 +4,7 @@ import Foundation
 
 /// A rule the user granted from a prompt, and the record that lets them take it back.
 ///
-/// Keyed by **repository**, not by workspace. A Bloom workspace is a git worktree, so anything
+/// Keyed by provider and repository. A Bloom workspace is a git worktree, so anything
 /// stored beside the working directory dies with the workspace: that is what makes the CLI's own
 /// `localSettings` destination the wrong home for a grant that was described to the user as
 /// lasting. Keeping grants here means a rule granted in one worktree is already in force in the
@@ -14,6 +14,8 @@ import Foundation
 public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
     public var id: PermissionGrantID
     public var repoID: RepoID
+    /// Nil for grants saved before providers were recorded. They remain visible but cannot match.
+    public var agentKind: AgentKind?
     /// The CLI's tool name, exactly as it arrived.
     public var toolName: String
     /// The CLI's `ruleContent`, exactly as it arrived. Nil is a rule covering the whole tool.
@@ -32,6 +34,7 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
     public init(
         id: PermissionGrantID = .new(),
         repoID: RepoID,
+        agentKind: AgentKind?,
         toolName: String,
         ruleContent: String? = nil,
         grantedAt: Date = Date(),
@@ -41,6 +44,7 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
     ) {
         self.id = id
         self.repoID = repoID
+        self.agentKind = agentKind
         self.toolName = toolName
         self.ruleContent = ruleContent
         self.grantedAt = grantedAt
@@ -57,9 +61,12 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
     /// would mean a person revoking a rule they never read.
     public var displayText: String { rule.displayText }
 
-    public static func granting(_ rule: PermissionRule, repoID: RepoID, for subject: String = "") -> PermissionGrant {
+    public static func granting(
+        _ rule: PermissionRule, repoID: RepoID, agentKind: AgentKind, for subject: String = ""
+    ) -> PermissionGrant {
         PermissionGrant(
             repoID: repoID,
+            agentKind: agentKind,
             toolName: rule.toolName,
             ruleContent: rule.ruleContent,
             grantedFor: subject
@@ -74,11 +81,11 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
     /// identical comments, which meant a change to what project scope stores had to be made twice
     /// and could be made once.
     public static func all(
-        granting decision: PermissionDecision, from ask: PermissionAsk, repoID: RepoID
+        granting decision: PermissionDecision, from ask: PermissionAsk, repoID: RepoID, agentKind: AgentKind
     ) -> [PermissionGrant] {
         guard case .allow(.project) = decision else { return [] }
 
-        return ask.rules.map { granting($0, repoID: repoID, for: ask.subject) }
+        return ask.rules.map { granting($0, repoID: repoID, agentKind: agentKind, for: ask.subject) }
     }
 }
 
@@ -86,7 +93,7 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
 
 /// Deciding whether a stored grant already answers an ask.
 ///
-/// The matching rule is **exact equality, and only exact equality**, on the tool name and on the
+/// Grants must belong to the requesting provider. Rules then match by exact equality on the tool name and on the
 /// CLI's own `ruleContent`. No prefix matching, no globbing, no case folding, no trimming of
 /// whitespace, no resolving of paths. If any of those were done here, Bloom would be deciding
 /// that two rules mean the same thing, and Bloom is not the component that knows that: a rule is
@@ -108,7 +115,7 @@ public enum PermissionGrantIndex {
     /// Every rule in the suggestion has to be covered, not merely one of them. A suggestion
     /// carrying two rules is one decision about two things, and honouring half of it would be
     /// allowing something on the strength of a grant that was about something else.
-    public static func match(ask: PermissionAsk, grants: [PermissionGrant]) -> [PermissionGrant]? {
+    public static func match(ask: PermissionAsk, agentKind: AgentKind, grants: [PermissionGrant]) -> [PermissionGrant]? {
         // The same three gates the buttons use. An ask the user was never allowed to widen must
         // not be answered from a stored grant either, or the flag the CLI set would mean nothing
         // the second time the question came round.
@@ -116,7 +123,7 @@ public enum PermissionGrantIndex {
 
         var matched: [PermissionGrant] = []
         for rule in suggestion.rules {
-            guard let grant = grants.first(where: { $0.rule == rule }) else { return nil }
+            guard let grant = grants.first(where: { $0.agentKind == agentKind && $0.rule == rule }) else { return nil }
             matched.append(grant)
         }
         return matched.isEmpty ? nil : matched

@@ -14,7 +14,7 @@ import Synchronization
 /// `PermissionGrant.all` is the precedent and its head makes the argument this file extends:
 /// `SessionRunner` is right that runner surface is not shared, because the protocols are not, but
 /// none of this is protocol. It is Bloom deciding what it already approved, in Bloom's own tables,
-/// with no backend vocabulary anywhere in it.
+/// with each rule restricted to the provider that received the approval.
 ///
 /// A `Sendable` class with a lock rather than an actor, for the reason `PendingAsks` gives: it is
 /// held by two actors that reach it from inside their own isolation, and an `await` to read a
@@ -30,11 +30,13 @@ final class SessionGrants: Sendable {
     /// between workspaces, and the runners were reading `session.workspaceID` off a value they had
     /// been carrying since the workspace was opened, so this is the same fact fixed earlier.
     private let workspaceID: WorkspaceID?
+    private let agentKind: AgentKind
     private let cachedRepoID = Mutex<RepoID?>(nil)
 
-    init(store: Store, workspaceID: WorkspaceID?) {
+    init(store: Store, workspaceID: WorkspaceID?, agentKind: AgentKind) {
         self.store = store
         self.workspaceID = workspaceID
+        self.agentKind = agentKind
     }
 
     /// What this session's workspace belongs to. Looked up rather than held, because a runner
@@ -57,8 +59,8 @@ final class SessionGrants: Sendable {
     /// that one query each is not worth a cache that could go stale in the wrong direction.
     func matching(_ ask: PermissionAsk) async -> [PermissionGrant]? {
         guard ask.canWiden, let repoID = await repoID() else { return nil }
-        guard let grants = try? await store.permissionGrants(repoID: repoID) else { return nil }
-        return PermissionGrantIndex.match(ask: ask, grants: grants)
+        guard let grants = try? await store.permissionGrants(repoID: repoID, agentKind: agentKind) else { return nil }
+        return PermissionGrantIndex.match(ask: ask, agentKind: agentKind, grants: grants)
     }
 
     /// Note that these grants answered a question, so the panel can say when each was last used.
@@ -80,7 +82,7 @@ final class SessionGrants: Sendable {
     /// a project one, so this is a no-op for the ordinary once-only answer.
     func record(_ decision: PermissionDecision, from ask: PermissionAsk) async {
         guard let repoID = await repoID() else { return }
-        for grant in PermissionGrant.all(granting: decision, from: ask, repoID: repoID) {
+        for grant in PermissionGrant.all(granting: decision, from: ask, repoID: repoID, agentKind: agentKind) {
             _ = try? await store.upsert(grant)
         }
     }
