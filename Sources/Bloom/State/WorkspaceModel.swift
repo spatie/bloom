@@ -434,19 +434,27 @@ final class WorkspaceModel {
         draft: String = ""
     ) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
+        // Quick prompts can submit before the composer appears. Settle defaults before exposing
+        // the session, otherwise its first turn can launch Claude despite a Codex default.
+        let openingControls: ComposerControls
+        if let controls {
+            openingControls = controls
+        } else {
+            guard let resolved = try? await app.resolvedControls(for: repo) else { return nil }
+            openingControls = resolved
+        }
+        guard !app.isArchiving(workspace.id) else { return nil }
         var session = Session(
             workspaceID: workspace.id,
             title: title ?? PaneNaming.nextTitle(base: PaneNaming.chat, taken: sessions.map(\.title)),
             sortOrder: sessions.count
         )
-        if let controls {
-            session.model = controls.model
-            session.effort = controls.effort
-            session.agentKind = controls.agentKind
-            session.permissionMode = controls.permissionMode
-        }
+        session.model = openingControls.model
+        session.effort = openingControls.effort
+        session.agentKind = openingControls.agentKind
+        session.permissionMode = openingControls.permissionMode
         guard let stored = try? await store.upsert(session) else { return nil }
-        if let controls { await controls.store(sessionID: stored.id, in: store) }
+        await openingControls.store(sessionID: stored.id, in: store)
         if !draft.isEmpty { try? await store.saveDraft(sessionID: stored.id, body: draft) }
         await reloadSessions()
         activeSessionID = stored.id

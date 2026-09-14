@@ -308,12 +308,12 @@ extension AppModel {
     /// window agrees with one created from the sheet rather than falling back to the built-in.
     /// Repository settings first, then the Settings screen, then a machine-wide file. See
     /// `ComposerDefaults.resolve`.
-    private func resolvedControls(for repo: Repo) async throws -> ComposerControls {
+    func resolvedControls(for repo: Repo?) async throws -> ComposerControls {
         guard let store else { return ComposerControls() }
 
         let appDefaults = await AppDefaults.load(from: store)
         let repoSettings = await Task.detached(priority: .userInitiated) {
-            SettingsLoader.load(repo: repo.path)
+            repo.map { SettingsLoader.load(repo: $0.path) } ?? RepoSettings()
         }.value
         // The Codex list as this window last fetched it, which may well be empty here: nothing
         // waits for a fetch to start a workspace. Empty costs only the effort fallback, because
@@ -331,11 +331,9 @@ extension AppModel {
         // that rule, and the Models screen records the backend beside the model so the common case
         // needs no list to look an id up in.
         return ComposerControls(
-            model: resolved.model,
-            effort: resolved.effort,
-            agentKind: resolved.backend,
-            permissionMode: resolved.permissionMode,
+            defaults: resolved,
             isFastMode: appDefaults.fastMode,
+            outputStyle: appDefaults.outputStyle,
             codexContextWindow: appDefaults.codexContextWindow
         )
     }
