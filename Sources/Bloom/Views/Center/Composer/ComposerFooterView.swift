@@ -334,17 +334,20 @@ struct ComposerFooterView: View {
                 }
             }
 
-            // A paperclip, not the plus that used to sit here: a plus already means "new session"
-            // in the tab strip directly above, and it says nothing about what is being added.
             if let onSideConversation {
                 Button(action: onSideConversation) {
-                    Image(systemName: "arrow.turn.down.right")
+                    ComposerControlLabel(text: nil) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .imageScale(.medium)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("Ask a side question (/btw)")
                 .accessibilityLabel("Ask a side question")
             }
 
+            // A paperclip, not the plus that used to sit here: a plus already means "new session"
+            // in the tab strip directly above, and it says nothing about what is being added.
             // Gone with the rest when there is no agent: nothing reads an attachment into a shell.
             if showsAgentControls {
                 Button(action: onAttach) {
@@ -362,16 +365,19 @@ struct ComposerFooterView: View {
             // Stop before Send, and only while there is a turn to stop. The pair used to be one
             // control; see `ComposerStopButton` for why it no longer can be, and why Send is the
             // one that keeps the end of the row in every state.
-            if isRunning {
-                ComposerStopButton(onStop: onStop)
-            }
+            HStack(spacing: Metrics.spacingWide) {
+                if isRunning {
+                    ComposerStopButton(onStop: onStop)
+                }
 
-            ComposerSendButton(
-                intent: intent,
-                queues: queues,
-                canSend: canSend,
-                onSend: onSend
-            )
+                ComposerSendButton(
+                    intent: intent,
+                    queues: queues,
+                    canSend: canSend,
+                    onSend: onSend
+                )
+            }
+            .padding(.leading, Metrics.spacingWide)
         }
     }
 
