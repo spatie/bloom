@@ -361,6 +361,16 @@ public actor CodexClient {
         )
     }
 
+    public func readConfiguration(cwd: String) async throws -> JSONValue {
+        let result = try await send("config/read", params: .object([
+            "cwd": .string(cwd), "includeLayers": .bool(false),
+        ]))
+        guard let config = result["config"], config != .null else {
+            throw CodexClientError.unexpectedResult(method: "config/read")
+        }
+        return config
+    }
+
     /// Sends one turn and returns as soon as the server has accepted it.
     ///
     /// The reply is the turn in `inProgress`, not the finished one: waiting for the answer means
@@ -379,11 +389,13 @@ public actor CodexClient {
         effort: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
         sandboxPolicy: JSONValue? = nil,
-        approvalsReviewer: CodexApprovalsReviewer? = nil
+        approvalsReviewer: CodexApprovalsReviewer? = nil,
+        serviceTier: String? = nil
     ) async throws -> CodexTurn {
         let result = try await send("turn/start", params: .object(omittingNil: [
             "threadId": .string(threadID),
             "input": .array(input.map(\.json)),
+            "serviceTier": serviceTier.map(JSONValue.string),
             "model": model.map(JSONValue.string),
             "effort": effort.flatMap { $0.isEmpty ? nil : .string($0) },
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },

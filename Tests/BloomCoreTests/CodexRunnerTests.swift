@@ -325,6 +325,37 @@ private func eventually(
         #expect(json["message"]?["content"]?[0]?["text"]?.stringValue == "write the tests first")
     }
 
+    @Test(arguments: ["0", "1"])
+    func sendsExplicitCodexSpeedChoice(value: String) async throws {
+        let store = try Store(path: ":memory:")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting("session.\(session.id).codexFastMode", value)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("hello")
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        #expect(turn["params"]?["serviceTier"]?.stringValue == (value == "1" ? "priority" : "default"))
+        runner.cancelNow()
+        try await store.setSetting("session.\(session.id).codexFastMode", value == "1" ? "0" : "1")
+        try await runner.send("next turn")
+        let turns = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/start" }
+        #expect(turns.count == 2)
+        #expect(turns.last?["params"]?["serviceTier"]?.stringValue == (value == "1" ? "default" : "priority"))
+        await runner.shutdown()
+    }
+
+    @Test func oldClaudeSpeedPreferenceDoesNotOverrideCodexConfiguration() async throws {
+        let store = try Store(path: ":memory:")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(ComposerControls.fastModeKey(sessionID: session.id), "1")
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("hello")
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        #expect(turn["params"]?["serviceTier"] == nil)
+        await runner.shutdown()
+    }
+
     /// Model, effort, approval policy and sandbox all travel with the turn, which is what lets a
     /// composer chip take effect on the next turn without restarting anything.
     @Test func sendsTheChatsModelAndEffortWithEveryTurn() async throws {

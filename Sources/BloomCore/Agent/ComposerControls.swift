@@ -42,6 +42,8 @@ public struct ComposerControls: Equatable, Sendable {
         didSet { permissionMode = permissionMode.nearest(on: agentKind) }
     }
     public var isFastMode: Bool
+    /// Nil inherits Codex configuration. Kept separate from the older Claude thinking preference.
+    public var codexFastMode: Bool?
     /// How the agent is asked to write, by name. `OutputStyle.defaultName` for "leave it alone",
     /// which is what a session is until somebody picks something else.
     public var outputStyle: String
@@ -62,7 +64,8 @@ public struct ComposerControls: Equatable, Sendable {
         isFastMode: Bool = false,
         outputStyle: String = OutputStyle.defaultName,
         codexContextWindow: Int = CodexContextWindow.modelDefault,
-        hasWorktree: Bool = true
+        hasWorktree: Bool = true,
+        codexFastMode: Bool? = nil
     ) {
         self.model = model
         self.effort = effort
@@ -72,6 +75,7 @@ public struct ComposerControls: Equatable, Sendable {
         // initialiser, and every value of this type is made here.
         self.permissionMode = permissionMode.nearest(on: agentKind)
         self.isFastMode = isFastMode
+        self.codexFastMode = codexFastMode
         self.outputStyle = outputStyle
         self.codexContextWindow = codexContextWindow
         self.hasWorktree = hasWorktree
@@ -81,7 +85,8 @@ public struct ComposerControls: Equatable, Sendable {
         session: Session,
         isFastMode: Bool,
         outputStyle: String,
-        codexContextWindow: Int = CodexContextWindow.modelDefault
+        codexContextWindow: Int = CodexContextWindow.modelDefault,
+        codexFastMode: Bool? = nil
     ) {
         self.init(
             model: session.model,
@@ -93,7 +98,8 @@ public struct ComposerControls: Equatable, Sendable {
             codexContextWindow: codexContextWindow,
             // Read off the row rather than passed in, so the one caller that has a chat with no
             // worktree cannot forget to say so.
-            hasWorktree: session.workspaceID != nil
+            hasWorktree: session.workspaceID != nil,
+            codexFastMode: codexFastMode
         )
     }
 
@@ -172,7 +178,8 @@ public struct ComposerControls: Equatable, Sendable {
         defaults: ComposerDefaults,
         isFastMode: Bool,
         outputStyle: String,
-        codexContextWindow: Int = CodexContextWindow.modelDefault
+        codexContextWindow: Int = CodexContextWindow.modelDefault,
+        codexFastMode: Bool? = nil
     ) {
         self.init(
             model: defaults.model,
@@ -184,7 +191,8 @@ public struct ComposerControls: Equatable, Sendable {
             permissionMode: defaults.permissionMode,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
-            codexContextWindow: codexContextWindow
+            codexContextWindow: codexContextWindow,
+            codexFastMode: codexFastMode
         )
     }
 
@@ -222,9 +230,7 @@ public struct ComposerControls: Equatable, Sendable {
     /// Writes the parts of these choices that a `Session` row cannot hold, and marks the session
     /// settled. The other four go on the row itself, wherever it is being written.
     ///
-    /// All three store nil for their off state rather than a word for it, so a session that was
-    /// never asked and one that was asked and said no read back the same. `AgentRunner` and
-    /// `CodexRunner` treat them the same too, which is what keeps the two ends from disagreeing.
+    /// Codex speed preserves an explicit off value because absence inherits external settings.
     public func store(sessionID: SessionID, in store: Store) async {
         try? await store.saveComposerControls(self, sessionID: sessionID)
     }
@@ -232,6 +238,7 @@ public struct ComposerControls: Equatable, Sendable {
     func settings(sessionID: SessionID) -> [(String, String?)] {
         [
             (Self.fastModeKey(sessionID: sessionID), isFastMode ? "1" : nil),
+            (CodexSpeed.key(sessionID: sessionID), codexFastMode.map { $0 ? "1" : "0" }),
             (Self.outputStyleKey(sessionID: sessionID), OutputStyle.isDefault(outputStyle) ? nil : outputStyle),
             (Self.contextWindowKey(sessionID: sessionID), CodexContextWindow.stored(codexContextWindow)),
             (Self.defaultsAppliedKey(sessionID: sessionID), "1"),

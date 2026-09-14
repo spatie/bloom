@@ -52,6 +52,7 @@ struct ComposerView: View {
     @State private var caret = 0
     @State private var isFocused = false
     @State private var isFastMode = false
+    @State private var codexFastMode: Bool?
     /// The style name this session is on, mirrored out of the store the way fast mode is. Neither
     /// has a column on `Session`, so neither can be read off the row the footer is drawn from.
     @State private var outputStyle = OutputStyle.defaultName
@@ -175,7 +176,8 @@ struct ComposerView: View {
             session: transcript.session,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
-            codexContextWindow: codexContextWindow
+            codexContextWindow: codexContextWindow,
+            codexFastMode: codexFastMode
         )
     }
 
@@ -228,6 +230,15 @@ struct ComposerView: View {
     /// Writes the footer's choices back where a conversation keeps them: the four that are columns
     /// go on the session row, and fast mode and the output style go in the store's key value table.
     private func apply(controls new: ComposerControls) {
+        if new.codexFastMode != codexFastMode {
+            codexFastMode = new.codexFastMode
+            if let store = app.store {
+                let key = CodexSpeed.key(sessionID: transcript.session.id)
+                let value = new.codexFastMode.map { $0 ? "1" : "0" }
+                Task { try? await store.setSetting(key, value) }
+            }
+        }
+
         if new.isFastMode != isFastMode {
             isFastMode = new.isFastMode
             if let store = app.store {
@@ -604,6 +615,9 @@ struct ComposerView: View {
         let storedFastMode = (try? await store.setting(
             ComposerControls.fastModeKey(sessionID: sessionID)
         )) == "1"
+        let storedCodexSpeed = CodexSpeed.override(stored: try? await store.setting(
+            CodexSpeed.key(sessionID: sessionID)
+        ))
         let storedStyle = (try? await store.setting(
             ComposerControls.outputStyleKey(sessionID: sessionID)
         )) ?? OutputStyle.defaultName
@@ -616,6 +630,7 @@ struct ComposerView: View {
         // the state the NEW session's own preparation had just written.
         guard !Task.isCancelled else { return }
         isFastMode = storedFastMode
+        codexFastMode = storedCodexSpeed
         outputStyle = storedStyle
         codexContextWindow = storedContextWindow
 

@@ -100,8 +100,11 @@ final class AskModel {
                 let window = CodexContextWindow.normalised(
                     try await store.setting(ComposerControls.contextWindowKey(sessionID: current.id))
                 )
+                let codexFastMode = CodexSpeed.override(stored: try await store.setting(
+                    CodexSpeed.key(sessionID: current.id)
+                ))
                 carried = ComposerControls(session: current, isFastMode: fast, outputStyle: style,
-                                           codexContextWindow: window)
+                                           codexContextWindow: window, codexFastMode: codexFastMode)
             }
             let made = try await store.replaceAskConversation(id: current.id, controls: carried, draft: draft)
             transcripts.removeValue(forKey: current.id)?.teardown()

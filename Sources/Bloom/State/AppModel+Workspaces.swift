@@ -558,11 +558,15 @@ extension AppModel {
         let contextWindow = CodexContextWindow.normalised(try? await store.setting(
             ComposerControls.contextWindowKey(sessionID: session.id)
         ))
+        let codexFastMode = CodexSpeed.override(stored: try? await store.setting(
+            CodexSpeed.key(sessionID: session.id)
+        ))
         return ComposerControls(
             session: session,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
-            codexContextWindow: contextWindow
+            codexContextWindow: contextWindow,
+            codexFastMode: codexFastMode
         )
     }
 

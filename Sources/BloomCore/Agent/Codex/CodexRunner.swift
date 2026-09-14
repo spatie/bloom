@@ -165,6 +165,8 @@ public actor CodexRunner: SessionRunner {
         }
         try handle.check(generation)
 
+        let speed = CodexSpeed.override(stored: try await store.setting(CodexSpeed.key(sessionID: session.id)))
+        try handle.check(generation)
         let turn = try await client.startTurn(
             threadID: threadID,
             input: [.text(text)],
@@ -172,7 +174,8 @@ public actor CodexRunner: SessionRunner {
             effort: session.effort,
             approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
             sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
-            approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
+            approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode),
+            serviceTier: CodexSpeed.serviceTier(override: speed)
         )
         guard handle.begin(turnID: turn.id, generation: generation) else {
             // Stop can arrive while turn/start is in flight, before there is an id to interrupt.
