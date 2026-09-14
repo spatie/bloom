@@ -15,6 +15,29 @@ struct TranscriptPaneHoldTests {
         #expect(TranscriptPaneHold.arrival <= .seconds(2))
     }
 
+    // MARK: - Reflowing while a pane is dragged
+
+    @Test("a slow drag waits for the width to move a step before reflowing")
+    func slowDragWaitsForAStep() {
+        #expect(!TranscriptPaneHold.reflowsNow(from: 800, to: 801))
+        #expect(!TranscriptPaneHold.reflowsNow(from: 800, to: 800 - TranscriptPaneHold.reflowStep + 1))
+    }
+
+    @Test("a step either way reflows on the frame")
+    func aStepReflows() {
+        #expect(TranscriptPaneHold.reflowsNow(from: 800, to: 800 + TranscriptPaneHold.reflowStep))
+        #expect(TranscriptPaneHold.reflowsNow(from: 800, to: 800 - TranscriptPaneHold.reflowStep))
+        #expect(TranscriptPaneHold.reflowsNow(from: 800, to: 640))
+    }
+
+    /// The settle is what finishes a step the drag skipped, so it has to come quickly enough
+    /// that a paragraph drawn into the row under it is not something the reader sits and looks at.
+    @Test("the width settles quickly once the hand stops")
+    func settlesQuickly() {
+        #expect(TranscriptPaneHold.settle > .zero)
+        #expect(TranscriptPaneHold.settle <= .milliseconds(300))
+    }
+
     // MARK: - What a reflow measures once it settles
 
     @Test("what the reader can see is measured, and a screen either side of it")

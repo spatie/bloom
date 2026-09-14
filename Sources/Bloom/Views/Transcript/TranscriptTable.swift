@@ -317,7 +317,7 @@ struct TranscriptTable: NSViewRepresentable {
         private var warmWork: Task<Void, Never>?
         /// A reflow saying its placement a second time. See `rewidth`.
         private var placeWork: Task<Void, Never>?
-        /// The margin a width change leaves out while the width is still moving. See `widthChanged`.
+        /// The last layout of a resize, waiting for the width to be still. See `settleWidth`.
         private var resizeWork: Task<Void, Never>?
         private var viewportWork: Task<Void, Never>?
         private var viewportPlace: PlaceBeforeResize?
@@ -485,8 +485,12 @@ struct TranscriptTable: NSViewRepresentable {
             // The line height comes off the environment rather than beside `scale`, because it
             // arrives with everything else a row is drawn from and a second argument saying the
             // same thing is a second thing to forget to pass. See `TranscriptRowHeights.Measure`.
+            // Width changes belong to rewidth, which keeps offscreen heights as estimates.
+            // An update can arrive before that reflow, especially during a slow drag. Resetting
+            // to columnWidth here discarded those heights and retiled the whole conversation.
             let remeasured = heights.reset(
-                width: columnWidth, scale: scale, leading: environment.lineHeight.ratio
+                width: heights.measure?.width ?? Double(columnWidth),
+                scale: scale, leading: environment.lineHeight.ratio
             ) || wrapsDifferently
 
             let newIDs = newEntries.map(\.id)
@@ -1700,21 +1704,15 @@ struct TranscriptTable: NSViewRepresentable {
         /// `widthChanged` is the mechanism, called from `TranscriptTableView.layout()` on the frame
         /// the width moves. This is the fallback it was before that, for a pane arriving at its
         /// first width and for anything that resizes the scroll view without the table laying
-        /// itself out: it waits for the width to be still and reflows once, and finds nothing to
-        /// do when `widthChanged` already has.
+        /// itself out. It waits for the width to be still, which is the same settle
+        /// `widthChanged` arms, so the two cannot schedule two different last layouts.
         @objc private func paneResized() {
             guard let sizing = heights.measure,
                   !TranscriptRowHeights.isSameWidth(Double(columnWidth), sizing.width) else {
                 reportGeometry()
                 return
             }
-            resizeWork?.cancel()
-            resizeWork = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(150))
-                guard !Task.isCancelled, let self else { return }
-                resizeWork = nil
-                rewidth(keeping: nil, withMargin: true)
-            }
+            settleWidth()
             reportGeometry()
         }
 
@@ -1725,12 +1723,21 @@ struct TranscriptTable: NSViewRepresentable {
         /// Called on every frame of a divider drag, a window edge, a zoom or the inspector
         /// sliding, which is what lets the text follow the hand rather than a fade after it lets
         /// go. Only the visible rows are measured here: a screen of them fits in a frame, and every
-        /// other row keeps its old height as an estimate until it is drawn. The margin around them
-        /// is measured once the width has been still for 150ms, so a drag pays for it once rather
-        /// than on every frame. See `TranscriptPaneHold`, which carries the history.
+        /// other row keeps its old height as an estimate until it is drawn. See
+        /// `TranscriptPaneHold`, which carries the history.
+        ///
+        /// **Not on every frame of a slow drag.** A width less than `reflowStep` from the last
+        /// reflow is left to the settle, and the rows keep the heights they had until then. The
+        /// cells still lay their content out at the new width and report it, and `noted` refuses
+        /// those reports because the cache is for the last reflow's width, so a slow drag counts
+        /// width mismatches in `TranscriptHoldCensus` by design. The settle measures them again.
         private func widthChanged() {
             guard let sizing = heights.measure,
                   !TranscriptRowHeights.isSameWidth(Double(columnWidth), sizing.width) else { return }
+            guard TranscriptPaneHold.reflowsNow(from: sizing.width, to: Double(columnWidth)) else {
+                settleWidth()
+                return
+            }
             // Read by `viewportWillResize` before AppKit moved the clip view, when it was still
             // true. Taken here so the viewport's own correction does not place the reader a
             // second time against heights that are about to change.
@@ -1742,12 +1749,20 @@ struct TranscriptTable: NSViewRepresentable {
             warmWork?.cancel()
             warmWork = nil
             rewidth(keeping: place, withMargin: false)
+            settleWidth()
+        }
+
+        /// **The last layout of a resize, once the width has been still for
+        /// `TranscriptPaneHold.settle`.** A reflow at the width the pane stopped at if the drag's
+        /// last steps were too small to take one, and the margin around the screen either way.
+        /// Re-armed by every width change, so a drag pays for it once.
+        private func settleWidth() {
             resizeWork?.cancel()
             resizeWork = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(150))
+                try? await Task.sleep(for: TranscriptPaneHold.settle)
                 guard !Task.isCancelled, let self else { return }
                 resizeWork = nil
-                measureMargin()
+                if !rewidth(keeping: nil, withMargin: true) { measureMargin() }
             }
         }
 

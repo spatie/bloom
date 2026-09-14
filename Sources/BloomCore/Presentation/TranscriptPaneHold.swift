@@ -24,6 +24,25 @@ import Foundation
 /// drag was a distraction nobody needed. So a width change reflows as it happens, measuring what
 /// is visible, and `eager` below is measured once the width has stopped moving.
 public enum TranscriptPaneHold {
+    /// How far the width has to move from the last reflow before a resize reflows on the frame.
+    ///
+    /// A slow drag moves the pane a point or two a frame, and a reflow for each of those rewraps
+    /// almost nothing while paying for every row on screen. Below this the rows keep the heights
+    /// of the last reflow for a few frames, so a paragraph that gained a line draws into the row
+    /// under it until the next step or the settle. Eight points is a character or so of body text:
+    /// a fast drag passes it every frame and still follows the hand, and a drag at a point a frame
+    /// reflows every eighth.
+    public static let reflowStep: Double = 8
+
+    /// Whether a width this far from the last reflow is reflowed now rather than at the settle.
+    public static func reflowsNow(from reflowed: Double, to width: Double) -> Bool {
+        abs(width - reflowed) >= reflowStep
+    }
+
+    /// How long the width has to be still before the resize is finished: the reflow a slow drag
+    /// skipped, if it skipped one, and the margin around the screen. See `eager`.
+    public static let settle: Duration = .milliseconds(150)
+
     /// The longest a pane stays blank waiting for the conversation it has been pointed at.
     ///
     /// **What it is showing meanwhile is its own empty ground and never another conversation**, so
