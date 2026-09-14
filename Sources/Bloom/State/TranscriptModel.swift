@@ -102,11 +102,15 @@ final class TranscriptModel {
     private(set) var presentationRevision = 0
     @ObservationIgnored private var foldCache = TranscriptFoldCache()
     @ObservationIgnored private var questionIndex = PinnedQuestionIndex()
+    /// Tool calls that arrived moments ago, by call id, which fold before their result is back.
+    /// See `TranscriptFold.freshCall`. Told through `presentationRevision`, like the cache above.
+    @ObservationIgnored private var freshCalls: Set<String> = []
 
     /// These caches write no observable state and are safe to consult during a render pass.
     /// Each belongs to this session, including when its pane is displaying another workspace.
     func presentationFolds() -> TranscriptFold.Folds {
-        foldCache.resolve(rows.lazy.map { row in
+        let freshCalls = freshCalls
+        return foldCache.resolve(rows.lazy.map { row in
             let settled: Bool
             switch row.kind {
             case .toolUse: settled = row.resultPayload != nil
@@ -121,6 +125,7 @@ final class TranscriptModel {
                 drawsNothing: TranscriptNoise.isHidden(row)
                     || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
                 settled: settled,
+                isFresh: row.kind == .toolUse && row.refID.map(freshCalls.contains) == true,
                 toolUseID: row.kind == .toolUse ? row.refID : nil,
                 parentToolUseID: row.parentToolUseID,
                 opensTurn: BackgroundWake.isRow(kind: row.kind, payload: row.payload)
@@ -410,6 +415,7 @@ final class TranscriptModel {
         }.value
 
         foldCache.reset()
+        freshCalls = []
         questionIndex = PinnedQuestionIndex()
         rows = built.rows
         presentationRevision += 1
@@ -1424,10 +1430,18 @@ final class TranscriptModel {
             // through. That is the only signal there is: the CLI announces a retry and never
             // announces a recovery, so the recovery is the next event of any kind.
             settleRetryRun()
+            let runningTool = streamingToolName
+            let callsBefore = freshCalls
             await appendLatestMessages()
             // Keep the live drawing while the store is awaited. Clearing first leaves an empty
             // frame between the stream and its saved row, interrupting the shared arrival.
             clearStreaming()
+            // A call that just arrived is folded out of sight for a moment, so the tail goes on
+            // naming it rather than saying the model is being waited on while a tool runs. Its
+            // result clears this like any other arrival. See `TranscriptFold.freshCall`.
+            if case .toolUse = event, !freshCalls.isSubset(of: callsBefore) {
+                streamingToolName = runningTool
+            }
 
         case .error(let failure):
             // The agent died without ever producing a result: a model it does not know, expired
@@ -1676,6 +1690,7 @@ final class TranscriptModel {
         ) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
+        var calls: [String] = []
         // **Filtered against the cursor again, having already been queried against it.** The read
         // above is a suspension point, so two calls can both ask for everything after `n` and both
         // come back with the same rows: the cursor only moves in the loop below, which neither of
@@ -1689,12 +1704,46 @@ final class TranscriptModel {
             // Before folding, because a tool result changes an old row rather than appending one.
             // The cursor belongs to stored messages, not to their presentation.
             highestSeenMessageSeq = max(highestSeenMessageSeq, message.seq)
+            if message.kind == .toolUse, let id = message.refID { calls.append(id) }
             absorb(message)
+        }
+        // A question stops the turn on a person, and a running call drawn in above it a moment
+        // later would move the buttons they are reaching for. So it is drawn now, with the question.
+        if fresh.contains(where: { $0.kind == .permissionAsk }) {
+            endFreshCalls(Array(freshCalls))
+        } else if !calls.isEmpty {
+            beginFreshCalls(calls)
         }
         // Over what actually arrived, not over the transcript. A tool result folds onto a row that
         // is already there rather than appending, so the slice can be empty, and an empty one
         // leaves the held reading exactly where it was.
         noteContextWindow(in: rows[min(appendedFrom, rows.count)...])
+    }
+
+    /// Lets calls that have just arrived fold straight away, and draws any still running once
+    /// `TranscriptFold.freshCall` has passed.
+    ///
+    /// **A timer rather than waiting for the result, because a call can run for minutes.** Held out
+    /// of sight until its result, a test run would be a count and a status line and nothing else.
+    private func beginFreshCalls(_ calls: [String]) {
+        freshCalls.formUnion(calls)
+        Task { [weak self] in
+            try? await Task.sleep(for: TranscriptFold.freshCall)
+            self?.endFreshCalls(calls)
+        }
+    }
+
+    private func endFreshCalls(_ calls: [String]) {
+        var revealed = false
+        for id in calls where freshCalls.remove(id) != nil {
+            // A call that settled while fresh folds either way, so only a running one changes what
+            // the fold says.
+            guard let index = indexByRefID[id], rows.indices.contains(index),
+                  rows[index].resultPayload == nil else { continue }
+            foldCache.invalidate(row: index)
+            revealed = true
+        }
+        if revealed { presentationRevision += 1 }
     }
 
     /// Folds what the newest rows say about the context window into the held reading.
