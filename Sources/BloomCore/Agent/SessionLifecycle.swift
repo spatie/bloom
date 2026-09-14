@@ -120,20 +120,17 @@ public extension Session {
     // Polls can miss intermediate hooks, so a waiting snapshot may be the first event we see.
     mutating func applyInteractiveState(_ observed: SessionState, at date: Date = Date()) {
         guard state != observed else { return }
+        if !state.isMidTurn { apply(.turnStarted, at: date) }
         switch observed {
         case .running:
-            apply(state == .waiting ? .unblocked : .turnStarted, at: date)
+            if state == .waiting { apply(.unblocked, at: date) }
         case .waiting:
-            if !state.isMidTurn { apply(.turnStarted, at: date) }
             apply(.blocked, at: date)
         case .idle:
-            if !state.isMidTurn { apply(.turnStarted, at: date) }
             apply(.turnFinished(isError: false), at: date)
         case .failed:
-            if !state.isMidTurn { apply(.turnStarted, at: date) }
             apply(.turnFinished(isError: true), at: date)
         case .cancelled:
-            if !state.isMidTurn { apply(.turnStarted, at: date) }
             apply(.cancelled, at: date)
         }
     }

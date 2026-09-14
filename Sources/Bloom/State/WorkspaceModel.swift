@@ -1171,14 +1171,22 @@ final class WorkspaceModel {
         await reloadSessions()
         guard !Task.isCancelled else { return }
         if let cliSession {
-            guard let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
+            let port = await ensurePort()
+            guard !Task.isCancelled,
+                  let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
                   sessions.contains(where: { $0.id == cliSession.id }),
                   let command = cliSession.agentKind.interactiveCommand(
                       directory: workspace.path, prompt: cliPrompt ?? "", sessionID: cliSession.id,
                       model: cliSession.model, effort: cliSession.effort, permissionMode: nil
                   ) else { return }
             try? FileManager.default.removeItem(at: AgentKind.interactiveStatusURL(sessionID: cliSession.id))
-            TerminalSessionStore.shared.run(command, inPaneID: terminal.id)
+            let terminals = TerminalSessionStore.shared
+            terminals.useStore(store)
+            terminals.run(command, inPaneID: terminal.id)
+            _ = terminals.terminal(
+                for: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: workspace.id, title: terminal.title),
+                workspace: workspace, repo: repo, port: port, directory: terminal.directory
+            )
             pendingCLILaunches.remove(cliSession.id)
             return
         }

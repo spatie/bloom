@@ -19,6 +19,30 @@ struct ProcessTableTests {
         }
     }
 
+    @Test("Generated launch and resume hooks do not become CLI flags")
+    func generatedInteractiveCommands() throws {
+        for kind in [AgentKind.claudeCode, .codex] {
+            for resume in [nil, "native-session"] as [String?] {
+                let arguments = try #require(kind.interactiveArguments(
+                    prompt: "check --help and -p before exec", sessionID: SessionID("session"),
+                    model: "", effort: "", resuming: resume
+                ))
+                let command = ([kind.executableName] + arguments).joined(separator: " ")
+                #expect(ProcessTable.interactiveAgent(command: command) == kind)
+            }
+            let arguments = try #require(kind.interactiveArguments(
+                prompt: "", sessionID: SessionID("session"), model: "", effort: ""
+            ))
+            let command = ([kind.executableName] + arguments).joined(separator: " ")
+            let suffix = kind == .claudeCode ? " --print task" : " exec task"
+            #expect(ProcessTable.interactiveAgent(command: command + suffix) == nil)
+            #expect(ProcessTable.interactiveAgent(command: command + " --help") == nil)
+        }
+        let settings = #"{"prompt":"say \"--help\" and -p", "tools": ["exec", "review"]}"#
+        #expect(ProcessTable.interactiveAgent(command: "claude --settings \(settings) -- task") == .claudeCode)
+        #expect(ProcessTable.interactiveAgent(command: "claude --settings \(settings) --print task") == nil)
+    }
+
     @Test("Detection follows wrappers but stays inside the selected shell job")
     func interactiveJobTree() {
         let table = ProcessTable(psOutput: """

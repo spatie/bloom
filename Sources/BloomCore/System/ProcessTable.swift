@@ -117,7 +117,7 @@ public struct ProcessTable: Sendable, Equatable {
     }
 
     public static func interactiveAgent(command: String) -> AgentKind? {
-        var arguments = command.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        var arguments = commandWords(command)
         guard let executable = arguments.first else { return nil }
         let name = URL(fileURLWithPath: executable).lastPathComponent
         if name == "node" || name == "nodejs" || name == "bun" {
@@ -133,17 +133,29 @@ public struct ProcessTable: Sendable, Equatable {
         }
         guard let commandName = arguments.first else { return nil }
         let binary = URL(fileURLWithPath: commandName).lastPathComponent
-        let flags = arguments.dropFirst().prefix { $0 != "--" }
-        if flags.contains("--help") || flags.contains("-h")
-            || flags.contains("--version") || flags.contains("-V") { return nil }
         switch binary {
         case "claude":
-            guard !flags.contains(where: {
-                $0 == "--print" || $0.hasPrefix("--print=") || $0 == "-p"
-                    || $0.hasPrefix("--output-format")
-            }) else { return nil }
-            let commands: Set<String> = ["auth", "mcp", "plugin", "install", "update", "doctor", "setup-token"]
-            guard arguments.dropFirst().first.map({ !commands.contains($0) }) ?? true else { return nil }
+            let commands: Set<String> = ["auth", "mcp", "plugin", "install", "update", "doctor", "setup-token", "help"]
+            let valueOptions: Set<String> = [
+                "--settings", "--session-id", "--resume", "-r", "--model", "--effort", "--permission-mode",
+                "--system-prompt", "--append-system-prompt", "--mcp-config", "--agent", "--agents",
+                "--add-dir", "--allowedTools", "--disallowedTools", "--tools", "--setting-sources"
+            ]
+            var index = 1
+            while index < arguments.count {
+                let argument = arguments[index]
+                if argument == "--" { break }
+                if ["--help", "-h", "--version", "-V", "--print", "-p"].contains(argument)
+                    || argument.hasPrefix("--print=") || argument.hasPrefix("--output-format") { return nil }
+                if valueOptions.contains(argument) {
+                    index += 2
+                } else if argument.hasPrefix("-") {
+                    index += 1
+                } else {
+                    guard !commands.contains(argument) else { return nil }
+                    break
+                }
+            }
             return .claudeCode
         case "codex":
             let commands: Set<String> = ["exec", "e", "review", "app-server", "mcp-server", "mcp", "login", "logout", "completion", "sandbox", "debug", "apply", "cloud", "features", "help"]
@@ -152,6 +164,7 @@ public struct ProcessTable: Sendable, Equatable {
             while index < arguments.count {
                 let argument = arguments[index]
                 if argument == "--" { break }
+                if ["--help", "-h", "--version", "-V"].contains(argument) { return nil }
                 if valueOptions.contains(argument) {
                     index += 2
                 } else if argument.hasPrefix("-") {
@@ -165,6 +178,42 @@ public struct ProcessTable: Sendable, Equatable {
         default:
             return nil
         }
+    }
+
+    // ps drops argv boundaries; keep hook JSON and TOML together rather than reading their text as flags.
+    private static func commandWords(_ command: String) -> [String] {
+        var words: [String] = []
+        var word = ""
+        var quote: Character?
+        var escaped = false
+        var brackets: [Character] = []
+        for character in command {
+            if let delimiter = quote {
+                word.append(character)
+                if escaped {
+                    escaped = false
+                } else if character == "\\", delimiter == "\"" {
+                    escaped = true
+                } else if character == delimiter {
+                    quote = nil
+                }
+            } else if character == "\"" || character == "'" {
+                quote = character
+                word.append(character)
+            } else if character == "{" || character == "[" {
+                brackets.append(character == "{" ? "}" : "]")
+                word.append(character)
+            } else if character == brackets.last {
+                brackets.removeLast()
+                word.append(character)
+            } else if character.isWhitespace && brackets.isEmpty {
+                if !word.isEmpty { words.append(word); word = "" }
+            } else {
+                word.append(character)
+            }
+        }
+        if !word.isEmpty { words.append(word) }
+        return words
     }
 
     /// Whether a shell has handed its terminal to something else, or nil when the shell is not in

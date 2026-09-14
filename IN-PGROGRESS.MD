@@ -54,6 +54,14 @@ Suggested event mapping: `UserPromptSubmit`, `PreToolUse` and `PostToolUse` mean
 - Initial implementation was committed and pushed to `alex/cli-agent-terminals`. No pull request is requested.
 - Merged current `main` to retain schema version 27 support after the first dev build could not open the newer dev database. The dev database was backed up and its integrity checked before app replacement. The existing database is kept in place. No database reset or schema downgrade is used. CLI integration remains alongside main's run scripts, terminal activity and workspace history guards.
 
+## Review follow-up
+
+- Codex reviewed the committed CLI integration. Fixed both confirmed findings: hook JSON/TOML stays together during process detection, and setup launches the terminal even when its tab is hidden.
+- Added detection regressions using the actual generated Claude and Codex launch and resume arguments, including real headless flags after hook settings.
+- Claude's simplify session completed its review suggestions. Removed repeated lifecycle transitions and reused the Claude hook entry. Larger restructuring suggestions remain deferred.
+- Claude's separate review reached its account limit before a final report. Its partial findings are not counted as a completed review.
+- Final fast dev build compiled without warnings and passed signature verification. Both linters and 175 focused tests across 19 suites passed. The earlier schema checks passed too. No PR is being opened, as requested.
+
 ## Manual checks still to run
 
 1. Create one Claude CLI workspace and one Codex CLI workspace with a multiline task and an attachment. Verify setup finishes before the prompt is sent.

@@ -44,12 +44,13 @@ public extension AgentKind {
         var arguments: [String]
         switch self {
         case .claudeCode:
+            let hook: [String: Any] = ["type": "command", "command": Self.interactiveHookCommand, "timeout": 3]
             var hooks: [String: Any] = Dictionary(uniqueKeysWithValues: (events + ["StopFailure"]).map {
-                ($0, [["hooks": [["type": "command", "command": Self.interactiveHookCommand, "timeout": 3]]]] as Any)
+                ($0, [["hooks": [hook]]] as Any)
             })
             hooks["Notification"] = [[
                 "matcher": "permission_prompt|idle_prompt",
-                "hooks": [["type": "command", "command": Self.interactiveHookCommand, "timeout": 3]]
+                "hooks": [hook]
             ]]
             guard let data = try? JSONSerialization.data(withJSONObject: ["hooks": hooks], options: [.sortedKeys]),
                   let settings = String(data: data, encoding: .utf8) else { return nil }
