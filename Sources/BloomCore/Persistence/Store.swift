@@ -1227,18 +1227,7 @@ public actor Store {
     }
 
     public func deleteRepo(id: RepoID) throws {
-        try requireRepoCanBeRemoved(id: id)
         try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
-    }
-
-    public func requireRepoCanBeRemoved(id: RepoID) throws {
-        for workspace in try workspaces(repoID: id, includeArchived: true) {
-            try requireWorkspaceCanBeRemoved(id: workspace.id)
-        }
-    }
-
-    public func requireWorkspaceCanBeRemoved(id: WorkspaceID) throws {
-        guard try pendingCheckpointRewind(workspaceID: id) == nil else { throw WorkspaceError.recoveryPending }
     }
 
     // MARK: - Workspaces
@@ -1391,7 +1380,6 @@ public actor Store {
     }
 
     public func deleteWorkspace(id: WorkspaceID) throws {
-        try requireWorkspaceCanBeRemoved(id: id)
         try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
     }
 
@@ -1498,7 +1486,6 @@ public actor Store {
                     "SELECT 1 AS ok FROM workspaces WHERE id = ? AND state = 'archived'", [.text(id)]
                 ).first != nil
                 guard isArchived else { continue }
-                try requireWorkspaceCanBeRemoved(id: id)
 
                 try db.run(
                     "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
@@ -1961,7 +1948,6 @@ public actor Store {
     /// before the agent answered takes resume with it.
     @discardableResult
     public func upsert(_ session: Session) throws -> Session {
-        if session.archivedAt != nil { try requireSessionCanClose(id: session.id) }
         try rememberImplementationMode(for: session)
         try db.run(
             """
@@ -2120,14 +2106,7 @@ public actor Store {
     }
 
     public func deleteSession(id: SessionID) throws {
-        try requireSessionCanClose(id: id)
         try db.run("DELETE FROM sessions WHERE id = ?", [.text(id)])
-    }
-
-    public func requireSessionCanClose(id: SessionID) throws {
-        if let journal = try checkpointRewind(sessionID: id), journal.stage != .complete {
-            throw SnapshotFailure("Resolve this conversation's interrupted rewind before closing it.")
-        }
     }
 
     /// Any session left `running` or `waiting` when the app died is doing neither now.
@@ -2216,84 +2195,6 @@ public actor Store {
     }
 
     // MARK: - Messages
-
-    public func pendingCheckpointRewind(workspaceID: WorkspaceID) throws -> CheckpointRewind? {
-        for row in try db.query("SELECT id FROM sessions WHERE workspace_id = ?", [.text(workspaceID)]) {
-            guard let id = row.string("id"), let journal = try checkpointRewind(sessionID: SessionID(id)),
-                  journal.stage != .complete else { continue }
-            return journal
-        }
-        return nil
-    }
-
-    /// Persist the original transcript before either files or provider history can change.
-    /// No partial backup is accepted: a very large rewind fails before its destructive steps.
-    public func prepareTranscriptRewind(_ checkpoint: TurnCheckpoint) throws -> TranscriptRewindBackup {
-        let removed = try db.query(
-            "SELECT * FROM messages WHERE session_id = ? AND seq >= ? ORDER BY seq",
-            [.text(checkpoint.sessionID), .int(Int64(checkpoint.startSeq))]
-        ).map(Self.message(from:))
-        guard let first = removed.first, first.seq == checkpoint.startSeq, first.kind == .user else {
-            throw SnapshotFailure("The original user message is unavailable for this rewind.")
-        }
-        let backup = TranscriptRewindBackup(
-            checkpointID: checkpoint.id, messages: removed, prompt: UserTurnPrompt.text(in: first.payload),
-            originalDraft: try draft(sessionID: checkpoint.sessionID)
-        )
-        let encoded = try JSONEncoder().encode(backup)
-        guard encoded.count <= 50 * 1_024 * 1_024 else {
-            throw SnapshotFailure("This rewind exceeds the transcript backup limit. Choose a more recent message.")
-        }
-        try setSetting(TranscriptRewindBackup.key(sessionID: checkpoint.sessionID), String(decoding: encoded, as: UTF8.self))
-        return backup
-    }
-
-    public func transcriptRewindBackup(sessionID: SessionID) throws -> TranscriptRewindBackup? {
-        guard let value = try setting(TranscriptRewindBackup.key(sessionID: sessionID)) else { return nil }
-        return try JSONDecoder().decode(TranscriptRewindBackup.self, from: Data(value.utf8))
-    }
-
-    /// Provider confirmation is required. Transcript deletion, restored draft and the completed
-    /// journal commit together, so recovery never repeats the prompt or erases unconfirmed history.
-    @discardableResult
-    public func completeTranscriptRewind(sessionID: SessionID) throws -> String {
-        try db.transaction {
-            guard var journal = try checkpointRewind(sessionID: sessionID) else {
-                throw SnapshotFailure("The rewind recovery record is unavailable.")
-            }
-            if journal.stage == .complete { return try draft(sessionID: sessionID) }
-            guard journal.stage == .providerReverted,
-                  let backup = try transcriptRewindBackup(sessionID: sessionID),
-                  backup.checkpointID == journal.checkpoint.id else {
-                throw SnapshotFailure("The agent has not confirmed this rewind.")
-            }
-            let seq = journal.checkpoint.startSeq
-            for message in backup.messages where message.kind == .permissionAsk {
-                if let ask = PermissionAsk.decode(payload: message.payload) {
-                    try db.run("DELETE FROM permission_asks WHERE id = ? AND session_id = ?", [.text(ask.requestID), .text(sessionID)])
-                }
-            }
-            try db.run("DELETE FROM messages WHERE session_id = ? AND seq >= ?", [.text(sessionID), .int(Int64(seq))])
-            // These deliveries were sent. Detach deleted row references, never make them pending.
-            try db.run("UPDATE deliveries SET delivered_seq = NULL WHERE target_session_id = ? AND delivered_seq >= ?", [
-                .text(sessionID), .int(Int64(seq)),
-            ])
-            let current = try draft(sessionID: sessionID)
-            let restored = current.isEmpty ? backup.prompt : current + "\n\n" + backup.prompt
-            try saveDraft(sessionID: sessionID, body: restored)
-            try db.run("UPDATE sessions SET last_read_seq = MIN(last_read_seq, ?), context_tokens = 0 WHERE id = ?", [
-                .int(Int64(seq - 1)), .text(sessionID),
-            ])
-            // Retire row associations in this same transaction: after a crash, reused message
-            // sequence numbers must never inherit a diff belonging to the removed conversation.
-            let retired = try removeTurnCheckpoints(sessionID: sessionID, fromSeq: seq)
-            try queueRetiredCheckpoints(retired, sessionID: sessionID)
-            journal.stage = .complete
-            journal.failure = nil
-            try saveCheckpointRewind(journal)
-            return restored
-        }
-    }
 
     public func messages(sessionID: SessionID, afterSeq: Int = -1, limit: Int = 100_000) throws -> [Message] {
         try db.query(

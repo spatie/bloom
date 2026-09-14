@@ -3,7 +3,6 @@ import os
 
 public enum WorkspaceError: Error, CustomStringConvertible {
     case projectFolderMissing
-    case recoveryPending
     case notARepository(String)
     /// git could not say whether it is one. Kept apart from the case above, because reporting a
     /// git that does not run as a folder that is not a repository sent a user round in circles.
@@ -22,7 +21,6 @@ public enum WorkspaceError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .projectFolderMissing: "The project folder is no longer on disk."
-        case .recoveryPending: "Resolve the interrupted rewind before removing or archiving this workspace."
         case .notARepository(let path): "\(path) is not a git repository"
         case .gitCannotRead(let problem): problem.sentence
         case .pathInUse(let path): "\(path) already exists"
@@ -494,20 +492,14 @@ public struct WorkspaceManager: Sendable {
         onExit: (@Sendable (Int) -> Void)? = nil,
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> Bool {
-        guard let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup),
-              lease.isValid(in: workspace.path, operation: .setup) else {
-            onOutput("Setup cannot run while another setup or rewind is using this worktree.")
+        guard let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path),
+              lease.isValid(in: workspace.path) else {
+            onOutput("Setup cannot run while another setup is using this worktree.")
             return false
         }
         defer { if operationLease == nil { lease.release() } }
-        do {
-            try Task.checkCancellation()
-            guard try await store.pendingCheckpointRewind(workspaceID: workspace.id) == nil else {
-                onOutput("Resolve the interrupted rewind before running setup. Nothing was started.")
-                return false
-            }
-        } catch {
-            onOutput("Bloom could not check this workspace's rewind state. Nothing was started.")
+        guard !Task.isCancelled else {
+            onOutput("Setup was cancelled before it began, so nothing was started.")
             return false
         }
         let settings = SettingsLoader.load(repo: repo.path)
@@ -522,9 +514,6 @@ public struct WorkspaceManager: Sendable {
             preparationLog = "Preparing this worktree's submodules.\n"
             onOutput(preparationLog.trimmingCharacters(in: .newlines))
             do {
-                guard try await store.pendingCheckpointRewind(workspaceID: workspace.id) == nil else {
-                    throw WorkspaceError.recoveryPending
-                }
                 let output = try await Git.initialiseSubmodules(in: workspace.path)
                 preparationLog += output
                 if !output.isEmpty { onOutput(output) }
@@ -582,9 +571,6 @@ public struct WorkspaceManager: Sendable {
         await withTaskCancellationHandler {
             do {
                 try Task.checkCancellation()
-                guard try await store.pendingCheckpointRewind(workspaceID: workspace.id) == nil else {
-                    throw WorkspaceError.recoveryPending
-                }
                 let lines = runner.lines
                 didStart = true
                 try Task.checkCancellation()
@@ -748,7 +734,6 @@ public struct WorkspaceManager: Sendable {
         // in `WorkspaceLifecycle`, but this is the one edge that table would have had, so it is
         // written where the destructive work starts rather than where the row is finally saved.
         guard workspace.state == .active else { return }
-        try await store.requireWorkspaceCanBeRemoved(id: workspace.id)
 
         // Read before anything is removed, because the removal below is what makes it false.
         // See the branch delete near the end of this method for what it guards.
@@ -822,7 +807,6 @@ public struct WorkspaceManager: Sendable {
             }
         }
 
-        try await store.requireWorkspaceCanBeRemoved(id: workspace.id)
         try await Git.removeWorktree(repo: repo.path, path: workspace.path, force: force)
 
         // **Only when the worktree was really there.** Deleting a branch is the one step here

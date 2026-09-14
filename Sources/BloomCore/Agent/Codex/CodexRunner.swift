@@ -26,7 +26,6 @@ public actor CodexRunner: SessionRunner {
     private var pumpTask: Task<Void, Never>?
     private var translation: CodexTranslation
     private var threadID: String?
-    private var isRewinding = false
     private var planningRescanToken: String?
 
     /// What this project has already approved. One type for both backends: see `SessionGrants`.
@@ -143,7 +142,7 @@ public actor CodexRunner: SessionRunner {
     }
 
     public func evictIfIdle(for duration: Duration) async -> Bool {
-        guard !wasEvicted, !isRewinding, sendsInFlight == 0, !session.state.isMidTurn,
+        guard !wasEvicted, sendsInFlight == 0, !session.state.isMidTurn,
               session.agentSessionID != nil, pending.isEmpty, !sink.hasBackgroundWork else { return false }
         let lastActivity = sink.lastActivity
         guard lastActivity.duration(to: .now) >= duration,
@@ -166,7 +165,6 @@ public actor CodexRunner: SessionRunner {
     private func send(_ text: String, recording: Data?, deliveryID: DeliveryID?,
                       interactionMode: InteractionMode?) async throws {
         guard !wasEvicted else { throw ProviderIdleError.retired }
-        guard !isRewinding else { throw ConversationRewindError.busy }
         sendsInFlight += 1
         sink.noteActivity()
         defer { sendsInFlight -= 1 }
@@ -579,26 +577,6 @@ public actor CodexRunner: SessionRunner {
 
     private var subagents = CodexSubagents()
     private nonisolated let childTurns = CodexChildTurns()
-
-    public nonisolated var supportsConversationRewind: Bool { true }
-
-    public func rewind(beforeTurnID: String) async throws {
-        guard !isRewinding, sendsInFlight == 0, handle.turnID == nil,
-              pending.isEmpty, !sink.hasBackgroundWork else { throw ConversationRewindError.busy }
-        isRewinding = true
-        defer { isRewinding = false }
-        let connection = try await connected()
-        let thread = try await openThread(on: connection)
-        try await connection.rewindThread(threadID: thread, beforeTurnID: beforeTurnID)
-        items.removeAll()
-    }
-
-    public func containsTurn(_ turnID: String) async throws -> Bool {
-        guard sendsInFlight == 0, handle.turnID == nil, pending.isEmpty else { throw ConversationRewindError.busy }
-        let connection = try await connected()
-        let thread = try await openThread(on: connection)
-        return try await connection.threadContainsTurn(threadID: thread, turnID: turnID)
-    }
 
     public func subagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
         guard let child = subagents.threadID(for: id), let client,

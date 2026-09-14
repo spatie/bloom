@@ -402,48 +402,6 @@ final class TranscriptModel {
 
     private var store: Store? { app.store }
 
-    private var historyWorkspaceHeld: Bool {
-        workspace.map { HistoryWorkspaceGate.shared.holds($0.id) } ?? false
-    }
-
-    private func historyBlocksSending() async -> Bool {
-        if historyWorkspaceHeld { return true }
-        guard let store, let workspace else { return false }
-        do {
-            guard let journal = try await store.pendingCheckpointRewind(workspaceID: workspace.id) else { return false }
-            HistoryWorkspaceGate.shared.mark(workspace.id, unresolved: true)
-            history.blockingSessionID = journal.checkpoint.sessionID
-            history.failure = "Resolve the interrupted rewind in its conversation before sending more messages."
-            if journal.checkpoint.sessionID == session.id { history.pendingRewind = journal }
-            return true
-        } catch {
-            history.failure = "Could not check the workspace's rewind state: \(error)"
-            return true
-        }
-    }
-
-    func providerContainsTurn(_ turnID: String) async throws -> Bool {
-        guard let runner = ensureRunner(), runner.supportsConversationRewind else { throw ConversationRewindError.unsupported }
-        return try await runner.containsTurn(turnID)
-    }
-
-    func rewindProvider(beforeTurnID: String) async throws {
-        guard let runner = ensureRunner(), runner.supportsConversationRewind else { throw ConversationRewindError.unsupported }
-        try await runner.rewind(beforeTurnID: beforeTurnID)
-    }
-
-    func reloadAfterRewind() async {
-        guard let store else { return }
-        wasStoppedByHand = true
-        sending = nil
-        steering = nil
-        clearStreaming()
-        await read(from: store)
-        await refreshSession()
-        PromptAttachmentStore.shared.restoreDraftAttachments(draft, sessionID: session.id.rawValue)
-        composerFocusRequests += 1
-    }
-
     // MARK: - Loading
 
     func load() async {
@@ -530,8 +488,7 @@ final class TranscriptModel {
         // start a paid turn on a Mac nobody is sitting at, so it is shown as pending and goes with
         // the owner's next message. See `DeliveryHold.none`.
         await refreshQueue()
-        await history.load(store: store, sessionID: session.id, workspaceID: workspace?.id)
-        if workspace != nil { await history.cleanupRetired(store: store, sessionID: session.id, cwd: cwd) }
+        await history.load(store: store, sessionID: session.id)
         isLoaded = true
     }
 
@@ -805,7 +762,7 @@ final class TranscriptModel {
     /// question the moment a running turn stopped holding the queue on two of the four backends:
     /// the tooltip went on offering to queue a message that was about to go straight out.
     var queuesNextMessage: Bool {
-        if history.isCapturing || history.isFinalisingTurn || (history.hasActiveTurn && !isRunning) || historyWorkspaceHeld { return true }
+        if history.isCapturing || history.isFinalisingTurn || (history.hasActiveTurn && !isRunning) { return true }
         if isRunning, session.interactionMode != activeInteractionMode { return true }
         return !Delivery.goesImmediately(
             behind: pendingDeliveries, hold: deliveryHold, on: session.agentKind
@@ -818,7 +775,6 @@ final class TranscriptModel {
     /// business knowing, and because a caption that disagrees with the drain is the one thing this
     /// queue may not do: both read `DeliveryHold`. See `DeliveryHold.sentence(on:)`.
     var holdSentence: String? {
-        if historyWorkspaceHeld { return "Resolve the interrupted rewind before sending more messages." }
         if history.isCapturing || history.isFinalisingTurn { return "Saving this turn's file changes." }
         if pendingDeliveries.first?.state == .uncertain {
             return "Bloom could not confirm delivery. Check the conversation before sending again."
@@ -848,7 +804,7 @@ final class TranscriptModel {
     /// somebody says something.
     func drain() async {
         guard !isReconcilingPresentation else { return }
-        guard !history.isCapturing, !history.isFinalisingTurn, !(history.hasActiveTurn && !isRunning), !(await historyBlocksSending()) else { return }
+        guard !history.isCapturing, !history.isFinalisingTurn, !(history.hasActiveTurn && !isRunning) else { return }
         guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
         guard drainState.begin() else { return }
         var allowRepeat = true
@@ -1143,10 +1099,6 @@ final class TranscriptModel {
             await abandon(delivery, saying: "Bloom could not open an agent for this chat.")
             return false
         }
-        guard !historyWorkspaceHeld else {
-            await abandon(delivery, saying: "Resolve the interrupted rewind before sending more messages.")
-            return false
-        }
         // The queue is moving, whether or not that begins a turn.
         wasStoppedByHand = false
 
@@ -1187,7 +1139,6 @@ final class TranscriptModel {
             // model is handed is the envelope, and what the transcript draws is the words. See
             // `Delivery.sent` and `SessionRunner.send(_:recording:)`.
             try await runner.sendDelivery(delivery)
-            if startsATurn, let store { await history.sent(delivery: delivery, store: store) }
             // The runner writes the user row as part of the send, and until this line nothing read
             // it back: the transcript only pulled rows on an agent event, so the owner's own
             // message did not appear until the answer did. Reading it here is what retires the

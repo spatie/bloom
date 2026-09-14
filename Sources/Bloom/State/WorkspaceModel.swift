@@ -555,10 +555,6 @@ final class WorkspaceModel {
     /// Persist the replacement before stopping the old agent so a failed write leaves it usable.
     func replaceSession(_ session: Session, controls: ComposerControls) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
-        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
-            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before replacing a conversation.")
-            return nil
-        }
         do {
             let next = try await store.replaceWorkspaceConversation(id: session.id, controls: controls)
             transcripts.removeValue(forKey: session.id)?.teardown()
@@ -574,10 +570,6 @@ final class WorkspaceModel {
 
     func closeSession(_ session: Session) async {
         guard let store else { return }
-        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
-            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before closing a conversation.")
-            return
-        }
         do {
             _ = try await store.update(sessionID: session.id) { $0.archivedAt = Date() }
         } catch {
@@ -1219,26 +1211,15 @@ final class WorkspaceModel {
     private func stream(
         setupIn repo: Repo, through manager: WorkspaceManager, operationLease: WorkspaceOperationLease? = nil
     ) async -> Bool {
-        guard !HistoryWorkspaceGate.shared.holds(workspace.id),
-              let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup),
-              lease.isValid(in: workspace.path, operation: .setup) else {
+        guard let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path),
+              lease.isValid(in: workspace.path) else {
             operationLease?.release()
             if operationLease != nil { isRunningSetup = false }
-            app.notice = BloomNotice(message: "Resolve the workspace's rewind before running setup.")
+            app.notice = BloomNotice(message: "Setup is already running in this workspace.")
             return false
         }
         isRunningSetup = true
         defer { isRunningSetup = false; lease.release() }
-        do {
-            guard let store = app.store,
-                  try await store.pendingCheckpointRewind(workspaceID: workspace.id) == nil else {
-                app.notice = BloomNotice(message: "Resolve the interrupted rewind before running setup.")
-                return false
-            }
-        } catch {
-            if !Task.isCancelled { app.notice = BloomNotice(message: "Bloom could not check this workspace's rewind state. Setup did not start.") }
-            return false
-        }
         setupWasStopped = false
         setupStartedAt = .now
         setupDurationMS = nil
@@ -1337,11 +1318,10 @@ final class WorkspaceModel {
     /// Through the same `setupTask` the first run uses, so archiving or quitting stops a
     /// `composer install` started from here exactly as it stops one started at creation.
     func runSetupAgain() {
-        guard !app.isArchiving(workspace.id), !HistoryWorkspaceGate.shared.holds(workspace.id),
-              canRunSetup, let repo, let manager = app.manager,
-              let lease = WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup) else { return }
-        // The scheduled task has not run yet. Reserve now so a rewind cannot pass its idle
-        // check in the interval between this button action and the task's first instruction.
+        guard !app.isArchiving(workspace.id), canRunSetup, let repo, let manager = app.manager,
+              let lease = WorkspaceOperationLease.acquire(in: workspace.path) else { return }
+        // The scheduled task has not run yet. Reserve now so a second run cannot start in the
+        // interval between this button action and the task's first instruction.
         isRunningSetup = true
         setupTask?.cancel()
         setupGeneration += 1

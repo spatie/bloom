@@ -1,7 +1,9 @@
 import Foundation
 
-/// Worktree and staging are distinct snapshots. Restoring only a worktree tree into both would
-/// turn every untracked file into a staged addition and lose the owner's partial staging.
+/// Worktree and staging are distinct snapshots. Only the worktree tree is read now, by a turn's
+/// footer; the two staging refs were for restoring files, which was removed. They are still
+/// written by capture and removed by `Git.deleteSnapshot`, so snapshots taken before and after
+/// that removal are pruned by the same code.
 public struct GitSnapshot: Codable, Sendable, Equatable {
     public let id: GitSnapshotID
     public let sessionID: SessionID
