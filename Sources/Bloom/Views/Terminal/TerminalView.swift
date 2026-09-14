@@ -157,11 +157,30 @@ final class BloomTerminalView: LocalProcessTerminalView {
         TerminalGhostty.font(family: typography.fontFamily ?? ghostty?.fontFamily, size: size)
     }
 
+    private(set) var hasStarted = false
+    private var displayedOutput = ""
+
+    func showOutput(_ text: String) {
+        guard !hasStarted, text != displayedOutput else { return }
+        let addition: String
+        if text.hasPrefix(displayedOutput) {
+            addition = String(text.dropFirst(displayedOutput.count))
+        } else {
+            clearScreen()
+            addition = text
+        }
+        feed(text: addition.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n", with: "\r\n"))
+        displayedOutput = text
+    }
+
     // MARK: - Process
 
     func start(_ launch: TerminalLaunch) {
         guard !process.running else { return }
         hasExited = false
+        hasStarted = true
+        displayedOutput = ""
         startProcess(
             executable: launch.executable,
             args: launch.arguments,
@@ -412,7 +431,6 @@ private final class TerminalProcessObserver: LocalProcessTerminalViewDelegate {
 /// ever being deallocated, and so the pty follows the view size on every layout pass.
 final class TerminalHostView: NSView {
     private weak var terminal: BloomTerminalView?
-    private var displayedOutput = ""
 
     /// Whether this is the pane the tab says holds the keyboard. Only that one reaches for it when
     /// the tab appears: four shells all grabbing first responder as they are drawn would leave the
@@ -427,23 +445,6 @@ final class TerminalHostView: NSView {
             guard oldValue != focusRequest, isFocusedPane else { return }
             takeKeyboard()
         }
-    }
-
-    func showOutput(_ text: String) {
-        let view = terminal ?? BloomTerminalView(frame: bounds)
-        attach(view)
-        view.updateTheme()
-        guard text != displayedOutput else { return }
-        let addition: String
-        if text.hasPrefix(displayedOutput) {
-            addition = String(text.dropFirst(displayedOutput.count))
-        } else {
-            view.clearScreen()
-            addition = text
-        }
-        view.feed(text: addition.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\n", with: "\r\n"))
-        displayedOutput = text
     }
 
     func attach(_ view: BloomTerminalView) {
@@ -518,11 +519,6 @@ struct TerminalView: NSViewRepresentable {
     }
 
     private func configure(_ host: TerminalHostView) {
-        if let output {
-            host.isFocusedPane = false
-            host.showOutput(output)
-            return
-        }
         let session = self.session
         host.attach(session)
         session.updateTheme()
@@ -531,13 +527,13 @@ struct TerminalView: NSViewRepresentable {
         session.onContextMenu = onContextMenu
         session.onExit = onExit
         // Before the request, whose `didSet` reads it.
-        host.isFocusedPane = isFocusedPane
+        host.isFocusedPane = output == nil && isFocusedPane
         host.focusRequest = focusRequest
     }
 
     @MainActor private var session: BloomTerminalView {
         TerminalSessionStore.shared.terminal(
-            for: tab, workspace: workspace, repo: repo, port: port, directory: directory
+            for: tab, workspace: workspace, repo: repo, port: port, directory: directory, output: output
         )
     }
 }

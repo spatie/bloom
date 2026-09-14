@@ -340,31 +340,13 @@ struct CenterPaneView: View {
     /// A fresh workspace runs its setup script before anything else, and that can take minutes on a
     /// large repository. Saying so beats an empty rectangle that looks like a failure.
     private func cliSetup(_ terminal: CenterTab, sessionID: SessionID) -> some View {
-        VStack(spacing: 0) {
-            TerminalView(
-                tab: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: model.workspace.id, title: terminal.title),
-                workspace: model.workspace, repo: model.repo, port: model.port,
-                output: "Setting up the workspace…\n\n"
-                    + (model.cliSetupCommand.isEmpty ? "" : "$ " + model.cliSetupCommand + "\n\n")
-                    + model.setupOutput
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if let prompt = model.pendingCLIPrompts[sessionID], !prompt.isEmpty {
-                VStack(alignment: .leading, spacing: Metrics.spacing) {
-                    Text("Queued prompt · sends after setup")
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                    Text(prompt)
-                        .font(Typo.body)
-                        .lineLimit(3)
-                        .textSelection(.enabled)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Metrics.gutter)
-                .background(Palette.surface)
-                .overlay(alignment: .top) { Hairline() }
-            }
-        }
+        TerminalView(
+            tab: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: model.workspace.id, title: terminal.title),
+            workspace: model.workspace, repo: model.repo, port: model.port,
+            output: (model.sessions.first { $0.id == sessionID }?.agentKind ?? .claudeCode)
+                .interactiveSetupOutput(prompt: model.pendingCLIPrompts[sessionID], log: model.setupOutput)
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var setupState: some View {

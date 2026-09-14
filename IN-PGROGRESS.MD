@@ -122,3 +122,5 @@ Validation: all 12 interactive CLI tests and both linters passed. Fast dev build
 - Empty-pane Chat, Terminal and Browser buttons now share neutral styling.
 - CLI launchers clear their terminal screen and scrollback before starting the agent, hiding the echoed launch path. Redirected output is left untouched.
 - Pending CLI chats render setup commands and the live setup log through the existing terminal view without starting another process. A footer previews the queued prompt until launch.
+
+- Setup now uses the same stored terminal view that later starts the CLI. Its compact ANSI heading and queued-prompt preview replace the script source dump and separate footer. The existing setup runner still owns execution and cancellation.

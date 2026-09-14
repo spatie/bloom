@@ -364,7 +364,6 @@ final class WorkspaceModel {
     private var setupTask: Task<Void, Never>?
     var pendingCLILaunches: Set<SessionID> = []
     private(set) var pendingCLIPrompts: [SessionID: String] = [:]
-    private(set) var cliSetupCommand = ""
     /// The script alone, where `setupTask` is the script and whatever follows it. Stop cancels
     /// this one, so the queue behind the run still drains; archiving and quitting cancel the
     /// outer task, which reaches this through `stream`'s cancellation handler.
@@ -1158,8 +1157,6 @@ final class WorkspaceModel {
         let settings = await Task.detached(priority: .userInitiated) {
             SettingsLoader.load(repo: repoPath)
         }.value
-
-        if cliSession != nil { cliSetupCommand = settings.setupScript ?? "" }
 
         if workspace.setupState == .pending, settings.setupScript != nil || Git.hasSubmodules(in: workspace.path) {
             let succeeded = await stream(setupIn: repo, through: manager)

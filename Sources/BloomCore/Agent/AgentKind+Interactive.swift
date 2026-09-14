@@ -96,6 +96,21 @@ public extension AgentKind {
             .appendingPathComponent(name + ".json")
     }
 
+    func interactiveSetupOutput(prompt: String?, log: String) -> String {
+        let preview = String(String.UnicodeScalarView((prompt ?? "").unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0)
+        }))
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        var text = "\n  \u{1b}[1;36m" + label + "\u{1b}[0m\n"
+            + "  Setting up your workspace\n\n"
+        if !preview.isEmpty {
+            text += "  \u{1b}[2mQueued prompt\u{1b}[0m\n  "
+                + String(preview.prefix(180)) + (preview.count > 180 ? "…" : "") + "\n\n"
+        }
+        text += "  \u{1b}[2mSetup output · agent starts when ready\u{1b}[0m\n\n"
+        return text + (log.isEmpty ? "  Waiting for setup output…\n" : log)
+    }
+
     func interactiveScreenIsBusy(lines: [String]) -> Bool {
         var lines = lines
         while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }

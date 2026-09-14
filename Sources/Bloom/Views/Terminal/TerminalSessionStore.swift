@@ -280,17 +280,28 @@ final class TerminalSessionStore {
         workspace: Workspace,
         repo: Repo?,
         port: Int,
-        directory: String = ""
+        directory: String = "",
+        output: String? = nil
     ) -> BloomTerminalView {
-        if let existing = terminals[tab.id.rawValue] { return existing }
+        if let existing = terminals[tab.id.rawValue], existing.hasStarted { return existing }
 
-        let view = BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 640, height: 320))
+        let view = terminals[tab.id.rawValue]
+            ?? BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 640, height: 320))
 
         // A pane that is already over, drawn one last time before SwiftUI catches up. It gets an
         // empty terminal that forks nothing and is not filed under its id, so the draw after this
         // one drops it. See `closedPanes`.
         guard !closedPanes.contains(tab.id.rawValue) else {
             view.willStop()
+            return view
+        }
+
+        if let output {
+            if terminals[tab.id.rawValue] == nil {
+                terminals[tab.id.rawValue] = view
+                paneOwner[tab.id.rawValue] = workspace.id
+            }
+            view.showOutput(output)
             return view
         }
 

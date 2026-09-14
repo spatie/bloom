@@ -4,6 +4,22 @@ import Testing
 
 @Suite("Interactive CLI agents")
 struct InteractiveAgentTests {
+    @Test("Terminal setup previews stay compact and cannot execute prompt escape sequences")
+    func setupPreview() {
+        let output = AgentKind.codex.interactiveSetupOutput(
+            prompt: "first line\nsecond line\u{1b}[2J" + String(repeating: "x", count: 250),
+            log: "Installing packages\nDone\n"
+        )
+        #expect(output.contains("Codex"))
+        #expect(output.contains("first line second line[2J"))
+        #expect(!output.contains("\u{1b}[2J"))
+        #expect(!output.contains(String(repeating: "x", count: 200)))
+        #expect(output.hasSuffix("Installing packages\nDone\n"))
+        let empty = AgentKind.claudeCode.interactiveSetupOutput(prompt: nil, log: "")
+        #expect(!empty.contains("Queued prompt"))
+        #expect(empty.contains("Waiting for setup output"))
+    }
+
     @Test("Native CLI busy markers exclude idle prompts and old history")
     func screenActivity() {
         #expect(AgentKind.codex.interactiveScreenIsBusy(lines: ["• Working (12s • esc to interrupt)"]))
