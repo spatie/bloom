@@ -14,6 +14,7 @@ struct CenterColumnView: View {
     var body: some View {
         VStack(spacing: 0) {
             SessionTabsView(model: model)
+            WorkspaceSettingsNotices(model: model)
             CenterPanesView(model: model)
         }
         .background(Palette.windowBackground)
@@ -29,6 +30,10 @@ struct CenterColumnView: View {
             // relaunch. `TabReconciliation` refuses an unread list as well, because an ordering
             // that is only correct by inspection is one edit away from being incorrect.
             WorkspaceTabsStore.shared.reconcile(in: model)
+            // After the reconcile, because starting a run script may add a tab, and a tab added
+            // before the strip has been squared with what is stored is one the reconcile judges.
+            // Once per workspace per launch; see `RunScriptLauncher.considerAutostart`.
+            await RunScriptLauncher.shared.considerAutostart(in: model)
         }
     }
 

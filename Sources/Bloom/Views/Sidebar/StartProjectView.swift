@@ -65,6 +65,10 @@ struct StartProjectView: View {
     /// Set when git on this Mac has no name or address configured, in which case no commit can be
     /// made and the button is held before anything is written rather than half way through it.
     @State private var identityProblem: String?
+    /// What git said about the last target with a `.git` in it. Kept beside `facts` rather than
+    /// in them, because `facts` is replaced on every settled keystroke and this is asked once per
+    /// path. See `NewProjectStarter.repositoryProblem`.
+    @State private var repositoryCheck: RepositoryCheck?
     @State private var createTask: Task<Void, Never>?
     @State private var isStepSlow = false
     /// Set by every path that ends this window on purpose, so the close that follows is not read
@@ -95,7 +99,22 @@ struct StartProjectView: View {
 
     private var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
 
-    private var verdict: ProjectTargetVerdict { ProjectTargetVerdict.of(facts) }
+    private var verdict: ProjectTargetVerdict { ProjectTargetVerdict.of(checked(facts)) }
+
+    /// The facts, with git's answer folded in once it is about the same path.
+    private func checked(_ inspected: NewProjectFacts) -> NewProjectFacts {
+        var checked = inspected
+        if let repositoryCheck, repositoryCheck.path == inspected.path {
+            checked.gitProblem = repositoryCheck.problem
+        }
+        return checked
+    }
+
+    /// The folder git has to be asked about, which is only ever one with a `.git` in it.
+    private var repositoryToCheck: String? {
+        guard facts.targetIsRepository, !facts.path.isEmpty else { return nil }
+        return facts.path
+    }
 
     private var hasTyped: Bool {
         !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -183,6 +202,14 @@ struct StartProjectView: View {
             guard !Task.isCancelled else { return }
             completions = matches
         }
+        // A `.git` on disk is not git agreeing, and Add runs git. Asked here so the block refuses
+        // before the button is pressed rather than the sidebar refusing after the window closed.
+        .task(id: repositoryToCheck) {
+            guard let path = repositoryToCheck else { return }
+            let problem = await NewProjectStarter.repositoryProblem(at: path)
+            guard !Task.isCancelled else { return }
+            repositoryCheck = RepositoryCheck(path: path, problem: problem)
+        }
         // The counts under a Start Tracking verdict, which are a walk of the whole folder and so
         // are asked only once the target has settled on one. Keyed on the path rather than on the
         // line, so correcting a typo further up the path does not walk `node_modules` twice.
@@ -217,6 +244,11 @@ struct StartProjectView: View {
     private struct Draft: Equatable {
         var typed: String
         var location: String
+    }
+
+    private struct RepositoryCheck: Equatable {
+        var path: String
+        var problem: GitRepositoryProblem?
     }
 
     /// The folder whose contents are worth counting, and nil for every other verdict.
@@ -575,16 +607,29 @@ struct StartProjectView: View {
         // keyboard on purpose, and Return is faster than that beat: without this, typing a name
         // and pressing Return in one movement pressed a button that was still looking at the empty
         // field. It is a handful of stats, once, on a key press.
-        let current = NewProjectStarter.inspect(typed: typed, defaultLocation: defaultLocation)
-        facts = current
+        let inspected = NewProjectStarter.inspect(typed: typed, defaultLocation: defaultLocation)
+        facts = inspected
+        let current = checked(inspected)
         let decided = ProjectTargetVerdict.of(current)
         guard decided.isAllowed, !current.path.isEmpty else { return }
         guard identityProblem == nil || !decided.makesACommit else { return }
 
         // Nothing is written for a repository that is already one, so there is no run to watch and
         // no failure to report: the project simply appears in the sidebar.
+        //
+        // Unless git has not been asked yet, which is Return pressed faster than the check above.
+        // Asked here then, so a git that will not read the folder refuses in this window.
         if case .add(let root) = decided {
-            finish(StartedProject(path: root, opensWorkspace: false))
+            if repositoryCheck?.path == current.path {
+                finish(StartedProject(path: root, opensWorkspace: false))
+                return
+            }
+            Task {
+                let problem = await NewProjectStarter.repositoryProblem(at: current.path)
+                repositoryCheck = RepositoryCheck(path: current.path, problem: problem)
+                guard problem == nil else { return }
+                finish(StartedProject(path: root, opensWorkspace: false))
+            }
             return
         }
 

@@ -35,7 +35,9 @@ public actor GrokRunner: SessionRunner {
     private let connection = LiveConnection()
     private let pending = PendingAsks()
     private let handle = CodexTurnHandle()
-    private let sink = EventFanout<AgentEvent>()
+    private let sink = AgentPresentationFeed()
+    private var sendsInFlight = 0
+    private var wasEvicted = false
     private var trouble = PersistenceTrouble()
     private let bridge: BridgeAttachment?
 
@@ -65,6 +67,7 @@ public actor GrokRunner: SessionRunner {
     }
 
     public nonisolated var events: AsyncStream<AgentEvent> { sink.stream() }
+    public nonisolated var presentationFeed: AgentPresentationFeed? { sink }
 
     public var isProcessAlive: Bool { connection.current?.isProcessAlive ?? false }
 
@@ -79,6 +82,34 @@ public actor GrokRunner: SessionRunner {
     // MARK: - SessionRunner
 
     public func send(_ text: String, recording: Data? = nil) async throws {
+        try await send(text, recording: recording, deliveryID: nil, interactionMode: nil)
+    }
+
+    public func evictIfIdle(for duration: Duration) async -> Bool {
+        guard !wasEvicted, sendsInFlight == 0, !session.state.isMidTurn,
+              session.agentSessionID != nil, pending.isEmpty, !sink.hasBackgroundWork else { return false }
+        let lastActivity = sink.lastActivity
+        guard lastActivity.duration(to: .now) >= duration,
+              let waiting = try? await store.pendingDeliveries(sessionID: session.id), waiting.isEmpty else { return false }
+        // Recheck after the store hop. A send or a native background event invalidates the lease.
+        guard sendsInFlight == 0, !session.state.isMidTurn, pending.isEmpty,
+              !sink.hasBackgroundWork, sink.lastActivity == lastActivity else { return false }
+        wasEvicted = true
+        terminateNow()
+        return true
+    }
+
+    public func sendDelivery(_ delivery: Delivery) async throws {
+        try await send(delivery.sent, recording: delivery.crewPayload,
+                       deliveryID: delivery.id, interactionMode: delivery.interactionMode)
+    }
+
+    private func send(_ text: String, recording: Data?, deliveryID: DeliveryID?,
+                      interactionMode: InteractionMode?) async throws {
+        guard !wasEvicted else { throw ProviderIdleError.retired }
+        sendsInFlight += 1
+        sink.noteActivity()
+        defer { sendsInFlight -= 1 }
         let generation = handle.generation
         let replacement = handle.prepareReplacement()
         defer { handle.finishReplacement(replacement) }
@@ -94,14 +125,14 @@ public actor GrokRunner: SessionRunner {
         try await applyComposerSettings(on: client, sessionID: grokSessionID)
         try handle.check(generation)
 
-        if let recording {
-            await persist(kind: .crew, payload: recording)
-        } else {
-            await persist(kind: .user, payload: Self.userPayload(text))
+        if deliveryID == nil {
+            if let recording { await persist(kind: .crew, payload: recording) } else { await persist(kind: .user, payload: Self.userPayload(text)) }
         }
         try handle.check(generation)
 
+        if let deliveryID { try await store.beginDeliveryDispatch(id: deliveryID) }
         let promptID = try await client.beginPrompt(sessionID: grokSessionID, text: text)
+        if let deliveryID { try await store.acceptDelivery(id: deliveryID, providerTurnID: promptID.turnID) }
         guard handle.begin(turnID: promptID.turnID, generation: generation) else {
             await client.cancel(sessionID: grokSessionID)
             throw CancellationError()
@@ -129,6 +160,7 @@ public actor GrokRunner: SessionRunner {
     }
 
     public nonisolated func terminateNow() {
+        sink.noteProcessEnded()
         handle.markCancelled()
         connection.current?.terminateNow()
         Task { await self.shutdown() }
@@ -306,8 +338,9 @@ public actor GrokRunner: SessionRunner {
 
     private func emit(_ event: AgentEvent, endingTurn: String? = nil) async {
         let intent = handle.intent
+        var storedMessage: Message?
         if event.isTranscriptRow {
-            await persist(
+            storedMessage = await persist(
                 kind: event.kind,
                 payload: event.raw.isEmpty ? Data("{}".utf8) : event.raw,
                 refID: event.refID
@@ -337,7 +370,7 @@ public actor GrokRunner: SessionRunner {
         }
 
         if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn, intent: intent) { return }
-        sink.yield(event)
+        sink.yield(event, messageSeq: storedMessage?.seq)
     }
 
     // MARK: - Asking
@@ -430,9 +463,10 @@ public actor GrokRunner: SessionRunner {
         return Data(json.compactJSON.utf8)
     }
 
-    private func persist(kind: MessageKind, payload: Data, refID: String? = nil) async {
+    @discardableResult
+    private func persist(kind: MessageKind, payload: Data, refID: String? = nil) async -> Message? {
         do {
-            try await store.appendNext(
+            return try await store.appendNext(
                 sessionID: session.id,
                 kind: kind,
                 payload: payload,
@@ -440,6 +474,7 @@ public actor GrokRunner: SessionRunner {
             )
         } catch {
             await report("could not store a \(kind.rawValue) row", error)
+            return nil
         }
     }
 

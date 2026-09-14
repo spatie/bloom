@@ -17,18 +17,16 @@ struct DiffScopeTests {
 
     // MARK: - What git is asked
 
-    @Test("every scope is the worktree against one revision")
+    @Test("each comparison has its own revision identity")
     func revisions() {
         let picked = commit()
         #expect(DiffScope.all.revision(baseline: "abc123") == "abc123")
         #expect(DiffScope.uncommitted.revision(baseline: "abc123") == "HEAD")
-        #expect(DiffScope.since(picked).revision(baseline: "abc123") == picked.sha)
+        #expect(DiffScope.commit(picked).revision(baseline: "abc123") == picked.sha)
     }
 
-    /// The reason `since` means "since" rather than "including": it makes uncommitted the named
-    /// case of the same idea instead of a fourth kind of thing.
-    @Test("uncommitted is since the newest commit, said in a shorter way")
-    func uncommittedIsSinceHead() {
+    @Test("uncommitted uses HEAD as its baseline")
+    func uncommittedUsesHead() {
         #expect(DiffScope.uncommitted.revision(baseline: "abc123") == "HEAD")
     }
 
@@ -36,7 +34,7 @@ struct DiffScopeTests {
     func narrowing() {
         #expect(DiffScope.all.isNarrowed == false)
         #expect(DiffScope.uncommitted.isNarrowed)
-        #expect(DiffScope.since(commit()).isNarrowed)
+        #expect(DiffScope.commit(commit()).isNarrowed)
     }
 
     // MARK: - What it says
@@ -44,17 +42,17 @@ struct DiffScopeTests {
     @Test("the badge identifies a commit by its sha, not by a truncated sentence")
     func badges() {
         let long = commit(subject: "A subject long enough that no band would ever fit it on one line")
-        #expect(DiffScope.all.badge == "All changes")
+        #expect(DiffScope.all.badge == "All branch changes")
         #expect(DiffScope.uncommitted.badge == "Uncommitted")
-        #expect(DiffScope.since(long).badge == "Since 0f1e2d3")
-        #expect(DiffScope.since(long).title == "Since \(long.subject)")
+        #expect(DiffScope.commit(long).badge == "Commit 0f1e2d3")
+        #expect(DiffScope.commit(long).title == long.subject)
     }
 
     @Test("an empty list means something different in each scope")
     func emptyMessages() {
         #expect(DiffScope.all.emptyMessage(base: "main").contains("main"))
         #expect(DiffScope.uncommitted.emptyMessage(base: "main") == "Everything in this worktree is committed.")
-        #expect(DiffScope.since(commit()).emptyMessage(base: "main").contains("0f1e2d3"))
+        #expect(DiffScope.commit(commit()).emptyMessage(base: "main").contains("0f1e2d3"))
     }
 
     // MARK: - Review comments the scope leaves out
@@ -111,27 +109,27 @@ struct DiffScopeTests {
     func truncation() {
         #expect(BranchCommitList(commits: [commit()], isTruncated: false).truncationNote == nil)
         let short = BranchCommitList(commits: [commit()], isTruncated: true)
-        #expect(short.truncationNote?.contains("\(BranchCommitList.limit)") == true)
+        #expect(short.truncationNote?.contains("1") == true)
     }
 
     @Test("a scope pointing at a commit this branch no longer holds falls back to All changes")
     func rewrittenCommitFallsBack() {
         let list = BranchCommitList(commits: [commit("aaaa111", subject: "Still here")])
-        let gone = DiffScope.since(commit("bbbb222", subject: "Squashed away"))
+        let gone = DiffScope.commit(commit("bbbb222", subject: "Squashed away"))
 
         #expect(list.canOffer(gone) == false)
         #expect(list.resolve(gone) == .all)
         #expect(list.resolve(.uncommitted) == .uncommitted)
-        #expect(list.resolve(.since(commit("aaaa111", subject: "Still here"))) != .all)
+        #expect(list.resolve(.commit(commit("aaaa111", subject: "Still here"))) != .all)
     }
 
     // MARK: - Reading git log
 
     @Test("parses the commit records, NUL separated and unit separated")
     func parsesLog() throws {
-        let unit = "\u{1f}"
+        let unit = "\0"
         let record = { (sha: String, subject: String, author: String, date: String) in
-            "\(sha)\(unit)\(subject)\(unit)\(author)\(unit)\(date)"
+            "\(sha)\(unit)\(subject)\(unit)\(author)\(unit)\(date)\(unit)\(unit)"
         }
         let stream = [
             record("1111111111111111111111111111111111111111", "Teach the parser about renames", "Freek", "2026-08-20T09:15:00+02:00"),
@@ -190,13 +188,12 @@ struct DiffScopeGitTests {
         )
         #expect(uncommitted.map(\.path) == ["third.txt"])
 
-        // Since the first step: everything written after it, which is the second commit and the
-        // file that was never committed. Not the first step's own file.
+        // Selecting the first step includes only its own file, never later work.
         let second = try #require(commits.commits.last)
-        let since = try await Git.changedFiles(
-            worktree: repo.path, base: "main", scope: .since(second)
+        let selected = try await Git.changedFiles(
+            worktree: repo.path, base: "main", scope: .commit(second)
         )
-        #expect(since.map(\.path) == ["second.txt", "third.txt"])
+        #expect(selected.map(\.path) == ["first.txt"])
     }
 
     @Test("a file's patch is measured from the same place as the list")
@@ -222,10 +219,8 @@ struct DiffScopeGitTests {
         #expect(onlyUncommitted.contains("+one") == false)
     }
 
-    /// The list exists to be measured from, and a merge of the base branch is the one thing on a
-    /// workspace branch that the reader did not write.
-    @Test("merges are left out of the list")
-    func mergesAreLeftOut() async throws {
+    @Test("merges are included so their resolutions can be reviewed")
+    func mergesAreIncluded() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
 
@@ -247,7 +242,7 @@ struct DiffScopeGitTests {
         )
 
         let commits = try await Git.branchCommits(worktree: repo.path, base: "main")
-        #expect(commits.commits.map(\.subject) == ["My own work"])
+        #expect(commits.commits.map(\.subject) == ["Merge branch 'main' into work", "My own work"])
     }
 
     @Test("a branch with more commits than the limit says the list is short")

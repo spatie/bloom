@@ -280,6 +280,10 @@ struct SessionTabsView: View {
             title: tabs.displayTitle(of: tab, in: model),
             icon: icon(for: tab),
             isActive: selected == .tool(tab.id),
+            // A run script's tab wears the dot a working conversation does while its command is
+            // going. An ordinary terminal never does: nothing polls it, and a shell somebody ran
+            // `ls` in is not a thing anybody is waiting on.
+            isRunning: launcher.isRunning(tab),
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             // What is on the tab, not what the tab is filed under. A browser showing "Spatie"
@@ -318,9 +322,20 @@ struct SessionTabsView: View {
     /// A dictionary lookup behind one address parse, which is what it costs to ask this from a
     /// body that redraws on a window resize. See `BrowserFaviconStore`.
     private func icon(for tab: CenterTab) -> TabItemIcon {
+        if tab.kind == .terminal, let script = runScript(of: tab) {
+            return .symbol(RunScriptGlyph.symbol(for: script.icon))
+        }
         guard tab.kind == .browser else { return .symbol(tab.icon) }
         return .page(BrowserFaviconStore.shared.icon(for: tab.url))
     }
+
+    /// The run script a terminal tab was opened for, as the settings file states it now.
+    private func runScript(of tab: CenterTab) -> RunScript? {
+        guard let id = tab.runScriptID else { return nil }
+        return model.settings.runScripts.first { $0.id == id }
+    }
+
+    private var launcher: RunScriptLauncher { .shared }
 
     private func closeTitle(for tab: CenterTab) -> String {
         switch tab.kind {
@@ -364,6 +379,7 @@ struct SessionTabsView: View {
                 .keyboardShortcut("d", modifiers: [.command, .shift])
             // An empty note is exactly what somebody opening this is about to fix.
             Button(CenterTab.notesTitle, systemImage: "note.text") { WorkspaceNotes.open(in: model) }
+            runScriptItems
         } label: {
             Label("New tab", systemImage: "plus")
                 .labelStyle(.iconOnly)
@@ -375,6 +391,55 @@ struct SessionTabsView: View {
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
         .contentShape(Rectangle())
         .help("New tab in this workspace")
+    }
+
+    /// The project's run scripts, under their own heading, in the order the file states them.
+    ///
+    /// Absent rather than an empty heading for a project with none, so the menu is exactly what it
+    /// was before run scripts had tabs. Each row's second line is the command, so what runs can be
+    /// read before it runs, and a script already going says Running instead, because picking it
+    /// shows its tab rather than starting a second copy. The words are `RunScriptMenuItem`.
+    @ViewBuilder
+    private var runScriptItems: some View {
+        let scripts = model.settings.runScripts
+        if !scripts.isEmpty {
+            let running = runningScripts()
+            Divider()
+            Section("Run Scripts") {
+                ForEach(scripts) { script in
+                    let item = RunScriptMenuItem.make(
+                        script: script,
+                        isRunning: running.contains(script.id),
+                        missingFile: missingFile(of: script)
+                    )
+                    Button {
+                        launcher.pick(script, in: model)
+                    } label: {
+                        // A label and then a second text, which a menu draws as the title with
+                        // its glyph and a subtitle under it.
+                        Label {
+                            Text(verbatim: item.title)
+                        } icon: {
+                            Image(systemName: RunScriptGlyph.symbol(for: script.icon))
+                        }
+                        Text(verbatim: item.subtitle)
+                    }
+                    .disabled(!item.isEnabled)
+                }
+            }
+        }
+    }
+
+    /// The ids of the run scripts with a tab whose command is going.
+    private func runningScripts() -> Set<String> {
+        Set(tabs.tabs(for: model.workspace.id).compactMap { tab in
+            launcher.isRunning(tab) ? tab.runScriptID : nil
+        })
+    }
+
+    private func missingFile(of script: RunScript) -> String? {
+        guard let file = model.settings.scriptFiles[.run(script.id)], file.isMissing else { return nil }
+        return file.path
     }
 
     /// Whether this tab can be opened beside the one the user is in. The pair of menu items is

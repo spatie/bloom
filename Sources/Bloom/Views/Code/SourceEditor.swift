@@ -23,12 +23,6 @@ struct SourceEditor: NSViewRepresentable {
     /// Off for a value that is being shown rather than edited, such as the resolved settings the
     /// preferences window mirrors. The caret and the find bar go with it.
     var isEditable = true
-    /// The ground the code and the gutter are drawn on.
-    ///
-    /// `nil` keeps `NSColor.textBackgroundColor`, which is what a full pane editor wants. A field
-    /// inside a form passes the form's own sunken surface instead, because the app's dark
-    /// appearance is a deep blue and the system's text background is very nearly black next to it.
-    var ground: Color?
     /// Drawn in place of the text while the buffer is empty. A script nobody has written yet is
     /// otherwise an unexplained empty box.
     var placeholder = ""
@@ -47,8 +41,7 @@ struct SourceEditor: NSViewRepresentable {
     /// The ground as an `NSColor`, resolved on the main actor where the SwiftUI environment is
     /// available, so no draw pass ever has to do the conversion.
     private var resolvedGround: NSColor {
-        guard let ground else { return .textBackgroundColor }
-        return NSColor(ground)
+        NSColor(Palette.codeBackground)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
@@ -106,7 +99,7 @@ struct SourceEditor: NSViewRepresentable {
         // with and the gutter is drawn on top of the first few characters of every line.
         let ruler = LineNumberRuler(scrollView: scrollView, textView: textView)
         ruler.fill = resolvedGround
-        ruler.numberColor = NSColor(Palette.textTertiary)
+        ruler.numberColor = NSColor(Palette.codeGutter)
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
@@ -140,7 +133,7 @@ struct SourceEditor: NSViewRepresentable {
         scrollView.backgroundColor = ground
         if let ruler = scrollView.verticalRulerView as? LineNumberRuler {
             ruler.fill = ground
-            ruler.numberColor = NSColor(Palette.textTertiary)
+            ruler.numberColor = NSColor(Palette.codeGutter)
             ruler.needsDisplay = true
         }
 
@@ -150,15 +143,17 @@ struct SourceEditor: NSViewRepresentable {
         // selection and the undo stack, and SwiftUI re-runs this on every unrelated update.
         // Language and appearance both change what the colour pass produces, so either one moving
         // has to re-run it even when the buffer is untouched.
-        if textView.string != text
-            || context.coordinator.language != language
-            || context.coordinator.appearance != colorScheme {
+        if !textView.string.utf8.elementsEqual(text.utf8) {
             context.coordinator.replace(text: text, language: language, appearance: colorScheme)
         }
+        context.coordinator.refreshTheme(language: language, appearance: colorScheme)
         context.coordinator.restorePosition()
     }
 
     private func configure(_ view: CodeTextView, scrollView: NSScrollView) {
+        view.insertionPointColor = NSColor(Palette.codeCaret)
+        view.selectedTextAttributes = [.backgroundColor: NSColor(Palette.codeSelection), .foregroundColor: NSColor(Palette.codeForeground)]
+        view.defaultParagraphStyle = WrappedCodeLayout.paragraph()
         view.editorState = editorState
         editorState?.textView = view
         view.codeLanguage = language
@@ -193,6 +188,8 @@ struct SourceEditor: NSViewRepresentable {
         var text: Binding<String>
         private(set) var language: Language = .plainText
         private(set) var appearance: ColorScheme = .light
+        private var scheme: CodeScheme?
+        private var typography: ThemeTypography?
 
         private weak var textView: NSTextView?
         private weak var ruler: LineNumberRuler?
@@ -219,6 +216,24 @@ struct SourceEditor: NSViewRepresentable {
             self.ruler = ruler
         }
 
+        func refreshTheme(language: Language, appearance: ColorScheme) {
+            let scheme = ColourThemePreference.shared.codeScheme
+            let typography = ColourThemePreference.shared.codeTypography
+            guard self.scheme != scheme || self.typography != typography
+                    || self.language != language || self.appearance != appearance else { return }
+            self.scheme = scheme
+            self.typography = typography
+            self.language = language
+            self.appearance = appearance
+            applyTypography()
+            highlight(immediately: true)
+        }
+
+        private func applyTypography() {
+            if textView?.font != CodeMetrics.font { textView?.font = CodeMetrics.font }
+            if ruler?.numberFont != CodeMetrics.numberFont { ruler?.numberFont = CodeMetrics.numberFont }
+        }
+
         func detach() {
             if let view = textView as? CodeTextView, let state = view.editorState {
                 state.selection = view.selectedRange()
@@ -239,7 +254,10 @@ struct SourceEditor: NSViewRepresentable {
             guard let textView else { return }
             language = newLanguage
             appearance = scheme
-            if textView.string != value {
+            self.scheme = ColourThemePreference.shared.codeScheme
+            typography = ColourThemePreference.shared.codeTypography
+            applyTypography()
+            if !textView.string.utf8.elementsEqual(value.utf8) {
                 let selection = textView.selectedRange()
                 let origin = textView.enclosingScrollView?.contentView.bounds.origin
                 textView.string = value
@@ -346,10 +364,10 @@ struct SourceEditor: NSViewRepresentable {
             storage.endEditing()
         }
 
-        private static let base: [NSAttributedString.Key: Any] = [
-            .font: CodeMetrics.font,
-            .foregroundColor: NSColor(Palette.textPrimary),
-        ]
+        private static var base: [NSAttributedString.Key: Any] {
+            [.font: CodeMetrics.font, .foregroundColor: NSColor(Palette.codeForeground),
+             .paragraphStyle: WrappedCodeLayout.paragraph()]
+        }
     }
 
     /// The one place tokens become spans. Pure and off the main actor, so it can run detached.

@@ -70,11 +70,21 @@ public struct SetupProbe: Sendable {
         guard let path = Shell.which("git") else { return .missing }
         // Five seconds, the same deadline `AgentCatalog.readVersion` uses, and for the same
         // reason: a hung binary must not hold a window open.
-        guard let result = try? await Shell.run(path, ["--version"], timeout: .seconds(5)),
-              result.ok else {
-            return .ready(detail: nil)
-        }
-        return .ready(detail: AgentCatalog.parseVersion(result.trimmed))
+        return Self.gitOutcome(version: try? await Shell.run(path, ["--version"], timeout: .seconds(5)))
+    }
+
+    /// What `git --version` coming back says about git.
+    ///
+    /// **A git that exits non-zero is not installed, whatever is at `/usr/bin/git`.** Every Mac
+    /// has that file, and without the command line tools it is a stub that exits 1 with an
+    /// `xcrun: error`. This used to read any failure as ready, so a Mac with no working git was
+    /// told it was set up, and then every repository it added was refused as not being one.
+    /// Missing carries the right remedy, `xcode-select --install`. Nil, a timeout or a launch that
+    /// failed, stays ready: nothing was learnt, and a slow disk is not a missing git.
+    static func gitOutcome(version: ShellResult?) -> SetupOutcome {
+        guard let version else { return .ready(detail: nil) }
+        guard version.ok else { return .missing }
+        return .ready(detail: AgentCatalog.parseVersion(version.trimmed))
     }
 
     // MARK: - The agents

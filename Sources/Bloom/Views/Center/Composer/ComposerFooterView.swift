@@ -47,7 +47,14 @@ struct ComposerFooterView: View {
     /// What choosing a quick prompt does, or nil where there is nowhere to put one. Nil hides the
     /// button rather than disabling it: a control that can never do anything is not worth the room
     /// in a row that already loses its words at 420 points.
-    var onQuickPrompt: (@MainActor (QuickPrompt) -> Void)?
+    var onQuickPrompt: (@MainActor (QuickPromptPanelRow) -> Void)?
+    /// What the workspace's repository offers under the owner's own prompts. Empty in the create
+    /// window, which has no workspace model to have read a settings file.
+    var projectQuickPrompts: [ProjectQuickPrompt] = []
+    /// Called as the panel opens, so the settings file behind `projectQuickPrompts` can be read
+    /// again. Somebody who has just pulled a teammate's new prompt opens the panel to find it,
+    /// and until now nothing re-read that file short of switching workspace.
+    var onOpenQuickPrompts: (@MainActor () -> Void)?
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
     var onSideConversation: (@MainActor () -> Void)?
@@ -223,7 +230,8 @@ struct ComposerFooterView: View {
                     onOutputStyle: { id in edit { $0.outputStyle = id } },
                     onPermissionMode: selectPermissionMode,
                     onFastMode: { value in edit { $0.isFastMode = value } },
-                    onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } }
+                    onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
+                    onInteractionMode: { mode in edit { $0.interactionMode = mode } }
                 )
             }
 
@@ -251,6 +259,7 @@ struct ComposerFooterView: View {
             // already about an AI, so a sparkle would distinguish nothing.
             if showsAgentControls, onQuickPrompt != nil {
                 Button {
+                    onOpenQuickPrompts?()
                     isShowingQuickPrompts = true
                 } label: {
                     ComposerControlLabel(
@@ -274,6 +283,7 @@ struct ComposerFooterView: View {
                     if let onQuickPrompt {
                         QuickPromptMenu(
                             catalog: QuickPromptCatalog.shared,
+                            projectPrompts: projectQuickPrompts,
                             draft: $quickPromptDraft,
                             onPick: onQuickPrompt,
                             onClose: { isShowingQuickPrompts = false }

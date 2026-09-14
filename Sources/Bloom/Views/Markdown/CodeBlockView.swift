@@ -11,6 +11,7 @@ public struct CodeBlockView: View {
     private let code: String
     private let language: Language
     @State private var showsAllLines = false
+    @Environment(\.transcriptTextSelection) private var selection
 
     /// Whether the answer this fence belongs to is still arriving, which decides which cache the
     /// preparation goes through. See `CodeBlockPreparationCache`.
@@ -33,7 +34,7 @@ public struct CodeBlockView: View {
                 // at the floor of the scale, a rung under the smallest thing it names.
                 Text(Self.displayName(for: language))
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(Palette.codeGutter)
                 Spacer(minLength: MarkdownMetrics.blockGap)
                 CopyButton(text: code, title: "Copy code", size: MarkdownMetrics.iconButton)
             }
@@ -43,11 +44,21 @@ public struct CodeBlockView: View {
             Hairline()
 
             ScrollView(.horizontal) {
-                Text(highlighted(prepared, upTo: visibleCount))
-                    .font(Typo.code)
-                    .foregroundStyle(Palette.textPrimary)
-                    .textSelection(.enabled)
+                if selection != nil {
+                    TranscriptTextView(
+                        text: nativeHighlighted(prepared, upTo: visibleCount),
+                        linkColor: Palette.linkNSColor
+                    )
+                    .fixedSize(horizontal: true, vertical: false)
                     .padding(MarkdownMetrics.blockGap)
+                } else {
+                    Text(highlighted(prepared, upTo: visibleCount))
+                        .font(CodeMetrics.measuredFont)
+                        .lineSpacing(CodeMetrics.rowSpacing)
+                        .foregroundStyle(Palette.codeForeground)
+                        .textSelection(.enabled)
+                        .padding(MarkdownMetrics.blockGap)
+                }
             }
 
             // No `!showsAllLines`: an opened fence keeps the control, now reading the other way.
@@ -64,7 +75,7 @@ public struct CodeBlockView: View {
                 .padding(.vertical, Metrics.spacing)
             }
         }
-        .background(Palette.surfaceSunken)
+        .background(Palette.codeBackground)
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
@@ -93,13 +104,46 @@ public struct CodeBlockView: View {
     /// the way `SetupLineHeight` gives the setup log one. Worth writing when something asks for it.
     private func highlighted(_ prepared: CodeBlockPreparation, upTo count: Int) -> AttributedString {
         var output = AttributedString()
+        let scheme = ColourThemePreference.shared.codeScheme
+        let colours = Palette.codeColours
+        let schemeHash = scheme.hashValue
         for offset in 0..<count {
             if offset > 0 { output += AttributedString("\n") }
             output += SyntaxCache.attributed(
                 line: prepared.lines[offset],
                 language: language,
-                carry: prepared.carries[offset]
+                carry: prepared.carries[offset],
+                scheme: scheme, colours: colours, schemeHash: schemeHash
             )
+        }
+        return output
+    }
+
+    private func nativeHighlighted(_ prepared: CodeBlockPreparation, upTo count: Int) -> NSAttributedString {
+        let output = NSMutableAttributedString(string: "")
+        // The theme's code face and row spacing, so a fence reads the same selectable or not.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = CodeMetrics.rowSpacing
+        let attributes: [NSAttributedString.Key: Any] = [.font: CodeMetrics.font, .paragraphStyle: paragraph]
+        let scheme = ColourThemePreference.shared.codeScheme
+        let colours = Palette.codeColours
+        let schemeHash = scheme.hashValue
+        for offset in 0..<count {
+            if offset > 0 { output.append(NSAttributedString(string: "\n", attributes: attributes)) }
+            let value = SyntaxCache.attributed(
+                line: prepared.lines[offset], language: language, carry: prepared.carries[offset],
+                scheme: scheme, colours: colours, schemeHash: schemeHash
+            )
+            let line = NSMutableAttributedString(string: prepared.lines[offset], attributes: attributes)
+            for run in value.runs {
+                let prefix = String(value.characters[..<run.range.lowerBound]).utf16.count
+                let length = String(value.characters[run.range]).utf16.count
+                line.addAttribute(
+                    .foregroundColor, value: NSColor(run.foregroundColor ?? Palette.codeForeground),
+                    range: NSRange(location: prefix, length: length)
+                )
+            }
+            output.append(line)
         }
         return output
     }
