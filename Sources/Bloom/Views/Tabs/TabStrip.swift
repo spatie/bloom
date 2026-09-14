@@ -187,23 +187,24 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
 }
 
 extension TabStrip {
-    /// Opaque across the middle, fading only at an end that has tabs past it.
-    ///
-    /// Written as one gradient with four stops rather than as two overlays, because a stop that is
-    /// not wanted can be collapsed onto its neighbour and then it draws nothing. With neither end
-    /// overflowing this is a flat black mask, which is the same as no mask at all.
+    @ViewBuilder
     private var fade: some View {
-        let step = width > 0 ? min(TabStripOverflow.fadeWidth / width, 0.5) : 0
-        return LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: overflow.leading ? step : 0),
-                .init(color: .black, location: overflow.trailing ? 1 - step : 1),
-                .init(color: .clear, location: 1),
-            ],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
+        // Scroll geometry can arrive before the width cap settles.
+        if let tabsWidth, tabsWidth <= width {
+            Color.black
+        } else {
+            let step = width > 0 ? min(TabStripOverflow.fadeWidth / width, 0.5) : 0
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: overflow.leading ? step : 0),
+                    .init(color: .black, location: overflow.trailing ? 1 - step : 1),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
     }
 
     /// Whether there is anything past either end, from the scroll view's own geometry. A point of
