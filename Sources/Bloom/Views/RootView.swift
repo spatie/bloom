@@ -38,9 +38,6 @@ struct RootView: View {
         return windowWiring(
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView()
-                // The system toggle offers an irrelevant label-style context menu on macOS 26.
-                // BloomWindowToolbar replaces it with the same image-only action.
-                .toolbar(removing: .sidebarToggle)
                 .scrollContentBackground(.hidden)
                 .background {
                     Group {
@@ -95,8 +92,6 @@ struct RootView: View {
                     .toolbar {
                         BloomWindowToolbar(
                             app: app,
-                            isSidebarVisible: columnVisibility != .detailOnly,
-                            toggleSidebar: toggleSidebar,
                             startFreshAskConversation: { Task { await app.ask.newConversation() } }
                         )
                     }
@@ -120,10 +115,7 @@ struct RootView: View {
                     // glass in the title bar, and it moves nothing: no selection, no scroll, no
                     // column. Nothing it could reach was taken away with the field, which is the
                     // whole point of relocating it rather than replacing it. See `SearchPanelView`
-                    // for the card and `SearchToolbarButton` for the glyph.
-                    .onChange(of: app.selectedWorkspace != nil, initial: true) { _, available in
-                        InspectorGeometry.shared.setWorkspaceAvailable(available)
-                    }
+                    // for the card and `BloomWindowToolbar` for its button.
             }
             // As well as heading the toolbar (see BloomApp), the title names the window in the
             // Window menu and in Mission Control, so it is worth setting.
