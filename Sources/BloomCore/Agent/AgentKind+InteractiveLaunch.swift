@@ -28,7 +28,8 @@ public extension AgentKind {
         }
         let manager = FileManager.default
         try manager.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let data = Data(("#!/bin/sh\n" + script + "\n").utf8)
+        let clear = #"if [ -t 1 ]; then printf '\033[2J\033[H\033[3J'; fi"#
+        let data = Data(("#!/bin/sh\n" + clear + "\n" + script + "\n").utf8)
         if (try? Data(contentsOf: file)) != data {
             try data.write(to: file, options: .atomic)
             try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
