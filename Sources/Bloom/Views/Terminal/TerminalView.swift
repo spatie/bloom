@@ -412,6 +412,7 @@ private final class TerminalProcessObserver: LocalProcessTerminalViewDelegate {
 /// ever being deallocated, and so the pty follows the view size on every layout pass.
 final class TerminalHostView: NSView {
     private weak var terminal: BloomTerminalView?
+    private var displayedOutput = ""
 
     /// Whether this is the pane the tab says holds the keyboard. Only that one reaches for it when
     /// the tab appears: four shells all grabbing first responder as they are drawn would leave the
@@ -426,6 +427,23 @@ final class TerminalHostView: NSView {
             guard oldValue != focusRequest, isFocusedPane else { return }
             takeKeyboard()
         }
+    }
+
+    func showOutput(_ text: String) {
+        let view = terminal ?? BloomTerminalView(frame: bounds)
+        attach(view)
+        view.updateTheme()
+        guard text != displayedOutput else { return }
+        let addition: String
+        if text.hasPrefix(displayedOutput) {
+            addition = String(text.dropFirst(displayedOutput.count))
+        } else {
+            view.clearScreen()
+            addition = text
+        }
+        view.feed(text: addition.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n", with: "\r\n"))
+        displayedOutput = text
     }
 
     func attach(_ view: BloomTerminalView) {
@@ -476,6 +494,7 @@ struct TerminalView: NSViewRepresentable {
     /// gets the tab's, so splitting a terminal opened on a folder stays in that folder, which is
     /// what splitting does in every other terminal.
     var directory: String = ""
+    var output: String?
 
     /// Split panes only. A tab holding one terminal is always its own focused pane and never moves
     /// the keyboard, so it leaves all four of these alone.
@@ -499,6 +518,11 @@ struct TerminalView: NSViewRepresentable {
     }
 
     private func configure(_ host: TerminalHostView) {
+        if let output {
+            host.isFocusedPane = false
+            host.showOutput(output)
+            return
+        }
         let session = self.session
         host.attach(session)
         session.updateTheme()

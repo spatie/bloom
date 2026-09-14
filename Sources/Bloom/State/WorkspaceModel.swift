@@ -363,6 +363,8 @@ final class WorkspaceModel {
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
     var pendingCLILaunches: Set<SessionID> = []
+    private(set) var pendingCLIPrompts: [SessionID: String] = [:]
+    private(set) var cliSetupCommand = ""
     /// The script alone, where `setupTask` is the script and whatever follows it. Stop cancels
     /// this one, so the queue behind the run still drains; archiving and quitting cancel the
     /// outer task, which reaches this through `stream`'s cancellation handler.
@@ -612,6 +614,7 @@ final class WorkspaceModel {
         if let terminal = CenterTabStore.shared.terminal(for: session.id, in: workspace.id) {
             await CenterTabStore.shared.close(terminal)
             pendingCLILaunches.remove(session.id)
+            pendingCLIPrompts[session.id] = nil
         }
         transcripts[session.id]?.teardown()
         transcripts[session.id] = nil
@@ -1093,6 +1096,7 @@ final class WorkspaceModel {
         let cliSession = activeSession.flatMap { session in
             CenterTabStore.shared.terminal(for: session.id, in: workspace.id).map { _ in session }
         }
+        if let cliSession { pendingCLIPrompts[cliSession.id] = prompt }
         let cliDelivery: Delivery?
         if let cliSession, let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             cliDelivery = try? await store?.enqueueDelivery(Delivery(targetSessionID: cliSession.id, body: prompt))
@@ -1154,6 +1158,8 @@ final class WorkspaceModel {
         let settings = await Task.detached(priority: .userInitiated) {
             SettingsLoader.load(repo: repoPath)
         }.value
+
+        if cliSession != nil { cliSetupCommand = settings.setupScript ?? "" }
 
         if workspace.setupState == .pending, settings.setupScript != nil || Git.hasSubmodules(in: workspace.path) {
             let succeeded = await stream(setupIn: repo, through: manager)
@@ -1218,6 +1224,7 @@ final class WorkspaceModel {
             workspace: workspace, repo: repo, port: port, directory: terminal.directory
         )
         pendingCLILaunches.remove(cliSession.id)
+        pendingCLIPrompts[cliSession.id] = nil
     }
 
     private func prepareCLICommand(for session: Session, prompt: String) -> String? {

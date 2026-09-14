@@ -159,7 +159,7 @@ struct CenterPaneView: View {
             // body may not do that. `prepare` below is where it is built.
             if let terminal = CenterTabStore.shared.terminal(for: sessionID, in: model.workspace.id) {
                 if model.pendingCLILaunches.contains(sessionID) {
-                    setupState
+                    cliSetup(terminal, sessionID: sessionID)
                 } else {
                     ToolPaneView(
                         model: model, tab: terminal, siblings: paneContents,
@@ -339,6 +339,34 @@ struct CenterPaneView: View {
 
     /// A fresh workspace runs its setup script before anything else, and that can take minutes on a
     /// large repository. Saying so beats an empty rectangle that looks like a failure.
+    private func cliSetup(_ terminal: CenterTab, sessionID: SessionID) -> some View {
+        VStack(spacing: 0) {
+            TerminalView(
+                tab: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: model.workspace.id, title: terminal.title),
+                workspace: model.workspace, repo: model.repo, port: model.port,
+                output: "Setting up the workspace…\n\n"
+                    + (model.cliSetupCommand.isEmpty ? "" : "$ " + model.cliSetupCommand + "\n\n")
+                    + model.setupOutput
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let prompt = model.pendingCLIPrompts[sessionID], !prompt.isEmpty {
+                VStack(alignment: .leading, spacing: Metrics.spacing) {
+                    Text("Queued prompt · sends after setup")
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                    Text(prompt)
+                        .font(Typo.body)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Metrics.gutter)
+                .background(Palette.surface)
+                .overlay(alignment: .top) { Hairline() }
+            }
+        }
+    }
+
     private var setupState: some View {
         EmptyStateView(
             glyph: "gearshape.2",

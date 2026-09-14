@@ -120,3 +120,5 @@ Validation: all 12 interactive CLI tests and both linters passed. Fast dev build
 
 - CLI chat creation returns its session tab identity, so empty-pane reveal and split placement can select it.
 - Empty-pane Chat, Terminal and Browser buttons now share neutral styling.
+- CLI launchers clear their terminal screen and scrollback before starting the agent, hiding the echoed launch path. Redirected output is left untouched.
+- Pending CLI chats render setup commands and the live setup log through the existing terminal view without starting another process. A footer previews the queued prompt until launch.
