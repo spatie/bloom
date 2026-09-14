@@ -51,28 +51,10 @@ struct RepoHeaderRow: View {
     /// project at a time.
     @State private var isHeaderHovered = false
 
-    /// A row, not a section, and one that keeps a section's rhythm.
-    ///
-    /// A section header was given 13 points of spacing above a drawing band of 19, which together
-    /// are the 32 point pitch every row in this list is drawn on. A plain row is handed the whole
-    /// 32 and centres its content in it, so without the lead a project would sit hard against the
-    /// last workspace of the project before it and the pane would lose the one gap that says a new
-    /// project starts here. The padding puts that gap back INSIDE the row's own 32 points rather
-    /// than on top of them, so the pitch is unchanged and nothing below moves.
-    /// There is no trailing padding here any more, and that is the other half of the same change.
-    ///
-    /// A section header was given more room at its trailing edge than a plain row is, so the `+`
-    /// used to be drawn about eight points right of everything below it and eight points of
-    /// padding was what pulled it back. A plain row is handed the same insets as the rows under
-    /// it, so that padding had nothing left to correct and simply moved the `+` fourteen points
-    /// the other way. Measured on captures of both, at the pixel: the same glyph's trailing ink
-    /// stood at 482 as a section header with the padding, at 454 as a plain row with it, and at
-    /// 470 as a plain row without it, where the Projects heading's own button, which is a plain
-    /// row and carries the same frame, stands at 479. What is left is the difference between two
-    /// glyphs inside one frame, not a difference in the column.
+    /// The list supplies the row's insets. Extra padding around the button makes the
+    /// project taller than the workspace rows and offsets its content inside the right-click outline.
     var body: some View {
         header
-            .padding(.top, SidebarMetrics.headerLead)
             // A hidden project the owner has asked to see is drawn exactly where it would be, at
             // exactly the size it would be, in less ink. Nothing else: no badge, no italic, no
             // section of its own. The list has one job at a glance, which is to be scannable, and
@@ -122,10 +104,7 @@ struct RepoHeaderRow: View {
 
             Spacer(minLength: Metrics.spacingSmall)
 
-            // Boxed to the tile's size at the other end of the row, so the header is bracketed by
-            // two marks of one size rather than by an icon and a speck. The padding is the click
-            // target, and it is inside the label because a button's hit area is its label, which
-            // is why the `contentShape` outside the button widened nothing.
+            // Keep the square frame inside the label so the whole hover background takes clicks.
             Button {
                 onCreateWorkspace(repo)
             } label: {
@@ -316,8 +295,8 @@ struct RepoHeaderRow: View {
     ///
     /// Built here rather than reusing `RepoSettingsButton`, which is boxed to
     /// `Metrics.headerButton` and carries a hover plate: both were right at the trailing edge and
-    /// neither survives the move. A 24 point box in a 16 point column would hang four points over
-    /// the chevron and four over the name, and a rounded plate drawn in the tile's own column
+    /// neither survives the move. A 20 point box in a 16 point column would hang two points over
+    /// the chevron and two over the name, and a rounded plate drawn in the tile's own column
     /// would read as a second tile. It opens the window through the same call the menu item does.
     ///
     /// Nothing is lost with the pointer away, and that matters more here than it did at the

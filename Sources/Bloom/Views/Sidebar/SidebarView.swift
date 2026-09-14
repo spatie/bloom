@@ -116,100 +116,98 @@ struct SidebarView: View {
                 askRow
             }
 
-            // A plain row rather than a `Section` header, because the things it heads are
-            // themselves sections and a list cannot nest one inside another. It carries no tag
-            // and refuses selection, so it stays a label. Home keeps its own section above it,
-            // which is what stops it reading as the first project.
-            SidebarProjectsHeader(onStartProject: startProject)
-                .selectionDisabled()
-                .listRowSeparator(.hidden)
-
-            // One `ForEach` over every project and every workspace, rather than a `Section` per
-            // project, and the reason is the `onMove` at the foot of it. `onMove` on a `ForEach`
-            // of `Section`s moves nothing at all: a section header is not a row the outline will
-            // pick up, so the projects could not be dragged while each was a section of its own,
-            // and there is no second `onMove` that reaches them. One flat run is the shape the
-            // mechanism can move, and it moves both things: the source offset is what says
-            // whether a project or a workspace was picked up. See `SidebarReorder.destination`.
-            ForEach(paneRows) { row in
-                switch row {
-                case .project(let group):
-                    RepoHeaderRow(
-                        repo: group.repo,
-                        hasUnreadWork: group.hasUnreadWork,
-                        workspaceCount: group.workspaces.count,
-                        onCreateWorkspace: presentCreate
-                    )
-                    // A project is never the selection. The pane selects work, not the folder the
-                    // work is in, and this row carries no tag. Refusing selection does NOT refuse
-                    // the drag, which is the whole reason the projects can be reordered at all.
-                    .selectionDisabled()
-                case .workspace(let workspace, let projectName):
-                    // The fill and the ink are the same two lines every selectable row carries,
-                    // and they are applied in `workspaceRow` rather than here: written inline,
-                    // this `switch` stopped type checking in reasonable time.
-                    workspaceRow(workspace, projectName: projectName)
-                case .crew(let member, let workspaceID, _):
-                    CrewSidebarRow(row: member)
-                        // The owner's own way to be finished with a subagent, which the agent
-                        // above it has in `agent_stop` and the person watching it did not.
-                        .contextMenu {
-                            Button("Stop Subagent") { askToStop(member, in: workspaceID) }
-                        }
-                        // Always selectable, unlike the subagent row below it: a crew member is a
-                        // conversation, so there is always something to open, whatever it is
-                        // doing and whether or not it is still running.
-                        //
-                        // Never something to pick up. A crew member is where it is because of the
-                        // worktree it shares, not because of an order anybody chose.
-                        .moveDisabled(true)
-                        .tag(SidebarSelection.crew(workspaceID, member.id))
-                        .listRowBackground(selectionFill(for: .crew(workspaceID, member.id)))
-                        .selectedRowInk(
-                            isEmphasized: isEmphasized(.crew(workspaceID, member.id))
+            // One native section supplies the Projects heading's font and spacing. The rows
+            // stay in one ForEach so dragging still uses the same indices in `paneRows`.
+            Section {
+                // One `ForEach` over every project and every workspace, rather than a `Section` per
+                // project, and the reason is the `onMove` at the foot of it. `onMove` on a `ForEach`
+                // of `Section`s moves nothing at all: a section header is not a row the outline will
+                // pick up, so the projects could not be dragged while each was a section of its own,
+                // and there is no second `onMove` that reaches them. One flat run is the shape the
+                // mechanism can move, and it moves both things: the source offset is what says
+                // whether a project or a workspace was picked up. See `SidebarReorder.destination`.
+                ForEach(paneRows) { row in
+                    switch row {
+                    case .project(let group):
+                        RepoHeaderRow(
+                            repo: group.repo,
+                            hasUnreadWork: group.hasUnreadWork,
+                            workspaceCount: group.workspaces.count,
+                            onCreateWorkspace: presentCreate
                         )
-                case .subagent(let subagent, let workspaceID, _):
-                    SubagentSidebarRow(row: subagent)
-                        // A row with no file to open refuses selection rather than taking it and
-                        // showing an empty pane, which is the worse of the two.
-                        .selectionDisabled(!subagent.opensOutput)
-                        // Never something to pick up. A subagent has no place in the pane of its
-                        // own: it is where it is because of what spawned it.
-                        .moveDisabled(true)
-                        .tag(SidebarSelection.subagent(workspaceID, subagent.id))
-                        // A subagent that CAN be selected selects like everything else in the
-                        // pane. It shares the same semantic selection as every other selected row.
-                        .listRowBackground(
-                            selectionFill(for: .subagent(workspaceID, subagent.id))
-                        )
-                        .selectedRowInk(
-                            isEmphasized: isEmphasized(.subagent(workspaceID, subagent.id))
-                        )
-                case .pending(let pending):
-                    // A workspace that does not exist yet, so there is nothing to select, nothing
-                    // to open and nothing to write a `sort_order` onto. Refused here and again in
-                    // `SidebarReorder.destination`, on the same belt-and-braces footing as the
-                    // notice below. It fades in like any other row that turns up: the tracker was
-                    // handed its id in `regroup`, which is also what stops the stored row fading
-                    // in over the top of it a moment later. See `PendingWorkspaceRow`.
-                    PendingWorkspaceRow(pending: pending)
-                        .arrivingRow(arrival.isArriving(pending.id))
+                        // A project is never the selection. The pane selects work, not the folder the
+                        // work is in, and this row carries no tag. Refusing selection does NOT refuse
+                        // the drag, which is the whole reason the projects can be reordered at all.
                         .selectionDisabled()
-                        .moveDisabled(true)
+                    case .workspace(let workspace, let projectName):
+                        // The fill and the ink are the same two lines every selectable row carries,
+                        // and they are applied in `workspaceRow` rather than here: written inline,
+                        // this `switch` stopped type checking in reasonable time.
+                        workspaceRow(workspace, projectName: projectName)
+                    case .crew(let member, let workspaceID, _):
+                        CrewSidebarRow(row: member)
+                            // The owner's own way to be finished with a subagent, which the agent
+                            // above it has in `agent_stop` and the person watching it did not.
+                            .contextMenu {
+                                Button("Stop Subagent") { askToStop(member, in: workspaceID) }
+                            }
+                            // Always selectable, unlike the subagent row below it: a crew member is a
+                            // conversation, so there is always something to open, whatever it is
+                            // doing and whether or not it is still running.
+                            //
+                            // Never something to pick up. A crew member is where it is because of the
+                            // worktree it shares, not because of an order anybody chose.
+                            .moveDisabled(true)
+                            .tag(SidebarSelection.crew(workspaceID, member.id))
+                            .listRowBackground(selectionFill(for: .crew(workspaceID, member.id)))
+                            .selectedRowInk(
+                                isEmphasized: isEmphasized(.crew(workspaceID, member.id))
+                            )
+                    case .subagent(let subagent, let workspaceID, _):
+                        SubagentSidebarRow(row: subagent)
+                            // A row with no file to open refuses selection rather than taking it and
+                            // showing an empty pane, which is the worse of the two.
+                            .selectionDisabled(!subagent.opensOutput)
+                            // Never something to pick up. A subagent has no place in the pane of its
+                            // own: it is where it is because of what spawned it.
+                            .moveDisabled(true)
+                            .tag(SidebarSelection.subagent(workspaceID, subagent.id))
+                            // A subagent that CAN be selected selects like everything else in the
+                            // pane. It shares the same semantic selection as every other selected row.
+                            .listRowBackground(
+                                selectionFill(for: .subagent(workspaceID, subagent.id))
+                            )
+                            .selectedRowInk(
+                                isEmphasized: isEmphasized(.subagent(workspaceID, subagent.id))
+                            )
+                    case .pending(let pending):
+                        // A workspace that does not exist yet, so there is nothing to select, nothing
+                        // to open and nothing to write a `sort_order` onto. Refused here and again in
+                        // `SidebarReorder.destination`, on the same belt-and-braces footing as the
+                        // notice below. It fades in like any other row that turns up: the tracker was
+                        // handed its id in `regroup`, which is also what stops the stored row fading
+                        // in over the top of it a moment later. See `PendingWorkspaceRow`.
+                        PendingWorkspaceRow(pending: pending)
+                            .arrivingRow(arrival.isArriving(pending.id))
+                            .selectionDisabled()
+                            .moveDisabled(true)
 
-                case .notice:
-                    // A sentence about a project, so it is neither selectable nor something to
-                    // pick up. `SidebarReorder` refuses it a second time, in case the outline
-                    // offers it anyway.
-                    SidebarEmptyNoticeRow(isFiltered: filter != .all)
-                        .selectionDisabled()
-                        .moveDisabled(true)
+                    case .notice:
+                        // A sentence about a project, so it is neither selectable nor something to
+                        // pick up. `SidebarReorder` refuses it a second time, in case the outline
+                        // offers it anyway.
+                        SidebarEmptyNoticeRow(isFiltered: filter != .all)
+                            .selectionDisabled()
+                            .moveDisabled(true)
+                    }
                 }
+                // The list's own row reordering, which is `NSOutlineView`'s: the insertion line, the
+                // drag image, the autoscroll at the pane's edges, the snap back on a cancel and the
+                // settle on drop are all AppKit's, and none of it is drawn here.
+                .onMove(perform: move)
+            } header: {
+                SidebarProjectsHeader(onStartProject: startProject)
             }
-            // The list's own row reordering, which is `NSOutlineView`'s: the insertion line, the
-            // drag image, the autoscroll at the pane's edges, the snap back on a cancel and the
-            // settle on drop are all AppKit's, and none of it is drawn here.
-            .onMove(perform: move)
         }
         // The list draws its own row height, and that is left to it. Its selection is not.
         //
@@ -224,8 +222,7 @@ struct SidebarView: View {
         // all four left the pitch at exactly 32; `listRowInsets(leading:)` did not even move the
         // rows sideways. Reaching 28 means giving up `.listStyle(.sidebar)`, and with it the
         // selection above, keyboard navigation and the standard insets. Four points is not worth
-        // that. What was in reach was making the rhythm EVEN, which is what a project header's
-        // own top padding is spent on. See `SidebarMetrics.headerLead`.
+        // that. Project rows use the list's own vertical insets too.
         .listStyle(.sidebar)
         .confirmation($stoppingCrew) { pending in
             Confirmation(
