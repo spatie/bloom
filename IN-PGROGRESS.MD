@@ -113,7 +113,10 @@ Validation: all 12 interactive CLI tests and both linters passed. Fast dev build
 
 ### Default chat interface
 
-- Settings > Models > New session behaviour now selects Bloom chat or CLI chat.
+- Settings > Sessions > New session behaviour now selects Bloom chat or CLI chat.
 - Cmd+T, empty workspace actions and new chat panes share that preference.
 - The new workspace picker has Chat, Terminal and Browser. Its composer has a terminal toggle seeded from the preference, with a local override.
 - Unsupported CLI providers fall back to Bloom chat. Existing conversations keep their interface.
+
+- CLI chat creation returns its session tab identity, so empty-pane reveal and split placement can select it.
+- Empty-pane Chat, Terminal and Browser buttons now share neutral styling.

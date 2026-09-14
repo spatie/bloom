@@ -509,13 +509,13 @@ final class WorkspaceModel {
         guard let session = await createSession(title: title, controls: controls) else { return nil }
         guard WorkspaceStartMode.chat(usesCLI: defaults.terminalChat, agent: controls.agentKind).cliAgentKind != nil
         else { return .chat(session.id) }
-        let tab = CenterTabStore.shared.add(
+        CenterTabStore.shared.add(
             kind: .terminal, workspaceID: workspace.id,
             title: title ?? session.agentKind.label, agentSessionID: session.id
         )
         pendingCLILaunches.insert(session.id)
         await launchCLI(session, prompt: "", repo: repo)
-        return .tool(tab.id)
+        return .chat(session.id)
     }
 
     /// Retires the old runner only after its replacement has been saved successfully.

@@ -389,13 +389,8 @@ struct CenterPaneView: View {
                         Label(kind.title, systemImage: kind.symbol)
                             .labelStyle(.titleAndIcon)
                     }
-                    // Terminal is the prominent one because this pane exists for a workspace that
-                    // opened with a terminal and whose shell has ended, so it is what the reader
-                    // most likely wants back. It carries the system control accent, like every
-                    // primary action in the app.
-                    .buttonStyle(.borderedProminent)
-                    .tint(kind == .terminal ? Palette.controlAccent : Palette.surfaceRaised)
-                    .foregroundStyle(kind == .terminal ? Palette.selectedEmphasizedText : Palette.textPrimary)
+                    .buttonStyle(.bordered)
+                    .tint(Palette.controlAccent)
                 }
             }
         }
