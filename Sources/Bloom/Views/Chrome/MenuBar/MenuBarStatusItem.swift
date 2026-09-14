@@ -34,10 +34,18 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// sleep switch can be reached from without opening a window.
     static let isOnByDefault = true
 
+    /// Whether the strip draws the hand and its count, and the envelope and its count. Both on by
+    /// default, shared with the General settings pane. See `MenuBarSummary.segments` for what a
+    /// hidden count still shows.
+    static let waitingCountSettingKey = "menuBar.showsWaitingCount"
+    static let unreadCountSettingKey = "menuBar.showsUnreadCount"
+
     private var item: NSStatusItem?
     private weak var app: AppModel?
     private var unreadCount = 0
     private var waitingCount = 0
+    private var showsWaitingCount = true
+    private var showsUnreadCount = true
 
     private override init() {}
 
@@ -162,6 +170,13 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         refreshButton()
     }
 
+    func setShownCounts(waiting: Bool, unread: Bool) {
+        guard waiting != showsWaitingCount || unread != showsUnreadCount else { return }
+        showsWaitingCount = waiting
+        showsUnreadCount = unread
+        refreshButton()
+    }
+
     // MARK: - The glance
 
     /// The counts beside the mark, each with the glyph that says what it counts.
@@ -172,7 +187,12 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// for the words.
     private func refreshButton() {
         guard let button = item?.button else { return }
-        let segments = MenuBarSummary.segments(waiting: waitingCount, unread: unreadCount)
+        let segments = MenuBarSummary.segments(
+            waiting: waitingCount,
+            unread: unreadCount,
+            showsWaiting: showsWaitingCount,
+            showsUnread: showsUnreadCount
+        )
         let spoken = MenuBarSummary.tooltip(waiting: waitingCount, unread: unreadCount)
         button.attributedTitle = Self.title(for: segments, font: button.font)
         button.toolTip = spoken

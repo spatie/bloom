@@ -112,6 +112,8 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @AppStorage("confirmBeforeArchiving") private var confirmBeforeArchiving = true
     @AppStorage(MenuBarStatusItem.settingKey) private var showsMenuBarStatus = MenuBarStatusItem.isOnByDefault
+    @AppStorage(MenuBarStatusItem.waitingCountSettingKey) private var showsWaitingCount = true
+    @AppStorage(MenuBarStatusItem.unreadCountSettingKey) private var showsUnreadCount = true
     @State private var namesWorkspaces = WorkspaceNamingPreferences().isEnabled
 
     var body: some View {
@@ -122,6 +124,18 @@ struct GeneralSettingsView: View {
                     Text("Show agent status in the menu bar")
                     Text("See which agents are working or waiting for you.")
                 }
+                // Beside the Bloom mark, so off with it. The menu under the item lists both
+                // whatever these say.
+                Group {
+                    Toggle(isOn: $showsWaitingCount) {
+                        Label("Count agents waiting on you", systemImage: MenuBarSummary.waitingSymbol)
+                    }
+                    Toggle(isOn: $showsUnreadCount) {
+                        Label("Count finished tasks", systemImage: MenuBarSummary.unreadSymbol)
+                    }
+                }
+                .padding(.leading, Metrics.gutter)
+                .disabled(!showsMenuBarStatus)
             }
 
             DirectorySettingsSection()

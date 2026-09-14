@@ -29,6 +29,8 @@ enum SystemDefaults {
         UserDefaults.standard.register(defaults: [
             SleepPrevention.settingKey: SleepPrevention.isOnByDefault,
             MenuBarStatusItem.settingKey: MenuBarStatusItem.isOnByDefault,
+            MenuBarStatusItem.waitingCountSettingKey: true,
+            MenuBarStatusItem.unreadCountSettingKey: true,
             InstallPing.settingKey: InstallPing.isOnByDefault,
             CrashReporting.settingKey: CrashReporting.isOnByDefault,
         ])

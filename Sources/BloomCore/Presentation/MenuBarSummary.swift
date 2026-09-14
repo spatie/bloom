@@ -51,14 +51,23 @@ public enum MenuBarSummary {
     /// away is the better one, because a hand beside an envelope are different silhouettes and
     /// because a running count is not a thing anyone acts on. Which workspaces are working is
     /// still in the menu, by name, which is a more useful answer than the number ever was.
-    public static func segments(waiting: Int, unread: Int) -> [Segment] {
+    ///
+    /// Either count can be switched off in Settings. A hidden count is left out of the strip only:
+    /// the tooltip and the menu still name it, because a hover reading "Nothing waiting on you"
+    /// over an agent that is blocked would be a lie rather than a preference.
+    public static func segments(
+        waiting: Int,
+        unread: Int,
+        showsWaiting: Bool = true,
+        showsUnread: Bool = true
+    ) -> [Segment] {
         var segments: [Segment] = []
-        if waiting > 0 {
+        if showsWaiting, waiting > 0 {
             segments.append(
                 Segment(symbolName: waitingSymbol, count: waiting, label: "Agents waiting on you")
             )
         }
-        if unread > 0 {
+        if showsUnread, unread > 0 {
             segments.append(
                 Segment(symbolName: unreadSymbol, count: unread, label: "Unread results")
             )
