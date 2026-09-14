@@ -899,6 +899,16 @@ struct TranscriptListView: View {
             onContentWillChange: { follower.nudge() },
             quoteSelection: quoteSelection
         )
+        // Text scrolling up used to be cut off hard against the tab strip, a line sliced through
+        // its middle. A short fade into the transcript's own ground softens that edge. Below the
+        // pinned question rather than above it, and it takes no clicks, so a selection or a link
+        // under it still works.
+        .overlay(alignment: .top) {
+            LinearGradient(colors: [Palette.surface, Palette.surface.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: Metrics.spacingWide * 2)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .overlay(alignment: .top) {
             if let pinnedQuestion {
                 PinnedQuestionView(
