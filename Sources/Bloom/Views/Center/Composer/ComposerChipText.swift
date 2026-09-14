@@ -12,12 +12,22 @@ enum ComposerInlineChipLayout {
         NSFont.systemFont(ofSize: max(lineFont.pointSize - 1, 9))
     }
 
+    /// Capped so the icon keeps a point of plate above and below it inside the shorter chip.
     static func iconSize(for lineFont: NSFont) -> CGFloat {
-        ceil(labelFont(for: lineFont).pointSize) + 2
+        min(ceil(labelFont(for: lineFont).pointSize), height(for: lineFont) - 3)
     }
 
+    /// A point under the line, never over it.
+    ///
+    /// **This was the line height plus two, and that is what made the composer jump.** TextKit 1
+    /// sizes a line fragment around the tallest thing on it, so a chip taller than the text grew
+    /// the line it landed on, and with it the box, the moment a file was dropped in. The line
+    /// height itself is not enough either: it is rounded while the font's descender is not, so a
+    /// chip exactly that tall still grew the line by a point in about half the faces and sizes
+    /// measured. One point under it grew none of the thirty tried, system, Helvetica Neue,
+    /// Georgia, Menlo, Avenir Next and Charter from 11 to 20 points.
     static func height(for lineFont: NSFont) -> CGFloat {
-        ceil(NSLayoutManager().defaultLineHeight(for: lineFont)) + 2
+        floor(NSLayoutManager().defaultLineHeight(for: lineFont)) - 1
     }
 }
 
@@ -595,7 +605,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     /// Where a click takes the file off rather than opening it: the icon's slot and the padding
     /// around it, up to halfway across the gap before the name. Wider than the glyph on purpose,
-    /// which is fourteen points in a twenty point pill, and stopping short of the name because
+    /// which is twelve points in a fifteen point pill, and stopping short of the name because
     /// reading the name is what tells you which file you are about to remove.
     private func closeRect(in frame: NSRect) -> NSRect {
         NSRect(
