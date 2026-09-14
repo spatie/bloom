@@ -4,6 +4,7 @@ import BloomCore
 struct AskTabStrip: View {
     @Environment(AppModel.self) private var app
     @State private var renaming: SessionID?
+    @State private var isNewTabHovered = false
     @Namespace private var selection
 
     var body: some View {
@@ -36,9 +37,20 @@ struct AskTabStrip: View {
         } append: {
             Button { Task { await app.ask.newConversation() } } label: {
                 Image(systemName: "plus")
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: Metrics.barHeight, height: Metrics.barHeight)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, Metrics.inset)
+            .onHoverChange { isNewTabHovered = $0 }
+            .background {
+                if isNewTabHovered {
+                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                        .fill(Palette.hover)
+                        .padding(Metrics.spacingTight)
+                }
+            }
             .help("New Ask Bloom conversation")
             .accessibilityLabel("New Ask Bloom conversation")
         } trailing: {

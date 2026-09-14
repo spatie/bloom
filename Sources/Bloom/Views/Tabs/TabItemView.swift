@@ -319,6 +319,13 @@ struct TabItemView: View {
                 // Out and back again: the hit box is `closeSlop` bigger on every side, and the
                 // space the cross takes in the row is unchanged. See `closeSlop`.
                 .padding(Self.closeSlop)
+                .background {
+                    if isVisible && isCloseHovered {
+                        RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                            .fill((isActive ? surface.ink : Palette.textPrimary)
+                                .opacity(contrast == .increased ? 0.2 : 0.1))
+                    }
+                }
                 .contentShape(Rectangle())
                 .padding(-Self.closeSlop)
         }
@@ -335,6 +342,7 @@ struct TabItemView: View {
 
     private var closeInk: Color {
         guard isVisible else { return .clear }
+        if isCloseHovered { return isActive ? surface.ink : Palette.textPrimary }
         return isActive ? surface.inkMuted : Palette.textSecondary
     }
 

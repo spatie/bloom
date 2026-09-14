@@ -18,6 +18,7 @@ struct SessionTabsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var renamingID: String?
+    @State private var isNewTabHovered = false
     /// A tab being dragged along the strip, and the order the strip is showing because of it.
     ///
     /// The tabs move out from under the pointer while the drag is happening, so letting go changes
@@ -390,12 +391,22 @@ struct SessionTabsView: View {
         .menuIndicator(.hidden)
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
         .contentShape(Rectangle())
+        .background {
+            if isNewTabHovered {
+                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                    .fill(Palette.hover)
+                    .padding(Metrics.spacingTight)
+            }
+        }
         // Re-read on the way to the button, because a `Menu` has no moment of its own to do it
         // in: its items are built before it opens. A run script added from a terminal inside
         // Bloom changes no selection and brings no window forward, so without this it only reached
         // the menu on the next switch. The read is coalesced and off the main actor, and the pointer
         // takes longer to reach the button than the parse takes.
-        .onHover { if $0 { model.refreshSettings() } }
+        .onHover {
+            isNewTabHovered = $0
+            if $0 { model.refreshSettings() }
+        }
         .help("New tab in this workspace")
     }
 
