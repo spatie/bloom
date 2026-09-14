@@ -179,6 +179,17 @@ struct ScratchDirectoryTrait: TestTrait, SuiteTrait, TestScoping {
             try await withDirectory(performing: function)
             return
         }
+        // A time limit starts counting before this scope runs, so a test queued here spent its
+        // deadline waiting for somebody else's slot. The suite's tail waits for most of the run,
+        // and once CI took 67 seconds "cancelling a setup run stops the script" failed its one
+        // minute having done five seconds of work, with every other limited test in a scratch
+        // suite finishing at 61. There are a handful of these, too few to starve the executor.
+        if test.timeLimit != nil {
+            try await TestWorkloadLimit.$isHeld.withValue(true) {
+                try await withDirectory(performing: function)
+            }
+            return
+        }
         try await TestWorkloadLimit.shared.acquire()
         do {
             try Task.checkCancellation()
