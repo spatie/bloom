@@ -294,15 +294,17 @@ struct WorkspaceManagerTests {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
         // Ignores SIGTERM, which is what a Stop has to get past as well as the ordinary case.
-        // Five minutes rather than thirty seconds: on a loaded CI runner the first line took long
-        // enough to arrive that the script finished on its own before the cancel, and the test
-        // failed on `finished.txt`. A stop that does not work still fails, on the time limit.
+        // The loop is timed by `SECONDS`, a zsh builtin, and forks nothing whose death could end
+        // it early. It used to be `for _ in $(seq 1 6000)` after the echo, and the test cancels
+        // the moment it reads that line: the SIGTERM reached `seq` while it was still running,
+        // because `trap ''` does not carry into a command substitution, the loop came out empty
+        // and `touch` ran straight away. A stop that does not work still fails, on the time limit.
         try repo.write(".conductor/settings.toml", """
         [scripts]
         setup = '''
         trap '' TERM
         echo "seeding"
-        for _ in $(seq 1 6000); do sleep 0.05; done
+        while (( SECONDS < 300 )); do sleep 0.05; done
         touch finished.txt
         '''
         """)

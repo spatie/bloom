@@ -127,6 +127,11 @@ actor RepoTemplate {
         try await Shell.check("git", ["init", "-q", "-b", defaultBranch], cwd: directory)
         // Written rather than set through three `git config` processes, which is exactly what
         // `git config` would have done to this file and 555 forks cheaper across the suite.
+        // `maintenance.auto` is off because git 2.50's commit starts `git maintenance run --auto
+        // --detach` and returns without waiting for it. That process creates and removes
+        // `.git/objects/maintenance.lock` while `TempRepo` copies the template, and the copy
+        // failed on CI with "maintenance.lock doesn't exist" when it listed the lock and then went
+        // to read it. Every repository cut from the template inherits the setting.
         let config = (directory as NSString).appendingPathComponent(".git/config")
         let identity = """
 
@@ -135,6 +140,8 @@ actor RepoTemplate {
             \tname = Bloom Test
             [commit]
             \tgpgsign = false
+            [maintenance]
+            \tauto = false
 
             """
         let existing = (try? String(contentsOfFile: config, encoding: .utf8)) ?? ""
