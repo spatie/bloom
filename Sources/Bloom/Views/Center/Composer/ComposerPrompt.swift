@@ -542,9 +542,9 @@ struct ComposerPrompt<Footer: View>: View {
     /// Written into the body rather than into the whole draft, exactly as a picked file is: the
     /// caret the composer holds counts from the start of the prompt written after any `/command`,
     /// and writing it back through the split is what keeps the command intact.
-    private func insert(quickPrompt: QuickPrompt) {
+    private func insert(quickPrompt: QuickPromptPanelRow) {
         var draft = command
-        let insertion = QuickPromptInsertion.inserting(quickPrompt, into: draft.body, at: caret)
+        let insertion = QuickPromptInsertion.inserting(quickPrompt.text, into: draft.body, at: caret)
         draft.body = insertion.text
         text = draft.text
         caret = insertion.caret

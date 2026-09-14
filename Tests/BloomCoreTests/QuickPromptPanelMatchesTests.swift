@@ -79,6 +79,67 @@ struct QuickPromptPanelMatchesTests {
         }
     }
 
+    @Test("a project row chosen from the panel never sends, whatever the surface can do")
+    func projectRowDeliveryNeverSends() {
+        for canSend in [true, false] {
+            for canOpenNewChat in [true, false] {
+                for prompt in Self.project {
+                    let delivery = QuickPromptPanelRow.project(prompt)
+                        .delivery(canSend: canSend, canOpenNewChat: canOpenNewChat)
+                    #expect(!delivery.sends)
+                    #expect(delivery == prompt.delivery(canOpenNewChat: canOpenNewChat))
+                }
+            }
+        }
+        // The owner's own rows keep the rule they always had.
+        let shipIt = QuickPromptPanelRow.personal(Self.mine[1])
+        #expect(shipIt.delivery(canSend: true, canOpenNewChat: true) == .send)
+        #expect(shipIt.delivery(canSend: false, canOpenNewChat: true) == .compose)
+    }
+
+    @Test("a project row has its preview, no pencil, and says where it came from")
+    func projectRowPresentation() {
+        let row = QuickPromptPanelRow.project(Self.project[1])
+        #expect(row.text == "Add a changelog entry.")
+        #expect(row.secondLine == Self.project[1].preview)
+        #expect(row.chatTitle == "Write the changelog")
+        #expect(!row.isEditable)
+        #expect(row.accessibilityValue.contains(Self.project[1].preview))
+        #expect(row.accessibilityValue.contains("From this project"))
+        #expect(row.accessibilityValue.contains("Nothing is sent."))
+
+        let unnamed = QuickPromptPanelRow.personal(QuickPrompt(name: "", text: "Explain the diff."))
+        #expect(unnamed.isEditable)
+        #expect(unnamed.secondLine == nil)
+        #expect(unnamed.chatTitle == nil)
+        #expect(!unnamed.accessibilityValue.contains("From this project"))
+    }
+
+    @Test("an empty library with project prompts shows the rows rather than saying there is nothing")
+    func noticeWithProjectPrompts() {
+        let onlyProject = QuickPromptPanelMatches.ranking(personal: [], project: Self.project, query: "")
+        #expect(onlyProject.notice(isLoaded: true) == nil)
+        #expect(onlyProject.notice(isLoaded: false) == nil)
+        #expect(onlyProject.showsProjectHeading)
+
+        let nothing = QuickPromptPanelMatches.ranking(personal: [], project: [], query: "")
+        #expect(nothing.notice(isLoaded: true) == .nothingYet)
+        #expect(nothing.notice(isLoaded: false) == .loading)
+
+        let missed = QuickPromptPanelMatches.ranking(personal: Self.mine, project: Self.project, query: " zzz ")
+        #expect(missed.notice(isLoaded: true) == .noMatches("zzz"))
+    }
+
+    @Test("the Project heading is drawn only over project rows")
+    func headingVisibility() {
+        let noProject = QuickPromptPanelMatches.ranking(personal: Self.mine, project: [], query: "")
+        #expect(!noProject.showsProjectHeading)
+        #expect(noProject.notice(isLoaded: true) == nil)
+
+        let onlyMineMatched = QuickPromptPanelMatches.ranking(personal: Self.mine, project: Self.project, query: "ship")
+        #expect(!onlyMineMatched.showsProjectHeading)
+    }
+
     @Test("copying a project prompt gives the owner a prompt of their own that does not send")
     func copyToMyQuickPrompts() {
         let prompt = ProjectQuickPrompt(

@@ -147,6 +147,10 @@ struct ComposerView: View {
                 project: transcript.cwd,
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
+                // Read off the workspace model, which is where the Workspace menu reads its run
+                // scripts from: one parse of the settings file serves both. Nil model, no project.
+                projectQuickPrompts: model?.settings.quickPrompts ?? [],
+                onOpenQuickPrompts: { [model] in model?.refreshSettings() },
                 onSend: send,
                 onStop: transcript.stop,
                 onSideConversation: canOpenSideConversation ? openSideConversation : nil
@@ -493,10 +497,12 @@ struct ComposerView: View {
     /// `canOpenNewChat` is a real question rather than a constant: this composer is dropped in
     /// wherever a transcript exists, and without the workspace model there is no strip to open a
     /// second chat on. A prompt that asked for one then writes into this box instead.
-    private func fire(_ prompt: QuickPrompt, insert: @MainActor (QuickPrompt) -> Void) {
-        switch QuickPromptDelivery.decided(
-            for: prompt, canSend: true, canOpenNewChat: model != nil
-        ) {
+    ///
+    /// A project's prompt comes through the same switch and can only ever land on the two compose
+    /// cases, because `QuickPromptPanelRow.delivery` asks `ProjectQuickPrompt` rather than the
+    /// owner's rule, and that one has no send to answer with.
+    private func fire(_ prompt: QuickPromptPanelRow, insert: @MainActor (QuickPromptPanelRow) -> Void) {
+        switch prompt.delivery(canSend: true, canOpenNewChat: model != nil) {
         case .compose:
             insert(prompt)
         case .send:
@@ -521,7 +527,7 @@ struct ComposerView: View {
     /// store. Written the other way round, the load lands afterwards and puts the empty box back.
     /// Both are written, so a load that had already finished is not left holding nothing, and the
     /// two agree because the store now says the same words.
-    private func openChat(for prompt: QuickPrompt, sending: Bool) {
+    private func openChat(for prompt: QuickPromptPanelRow, sending: Bool) {
         guard let model else { return }
         let text = prompt.text
         Task { @MainActor in
