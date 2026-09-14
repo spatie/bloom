@@ -319,6 +319,9 @@ id_type_allowed_names=(
 # The remaining stored `String` ids, each one a deliberate decision. This list
 # should only ever get shorter.
 id_type_allowed_lines=(
+  'Sources/BloomCore/Presentation/CodeScheme.swift'              # a portable colour scheme key
+  'Sources/BloomCore/Presentation/TerminalScheme.swift'          # a portable colour scheme key
+  'Sources/BloomCore/Presentation/ColourTheme.swift'             # a theme definition key, not a database row
   'Sources/BloomCore/Presentation/HomeList.swift'                  # a date bucket key, not a row
   'Sources/BloomCore/Presentation/ChatFontCatalogue.swift'          # a font family, which macOS names
   'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings
@@ -334,6 +337,13 @@ id_type_allowed_lines=(
   'Sources/BloomCore/GitHub/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
   'Sources/BloomCore/Presentation/SearchPanelListing.swift'  # a section heading key, not a row
 )
+# External tokens carried beside typed Bloom ids. Limit each exemption to its
+# property so adding another bare internal id in the same file still fails.
+id_type_allowed_properties=(
+  'Sources/BloomCore/Agent/Delivery.swift:providerTurnID'             # the provider's accepted turn, used for recovery
+  'Sources/BloomCore/Transcript/TurnCheckpoint.swift:providerTurnID' # the same provider turn correlated with a snapshot
+  'Sources/BloomCore/Agent/PlanArtefact.swift:sourceID'               # the provider's plan item or tool-use token
+)
 # A stored property whose name ends in ID or Ids and whose type is a bare
 # String. Trailing `{` is excluded by the `$` anchor, which is what leaves
 # computed properties out.
@@ -347,6 +357,11 @@ while IFS= read -r hit; do
     [ "$file" = "$path" ] && allowed=1
   done
   for name in "${id_type_allowed_names[@]}"; do
+    case "$hit" in *" $name:"*|*" $name "*) allowed=1 ;; esac
+  done
+  for property in "${id_type_allowed_properties[@]}"; do
+    [ "$file" = "${property%:*}" ] || continue
+    name="${property##*:}"
     case "$hit" in *" $name:"*|*" $name "*) allowed=1 ;; esac
   done
   if [ "$allowed" -eq 0 ]; then

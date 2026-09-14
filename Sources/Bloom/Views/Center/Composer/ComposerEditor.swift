@@ -40,7 +40,29 @@ struct ComposerEditor: View {
     static let chatPlaceholder = "Ask to make changes, @mention files, run /commands"
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ComposerTextEditor(
+            text: $text,
+            caret: $caret,
+            isFocused: $isFocused,
+            maxLines: 10,
+            accessibilityLabel: accessibilityLabel,
+            onHeightChange: onContentHeightChange,
+            onKey: onKey,
+            onBackspaceAtStart: onBackspaceAtStart,
+            onAttach: onAttach,
+            onAttachmentFailure: onAttachmentFailure,
+            attachmentPaths: attachmentPaths,
+            onOpenAttachment: onOpenAttachment,
+            onHoverAttachment: onHoverAttachment,
+            attachmentRoot: attachmentRoot,
+            handle: handle
+        )
+        .frame(height: max(height, ComposerTextEditor.lineHeight))
+        // A background rather than a sibling in a stack, so the hint never sizes the box.
+        // SwiftUI sets a 15 or 16 point line a point taller than TextKit does (19 against 18),
+        // and as a sibling the hint made the empty box that point taller: the transcript
+        // above jumped by it on the first character typed and again when the draft was cleared.
+        .background(alignment: .topLeading) {
             if text.isEmpty {
                 // `textPlaceholder`, not the tertiary label: they are different colours, and
                 // the tertiary label at 26% is faint enough that the prompt hint read as a
@@ -55,25 +77,6 @@ struct ComposerEditor: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
-
-            ComposerTextEditor(
-                text: $text,
-                caret: $caret,
-                isFocused: $isFocused,
-                maxLines: 10,
-                accessibilityLabel: accessibilityLabel,
-                onHeightChange: onContentHeightChange,
-                onKey: onKey,
-                onBackspaceAtStart: onBackspaceAtStart,
-                onAttach: onAttach,
-                onAttachmentFailure: onAttachmentFailure,
-                attachmentPaths: attachmentPaths,
-                onOpenAttachment: onOpenAttachment,
-                onHoverAttachment: onHoverAttachment,
-                attachmentRoot: attachmentRoot,
-                handle: handle
-            )
-            .frame(height: max(height, ComposerTextEditor.lineHeight))
         }
     }
 }

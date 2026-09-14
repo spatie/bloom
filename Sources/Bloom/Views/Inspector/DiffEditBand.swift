@@ -52,8 +52,7 @@ struct DiffEditBandView: View {
             SourceEditor(
                 text: $text,
                 language: language,
-                colorScheme: colorScheme,
-                ground: Palette.surface
+                colorScheme: colorScheme
             )
             .frame(height: height)
             .clipShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))

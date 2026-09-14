@@ -31,7 +31,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             List(selection: $tab) {
                 Section("Bloom") {
-                    navigationRows([.general, .appearance, .notifications])
+                    navigationRows([.general, .appearance, .menuBar, .notifications])
                 }
                 Section("Agents") {
                     navigationRows([.agents, .sessions, .permissions, .prompts])
@@ -42,6 +42,11 @@ struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .frame(width: 185)
+            // The menu bar's "Menubar Settings…" names the pane it wants; without this the window
+            // opens on whichever pane it was left on, which is not what that row promises.
+            .onReceive(NotificationCenter.default.publisher(for: SettingsTabRequest.name)) { notification in
+                if let requested = SettingsTabRequest.tab(in: notification) { tab = requested }
+            }
 
             Divider()
 
@@ -98,6 +103,7 @@ struct SettingsView: View {
         switch tab ?? .general {
         case .general: GeneralSettingsView()
         case .appearance: AppearanceSettingsView()
+        case .menuBar: MenuBarSettingsView(app: app)
         case .notifications: NotificationSettingsView()
         case .agents: AgentsSettingsView()
         case .sessions: ModelSettingsView(defaults: defaultsBinding).disabled(!isLoaded)
@@ -111,31 +117,12 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     @AppStorage("confirmBeforeArchiving") private var confirmBeforeArchiving = true
-    @AppStorage(MenuBarStatusItem.settingKey) private var showsMenuBarStatus = MenuBarStatusItem.isOnByDefault
-    @AppStorage(MenuBarStatusItem.waitingCountSettingKey) private var showsWaitingCount = true
-    @AppStorage(MenuBarStatusItem.unreadCountSettingKey) private var showsUnreadCount = true
     @State private var namesWorkspaces = WorkspaceNamingPreferences().isEnabled
 
     var body: some View {
         Form {
             Section("Everyday behaviour") {
                 Toggle("Confirm before archiving", isOn: $confirmBeforeArchiving)
-                Toggle(isOn: $showsMenuBarStatus) {
-                    Text("Show agent status in the menu bar")
-                    Text("See which agents are working or waiting for you.")
-                }
-                // Beside the Bloom mark, so off with it. The menu under the item lists both
-                // whatever these say.
-                Group {
-                    Toggle(isOn: $showsWaitingCount) {
-                        Label("Count agents waiting on you", systemImage: MenuBarSummary.waitingSymbol)
-                    }
-                    Toggle(isOn: $showsUnreadCount) {
-                        Label("Count finished tasks", systemImage: MenuBarSummary.unreadSymbol)
-                    }
-                }
-                .padding(.leading, Metrics.gutter)
-                .disabled(!showsMenuBarStatus)
             }
 
             DirectorySettingsSection()

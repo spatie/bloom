@@ -18,8 +18,8 @@ import Foundation
 /// and there can be one per changed file.
 public struct ReviewedFile: Sendable, Hashable, Codable {
     public var workspaceID: WorkspaceID
-    /// Repository-relative, as the diff spells it, so it is the same string the changed file list,
-    /// the review pane and a review comment all use for one file.
+    /// The changed-file identity. Ordinary reviews use the repository-relative path; staging
+    /// reviews prefix it with the layer so reading one patch does not mark the other as viewed.
     public var path: String
     /// What `ReviewedFileFingerprint` made of the file's diff at the moment it was ticked.
     public var fingerprint: String
@@ -54,13 +54,16 @@ public enum ReviewedFileFingerprint {
     public static func revisions(for files: [ChangedFile], worktree: String, base: String, scope: DiffScope) -> [String: String] {
         let comparison = scope.revision(baseline: base)
         return Dictionary(uniqueKeysWithValues: files.map { file in
+            if scope.isHistorical { return (file.id, comparison) }
+            if file.layer == .staged { return (file.id, file.stagingRevision ?? comparison) }
+            let comparison = comparison + (file.layer == nil ? "" : ":" + (file.stagingRevision ?? "missing"))
             let path = (worktree as NSString).appendingPathComponent(file.path)
             let attributes = try? FileManager.default.attributesOfItem(atPath: path)
             let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate
             let size = (attributes?[.size] as? NSNumber)?.uint64Value
             let inode = (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
             let stamp = "\(comparison):\(modified.map { String($0) } ?? "missing"):\(size.map { String($0) } ?? "missing"):\(inode.map { String($0) } ?? "missing")"
-            return (file.path, stamp)
+            return (file.id, stamp)
         })
     }
 }
@@ -77,7 +80,7 @@ public enum ReviewedFileFingerprint {
 /// unread while the disagreement lasts.
 public enum ReviewedFiles {
     public static func isViewed(_ file: ChangedFile, marks: [String: String], revisions: [String: String] = [:]) -> Bool {
-        marks[file.path] == ReviewedFileFingerprint.of(file, revision: revisions[file.path] ?? "")
+        marks[file.id] == ReviewedFileFingerprint.of(file, revision: revisions[file.id] ?? "")
     }
 
     /// How many of the files on screen carry a tick that still holds.

@@ -223,7 +223,8 @@ struct ComposerFooterView: View {
                     onOutputStyle: { id in edit { $0.outputStyle = id } },
                     onPermissionMode: selectPermissionMode,
                     onFastMode: { value in edit { $0.isFastMode = value } },
-                    onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } }
+                    onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
+                    onInteractionMode: { mode in edit { $0.interactionMode = mode } }
                 )
             }
 

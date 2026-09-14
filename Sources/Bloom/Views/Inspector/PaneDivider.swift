@@ -34,6 +34,7 @@ struct PaneDivider: View {
     var reset: Double
 
     var label: String
+    var color: Color = Palette.border
 
     /// Where the pane was when the current drag started. Without it the pane would chase the
     /// pointer by the whole translation on every event rather than by the delta.
@@ -44,7 +45,7 @@ struct PaneDivider: View {
 
     var body: some View {
         Rectangle()
-            .fill(Palette.border)
+            .fill(color)
             .frame(
                 width: axis == .horizontal ? Metrics.hairline : nil,
                 height: axis == .vertical ? Metrics.hairline : nil

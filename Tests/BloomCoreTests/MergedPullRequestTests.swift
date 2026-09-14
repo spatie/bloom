@@ -141,13 +141,13 @@ struct MergedPullRequestTests {
     // MARK: - A number gh could never be asked about
 
     @Test("a number that is not a number is never handed to gh")
-    func refusesToAskAboutANonPositiveNumber() async {
+    func refusesToAskAboutANonPositiveNumber() async throws {
         // gh reads its positional argument with the same parser it uses for flags, which is why
         // the branch route validates the name first. A positive Int renders as digits with no
         // leading `-`, so the guard is what makes that true of this route too. No worktree exists
         // at the path below, so anything that did reach a subprocess would fail rather than pass.
-        #expect(await GitHub.snapshot(forNumber: 0, worktree: "/nowhere", maxAge: .zero) == nil)
-        #expect(await GitHub.snapshot(forNumber: -1, worktree: "/nowhere", maxAge: .zero) == nil)
+        #expect(try await GitHub.snapshot(forNumber: 0, worktree: "/nowhere", maxAge: .zero) == nil)
+        #expect(try await GitHub.snapshot(forNumber: -1, worktree: "/nowhere", maxAge: .zero) == nil)
     }
 
     // MARK: - The column

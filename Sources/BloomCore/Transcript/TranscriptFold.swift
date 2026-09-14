@@ -53,6 +53,15 @@ import Foundation
 ///    that had to reveal a row it had hidden is a transcript rearranging itself under somebody who
 ///    is reading it. A tool call with no result yet, and a permission question nobody has answered
 ///    yet, are the same fact here. Completed actions after them can still join the fold.
+///
+///    **Except a call that has only just been made.** Most calls are a file read or a `sed` that
+///    comes back in tens of milliseconds, and holding every one of those out drew the call as a
+///    row of its own for a few frames and then pulled it into the count: a line appearing under
+///    the fold and jumping into it, on every action of a turn. So a call younger than
+///    `freshCall` folds as though it had settled, the live tail says what is running meanwhile,
+///    and only a call still running once that has passed is drawn on its own. That reveal is
+///    the one place a fold gives a row back, and it is an insertion at the live end of the work
+///    rather than a rearrangement: the call was never on screen to be moved.
 /// 2. **The agent stopping, and a row carrying content of its own.** An `error` row is the agent
 ///    exiting in a way it did not choose, and inline media is deliberate content wearing an
 ///    activity row's clothes. Both remain visible and divide the ordinary activity before and
@@ -83,6 +92,14 @@ import Foundation
 /// Settling an action only adds it to the hidden rows. It never reveals completed work that
 /// was already folded, and the group keeps its identity while results arrive out of order.
 public enum TranscriptFold {
+    /// How long a tool call with no result may stay folded before it is drawn as running.
+    ///
+    /// Long enough to cover the calls that come back almost at once, which is most of them, and
+    /// short enough that a test run or a build is on screen by the time anybody wonders what the
+    /// turn is doing. A call that settles just after this still appears and folds, but it has been
+    /// on screen long enough to be read rather than flickering past.
+    public static let freshCall: Duration = .seconds(1)
+
     /// The fewest rows worth hiding.
     ///
     /// A fold costs one line for itself, so hiding N rows saves N minus one: at one it saves
@@ -211,6 +228,10 @@ public enum TranscriptFold {
         /// than trusting the caller: a result writes `is_error` and the payload in one go, so a
         /// call that could fail after being hidden would be a fold that has to unfold.
         public var settled: Bool
+        /// A tool call made less than `freshCall` ago, so it may fold before it has settled. See
+        /// the exception under rule 1. Ignored for every other kind: a permission question nobody
+        /// has answered is never hidden, however new it is.
+        public var isFresh: Bool
         /// This row's own call id, for a tool call, and what a child of it carries as its
         /// `parentToolUseID`. Nil for every other kind.
         public var toolUseID: String?
@@ -232,6 +253,7 @@ public enum TranscriptFold {
             featured: Bool = false,
             drawsNothing: Bool = false,
             settled: Bool = true,
+            isFresh: Bool = false,
             toolUseID: String? = nil,
             parentToolUseID: String? = nil,
             opensTurn: Bool = false
@@ -242,6 +264,7 @@ public enum TranscriptFold {
             self.featured = featured
             self.drawsNothing = drawsNothing
             self.settled = settled
+            self.isFresh = isFresh
             self.toolUseID = toolUseID
             self.parentToolUseID = parentToolUseID
             self.opensTurn = opensTurn
@@ -497,8 +520,9 @@ public enum TranscriptFold {
                 // the monotonicity rests on.** A result writes `is_error` and the payload in one
                 // go, so a call cannot have failed without having settled; read the other way
                 // round, a row that is hidden has already settled and can therefore never turn into
-                // a failure afterwards.
-                ready: fact.settled || fact.failed,
+                // a failure afterwards. A fresh call is the exception, and it costs nothing: a
+                // failed call folds like any other, so failing while hidden reveals nothing.
+                ready: fact.settled || fact.failed || (fact.isFresh && fact.kind == .toolUse),
                 mustShow: fact.mustShow,
                 toolUseID: fact.toolUseID,
                 parentToolUseID: fact.parentToolUseID

@@ -25,6 +25,7 @@ public enum WorkspaceArchiveSafety {
             return "Workspace setup is still running. Wait for it to finish before archiving."
         }
         do {
+            try await store.requireWorkspaceCanBeRemoved(id: workspace.id)
             for session in try await store.sessions(workspaceID: workspace.id) {
                 if session.id != asking, session.state == .running || session.state == .waiting {
                     return """
@@ -36,6 +37,8 @@ public enum WorkspaceArchiveSafety {
                     return "This workspace has queued messages. Handle them before archiving."
                 }
             }
+        } catch WorkspaceError.recoveryPending {
+            return WorkspaceError.recoveryPending.description
         } catch {
             return "Bloom could not check this workspace's activity. Nothing was archived; try again shortly."
         }

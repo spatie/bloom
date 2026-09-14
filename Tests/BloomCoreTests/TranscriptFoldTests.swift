@@ -17,8 +17,10 @@ import Testing
 struct TranscriptFoldTests {
     // MARK: Fixtures
 
-    private func tool(_ seq: Int, failed: Bool = false, settled: Bool = true) -> TranscriptFold.Fact {
-        TranscriptFold.Fact(seq: seq, kind: .toolUse, failed: failed, settled: settled)
+    private func tool(
+        _ seq: Int, failed: Bool = false, settled: Bool = true, fresh: Bool = false
+    ) -> TranscriptFold.Fact {
+        TranscriptFold.Fact(seq: seq, kind: .toolUse, failed: failed, settled: settled, isFresh: fresh)
     }
 
     private func prose(_ seq: Int) -> TranscriptFold.Fact {
@@ -200,6 +202,31 @@ struct TranscriptFoldTests {
         let facts = [user(0), tool(1), tool(2), tool(3, settled: false), tool(4), tool(5), tool(6)]
         let work = try only(facts)
         #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: everything) == [1, 2, 4, 5, 6])
+    }
+
+    /// Reported as: an action appears under the group for a split second and then jumps into it.
+    /// That was a `sed` drawn for the hundred milliseconds it ran, because it had no result yet.
+    @Test("a call that has only just been made folds before its result is back")
+    func aFreshCallFolds() throws {
+        let running = [user(0), tool(1), tool(2), tool(3), tool(4, settled: false, fresh: true)]
+        let work = try only(running)
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: everything) == [1, 2, 3, 4])
+
+        // Its result lands, and nothing the fold hides changes.
+        let settled = [user(0), tool(1), tool(2), tool(3), tool(4, fresh: true)]
+        #expect(try only(settled).ready == work.ready)
+
+        // Still running once it is no longer fresh, it is drawn on its own after all.
+        let slow = [user(0), tool(1), tool(2), tool(3), tool(4, settled: false)]
+        #expect(TranscriptFold.hiddenIndices(try only(slow), revealed: [], drawn: everything) == [1, 2, 3])
+    }
+
+    @Test("a fresh question nobody has answered is still never hidden")
+    func aFreshAskIsNeverHidden() throws {
+        var question = ask(4, decided: false)
+        question.isFresh = true
+        let work = try only([user(0), tool(1), tool(2), tool(3), question])
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: everything) == [1, 2, 3])
     }
 
     @Test("a running first action does not block later completed commands")

@@ -26,13 +26,16 @@ struct TerminalSplitView: View {
     var onCloseTab: @MainActor () -> Void
     /// Called when a split asks for something a shell tree cannot hold. See `handle`.
     var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
+    var terminalLabel: String = "Terminal"
+    var onAddToChat: (@MainActor (TerminalExcerpt) -> Void)?
 
     /// The same switch the terminal itself reads, so turning the Ghostty theme off also turns off
     /// Ghostty's way of fading the panes that do not have the keyboard.
-    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
+    private var usesGhosttyTheme: Bool { ColourThemePreference.shared.followsGhostty }
 
     /// Read for the restart strip's slide, the same courtesy the setup strip above a terminal gets.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     private var splits: TerminalSplitStore { .shared }
 
@@ -93,7 +96,13 @@ struct TerminalSplitView: View {
                 }
             }
         }
-        .background(Palette.surfaceSunken)
+        .background(terminalBackground)
+    }
+
+    private var terminalBackground: Color {
+        let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
+        let background = appearance.flatMap { TerminalGhostty.colours(for: $0).background }
+        return background.map { Color(nsColor: NSColor($0)) } ?? Palette.surfaceSunken
     }
 
     /// `remembered` is what this pane was running when Bloom last stopped, and only for a pane that
@@ -124,9 +133,16 @@ struct TerminalSplitView: View {
                 onCommand: { handle($0, from: id) },
                 onExit: { finished($0, in: id) },
                 onContextMenu: {
-                    TerminalPaneMenu.make(
+                    let excerpt = TerminalSessionStore.shared.excerpt(
+                        inPaneID: id, workspaceID: workspace.id, label: terminalLabel
+                    )
+                    let add: (@MainActor () -> Void)? = if let excerpt, let onAddToChat {
+                        { onAddToChat(excerpt) }
+                    } else { nil }
+                    return TerminalPaneMenu.make(
                         canClose: layout.paneCount > 1,
-                        isZoomed: layout.zoomed == id
+                        isZoomed: layout.zoomed == id,
+                        onAddToChat: add
                     ) { _ = handle($0, from: id) }
                 }
             )
@@ -227,6 +243,15 @@ struct TerminalSplitView: View {
 
         case .toggleZoom:
             return splits.toggleZoom(in: ownerID)
+
+        // The context menu's Add to Chat, from the keyboard. Nothing selected, or no conversation
+        // to add to, hands the key back, so the menu bar answers it with a beep rather than nothing.
+        case .addSelectionToChat:
+            guard let onAddToChat, let excerpt = TerminalSessionStore.shared.excerpt(
+                inPaneID: pane, workspaceID: workspace.id, label: terminalLabel
+            ) else { return false }
+            onAddToChat(excerpt)
+            return true
         }
     }
 }

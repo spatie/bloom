@@ -5,6 +5,11 @@ import Foundation
 public struct CodexSubagents: Sendable {
     private var children: [String: CodexSubAgentActivity] = [:]
     private var seenActivities: Set<String> = []
+    private var observedTurns: [String: String] = [:]
+
+    public var liveTurns: [String: String] {
+        observedTurns.filter { children[$0.key] != nil }
+    }
 
     public init() {}
 
@@ -17,6 +22,17 @@ public struct CodexSubagents: Sendable {
     public static func id(for threadID: String) -> SubagentID { SubagentID("codex:\(threadID)") }
 
     public mutating func receive(_ event: CodexEvent, parentThreadID: String) -> [SubagentSignal] {
+        // A child can announce its turn before the parent announces the child. Retain a bounded
+        // set of those candidates, but never interrupt a thread until ownership is established.
+        if case .turnStarted(let turn) = event, turn.threadID != parentThreadID {
+            if children[turn.threadID] != nil || observedTurns.count < 256 {
+                observedTurns[turn.threadID] = turn.id
+            }
+        }
+        if case .turnCompleted(let turn) = event {
+            if let active = observedTurns[turn.threadID], active != turn.id { return [] }
+            observedTurns[turn.threadID] = nil
+        }
         guard let source = event.threadID,
               source == parentThreadID || contains(threadID: source) else { return [] }
         switch event {
@@ -30,6 +46,7 @@ public struct CodexSubagents: Sendable {
                 signals.append(.started(start(activity)))
             }
             if activity.kind == "completed" || activity.kind == "interrupted" {
+                observedTurns[activity.agentThreadID] = nil
                 signals.append(.reported(SubagentReport(
                     id: Self.id(for: activity.agentThreadID), status: activity.kind, summary: ""
                 )))
