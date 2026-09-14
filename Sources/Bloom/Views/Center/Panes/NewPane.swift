@@ -46,8 +46,8 @@ enum NewPane {
         switch kind {
         case .chat:
             Task {
-                guard let session = await model.createSession(title: title) else { return }
-                place(.chat(session.id))
+                guard let content = await model.createChat(title: title) else { return }
+                place(content)
             }
 
         // The shell itself is not started here. `ToolPaneView` settles the environment and the

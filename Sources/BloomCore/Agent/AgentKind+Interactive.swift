@@ -18,6 +18,7 @@ public extension AgentKind {
             directory: directory,
             executable: "/usr/bin/env",
             arguments: [
+                "-u", "NO_COLOR", "TERM=xterm-256color", "COLORTERM=truecolor",
                 "BLOOM_CLI_STATUS_FILE=\(Self.interactiveStatusURL(sessionID: sessionID).path)",
                 executableName
             ] + arguments
@@ -61,7 +62,7 @@ public extension AgentKind {
             }
             if !effort.isEmpty { arguments += ["--effort", effort] }
         case .codex:
-            arguments = resuming.map { ["resume", $0, "--no-alt-screen"] } ?? ["--no-alt-screen"]
+            arguments = resuming.map { ["resume", $0] } ?? []
             if let permissionMode {
                 arguments += ["--sandbox", CodexRunner.sandboxMode(for: permissionMode).rawValue,
                               "--ask-for-approval", CodexRunner.approvalPolicy(for: permissionMode).rawValue]
@@ -93,6 +94,25 @@ public extension AgentKind {
         return base.appendingPathComponent("bloom-cli-status", isDirectory: true)
             .appendingPathComponent(container, isDirectory: true)
             .appendingPathComponent(name + ".json")
+    }
+
+    func interactiveScreenIsBusy(lines: [String]) -> Bool {
+        var lines = lines
+        while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
+        switch self {
+        case .codex:
+            return lines.suffix(12).contains {
+                $0.range(of: #"^\s*[•●◦⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]?\s*[^>❯›]+\([0-9]+[smh][^)]* • [^)]* to interrupt\)\s*$"#,
+                         options: .regularExpression) != nil
+            }
+        case .claudeCode:
+            return lines.suffix(6).contains {
+                $0.range(of: #"^\s*esc (?:to )?interrupt(?:\s*[·•].*)?\s*$"#,
+                         options: [.regularExpression, .caseInsensitive]) != nil
+            }
+        case .cursor, .openCode, .grok:
+            return false
+        }
     }
 
     static func interactiveHookState(data: Data) -> SessionState? {

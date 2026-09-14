@@ -28,11 +28,7 @@ final class LoginTerminalSession {
     ) {
         guard let path = Shell.which(executable) else { return nil }
 
-        var variables = Shell.environment()
-        variables["TERM"] = "xterm-256color"
-        variables["COLORTERM"] = "truecolor"
-        variables["TERM_PROGRAM"] = "Bloom"
-        if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
+        let variables = Shell.terminalEnvironment(inheriting: Shell.environment())
 
         label = ([executable] + arguments).joined(separator: " ")
         launch = TerminalLaunch(

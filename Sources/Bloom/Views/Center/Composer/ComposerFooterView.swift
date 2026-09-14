@@ -65,6 +65,8 @@ struct ComposerFooterView: View {
     /// a shell and never sends any of them anywhere. What is left is the send button, which is the
     /// one control on the row that still does something.
     var showsAgentControls: Bool = true
+    var usesCLIChat: Binding<Bool>?
+    var supportsCLIChat: Bool = true
 
     // Key the fetched value as well as the task, so changing projects cannot briefly show the
     // previous project's speed before SwiftUI starts the replacement task.
@@ -353,6 +355,18 @@ struct ComposerFooterView: View {
                 .buttonStyle(.plain)
                 .help("Attach a file")
                 .accessibilityLabel("Attach a file")
+            }
+
+            if let usesCLIChat {
+                Toggle(isOn: usesCLIChat) {
+                    Image(systemName: "terminal")
+                }
+                .toggleStyle(.button)
+                .disabled(!supportsCLIChat)
+                .help(supportsCLIChat
+                      ? "Open this chat in the CLI"
+                      : "CLI chat supports Claude Code and Codex")
+                .accessibilityLabel("Open chat in CLI")
             }
 
             if intent == .create {

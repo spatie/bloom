@@ -20,11 +20,7 @@ struct TerminalLaunch: Sendable, Hashable {
     static func loginShell(directory: String, extra: [String: String]) -> TerminalLaunch {
         let shell = LoginShell.path()
 
-        var variables = Shell.environment(extra: extra)
-        variables["TERM"] = "xterm-256color"
-        variables["COLORTERM"] = "truecolor"
-        variables["TERM_PROGRAM"] = "Bloom"
-        if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
+        let variables = Shell.terminalEnvironment(inheriting: Shell.environment(), extra: extra)
 
         return TerminalLaunch(
             executable: shell,
@@ -52,11 +48,7 @@ struct TerminalLaunch: Sendable, Hashable {
         directory: String,
         extra: [String: String]
     ) -> TerminalLaunch {
-        var variables = Shell.environment()
-        variables["TERM"] = "xterm-256color"
-        variables["COLORTERM"] = "truecolor"
-        variables["TERM_PROGRAM"] = "Bloom"
-        if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
+        let variables = Shell.terminalEnvironment(inheriting: Shell.environment())
 
         var sessionVariables = extra
         sessionVariables["COLORTERM"] = "truecolor"

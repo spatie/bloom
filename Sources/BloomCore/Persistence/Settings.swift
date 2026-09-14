@@ -413,6 +413,7 @@ public struct AppDefaults: Sendable, Hashable {
         public static let reviewEffort = "defaults.review.effort"
         public static let reviewBackend = "defaults.review.backend"
         public static let permissionMode = "defaults.permissionMode"
+        public static let terminalChat = "defaults.terminalChat"
         public static let planMode = "defaults.planMode"
         public static let fastMode = "defaults.fastMode"
         public static let outputStyle = "defaults.outputStyle"
@@ -450,6 +451,7 @@ public struct AppDefaults: Sendable, Hashable {
     /// what lets them say so.
     public var reviewBackend: AgentKind
     public var permissionMode: PermissionMode
+    public var terminalChat: Bool = false
     public var planMode: Bool
     public var fastMode: Bool
     /// Which output style a new session opens on, by name, or `OutputStyle.defaultName` for none.
@@ -521,6 +523,7 @@ public struct AppDefaults: Sendable, Hashable {
         if let raw = await value(Key.permissionMode), let mode = PermissionMode(rawValue: raw) {
             defaults.permissionMode = mode
         }
+        defaults.terminalChat = await value(Key.terminalChat) == "1"
         defaults.planMode = await value(Key.planMode) == "1"
         defaults.fastMode = await value(Key.fastMode) == "1"
         defaults.outputStyle = await value(Key.outputStyle) ?? OutputStyle.defaultName
@@ -558,6 +561,7 @@ public struct AppDefaults: Sendable, Hashable {
             Key.reviewEffort: reviewEffort,
             Key.reviewBackend: reviewBackend.rawValue,
             Key.permissionMode: permissionMode.rawValue,
+            Key.terminalChat: terminalChat ? "1" : "0",
             Key.planMode: planMode ? "1" : "0",
             Key.fastMode: fastMode ? "1" : "0",
             Key.outputStyle: OutputStyle.isDefault(outputStyle) ? nil : outputStyle,
@@ -573,6 +577,7 @@ public struct AppDefaults: Sendable, Hashable {
         try? await store.setSetting(Key.reviewEffort, reviewEffort)
         try? await store.setSetting(Key.reviewBackend, reviewBackend.rawValue)
         try? await store.setSetting(Key.permissionMode, permissionMode.rawValue)
+        try? await store.setSetting(Key.terminalChat, terminalChat ? "1" : "0")
         try? await store.setSetting(Key.planMode, planMode ? "1" : "0")
         try? await store.setSetting(Key.fastMode, fastMode ? "1" : "0")
         // Nil rather than the word, so "never chosen" and "chosen and then cleared" cannot drift

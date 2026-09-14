@@ -457,6 +457,9 @@ final class CenterTabStore {
     /// workspace whose panel had not loaded yet.
     private func stopShell(for tab: CenterTab) {
         TerminalSessionStore.shared.closePanes(of: tab.id)
+        if let sessionID = tab.agentSessionID {
+            try? AgentKind.removeInteractiveLaunch(sessionID: sessionID)
+        }
     }
 
     // MARK: - Persistence

@@ -356,7 +356,7 @@ struct CenterPaneView: View {
             title: "No session in this pane",
             message: "Sessions share the worktree but not the conversation, so a new one starts with a clean context.",
             actionTitle: "Start a session",
-            action: { Task { await model.createSession() } }
+            action: { NewPane.open(.chat, in: model) { tabs.reveal($0, in: model) } }
         )
     }
 

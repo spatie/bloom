@@ -84,13 +84,9 @@ struct CreateWorkspaceView: View {
     /// pick up the previous draft's screenshots.
     @State private var draftID = PromptAttachments.newShortID()
 
-    /// Which of the three things this window is being used for, and the last answer, kept.
-    ///
-    /// Read through `WorkspaceStartMode.remembered` rather than by giving `@AppStorage` a default,
-    /// so the fresh-install answer and the reason for it live in the core beside the tests instead
-    /// of in a property wrapper's second argument. Global rather than per project, and why, is on
-    /// `WorkspaceStartMode.rememberedKey`.
-    @AppStorage(WorkspaceStartMode.rememberedKey) private var rememberedMode: String?
+    @State private var selectedMode: WorkspaceStartMode = .chat
+    @State private var usesCLIChat = false
+    @State private var loadedChatPreference = false
 
     /// What the name field holds in the two modes that run no agent. Separate from `prompt`
     /// rather than sharing it, which is what lets a draft survive a person changing their mind
@@ -155,9 +151,9 @@ struct CreateWorkspaceView: View {
         PromptAttachmentStore.shared.attachments(for: draftID).map(\.path)
     }
 
-    /// Which mode the window is in, and the one place the stored string is turned back into it.
     private var mode: WorkspaceStartMode {
-        WorkspaceStartMode.remembered(raw: rememberedMode)
+        selectedMode == .chat
+            ? WorkspaceStartMode.chat(usesCLI: usesCLIChat, agent: controls.agentKind) : selectedMode
     }
 
     /// What the create button is about to be given as the task.
@@ -504,51 +500,34 @@ struct CreateWorkspaceView: View {
         .padding(Metrics.gutter)
     }
 
-    /// Which of the three things this window is for.
-    ///
-    /// Above the question rather than beside Create, which is the whole of the change. A second
-    /// button next to Create was two ways to finish where one of them silently repurposed the
-    /// input, and it cost the footer's five labels to say so. A choice made before anything is
-    /// typed cannot discard what was typed, because in the modes with no agent the box is not
-    /// there.
-    ///
-    /// `Text` rather than `Label` in the rows. A segmented picker on macOS is an
-    /// `NSSegmentedControl`, whose cells carry a title and an `NSImage`, so a SwiftUI icon inside
-    /// one is silently dropped: the same trap `projectControl` documents for `NSPopUpButton`. The
-    /// words are what carries this control anyway.
     private var modePicker: some View {
-        // "Start with", not "Start workspace", which is what was asked for and would have said
-        // the title's word back to it eight points underneath. The title names the thing; this
-        // names the choice, and the segments finish the sentence: start with a chat with an
-        // agent, with a terminal, or with a browser.
-        //
-        // The label is drawn by the picker rather than by a `Text` beside it, so AppKit places it
-        // and VoiceOver gets the association for nothing. `labelsHidden` used to be here, which
-        // is what left the control floating with no introduction.
         Picker("Start with", selection: modeBinding) {
-            ForEach(WorkspaceStartMode.allCases) { candidate in
-                Text(candidate.pickerLabel).tag(candidate)
-            }
+            Text("Chat").tag(WorkspaceStartMode.chat)
+            Text("Terminal").tag(WorkspaceStartMode.terminal)
+            Text("Browser").tag(WorkspaceStartMode.browser)
         }
-        .pickerStyle(.menu)
+        .pickerStyle(.segmented)
         .fixedSize()
-        // Explicit so every interactive control reads from the shared semantic token.
         .tint(Palette.controlAccent)
-        .help("Start a chat with an agent, or cut a worktree and open a shell or a browser in it")
+        .help(defaultCLIMode == nil
+              ? "CLI chat supports Claude and Codex. Choose either as your default agent to use it."
+              : "Chat and CLI chat use your default agent configuration")
     }
 
-    /// Writing the choice down, and carrying the draft across with it.
-    ///
-    /// Both directions, because the window now opens on whichever was used last: somebody who was
-    /// last in a terminal opens in one, and a sentence typed there has to survive the trip to chat
-    /// exactly as a sentence typed in chat has to survive the trip the other way. Both rules are
-    /// `WorkspaceStartPlan`'s. See `carriedName`. Terminal to browser crosses nothing, because
-    /// both are showing the same field with the same name in it.
+    private var defaultCLIMode: WorkspaceStartMode? {
+        switch controls.agentKind {
+        case .claudeCode: .claudeCLI
+        case .codex: .codexCLI
+        case .grok, .cursor, .openCode: nil
+        }
+    }
+
+    // Preserve the draft when switching between agent and non-agent starts.
     private var modeBinding: Binding<WorkspaceStartMode> {
         Binding(
-            get: { mode },
+            get: { selectedMode },
             set: { chosen in
-                guard chosen != mode else { return }
+                guard chosen != selectedMode else { return }
                 switch chosen {
                 case .terminal, .browser:
                     typedName = WorkspaceStartPlan.carriedName(
@@ -562,7 +541,7 @@ struct CreateWorkspaceView: View {
                 }
                 // Written before the focus is moved, because `focusTheBox` reads the mode back
                 // out of it and would otherwise put the keyboard in the box that is leaving.
-                rememberedMode = chosen.rawValue
+                selectedMode = chosen
                 focusTheBox()
             }
         )
@@ -601,7 +580,11 @@ struct CreateWorkspaceView: View {
                 // is the same fallback said once, for a surface that can do neither.
                 onQuickPrompt: actions.insert,
                 onSend: create,
-                showsAgentControls: mode.cliAgentKind == nil
+                usesCLIChat: Binding(
+                    get: { usesCLIChat && defaultCLIMode != nil },
+                    set: { usesCLIChat = $0 }
+                ),
+                supportsCLIChat: defaultCLIMode != nil
             )
         }
     }
@@ -740,7 +723,7 @@ struct CreateWorkspaceView: View {
     private var statusRow: some View {
         HStack(spacing: Metrics.spacingWide) {
             if mode.cliAgentKind != nil {
-                Text("Opens in a terminal using your CLI settings")
+                Text("Opens in a terminal using your default agent configuration")
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
             } else {
@@ -939,6 +922,10 @@ struct CreateWorkspaceView: View {
         // The gathering and both branch decisions live in the core, where the suite can reach
         // them, and where the subprocess rule wants them: this view was the last one on the
         // allow-list in `Tools/house-rules.sh` for calling `Git` itself.
+        if !loadedChatPreference {
+            usesCLIChat = appDefaults.terminalChat
+            loadedChatPreference = true
+        }
         let context = await WorkspaceStartContext.load(repoPath: path)
 
         // Cancelled means the project changed under this load, and these are the other
@@ -1153,7 +1140,7 @@ struct CreateWorkspaceView: View {
         )
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
         let source = checkout
-        let chosenControls: ComposerControls? = chosen.cliAgentKind == nil ? controls : nil
+        let chosenControls = controls
         let shouldRunSetup = runSetupScript
 
         // A file can be moved or deleted between being attached and Create being pressed, and

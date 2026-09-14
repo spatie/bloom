@@ -495,6 +495,29 @@ final class WorkspaceModel {
         return stored
     }
 
+    func createChat(title: String? = nil) async -> PaneContent? {
+        guard let store, let repo = app.repo(for: workspace) else { return nil }
+        let defaults = await AppDefaults.load(from: store)
+        let controls = ComposerControls(
+            defaults: ComposerDefaults.resolve(
+                repo: SettingsLoader.load(repo: workspace.path), app: defaults,
+                models: ComposerModelCatalog.shared.models
+            ),
+            isFastMode: defaults.fastMode, outputStyle: defaults.outputStyle,
+            codexContextWindow: defaults.codexContextWindow
+        )
+        guard let session = await createSession(title: title, controls: controls) else { return nil }
+        guard WorkspaceStartMode.chat(usesCLI: defaults.terminalChat, agent: controls.agentKind).cliAgentKind != nil
+        else { return .chat(session.id) }
+        let tab = CenterTabStore.shared.add(
+            kind: .terminal, workspaceID: workspace.id,
+            title: title ?? session.agentKind.label, agentSessionID: session.id
+        )
+        pendingCLILaunches.insert(session.id)
+        await launchCLI(session, prompt: "", repo: repo)
+        return .tool(tab.id)
+    }
+
     /// Retires the old runner only after its replacement has been saved successfully.
     func clearConversation(_ previous: Session, controls: ComposerControls) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
@@ -933,7 +956,8 @@ final class WorkspaceModel {
     /// was not running as far as this property was concerned, however plainly the session row said
     /// otherwise.
     var isRunning: Bool {
-        AgentTurns.workspace(.running, sessions: sessions, live: liveTurns)
+        TerminalSessionStore.shared.runningWorkspaceIDs.contains(workspace.id)
+            || AgentTurns.workspace(.running, sessions: sessions, live: liveTurns)
     }
 
     /// What this workspace's live transcripts say about their own sessions, for the rule above and
@@ -1073,10 +1097,7 @@ final class WorkspaceModel {
         if let cliSession, let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             cliDelivery = try? await store?.enqueueDelivery(Delivery(targetSessionID: cliSession.id, body: prompt))
             if let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
-               let command = cliSession.agentKind.interactiveCommand(
-                   directory: workspace.path, prompt: prompt, sessionID: cliSession.id,
-                   model: cliSession.model, effort: cliSession.effort
-               ) {
+               let command = prepareCLICommand(for: cliSession, prompt: prompt) {
                 try? await store?.setSetting(TerminalCommandMemory.key(paneID: terminal.id), command)
             }
         } else {
@@ -1171,23 +1192,7 @@ final class WorkspaceModel {
         await reloadSessions()
         guard !Task.isCancelled else { return }
         if let cliSession {
-            let port = await ensurePort()
-            guard !Task.isCancelled,
-                  let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
-                  sessions.contains(where: { $0.id == cliSession.id }),
-                  let command = cliSession.agentKind.interactiveCommand(
-                      directory: workspace.path, prompt: cliPrompt ?? "", sessionID: cliSession.id,
-                      model: cliSession.model, effort: cliSession.effort, permissionMode: nil
-                  ) else { return }
-            try? FileManager.default.removeItem(at: AgentKind.interactiveStatusURL(sessionID: cliSession.id))
-            let terminals = TerminalSessionStore.shared
-            terminals.useStore(store)
-            terminals.run(command, inPaneID: terminal.id)
-            _ = terminals.terminal(
-                for: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: workspace.id, title: terminal.title),
-                workspace: workspace, repo: repo, port: port, directory: terminal.directory
-            )
-            pendingCLILaunches.remove(cliSession.id)
+            await launchCLI(cliSession, prompt: cliPrompt ?? "", repo: repo)
             return
         }
         guard let session = activeSession,
@@ -1196,6 +1201,35 @@ final class WorkspaceModel {
         // first. Nothing is passed in: the opening prompt is already in the queue, and so is
         // anything typed into the composer since. See `enqueueOpening`.
         await transcript(for: session).drain()
+    }
+
+    private func launchCLI(_ cliSession: Session, prompt: String, repo: Repo) async {
+        let port = await ensurePort()
+        guard !Task.isCancelled,
+              let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
+              sessions.contains(where: { $0.id == cliSession.id }),
+              let command = prepareCLICommand(for: cliSession, prompt: prompt) else { return }
+        try? FileManager.default.removeItem(at: AgentKind.interactiveStatusURL(sessionID: cliSession.id))
+        let terminals = TerminalSessionStore.shared
+        terminals.useStore(store)
+        terminals.run(command, inPaneID: terminal.id)
+        _ = terminals.terminal(
+            for: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: workspace.id, title: terminal.title),
+            workspace: workspace, repo: repo, port: port, directory: terminal.directory
+        )
+        pendingCLILaunches.remove(cliSession.id)
+    }
+
+    private func prepareCLICommand(for session: Session, prompt: String) -> String? {
+        do {
+            return try session.agentKind.prepareInteractiveCommand(
+                directory: workspace.path, prompt: prompt, sessionID: session.id,
+                model: session.model, effort: session.effort, permissionMode: session.permissionMode
+            )
+        } catch {
+            app.alert = BloomAlert(title: "Could not launch the agent", message: error.readableMessage)
+            return nil
+        }
     }
 
     /// The workspace's own port block, allocated once however many callers ask at once.

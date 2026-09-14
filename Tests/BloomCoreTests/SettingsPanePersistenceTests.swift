@@ -3,6 +3,32 @@ import Testing
 
 @Suite("Settings pane persistence", .scratchDirectory)
 struct SettingsPanePersistenceTests {
+    @Test("The chat interface preference persists without changing model defaults")
+    func terminalChatPreference() async throws {
+        let store = try makeTestStore("settings-terminal-chat")
+        let previous = await AppDefaults.load(from: store)
+        #expect(!previous.terminalChat)
+        var edited = previous
+        edited.terminalChat = true
+        try await edited.saveChanges(from: previous, to: store)
+        let loaded = await AppDefaults.load(from: store)
+        #expect(loaded.terminalChat)
+        #expect(loaded.storedModel == nil)
+        edited.terminalChat = false
+        try await edited.saveChanges(from: loaded, to: store)
+        #expect(await AppDefaults.load(from: store).terminalChat == false)
+    }
+
+    @Test("New chats honour the preferred interface for supported agents")
+    func preferredChatMode() {
+        #expect(WorkspaceStartMode.chat(usesCLI: true, agent: .claudeCode) == .claudeCLI)
+        #expect(WorkspaceStartMode.chat(usesCLI: true, agent: .codex) == .codexCLI)
+        #expect(WorkspaceStartMode.chat(usesCLI: false, agent: .codex) == .chat)
+        #expect(WorkspaceStartMode.chat(usesCLI: true, agent: .cursor) == .chat)
+        #expect(WorkspaceStartMode.chat(usesCLI: true, agent: .openCode) == .chat)
+        #expect(WorkspaceStartMode.chat(usesCLI: true, agent: .grok) == .chat)
+    }
+
     @Test("permission edits leave unchosen model defaults unstated")
     func permissionDoesNotPinModels() async throws {
         let store = try makeTestStore("settings-permission-only")

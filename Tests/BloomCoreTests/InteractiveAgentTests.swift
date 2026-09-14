@@ -4,6 +4,26 @@ import Testing
 
 @Suite("Interactive CLI agents")
 struct InteractiveAgentTests {
+    @Test("Native CLI busy markers exclude idle prompts and old history")
+    func screenActivity() {
+        #expect(AgentKind.codex.interactiveScreenIsBusy(lines: ["• Working (12s • esc to interrupt)"]))
+        #expect(AgentKind.codex.interactiveScreenIsBusy(lines: ["  Thinking (1m 12s • esc to interrupt)"]))
+        #expect(AgentKind.claudeCode.interactiveScreenIsBusy(lines: ["  esc to interrupt · ctrl+t to hide tasks"]))
+        #expect(AgentKind.claudeCode.interactiveScreenIsBusy(lines: ["  esc interrupt"]))
+        #expect(AgentKind.claudeCode.interactiveScreenIsBusy(
+            lines: ["esc to interrupt"] + Array(repeating: "", count: 40)
+        ))
+        #expect(!AgentKind.codex.interactiveScreenIsBusy(lines: ["› explain (12s • esc to interrupt)"]))
+        #expect(!AgentKind.codex.interactiveScreenIsBusy(lines: ["› What should I work on?"]))
+        #expect(!AgentKind.claudeCode.interactiveScreenIsBusy(lines: ["❯ explain esc to interrupt"]))
+        #expect(!AgentKind.claudeCode.interactiveScreenIsBusy(
+            lines: ["esc to interrupt"] + Array(repeating: "idle output", count: 6)
+        ))
+        #expect(!AgentKind.codex.interactiveScreenIsBusy(
+            lines: ["• Working (12s • esc to interrupt)"] + Array(repeating: "idle output", count: 12)
+        ))
+    }
+
     @Test("Interactive arguments preserve the prompt and normal permission choices")
     func arguments() throws {
         let id = SessionID.new()
@@ -27,7 +47,7 @@ struct InteractiveAgentTests {
             prompt: prompt, sessionID: id, model: "gpt-test", effort: "high", permissionMode: .acceptEdits
         ))
         #expect(codex.suffix(2) == ["--", prompt])
-        #expect(codex.contains("--no-alt-screen"))
+        #expect(!codex.contains("--no-alt-screen"))
         #expect(codex.contains("workspace-write"))
         #expect(codex.contains("on-request"))
         #expect(!codex.contains("exec"))
@@ -144,4 +164,61 @@ struct InteractiveAgentTests {
         let development = AgentKind.interactiveStatusURL(sessionID: id, namespace: "be.spatie.bloom.dev")
         #expect(production != development)
     }
+    @Test("Private launch files keep long prompts out of terminal input", arguments: [AgentKind.claudeCode, .codex])
+    func launchFile(agent: AgentKind) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fake = root.appendingPathComponent(agent.executableName)
+        try Data("#!/bin/sh\nfor argument do printf '%s\n' \"$argument\"; done\n".utf8).write(to: fake)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake.path)
+        let id = SessionID.new()
+        let prompt = String(repeating: "A long task. ", count: 1000) + "\n'quoted' $(touch unwanted)"
+        let command = try #require(try agent.prepareInteractiveCommand(
+            directory: root.path, prompt: prompt, sessionID: id, model: "", effort: "", base: root
+        ))
+        #expect(command.utf8.count < 1_000)
+        #expect(!command.contains("A long task"))
+        let folder = try AgentKind.interactiveLaunchDirectory(sessionID: id, base: root)
+        let file = folder.appendingPathComponent("start.sh")
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        #expect(attributes[.posixPermissions] as? Int == 0o600)
+        let result = try await Shell.run("/bin/sh", ["-c", command], env: ["PATH": root.path + ":/usr/bin:/bin"])
+        #expect(result.ok)
+        #expect(result.stdout.hasSuffix("--\n" + prompt + "\n"))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("unwanted").path))
+        let resume = try #require(try agent.prepareInteractiveCommand(
+            directory: root.path, prompt: "", sessionID: id, model: "", effort: "",
+            resuming: "native-id", base: root
+        ))
+        #expect(resume != command)
+        let resumed = try await Shell.run("/bin/sh", ["-c", resume], env: ["PATH": root.path + ":/usr/bin:/bin"])
+        #expect(resumed.ok)
+        #expect(resumed.stdout.contains("native-id"))
+        #expect(!resumed.stdout.contains("A long task"))
+        try AgentKind.removeInteractiveLaunch(sessionID: id, base: root)
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    @Test("Interactive launch restores terminal colour capabilities")
+    func terminalColours() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fake = root.appendingPathComponent("claude")
+        try Data(#"""
+        #!/bin/sh
+        printf '%s|%s|%s' "${NO_COLOR-unset}" "$TERM" "$COLORTERM"
+        """#.utf8).write(to: fake)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake.path)
+        let command = try #require(AgentKind.claudeCode.interactiveCommand(
+            directory: root.path, prompt: "", sessionID: .new(), model: "", effort: ""
+        ))
+        let result = try await Shell.run("/bin/sh", ["-c", command], env: [
+            "PATH": root.path + ":/usr/bin:/bin", "NO_COLOR": "1", "TERM": "dumb", "COLORTERM": ""
+        ])
+        #expect(result.ok)
+        #expect(result.stdout == "unset|xterm-256color|truecolor")
+    }
+
 }

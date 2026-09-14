@@ -373,6 +373,7 @@ final class TerminalSessionStore {
     private var lastHookDates: [SessionID: Date] = [:]
     private let activityStartedAt = Date()
     private(set) var agentTurns: [SessionID: AgentTurns.Live] = [:]
+    private(set) var runningWorkspaceIDs: Set<WorkspaceID> = []
     var onAgentActivityChanged: (() -> Void)?
     var onAgentTurnFinished: ((WorkspaceID) async -> Void)?
 
@@ -391,8 +392,9 @@ final class TerminalSessionStore {
             .filter { $0.kind == .terminal && $0.agentSessionID != nil }
         guard !panes.isEmpty || !linkedTabs.isEmpty else {
             paneAgents = [:]
-            if !agentTurns.isEmpty {
+            if !agentTurns.isEmpty || !runningWorkspaceIDs.isEmpty {
                 agentTurns = [:]
+                runningWorkspaceIDs = []
                 onAgentActivityChanged?()
             }
             return
@@ -413,6 +415,9 @@ final class TerminalSessionStore {
                 processes[pane.pane] = process.pid
             }
         }
+        var runningPanes = Set(detected.compactMap { pane, kind in
+            kind.interactiveScreenIsBusy(lines: currentScreen(inPane: pane)) ? pane : nil
+        })
         var turns: [SessionID: AgentTurns.Live] = [:]
         for tab in linkedTabs {
             guard let sessionID = tab.agentSessionID,
@@ -427,7 +432,8 @@ final class TerminalSessionStore {
                 }
             }
             let isPresent = detected[tab.id] == session.agentKind
-            var state: SessionState = session.state == .failed ? .failed : .idle
+            var state: SessionState = isPresent && runningPanes.contains(tab.id) ? .running
+                : (session.state == .failed ? .failed : .idle)
             var externalSession: String?
             let statusURL = AgentKind.interactiveStatusURL(sessionID: sessionID)
             let replaced = agentProcesses[tab.id] != nil && agentProcesses[tab.id] != processes[tab.id]
@@ -456,12 +462,15 @@ final class TerminalSessionStore {
             }
             if isPresent, let externalSession,
                let workspace = try? await store.workspace(id: tab.workspaceID),
-               let resume = session.agentKind.interactiveCommand(
+               CenterTabStore.shared.terminal(for: sessionID, in: tab.workspaceID)?.id == tab.id,
+               let resume = try? session.agentKind.prepareInteractiveCommand(
                    directory: workspace.path, prompt: "", sessionID: sessionID,
-                   model: "", effort: "", resuming: externalSession
+                   model: session.model, effort: session.effort,
+                   permissionMode: session.permissionMode, resuming: externalSession
                ) {
                 await recall.rememberResume(resume, inPane: tab.id, store: store)
             }
+            if isPresent { runningPanes.remove(tab.id) }
             turns[sessionID] = AgentTurns.Live(
                 sessionID: sessionID, workspaceID: tab.workspaceID,
                 isRunning: state == .running, isAwaitingPermission: state == .waiting
@@ -477,9 +486,36 @@ final class TerminalSessionStore {
         }
         agentProcesses = processes
         if paneAgents != detected { paneAgents = detected }
-        if agentTurns != turns {
+        let running = Set(runningPanes.compactMap { paneOwner[$0] })
+        if agentTurns != turns || runningWorkspaceIDs != running {
             agentTurns = turns
+            runningWorkspaceIDs = running
             onAgentActivityChanged?()
+        }
+    }
+
+    private func currentScreen(inPane pane: String) -> [String] {
+        guard let terminal = terminals[pane]?.getTerminal() else { return [] }
+        let start = terminal.buffer.totalLinesTrimmed
+        var lower = start
+        var upper = start + terminal.rows
+        while terminal.getScrollInvariantLine(row: upper) != nil {
+            lower = upper
+            upper = start + (upper - start) * 2
+        }
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if terminal.getScrollInvariantLine(row: middle) == nil {
+                upper = middle
+            } else {
+                lower = middle + 1
+            }
+        }
+        // Read the live screen even when the user has scrolled into history.
+        return (max(start, upper - terminal.rows)..<upper).compactMap {
+            terminal.getScrollInvariantLine(row: $0)?.translateToString(
+                trimRight: true, skipNullCellsFollowingWide: true
+            )
         }
     }
 

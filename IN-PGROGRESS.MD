@@ -71,3 +71,49 @@ Suggested event mapping: `UserPromptSubmit`, `PreToolUse` and `PostToolUse` mean
 5. Close a linked session during setup. Verify it does not launch later or start another chat's runner.
 
 These are pending checks, not claimed results. The first dev launch hit the schema mismatch above. Reopening the compatible build is pending.
+
+## Picker revision and launch investigation
+
+- Replaced duplicated agent entries with a single agent menu and a native Chat / Terminal toggle for Claude and Codex. Plain terminal and browser starts remain in the same menu. The prompt and existing mode persistence are reused.
+- UI source changes pass both linters. No app build or relaunch was performed for this revision, as requested.
+- Reproduced the reported stuck command in a headless zsh PTY with delayed shell startup. Sending a 3,528-byte quoted command after 120 ms accepted all bytes at the writer but did not execute; another Enter produced the same quote continuation prompt as the screenshot.
+- The PTY reported a 1,024-byte canonical input limit. A 128-byte command succeeded at the same delay. The full 3,528-byte command also succeeded after the shell prompt appeared and canonical mode was disabled. This confirms startup input truncation, rather than malformed command quoting.
+- Bloom currently types the generated prompt and repeated hook JSON into a new shell after a fixed 120 ms delay. That delay is not a shell readiness check.
+- Proposed launch fix, not implemented: reuse the terminal launch path with a short command pointing to a private per-session launch file. Store the long prompt and hook arguments in that file, with cleanup tied to session lifecycle. This requires launch-file persistence and cleanup changes but no new UI component. Increasing the delay alone would leave the timing problem in place.
+
+## Short launcher implementation
+
+- Interactive launches now write private per-session start and resume scripts beside the app database. Terminal input contains only the short shell invocation; the complete prompt and hook arguments stay in the script.
+- The scripts survive app relaunch for the existing restart offer. Closing the linked terminal removes its launch directory. Resume preserves the native session ID and does not replay the opening prompt.
+- Tests cover long multiline prompts, literal shell characters, file permissions, resume and cleanup for both agents. A headless slow-starting zsh check delivered a 15,000-byte prompt intact through a 97-byte terminal command at the former 120 ms timing.
+- Fast dev build installed without warnings, with both linters and signature verification passing. Bloom Dev was reopened with the picker and launch changes. Existing truncated shell input needs to be cancelled; it is not automatically resubmitted.
+
+## Four quick starts and terminal colour
+
+- The create window now offers Chat, CLI chat, Terminal and Browser in one segmented picker, with Chat selected initially. Both chat routes use the current default agent configuration. CLI chat is available for Claude and Codex; it is disabled for other default providers.
+- Confirmed Bloom Dev inherited NO_COLOR=1 and TERM=dumb from the build session. Interactive agent launches now unset NO_COLOR and explicitly advertise xterm-256color and true colour, including when an older tmux server survives a restart.
+- Removed Codex's forced inline mode so its normal full-screen TUI can run. Existing terminal themes and ANSI colours are unchanged.
+- Added a regression that launches a fake CLI under the inherited no-colour environment and checks the exact corrected values.
+
+Validation: all 12 interactive CLI tests and both linters passed. Fast dev build compiled without warnings, passed signature verification, and was installed and reopened. New CLI sessions are needed to pick up the corrected environment.
+
+## Manually started agents in splits
+
+- Confirmed the Codex processes in the reported workspace still carried NO_COLOR=1 despite TERM=xterm-256color and COLORTERM=truecolor. Manually typing codex bypassed the earlier agent-launcher fix.
+- Normal shells, tmux clients and sign-in terminals now share a terminal environment that removes the inherited headless flag. Explicit workspace environment values remain supported.
+- tmux now marks NO_COLOR as removed in its private server environment before attaching or creating a pane. An isolated live-tmux check passed for both fresh and existing servers; merely passing an empty environment override was insufficient.
+- All 41 focused terminal and tmux tests and both linters passed. Existing shells keep their old environment; new splits receive the corrected one.
+
+### Workspace busy state for terminal agents
+
+- Manual CLI launches now contribute to the workspace busy indicator, including splits.
+- Linked CLI chats use lifecycle hooks, with native TUI interrupt markers as a fallback.
+- The fallback reads the live screen, independent of scrollback position, and excludes prompt text.
+- This is a best-effort fallback for current Claude and Codex layouts. It does not infer permission requests or emit completion notifications.
+
+### Default chat interface
+
+- Settings > Models > New session behaviour now selects Bloom chat or CLI chat.
+- Cmd+T, empty workspace actions and new chat panes share that preference.
+- The new workspace picker has Chat, Terminal and Browser. Its composer has a terminal toggle seeded from the preference, with a local override.
+- Unsupported CLI providers fall back to Bloom chat. Existing conversations keep their interface.

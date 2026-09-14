@@ -1199,6 +1199,7 @@ final class AppModel {
         let live = workspaceModels.values.flatMap { $0.liveTurns }
             .filter { terminalTurns[$0.sessionID] == nil } + Array(terminalTurns.values)
         let running = AgentTurns.workspaces(.running, stored: storedActivity, live: live)
+            .union(TerminalSessionStore.shared.runningWorkspaceIDs)
         let waiting = AgentTurns.workspaces(.awaitingPermission, stored: storedActivity, live: live)
         if runningWorkspaceIDs != running { runningWorkspaceIDs = running }
         if waitingWorkspaceIDs != waiting { waitingWorkspaceIDs = waiting }

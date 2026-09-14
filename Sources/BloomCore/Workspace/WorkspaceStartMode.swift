@@ -32,6 +32,15 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     /// and for the same reason: nothing is written that a name could be derived from.
     case browser
 
+    public static func chat(usesCLI: Bool, agent: AgentKind) -> Self {
+        guard usesCLI else { return .chat }
+        switch agent {
+        case .claudeCode: return .claudeCLI
+        case .codex: return .codexCLI
+        case .cursor, .openCode, .grok: return .chat
+        }
+    }
+
     public var id: String { rawValue }
 
     /// What the workspace's own controls call it, where the word sits beside other one word

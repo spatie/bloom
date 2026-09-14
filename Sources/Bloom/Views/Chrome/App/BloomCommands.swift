@@ -132,7 +132,7 @@ struct BloomCommands: Commands {
                     return
                 }
                 guard let workspace = model.selectedModel else { return }
-                Task { await workspace.createSession() }
+                NewPane.open(.chat, in: workspace) { WorkspaceTabsStore.shared.select($0, in: workspace) }
             }
             .disabled(model.selectedModel == nil && model.selection != .ask)
 
