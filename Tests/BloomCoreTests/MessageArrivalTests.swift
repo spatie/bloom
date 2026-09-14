@@ -6,17 +6,11 @@ import Testing
 struct MessageArrivalTests {
     private let start = Date(timeIntervalSince1970: 1000)
 
-    @Test func sentBubbleLiftsAndSettlesWithoutOvershoot() {
+    @Test func sentBubbleLeavesMovementToTheTranscript() {
         let arrival = MessageArrival(style: .sent, startedAt: start)
-        let first = arrival.pose(at: start, reduceMotion: false)
-        #expect(first.opacity == 0)
-        #expect(first.rise == 10)
-        #expect(first.scale == 0.975)
-        let middle = arrival.pose(at: start.addingTimeInterval(0.16), reduceMotion: false)
-        #expect(middle.opacity > 0 && middle.opacity < 1)
-        #expect(middle.rise > 0 && middle.rise < 10)
-        #expect(middle.scale > first.scale && middle.scale < 1)
-        #expect(arrival.pose(at: start.addingTimeInterval(1), reduceMotion: false) == .settled)
+        for seconds in [0.0, 0.08, 0.16, 1] {
+            #expect(arrival.pose(at: start.addingTimeInterval(seconds), reduceMotion: false) == .settled)
+        }
     }
 
     @Test func repliesOnlyFade() {

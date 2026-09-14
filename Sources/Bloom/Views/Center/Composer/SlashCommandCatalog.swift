@@ -4,13 +4,9 @@ import BloomCore
 
 /// Holds the `/command` list for one workspace, and decides when it is worth reading again.
 ///
-/// The scan is a walk of six directories plus a bounded read per file. That is a few milliseconds
-/// once and pure waste on every keystroke, so it happens twice: when the composer first points at
-/// a checkout, and again when the user opens the menu after the list has been sitting still for
-/// `stalenessWindow`. Opening the menu is the only moment a stale list can be seen, and a person
-/// who has just written a new skill in another window types `/` before they can notice it is
-/// missing. Nothing watches the filesystem, because a watcher on `~/.claude` would have to be
-/// alive for every workspace at once to answer a question that is only ever asked here.
+/// Reads local commands and asks Codex for its enabled skills when the composer first points at
+/// a checkout, then refreshes when the menu opens after `stalenessWindow`. Codex lookups have
+/// their own thirty-second cache so reopening the menu does not repeatedly launch a subprocess.
 @MainActor
 @Observable
 final class SlashCommandCatalog {
@@ -29,6 +25,8 @@ final class SlashCommandCatalog {
     /// joins it rather than starting a duplicate walk of the same directories.
     private var running: Task<[SlashCommand], Never>?
     private var runningPath: String?
+    private var codexCatalog: CodexSkillCatalog?
+    private var codexPath: String?
 
     /// How long a list is taken on trust before opening the menu re-reads it.
     static let stalenessWindow: TimeInterval = 3
@@ -102,8 +100,17 @@ final class SlashCommandCatalog {
             task = running
         } else {
             let home = NSHomeDirectory()
+            let codexHome = Shell.environment()["CODEX_HOME"]
+            if codexPath != workspacePath {
+                codexCatalog = CodexSkillCatalog.live(project: workspacePath, codexHome: codexHome)
+                codexPath = workspacePath
+            }
+            let codex = codexCatalog
             task = Task.detached(priority: .utility) {
-                SlashCommandIndex.discover(home: home, project: workspacePath)
+                let skills = await codex?.skills()
+                return SlashCommandIndex.discover(
+                    home: home, project: workspacePath, codexSkills: skills, codexHome: codexHome
+                )
             }
             running = task
             runningPath = workspacePath

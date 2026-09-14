@@ -16,6 +16,7 @@ struct FileTreeView: View {
     /// without costing somebody the place they had opened their way down to. See `filterOpen`.
     @State private var expanded: Set<String> = []
     @State private var selection: String?
+    @State private var revealPath: String?
 
     /// What is in the filter field.
     @State private var query = ""
@@ -35,6 +36,7 @@ struct FileTreeView: View {
     /// Likewise: this used to be a computed `Set` read once per row, so it was rebuilt from the
     /// whole changed file list for every visible row on every pass.
     @State private var changedPaths: Set<String> = []
+    @State private var highlightedPaths: Set<String> = []
     /// Resolved when the selection moves rather than in `body`, which runs again on every hover.
     @State private var previewURL: URL?
     /// Bumped whenever the keyboard should be on the tree: every row activation, which is what
@@ -77,6 +79,17 @@ struct FileTreeView: View {
                         guard hasKeyboard, let path else { return }
                         proxy.scrollTo(path)
                     }
+                    .onChange(of: revealPath) { _, path in
+                        if let path { proxy.scrollTo(path, anchor: .center) }
+                    }
+                    .onChange(of: rows) { _, rows in
+                        if let revealPath, rows.contains(where: { $0.id == revealPath }) {
+                            proxy.scrollTo(revealPath, anchor: .center)
+                        }
+                    }
+                    .onScrollPhaseChange { _, phase in
+                        if phase == .tracking || phase == .interacting || phase == .decelerating { revealPath = nil }
+                    }
             }
             // Arrows, left and right through the folders, Home and End, type-select, Return, and
             // the space bar Quick Look that used to be reachable only with the pointer. See
@@ -92,14 +105,31 @@ struct FileTreeView: View {
         .task(id: LoadID(workspaceID: model.workspace.id, workspacePath: model.workspace.path)) {
             // Nothing is thrown away first. A workspace whose listing has already been read draws
             // it on the frame it arrives on, and this returns without a subprocess.
-            expanded = []
+            expanded = Set(UserDefaults.standard.stringArray(forKey: expansionKey) ?? [])
+            selection = nil
+            revealPath = nil
             // The filter goes with the workspace it was typed at. Carrying it across would show
             // the next worktree already narrowed by a word nobody typed at it.
             query = ""
             await model.refreshFileTree()
+            guard !Task.isCancelled else { return }
+            if let path = FileReview.activePath(in: model), let ancestors = FileTreeNode.ancestors(of: path, in: model.fileTree) {
+                expanded.formUnion(ancestors)
+                rebuildRows()
+                selection = path
+                revealPath = path
+            } else {
+                rebuildRows()
+            }
+        }
+        .onChange(of: expanded) { _, paths in
+            UserDefaults.standard.set(paths.sorted(), forKey: expansionKey)
         }
         .onChange(of: model.fileTree, initial: true) { _, _ in rebuildRows() }
-        .onChange(of: query) { _, _ in rebuildRows() }
+        .onChange(of: query) { _, _ in
+            revealPath = nil
+            rebuildRows()
+        }
         .onChange(of: hasKeyboard) { _, focused in
             if !focused { keyboard.forgetTyping() }
         }
@@ -108,8 +138,11 @@ struct FileTreeView: View {
         }
         .onChange(of: model.changedFiles, initial: true) { _, files in
             changedPaths = Set(files.map(\.path))
+            highlightedPaths = FileTreeChanges.highlightedPaths(for: changedPaths)
         }
     }
+
+    private var expansionKey: String { "fileTree.expanded." + model.workspace.id.rawValue }
 
     // MARK: - Tree
 
@@ -155,6 +188,7 @@ struct FileTreeView: View {
                 item: item,
                 isExpanded: openFolders.contains(path),
                 isChanged: changedPaths.contains(path),
+                containsChanges: highlightedPaths.contains(path),
                 fullPath: fullPath(path),
                 action: { activate(item.node) },
                 onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) },
@@ -162,6 +196,12 @@ struct FileTreeView: View {
                 onSplitPage: { BrowserTab.splitFile(fullPath(path), in: model, axis: $0) }
             )
             .equatable()
+        }
+        .background {
+            if highlightedPaths.contains(path), selection != path {
+                RoundedRectangle(cornerRadius: Metrics.corner)
+                    .fill(Palette.positive.opacity(0.10))
+            }
         }
         .padding(.horizontal, Metrics.spacingSmall)
     }
@@ -187,6 +227,7 @@ struct FileTreeView: View {
     /// highlight and for Quick Look, and a file the agent touched also becomes the changed list's
     /// selection, so the two tabs of this column agree about what is open.
     private func activate(_ node: FileTreeNode) {
+        revealPath = nil
         keyboardArm += 1
 
         guard node.isDirectory else {
@@ -250,6 +291,7 @@ struct FileTreeView: View {
     /// has, and typing at the field filters; which of the two is happening is said by the focus
     /// ring, which is drawn around the tree alone.
     private func handle(key: ListKey) -> Bool {
+        revealPath = nil
         let index = selection.flatMap { path in rows.firstIndex { $0.node.path == path } }
 
         if key == .left || key == .right {
@@ -300,6 +342,7 @@ struct FileTreeView: View {
     /// The new rows are flattened before anything is written, because their count is what decides
     /// whether the write is animated at all.
     private func toggle(_ node: FileTreeNode) {
+        revealPath = nil
         var opened = openFolders
         if opened.contains(node.path) {
             opened.remove(node.path)

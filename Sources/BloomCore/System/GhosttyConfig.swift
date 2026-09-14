@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Deliberately not an AppKit colour: BloomCore has no UI, and the whole point of reading Ghostty
 /// is to reproduce fixed bytes rather than something that shifts with appearance or contrast.
-public struct GhosttyColor: Sendable, Hashable {
+public struct GhosttyColor: Codable, Sendable, Hashable {
     public var red: UInt8
     public var green: UInt8
     public var blue: UInt8
@@ -37,7 +37,7 @@ public enum GhosttyAppearance: String, Sendable, Hashable {
 ///
 /// Every colour is optional and `nil` means "Ghostty said nothing about this", which is what lets
 /// a machine with no Ghostty config keep Bloom's own appearance untouched.
-public struct GhosttyTheme: Sendable, Hashable {
+public struct GhosttyTheme: Codable, Sendable, Hashable {
     public var background: GhosttyColor?
     public var foreground: GhosttyColor?
     public var cursorColor: GhosttyColor?
@@ -62,6 +62,42 @@ public struct GhosttyTheme: Sendable, Hashable {
             && palette.isEmpty
             && fontFamily == nil
             && fontSize == nil
+    }
+
+    // Ghostty's defaults, including inverted selection colours: src/config/Config.zig.
+    public func resolvingColourDefaults() -> Self {
+        var value = self
+        value.background = background ?? GhosttyColor(red: 0x28, green: 0x2C, blue: 0x34)
+        value.foreground = foreground ?? GhosttyColor(red: 0xFF, green: 0xFF, blue: 0xFF)
+        value.cursorColor = cursorColor ?? value.foreground
+        value.cursorTextColor = cursorTextColor ?? value.background
+        value.selectionBackground = selectionBackground ?? value.foreground
+        value.selectionForeground = selectionForeground ?? value.background
+        for slot in 0..<16 where value.palette[slot] == nil { value.palette[slot] = Self.defaultPalette[slot] }
+        return value
+    }
+
+    /// What a terminal draws with when it follows this configuration inside a Bloom theme.
+    ///
+    /// **A config that sets its own background or foreground is a whole terminal**, and gets
+    /// Ghostty's defaults for everything else, because a dark ground of the user's with Bloom's
+    /// light selection on it would read as a bug. **A config that sets neither is a few colours**,
+    /// most often a palette slot or two, and those are laid over the theme's panel: the ground,
+    /// ink, cursor and selection come from `scheme` unless the config names them, and the sixteen
+    /// ANSI slots come from Ghostty. Filling that second case with Ghostty's dark `#282C34` put a
+    /// black block in a light window for a config whose only line was `palette = 2=#5ccd86`,
+    /// which is what the terminal looked like before theme presets and had to look like again.
+    public func layered(over scheme: GhosttyTheme) -> Self {
+        guard background == nil, foreground == nil else { return resolvingColourDefaults() }
+        var value = scheme
+        value.cursorColor = cursorColor ?? scheme.cursorColor
+        value.cursorTextColor = cursorTextColor ?? scheme.cursorTextColor
+        value.selectionBackground = selectionBackground ?? scheme.selectionBackground
+        value.selectionForeground = selectionForeground ?? scheme.selectionForeground
+        value.palette = Dictionary(uniqueKeysWithValues: ansiColors().enumerated().map { ($0.offset, $0.element) })
+        value.fontFamily = fontFamily
+        value.fontSize = fontSize
+        return value
     }
 
     /// The sixteen ANSI slots, Ghostty's own defaults wherever the config was silent.

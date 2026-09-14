@@ -576,7 +576,7 @@ private let goldenTokens = #"""
 3|operator:</|type:template|operator:>
 4|
 5|operator:<|type:script|plain: |attribute:setup|operator:>
-6|keyword:import|plain: |punctuation:{|plain: |plain:ref|plain: |punctuation:}|plain: |plain:from|plain: |string:'vue'|punctuation:;
+6|keyword:import|plain: |punctuation:{|plain: |plain:ref|plain: |punctuation:}|plain: |keyword:from|plain: |string:'vue'|punctuation:;
 7|keyword:const|plain: |plain:name|plain: |operator:=|plain: |function:ref|punctuation:(|string:'bloom'|punctuation:);
 8|operator:</|type:script|operator:>
 == xml

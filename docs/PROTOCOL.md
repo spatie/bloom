@@ -193,6 +193,14 @@ before it read anything from stdin: `init`, this line, then a second `init` for 
 had actually sent. A result answering a prompt names no origin at all. See `StrayResult`, which is
 the bug that cost.
 
+The same thing happens mid process, and there the turn does real work. Measured on `claude
+2.1.268` on 11 September 2026: a turn put `sleep 5` in the background and ended; five seconds later
+the CLI wrote `task_updated`, then `system/task_notification` for the command, then a second `init`,
+then a whole turn, closed by a `result` with `origin: task-notification`. The notification is the
+only line saying why that turn began, and its `summary` reads `Background command "<description>"
+completed (exit code 0)`. Bloom stores it when it arrives between turns and draws it as the turn's
+opening line. See `BackgroundWake`.
+
 ### `rate_limit_event`
 
 One per turn, and it carries **one window**, never a set:

@@ -5,9 +5,9 @@ import BloomCore
 struct AskView: View {
     @Environment(AppModel.self) private var app
 
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
-    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
+    private var textSize: ChatTextSize { ColourThemePreference.shared.chatTextSize }
+    private var chatFontID: String { ColourThemePreference.shared.chatFont }
+    private var lineHeight: ChatLineHeight { ColourThemePreference.shared.chatLineHeight }
 
     var body: some View {
         VStack(spacing: 0) {

@@ -28,10 +28,17 @@ public extension Git {
     /// made without one behaves like local work that has never been shared, which is the opposite
     /// of what has just been checked out.
     static func addTrackingWorktree(
-        repo: String, path: String, branch: String, remote: String = Git.remote
+        repo: String, path: String, branch: String, remote: String? = nil
     ) async throws {
         try validate(branch: branch)
         try validate(ref: path, label: "worktree path")
+        let destination: String?
+        if let remote { destination = remote } else {
+            destination = try await repositoryContext(in: repo, branch: branch).publishRemote
+        }
+        guard let remote = destination else {
+            throw error(["worktree", "add"], 1, "No remote is configured for \(branch).", "")
+        }
         try validate(ref: remote, label: "remote")
 
         let parent = (path as NSString).deletingLastPathComponent

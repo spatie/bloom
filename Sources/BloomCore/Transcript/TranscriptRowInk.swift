@@ -40,8 +40,12 @@ public enum TranscriptRowInk {
     /// it would be a guess, and a guess here is worth less than the mean it would replace. A tool
     /// result whose call is on the row above draws nothing either, but which rows those are is a
     /// question about the row before it rather than about the row, so it is not answered here.
+    ///
+    /// Two `system` rows draw: an init, and a background task's notification, which is stored only
+    /// when it opens a turn the CLI started by itself. See `BackgroundWake`.
     public static func drawsNothing(kind: MessageKind, payload: Data) -> Bool {
         guard kind == .system else { return false }
         return payload.prefix(probeLength).range(of: initMarker) == nil
+            && !BackgroundWake.isRow(kind: kind, payload: payload)
     }
 }

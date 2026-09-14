@@ -256,7 +256,7 @@ final class DetailSplitViewController: NSSplitViewController {
     /// below is told where the pane is going and "where is it now" is a question with two
     /// defensible answers while it is on its way there.
     private func publishInspectorWidth(collapsed: Bool, sliding: Bool) {
-        let width = collapsed ? 0 : inspectorHost.view.frame.width
+        let width = collapsed ? 0 : inspectorHost.view.frame.width + splitView.dividerThickness
         InspectorGeometry.shared.setInspectorWidth(width, sliding: sliding)
     }
 

@@ -62,6 +62,10 @@ public struct NewProjectFacts: Sendable, Equatable {
     /// folder that is there and has something in it, because it answers one question and it is
     /// `FolderVerdict`'s: a folder holding three of these is somebody's projects directory.
     public var childRepositories: [String]
+    /// What git said when it was asked about a target with a `.git` in it, which is never while
+    /// typing: the sheet asks once the target settles, and `NewProjectStarter.repositoryProblem`
+    /// is the question. Nil until then, and nil when git recognised it.
+    public var gitProblem: GitRepositoryProblem?
 
     public init(
         name: String = "",
@@ -78,7 +82,8 @@ public struct NewProjectFacts: Sendable, Equatable {
         isTargetWritable: Bool = true,
         homeDirectory: String = "",
         workspacesRoot: String = "",
-        childRepositories: [String] = []
+        childRepositories: [String] = [],
+        gitProblem: GitRepositoryProblem? = nil
     ) {
         self.name = name
         self.location = location
@@ -95,6 +100,7 @@ public struct NewProjectFacts: Sendable, Equatable {
         self.homeDirectory = homeDirectory
         self.workspacesRoot = workspacesRoot
         self.childRepositories = childRepositories
+        self.gitProblem = gitProblem
     }
 }
 
@@ -120,7 +126,8 @@ extension NewProjectFacts {
             isAbsolute: !path.isEmpty,
             homeDirectory: homeDirectory,
             workspacesRoot: workspacesRoot,
-            childRepositories: childRepositories
+            childRepositories: childRepositories,
+            gitProblem: targetIsRepository ? gitProblem : nil
         )
     }
 }

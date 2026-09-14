@@ -30,6 +30,8 @@ public struct PatchCache: Sendable {
         public var worktree: String
         public var base: String
         public var file: String
+        public var layer: ChangeLayer?
+        public var oldPath: String?
         public var change: ChangedFile.Change
         public var scope: DiffScope
         public var generation: Int
@@ -44,6 +46,8 @@ public struct PatchCache: Sendable {
             self.worktree = worktree
             self.base = base
             self.file = file.path
+            self.layer = file.layer
+            self.oldPath = file.oldPath
             self.change = file.change
             self.scope = scope
             self.generation = generation

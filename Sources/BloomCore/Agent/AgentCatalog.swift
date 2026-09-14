@@ -267,6 +267,13 @@ public actor AgentCatalog {
             )
         case .codex:
             details = codexDetails(authJSON: readFile(codexAuthPath))
+        case .grok:
+            let key = ProcessInfo.processInfo.environment["XAI_API_KEY"]
+            details = grokDetails(
+                authJSON: readFile(grokAuthPath),
+                version: version,
+                apiKeyIsSet: !(key ?? "").isEmpty
+            )
         case .cursor, .openCode:
             // Their auth file formats are not verified, so claiming an account would be a guess.
             details = []
@@ -284,6 +291,7 @@ public actor AgentCatalog {
 
     static var claudeAccountPath: String { "\(NSHomeDirectory())/.claude.json" }
     static var codexAuthPath: String { "\(NSHomeDirectory())/.codex/auth.json" }
+    static var grokAuthPath: String { "\(NSHomeDirectory())/.grok/auth.json" }
 
     private static func readFile(_ path: String) -> Data? {
         FileManager.default.contents(atPath: path)
@@ -468,7 +476,99 @@ public actor AgentCatalog {
         return value
     }
 
-    /// `claude_max` reads as `Claude Max`, `chatgpt` as `Chatgpt`.
+    // MARK: - Grok
+
+    /// Builds the Grok account table from `~/.grok/auth.json`.
+    ///
+    /// The file is a map of issuer keys to credential objects. Bloom reads only the non-secret
+    /// facts (`email`, `auth_mode`, `expires_at`, `first_name`). The `key` and `refresh_token`
+    /// members are live credentials and are never copied into a detail, a log, or an error.
+    public static func grokDetails(
+        authJSON: Data?,
+        version: String?,
+        apiKeyIsSet: Bool,
+        now: Date = Date()
+    ) -> [AgentDetail] {
+        let account = authJSON.flatMap(decodeGrokAuth)
+        guard account != nil || apiKeyIsSet else { return [] }
+
+        var details = [
+            AgentDetail(label: "Version", value: version ?? unknown),
+            AgentDetail(label: "Provider", value: apiKeyIsSet && account == nil ? "xAI API key" : "xAI"),
+            AgentDetail(
+                label: "Login method",
+                value: apiKeyIsSet && account == nil
+                    ? "API key (XAI_API_KEY set)"
+                    : grokLoginMethod(account?.authMode)
+            ),
+            AgentDetail(label: "Account", value: account?.email ?? account?.name ?? unknown),
+        ]
+        if let account, account.isExpired(at: now) {
+            details.append(AgentDetail(
+                label: "Session",
+                value: "Expired, sign in again with `grok login`"
+            ))
+        }
+        if apiKeyIsSet, account != nil {
+            details.append(AgentDetail(label: "API key", value: "Set"))
+        }
+        return details
+    }
+
+    static func grokLoginMethod(_ authMode: String?) -> String {
+        switch authMode {
+        case "oauth", "grok.com": return "Grok login"
+        case "apikey", "api_key": return "API key"
+        case let mode? where !mode.isEmpty: return titleCased(mode)
+        default: return "Grok login"
+        }
+    }
+
+    public struct GrokAccount: Sendable, Hashable {
+        public var email: String?
+        public var name: String?
+        public var authMode: String?
+        public var expiresAt: Date?
+
+        public init(email: String? = nil, name: String? = nil, authMode: String? = nil, expiresAt: Date? = nil) {
+            self.email = email
+            self.name = name
+            self.authMode = authMode
+            self.expiresAt = expiresAt
+        }
+
+        public func isExpired(at now: Date) -> Bool {
+            guard let expiresAt else { return false }
+            return expiresAt < now
+        }
+    }
+
+    /// Picks the first credential object that has an email or a name. The map keys are issuer
+    /// URLs plus client ids and are not themselves displayable.
+    public static func decodeGrokAuth(_ data: Data) -> GrokAccount? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        for value in root.values {
+            guard let object = value as? [String: Any] else { continue }
+            let email = nonEmpty(object["email"] as? String)
+            let name = nonEmpty(object["first_name"] as? String)
+                ?? nonEmpty(object["name"] as? String)
+            let authMode = nonEmpty(object["auth_mode"] as? String)
+            let expiry: Date?
+            if let text = object["expires_at"] as? String {
+                expiry = ISO8601DateFormatter().date(from: text)
+            } else if let seconds = object["expires_at"] as? NSNumber {
+                expiry = Date(timeIntervalSince1970: seconds.doubleValue)
+            } else {
+                expiry = nil
+            }
+            let account = GrokAccount(email: email, name: name, authMode: authMode, expiresAt: expiry)
+            if email != nil || name != nil { return account }
+        }
+        return nil
+    }
+
     static func titleCased(_ value: String) -> String {
         value
             .components(separatedBy: CharacterSet(charactersIn: "_-"))

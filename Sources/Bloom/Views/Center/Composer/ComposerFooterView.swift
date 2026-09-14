@@ -47,9 +47,17 @@ struct ComposerFooterView: View {
     /// What choosing a quick prompt does, or nil where there is nowhere to put one. Nil hides the
     /// button rather than disabling it: a control that can never do anything is not worth the room
     /// in a row that already loses its words at 420 points.
-    var onQuickPrompt: (@MainActor (QuickPrompt) -> Void)?
+    var onQuickPrompt: (@MainActor (QuickPromptPanelRow) -> Void)?
+    /// What the workspace's repository offers under the owner's own prompts. Empty in the create
+    /// window, which has no workspace model to have read a settings file.
+    var projectQuickPrompts: [ProjectQuickPrompt] = []
+    /// Called as the panel opens, so the settings file behind `projectQuickPrompts` can be read
+    /// again. Somebody who has just pulled a teammate's new prompt opens the panel to find it,
+    /// and until now nothing re-read that file short of switching workspace.
+    var onOpenQuickPrompts: (@MainActor () -> Void)?
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
+    var onSideConversation: (@MainActor () -> Void)?
     /// Whether the row carries the choices the agent runs on.
     ///
     /// False for a terminal workspace, which has no agent: the create window was offering a model,
@@ -57,6 +65,20 @@ struct ComposerFooterView: View {
     /// a shell and never sends any of them anywhere. What is left is the send button, which is the
     /// one control on the row that still does something.
     var showsAgentControls: Bool = true
+
+    // Key the fetched value as well as the task, so changing projects cannot briefly show the
+    // previous project's speed before SwiftUI starts the replacement task.
+    @State private var loadedSpeed: CodexSpeed?
+    @State private var loadedSpeedRequest: [String]?
+    @State private var speedFailed = false
+
+    private var speedRequest: [String] {
+        [project ?? "", controls.agentKind.rawValue, controls.model, String(showsAgentControls)]
+    }
+
+    private var codexSpeed: CodexSpeed? {
+        loadedSpeedRequest == speedRequest ? loadedSpeed : nil
+    }
 
     /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
     /// so the menu can offer the way back. See `ComposerOption.adding`.
@@ -157,6 +179,23 @@ struct ComposerFooterView: View {
         // On appearance rather than on first use of the menu, so the Codex section is there when
         // the menu is opened rather than a moment after. It fetches once.
         .task { if showsAgentControls { catalog.load() } }
+        .task(id: speedRequest) {
+            let request = speedRequest
+            loadedSpeed = nil
+            loadedSpeedRequest = request
+            speedFailed = false
+            guard showsAgentControls, controls.agentKind == .codex else { return }
+            do {
+                let speed = try await CodexSpeed.read(
+                    cwd: project ?? AgentScratchDirectory.current(), modelID: controls.model
+                )
+                guard !Task.isCancelled else { return }
+                loadedSpeed = speed
+            } catch {
+                guard !Task.isCancelled else { return }
+                speedFailed = true
+            }
+        }
         // Re-run when the composer moves to another checkout, because a project's own styles are
         // that project's. The scan itself does nothing when the answer is already held and fresh.
         .task(id: project) {
@@ -221,8 +260,19 @@ struct ComposerFooterView: View {
                     onEffort: { id in edit { $0.effort = id } },
                     onOutputStyle: { id in edit { $0.outputStyle = id } },
                     onPermissionMode: selectPermissionMode,
-                    onFastMode: { value in edit { $0.isFastMode = value } },
-                    onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } }
+                    onFastMode: { value in
+                        edit {
+                            if $0.agentKind == .codex {
+                                $0.codexFastMode = value
+                            } else {
+                                $0.isFastMode = value
+                            }
+                        }
+                    },
+                    onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
+                    codexSpeed: codexSpeed,
+                    codexSpeedFailed: loadedSpeedRequest == speedRequest && speedFailed,
+                    onInteractionMode: { mode in edit { $0.interactionMode = mode } }
                 )
             }
 
@@ -250,6 +300,7 @@ struct ComposerFooterView: View {
             // already about an AI, so a sparkle would distinguish nothing.
             if showsAgentControls, onQuickPrompt != nil {
                 Button {
+                    onOpenQuickPrompts?()
                     isShowingQuickPrompts = true
                 } label: {
                     ComposerControlLabel(
@@ -273,6 +324,7 @@ struct ComposerFooterView: View {
                     if let onQuickPrompt {
                         QuickPromptMenu(
                             catalog: QuickPromptCatalog.shared,
+                            projectPrompts: projectQuickPrompts,
                             draft: $quickPromptDraft,
                             onPick: onQuickPrompt,
                             onClose: { isShowingQuickPrompts = false }
@@ -284,6 +336,15 @@ struct ComposerFooterView: View {
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"
             // in the tab strip directly above, and it says nothing about what is being added.
+            if let onSideConversation {
+                Button(action: onSideConversation) {
+                    Image(systemName: "arrow.turn.down.right")
+                }
+                .buttonStyle(.plain)
+                .help("Ask a side question (/btw)")
+                .accessibilityLabel("Ask a side question")
+            }
+
             // Gone with the rest when there is no agent: nothing reads an attachment into a shell.
             if showsAgentControls {
                 Button(action: onAttach) {

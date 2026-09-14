@@ -4,22 +4,22 @@ import Testing
 
 @Suite("What a pane was running")
 struct ProcessTableTests {
-    /// The shape `ps -Ao pid=,ppid=,pgid=,args=` actually prints: right aligned numbers, and the
-    /// command taking the whole rest of the line.
+    /// The shape `ps -Ao pid=,ppid=,pgid=,tpgid=,args=` actually prints: right aligned numbers,
+    /// and the command taking the whole rest of the line.
     private static let sample = """
-              1     0     1 /sbin/launchd
-          40123     1 40123 /bin/zsh -l
-          40140 40123 40140 npm run dev
-          40141 40123 40140 tee /tmp/dev.log
-          40200     1 40200 /Applications/Something.app/Contents/MacOS/Something --flag
+              1     0     1     0 /sbin/launchd
+          40123     1 40123 40140 /bin/zsh -l
+          40140 40123 40140 40140 npm run dev
+          40141 40123 40140 40140 tee /tmp/dev.log
+          40200     1 40200     0 /Applications/Something.app/Contents/MacOS/Something --flag
         """
 
-    @Test("A line is three numbers and then everything else")
+    @Test("A line is four numbers and then everything else")
     func parsing() {
         let table = ProcessTable(psOutput: Self.sample)
         #expect(table.rows.count == 5)
         #expect(table.rows[2] == ProcessTable.Row(
-            pid: 40140, parent: 40123, group: 40140, command: "npm run dev"
+            pid: 40140, parent: 40123, group: 40140, terminalGroup: 40140, command: "npm run dev"
         ))
         // Spaces in the command are the normal case, not an edge one.
         #expect(table.rows[4].command == "/Applications/Something.app/Contents/MacOS/Something --flag")
@@ -28,11 +28,12 @@ struct ProcessTableTests {
     @Test("A line that is not a process is dropped rather than guessed at")
     func rubbish() {
         let table = ProcessTable(psOutput: """
-            PID PPID PGID ARGS
-            12ab 1 1 not a pid
+            PID PPID PGID TPGID ARGS
+            12ab 1 1 0 not a pid
               7 1
-              9 1 9
-              11 1 11 fine
+              9 1 9 0
+              10 1 10 fine
+              11 1 11 0 fine
             """)
         #expect(table.rows.count == 1)
         #expect(table.rows.first?.command == "fine")
@@ -47,8 +48,8 @@ struct ProcessTableTests {
     @Test("A shell at its prompt answers with nothing")
     func idle() {
         let table = ProcessTable(psOutput: """
-              40123     1 40123 /bin/zsh -l
-              40140     1 40140 npm run dev
+              40123     1 40123 40123 /bin/zsh -l
+              40140     1 40140     0 npm run dev
             """)
         #expect(table.foregroundCommand(ofShell: 40123) == nil)
         // A pid nobody has, and the one that would match every orphan if it were not guarded.
@@ -59,8 +60,8 @@ struct ProcessTableTests {
     @Test("A child that leads no group is still better than no answer")
     func withoutJobControl() {
         let table = ProcessTable(psOutput: """
-              40123     1 40123 /bin/sh
-              40140 40123 40123 php artisan serve
+              40123     1 40123 40123 /bin/sh
+              40140 40123 40123 40123 php artisan serve
             """)
         #expect(table.foregroundCommand(ofShell: 40123) == "php artisan serve")
     }
@@ -80,11 +81,29 @@ struct ProcessTableTests {
     @Test("The newest of several jobs wins")
     func severalJobs() {
         let table = ProcessTable(psOutput: """
-              40123     1 40123 /bin/zsh
-              40140 40123 40140 npm run dev
-              40190 40123 40190 php artisan serve
+              40123     1 40123 40190 /bin/zsh
+              40140 40123 40140     0 npm run dev
+              40190 40123 40190 40190 php artisan serve
             """)
         #expect(table.foregroundCommand(ofShell: 40123) == "php artisan serve")
+    }
+
+    /// The column a run script's running state is read from: who holds the shell's terminal.
+    @Test("A shell that has handed its terminal to a job is busy, and one at its prompt is not")
+    func terminalGroup() {
+        let table = ProcessTable(psOutput: """
+              40123     1 40123 40140 /bin/zsh -l
+              40140 40123 40140 40140 npm run dev
+              50123     1 50123 50123 /bin/zsh -l
+              60000     1 60000     0 /usr/libexec/logd
+            """)
+        #expect(table.isBusy(shell: 40123) == true)
+        #expect(table.isBusy(shell: 50123) == false)
+        // No terminal at all cannot be holding one.
+        #expect(table.isBusy(shell: 60000) == false)
+        // A shell the table does not have is not an answer either way.
+        #expect(table.isBusy(shell: 99999) == nil)
+        #expect(table.isBusy(shell: 0) == nil)
     }
 }
 

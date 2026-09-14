@@ -12,12 +12,22 @@ enum ComposerInlineChipLayout {
         NSFont.systemFont(ofSize: max(lineFont.pointSize - 1, 9))
     }
 
+    /// Capped so the icon keeps a point of plate above and below it inside the shorter chip.
     static func iconSize(for lineFont: NSFont) -> CGFloat {
-        ceil(labelFont(for: lineFont).pointSize) + 2
+        min(ceil(labelFont(for: lineFont).pointSize), height(for: lineFont) - 3)
     }
 
+    /// A point under the line, never over it.
+    ///
+    /// **This was the line height plus two, and that is what made the composer jump.** TextKit 1
+    /// sizes a line fragment around the tallest thing on it, so a chip taller than the text grew
+    /// the line it landed on, and with it the box, the moment a file was dropped in. The line
+    /// height itself is not enough either: it is rounded while the font's descender is not, so a
+    /// chip exactly that tall still grew the line by a point in about half the faces and sizes
+    /// measured. One point under it grew none of the thirty tried, system, Helvetica Neue,
+    /// Georgia, Menlo, Avenir Next and Charter from 11 to 20 points.
     static func height(for lineFont: NSFont) -> CGFloat {
-        ceil(NSLayoutManager().defaultLineHeight(for: lineFont)) + 2
+        floor(NSLayoutManager().defaultLineHeight(for: lineFont)) - 1
     }
 }
 
@@ -41,11 +51,21 @@ enum InlineChip: Equatable, Sendable {
     /// without asking anything that only the press which composed the turn could answer.
     case instructions(InjectedInstruction)
 
-    /// What the chip reads.
+    /// What the chip reads. Bloom's own instruction files read as the button that sent them, the
+    /// same as the blocks it puts in the message, so a pull request turn and a merge turn draw the
+    /// same kind of chip. See `SentTurn.title(forFile:)`.
     var label: String {
         switch self {
-        case .file(let path): (path as NSString).lastPathComponent
+        case .file(let path): SentTurn.title(forFile: path) ?? (path as NSString).lastPathComponent
         case .instructions(let block): block.title
+        }
+    }
+
+    /// Whether this chip stands for instructions Bloom gave the agent, by either road.
+    var isInstructions: Bool {
+        switch self {
+        case .file(let path): SentTurn.title(forFile: path) != nil
+        case .instructions: true
         }
     }
 
@@ -326,25 +346,20 @@ final class InlineChipAttachment: NSTextAttachment {
 /// `AttachmentChip`, because TextKit 1 has no way to put a view inside a line of text and
 /// `usedRect(for:)`, which is what grows this box a line at a time, is TextKit 1's alone.
 final class AttachmentChipCell: NSTextAttachmentCell {
-    /// What the chip is drawn on, as the three colours that depend on it.
-    ///
-    /// Plain `NSColor`s rather than anything dynamic for the bubble's ground, and that is not
-    /// laziness. An `NSColor` inside a text view resolves against the WINDOW's appearance, and the
-    /// user's bubble names `colorScheme` dark whatever the page is doing, so a dynamic pair here
-    /// would resolve on the light ramp inside a surface that is dark in both appearances. It is
-    /// the same trap `Palette.bubbleTextSelection` is a hard value for, and for the same reason.
     struct Ground: Equatable {
         var plate: NSColor
         var border: NSColor
         var ink: NSColor
 
-        /// Above the text field: the composer's own raised plate and hairline, taken from the
-        /// palette rather than spelled again here, and still resolved for whichever appearance the
-        /// window is in at the moment of drawing. Both are dynamic colours and converting one back
-        /// to AppKit keeps it dynamic.
-        @MainActor static let composer = Ground(
-            plate: NSColor(Palette.surfaceRaised), border: NSColor(Palette.border), ink: .labelColor
-        )
+        /// The composer's own raised plate and hairline, taken from the palette rather than spelled
+        /// again here, and still resolved for whichever appearance the window is in at the moment
+        /// of drawing. Both are dynamic colours and converting one back to AppKit keeps it dynamic.
+        ///
+        /// Computed rather than stored, so a chip drawn after the theme changes picks up the new
+        /// surfaces rather than the ones in force when this was first read.
+        @MainActor static var composer: Ground {
+            Ground(plate: NSColor(Palette.surfaceRaised), border: NSColor(Palette.border), ink: .labelColor)
+        }
 
         /// Inside a sent turn, on the accent fill `UserTurnRowView` draws.
         ///
@@ -352,35 +367,32 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         /// is lighter, and it is darker because the lighter one cannot carry text.**
         /// `AttachmentChip`, `Chip` and `DiffStatLabel` all sit on the accent fill as the inverted
         /// ink at twenty percent, which over Spatie Blue composites to `#4791A9`: white on that is
-        /// 3.56 to 1, under the 4.5 floor for body text. Nothing rescues a white plate here.
-        /// Ten percent is 4.32, still short; five percent is 4.76 and passes, but at 1.09 against
-        /// the fill it is a pill nobody can see, which is not a chip, it is a rumour of one.
+        /// 3.56 to 1, under the 4.5 floor for body text. Five percent passes at 4.76, but at 1.09
+        /// against the fill it is a pill nobody can see.
         ///
         /// So this one goes the other way. Spatie Blue at three quarters is `#13586E`, it carries
         /// the same white ink the sentence around it is set in at 7.93 to 1, and it stands off the
-        /// fill at 1.51, which is the separation the twenty percent plate already had (1.47). It
-        /// reads as a recess in the bubble rather than as a card lying on top of it, which is what
-        /// a path inside a sentence is.
+        /// fill at 1.51. It reads as a recess in the bubble rather than as a card lying on top of
+        /// it, which is what a path inside a sentence is.
         ///
-        /// One value rather than a pair, because `Palette.accentFill` is one value in both
-        /// appearances: these ratios are the ratios in light and in dark alike.
-        ///
-        /// The two treatments do not meet in practice. A turn draws these pills for the paths in
-        /// its sentence and `AttachmentChip` for the paths in its trailer, and nothing has written
-        /// a trailer since a file became a word in the sentence. See `AttachmentTrailer`.
+        /// Plain `NSColor`s rather than dynamic ones, and one value rather than a pair, because an
+        /// `NSColor` in a text view resolves against the WINDOW's appearance while the bubble is dark
+        /// in both, and `Palette.accentFill` is one value in both appearances.
         @MainActor static let userBubble = Ground(
             plate: NSColor(rgb: 0x13586E),
             // The plate's own edge, lifted off the plate rather than off the page: 2.34 against
             // what it encloses and 1.55 against the bubble outside it. A hairline in
-            // `Palette.border` disappears into a fill this saturated, which is the same finding
-            // `AttachmentChip.stroke` records.
+            // `Palette.border` disappears into a fill this saturated.
             border: NSColor(rgb: 0x6692A1),
             ink: .white
         )
     }
 
     let subject: InlineChip
-    private let ground: Ground
+    /// Whether the chip is drawn on the user's bubble. A flag rather than the `Ground` itself, so a
+    /// composer chip still reads the theme's surfaces when it draws rather than when it was built.
+    private let isOnBubble: Bool
+    private var ground: Ground { isOnBubble ? .userBubble : .composer }
     /// The font of the line the chip sits on, which is what it is sized against. Not `font`: an
     /// `NSCell` already has one of those and it means something else.
     private let lineFont: NSFont
@@ -423,7 +435,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
         self.subject = subject
         self.lineFont = font
-        self.ground = ground
+        self.isOnBubble = ground == .userBubble
         self.iconSize = iconSize
         self.nameWidth = nameWidth
         self.chipSize = NSSize(
@@ -521,23 +533,22 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     /// The mark in the slot before the name.
     ///
-    /// A file gets the icon its kind is drawn with everywhere else in this window. A block of
-    /// instructions has no kind and no file for `FileTypeIcon` to answer about, so it gets a symbol
-    /// in the ground's own ink: the same `doc.text` the button under the bubble used to carry, kept
-    /// so that a reader who knew that chip still recognises this one.
+    /// A file gets the icon its kind is drawn with everywhere else in this window. Instructions
+    /// get a symbol in the ground's own ink, whether they are a block in the message or one of
+    /// Bloom's own files: the same `doc.text` the button under the bubble used to carry, kept so
+    /// that a reader who knew that chip still recognises this one. An instruction file drawn with
+    /// the markdown icon was the half of the inconsistency `SentTurn.title(forFile:)` did not fix.
     ///
     /// Built per draw rather than held, exactly as `close` is. One chip in a turn is one of these,
     /// and it is a glyph.
     private var icon: NSImage? {
-        switch subject {
-        case .file:
-            return FileTypeIcon.icon(for: label)
-        case .instructions:
-            let size = NSImage.SymbolConfiguration(pointSize: iconSize - 3, weight: .regular)
-            let colour = NSImage.SymbolConfiguration(paletteColors: [ground.ink])
-            return NSImage(systemSymbolName: "doc.text", accessibilityDescription: label)?
-                .withSymbolConfiguration(size.applying(colour))
+        if case .file(let path) = subject, !subject.isInstructions {
+            return FileTypeIcon.icon(for: (path as NSString).lastPathComponent)
         }
+        let size = NSImage.SymbolConfiguration(pointSize: iconSize - 3, weight: .regular)
+        let colour = NSImage.SymbolConfiguration(paletteColors: [ground.ink])
+        return NSImage(systemSymbolName: "doc.text", accessibilityDescription: label)?
+            .withSymbolConfiguration(size.applying(colour))
     }
 
     // MARK: - Taking it off
@@ -586,7 +597,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     /// Where a click takes the file off rather than opening it: the icon's slot and the padding
     /// around it, up to halfway across the gap before the name. Wider than the glyph on purpose,
-    /// which is fourteen points in a twenty point pill, and stopping short of the name because
+    /// which is twelve points in a fifteen point pill, and stopping short of the name because
     /// reading the name is what tells you which file you are about to remove.
     private func closeRect(in frame: NSRect) -> NSRect {
         NSRect(

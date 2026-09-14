@@ -26,7 +26,7 @@ public enum TabSet {
     /// Taken here rather than left to each caller, because "a chat with a parent is not a tab" is
     /// the same rule as "conversations first and tools after them" and both belong in one file.
     public static func tabbable(_ sessions: [Session]) -> [SessionID] {
-        sessions.filter { $0.parentSessionID == nil }.map(\.id)
+        sessions.filter { $0.parentSessionID == nil && $0.sideConversationParentID == nil }.map(\.id)
     }
 
     /// The strip, left to right.
