@@ -4,6 +4,37 @@ import Testing
 
 @Suite("What a pane was running")
 struct ProcessTableTests {
+    @Test("Interactive agents are recognised without matching prompts or other tools")
+    func interactiveAgents() {
+        #expect(ProcessTable.interactiveAgent(command: "/usr/local/bin/claude build something") == .claudeCode)
+        #expect(ProcessTable.interactiveAgent(command: "codex resume session-id") == .codex)
+        #expect(ProcessTable.interactiveAgent(command: "codex please apply the fix") == .codex)
+        #expect(ProcessTable.interactiveAgent(command: "codex --model example please review this") == .codex)
+        #expect(ProcessTable.interactiveAgent(command: "node /opt/lib/node_modules/@anthropic-ai/claude-code/cli.js") == .claudeCode)
+        #expect(ProcessTable.interactiveAgent(command: "node /opt/lib/node_modules/@openai/codex/bin/codex.js") == .codex)
+        for command in ["echo claude", "my-codex", "claude -p hello", "claude --print hello",
+                        "codex exec hello", "codex -C /tmp exec hello", "codex app-server", "codex --help", "claude mcp list",
+                        "node /tmp/cli.js codex", "codex review"] {
+            #expect(ProcessTable.interactiveAgent(command: command) == nil)
+        }
+    }
+
+    @Test("Detection follows wrappers but stays inside the selected shell job")
+    func interactiveJobTree() {
+        let table = ProcessTable(psOutput: """
+            10 1 10 /bin/zsh
+            20 10 20 wrapper
+            21 20 20 /usr/local/bin/codex
+            30 1 30 claude
+            """)
+        #expect(table.interactiveAgent(ofShell: 10) == .codex)
+        #expect(table.interactiveAgent(ofShell: 0) == nil)
+        let newerJob = ProcessTable(rows: table.rows + [
+            ProcessTable.Row(pid: 40, parent: 10, group: 40, command: "vim")
+        ])
+        #expect(newerJob.interactiveAgent(ofShell: 10) == nil)
+    }
+
     /// The shape `ps -Ao pid=,ppid=,pgid=,args=` actually prints: right aligned numbers, and the
     /// command taking the whole rest of the line.
     private static let sample = """

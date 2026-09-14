@@ -53,7 +53,16 @@ struct ToolPaneView: View {
                             repo: model.repo,
                             port: model.port,
                             directory: tab.directory,
-                            onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
+                            onCloseTab: {
+                                Task {
+                                    if let sessionID = tab.agentSessionID,
+                                       let session = model.sessions.first(where: { $0.id == sessionID }) {
+                                        await model.closeSession(session)
+                                    } else {
+                                        await CenterTabStore.shared.close(tab)
+                                    }
+                                }
+                            },
                             splitColumn: splitColumn
                         )
                         .id(tab.id)

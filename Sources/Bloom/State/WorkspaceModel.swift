@@ -325,6 +325,7 @@ final class WorkspaceModel {
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
+    var pendingCLILaunches: Set<SessionID> = []
 
     init(workspace: Workspace, app: AppModel) {
         self.workspace = workspace
@@ -391,6 +392,7 @@ final class WorkspaceModel {
     /// arrival at a workspace whose sessions had not moved since the last one. That is a second
     /// full layout of the centre column, on the main thread, for a list that is the same list.
     func reloadSessions() async {
+        CenterTabStore.shared.load(workspaceID: workspace.id)
         guard let store else { return }
         SwitchTrace.mark("sessions.query.start", workspace: workspace.id)
         let fresh = (try? await store.sessions(workspaceID: workspace.id)) ?? []
@@ -493,6 +495,10 @@ final class WorkspaceModel {
 
     func closeSession(_ session: Session) async {
         guard let store else { return }
+        if let terminal = CenterTabStore.shared.terminal(for: session.id, in: workspace.id) {
+            await CenterTabStore.shared.close(terminal)
+            pendingCLILaunches.remove(session.id)
+        }
         transcripts[session.id]?.teardown()
         transcripts[session.id] = nil
         // Closing is one column. The strip's copy of this row can be a whole turn old, and the
@@ -540,13 +546,14 @@ final class WorkspaceModel {
     /// Builds a session's transcript if this launch has not seen it yet. Called from a task, never
     /// from a body, for the reason `transcript(for:)` spells out.
     func prepareTranscript(for sessionID: SessionID) {
-        guard let session = sessions.first(where: { $0.id == sessionID }) else { return }
+        guard CenterTabStore.shared.terminal(for: sessionID, in: workspace.id) == nil,
+              let session = sessions.first(where: { $0.id == sessionID }) else { return }
         transcript(for: session)
     }
 
     private func prepareActiveTranscript() {
         guard let session = activeSession else { return }
-        transcript(for: session)
+        prepareTranscript(for: session.id)
     }
 
     // MARK: - Crew
@@ -843,10 +850,12 @@ final class WorkspaceModel {
     /// for `AppModel`'s mirrors. Only the transcripts that exist: asking for one would build a
     /// model for every session in the strip.
     var liveTurns: [AgentTurns.Live] {
-        transcripts.keys.compactMap(liveTurn(for:))
+        let ids = Set(transcripts.keys).union(sessions.map(\.id))
+        return ids.compactMap(liveTurn(for:))
     }
 
     private func liveTurn(for sessionID: SessionID) -> AgentTurns.Live? {
+        if let terminal = TerminalSessionStore.shared.agentTurns[sessionID] { return terminal }
         guard let transcript = transcripts[sessionID] else { return nil }
         return AgentTurns.Live(
             sessionID: sessionID,
@@ -964,13 +973,34 @@ final class WorkspaceModel {
     /// workspace with "list the technologies used", typed "test" a moment later, and got "test"
     /// answered first. See `Delivery` and `TranscriptModel.submit`.
     func startSetupThenSend(prompt: String?, repo: Repo) async {
-        await enqueueOpening(prompt)
+        let cliSession = activeSession.flatMap { session in
+            CenterTabStore.shared.terminal(for: session.id, in: workspace.id).map { _ in session }
+        }
+        let cliDelivery: Delivery?
+        if let cliSession, let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            cliDelivery = try? await store?.enqueueDelivery(Delivery(targetSessionID: cliSession.id, body: prompt))
+            if let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
+               let command = cliSession.agentKind.interactiveCommand(
+                   directory: workspace.path, prompt: prompt, sessionID: cliSession.id,
+                   model: cliSession.model, effort: cliSession.effort
+               ) {
+                try? await store?.setSetting(TerminalCommandMemory.key(paneID: terminal.id), command)
+            }
+        } else {
+            cliDelivery = nil
+        }
+        if cliSession == nil { await enqueueOpening(prompt) }
 
         setupTask?.cancel()
         setupGeneration += 1
         let generation = setupGeneration
         setupTask = Task { [weak self] in
-            await self?.runSetupThenSend(repo: repo)
+            await self?.runSetupThenSend(repo: repo, cliSession: cliSession, cliPrompt: prompt)
+            if let cliDelivery, let self, !Task.isCancelled,
+               !self.pendingCLILaunches.contains(cliDelivery.targetSessionID),
+               CenterTabStore.shared.terminal(for: cliDelivery.targetSessionID, in: self.workspace.id) != nil {
+                _ = try? await self.store?.markDelivered(id: cliDelivery.id)
+            }
             // Only clear the handle if it is still this run's. A cancelled setup finishes after
             // the one that replaced it has already been stored, and clearing unconditionally
             // dropped the live handle, which left the new run with nothing able to cancel it.
@@ -1001,7 +1031,7 @@ final class WorkspaceModel {
 
     /// Runs the setup script, streaming into the transcript's setup row, then lets the chat's
     /// queue move.
-    func runSetupThenSend(repo: Repo) async {
+    func runSetupThenSend(repo: Repo, cliSession: Session? = nil, cliPrompt: String? = nil) async {
         guard let manager = app.manager else { return }
 
         // Off the main actor: this reads and parses up to six files from disk, and it runs at the
@@ -1037,7 +1067,21 @@ final class WorkspaceModel {
         }
 
         await reloadSessions()
-        guard !Task.isCancelled, let session = activeSession else { return }
+        guard !Task.isCancelled else { return }
+        if let cliSession {
+            guard let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
+                  sessions.contains(where: { $0.id == cliSession.id }),
+                  let command = cliSession.agentKind.interactiveCommand(
+                      directory: workspace.path, prompt: cliPrompt ?? "", sessionID: cliSession.id,
+                      model: cliSession.model, effort: cliSession.effort, permissionMode: nil
+                  ) else { return }
+            try? FileManager.default.removeItem(at: AgentKind.interactiveStatusURL(sessionID: cliSession.id))
+            TerminalSessionStore.shared.run(command, inPaneID: terminal.id)
+            pendingCLILaunches.remove(cliSession.id)
+            return
+        }
+        guard let session = activeSession,
+              CenterTabStore.shared.terminal(for: session.id, in: workspace.id) == nil else { return }
         // The worktree is built, so whatever was asked for while it was being built may go, oldest
         // first. Nothing is passed in: the opening prompt is already in the queue, and so is
         // anything typed into the composer since. See `enqueueOpening`.

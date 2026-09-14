@@ -483,7 +483,7 @@ struct CreateWorkspaceView: View {
                 .foregroundStyle(Palette.textPrimary)
 
             switch mode {
-            case .chat: chatBox
+            case .chat, .claudeCLI, .codexCLI: chatBox
             // One box for both, because they ask the same question. What differs between a
             // terminal and a browser start is which tab the workspace lands on, and that is
             // settled after the window is gone. See `WorkspaceStartMode.pane`.
@@ -521,7 +521,7 @@ struct CreateWorkspaceView: View {
                 Text(candidate.pickerLabel).tag(candidate)
             }
         }
-        .pickerStyle(.segmented)
+        .pickerStyle(.menu)
         .fixedSize()
         // Explicit so every interactive control reads from the shared semantic token.
         .tint(Palette.controlAccent)
@@ -545,7 +545,7 @@ struct CreateWorkspaceView: View {
                     typedName = WorkspaceStartPlan.carriedName(
                         prompt: spokenPrompt, currentName: typedName
                     )
-                case .chat:
+                case .chat, .claudeCLI, .codexCLI:
                     prompt = WorkspaceStartPlan.carriedPrompt(
                         name: typedName, currentPrompt: prompt
                     )
@@ -591,7 +591,8 @@ struct CreateWorkspaceView: View {
                 // not going to cut a worktree because a row was arrowed onto. `QuickPromptDelivery`
                 // is the same fallback said once, for a surface that can do neither.
                 onQuickPrompt: actions.insert,
-                onSend: create
+                onSend: create,
+                showsAgentControls: mode.cliAgentKind == nil
             )
         }
     }
@@ -729,7 +730,13 @@ struct CreateWorkspaceView: View {
     /// now.
     private var statusRow: some View {
         HStack(spacing: Metrics.spacingWide) {
-            hint
+            if mode.cliAgentKind != nil {
+                Text("Opens in a terminal using your CLI settings")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            } else {
+                hint
+            }
 
             Spacer(minLength: 0)
         }
@@ -1130,7 +1137,7 @@ struct CreateWorkspaceView: View {
         )
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
         let source = checkout
-        let chosenControls = controls
+        let chosenControls: ComposerControls? = chosen.cliAgentKind == nil ? controls : nil
         let shouldRunSetup = runSetupScript
 
         // A file can be moved or deleted between being attached and Create being pressed, and

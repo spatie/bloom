@@ -117,6 +117,27 @@ public extension SessionState {
 }
 
 public extension Session {
+    // Polls can miss intermediate hooks, so a waiting snapshot may be the first event we see.
+    mutating func applyInteractiveState(_ observed: SessionState, at date: Date = Date()) {
+        guard state != observed else { return }
+        switch observed {
+        case .running:
+            apply(state == .waiting ? .unblocked : .turnStarted, at: date)
+        case .waiting:
+            if !state.isMidTurn { apply(.turnStarted, at: date) }
+            apply(.blocked, at: date)
+        case .idle:
+            if !state.isMidTurn { apply(.turnStarted, at: date) }
+            apply(.turnFinished(isError: false), at: date)
+        case .failed:
+            if !state.isMidTurn { apply(.turnStarted, at: date) }
+            apply(.turnFinished(isError: true), at: date)
+        case .cancelled:
+            if !state.isMidTurn { apply(.turnStarted, at: date) }
+            apply(.cancelled, at: date)
+        }
+    }
+
     /// Move the session state, and stamp the moment it moved. The only way in.
     ///
     /// `updatedAt` is not a separate chore a caller remembers. It is this runner's statement about

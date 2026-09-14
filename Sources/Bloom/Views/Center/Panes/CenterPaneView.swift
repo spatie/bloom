@@ -73,6 +73,7 @@ struct CenterPaneView: View {
     private var waiting: PaneWait? {
         switch showing {
         case .chat(let sessionID):
+            if CenterTabStore.shared.terminal(for: sessionID, in: model.workspace.id) != nil { return nil }
             // The transcript exists, so the pane has a composer to draw and the wait belongs to
             // the transcript rather than to the pane. See `ChatPaneView.waiting`.
             //
@@ -156,7 +157,16 @@ struct CenterPaneView: View {
         case .chat(let sessionID):
             // The lookup only, never `transcript(for:)`: building one writes observed state, and a
             // body may not do that. `prepare` below is where it is built.
-            if let transcript = model.existingTranscript(for: sessionID) {
+            if let terminal = CenterTabStore.shared.terminal(for: sessionID, in: model.workspace.id) {
+                if model.pendingCLILaunches.contains(sessionID) {
+                    setupState
+                } else {
+                    ToolPaneView(
+                        model: model, tab: terminal, siblings: paneContents,
+                        splitColumn: { split($0, opening: $1) }, paneMenu: hostedMenu
+                    )
+                }
+            } else if let transcript = model.existingTranscript(for: sessionID) {
                 ChatPaneView(transcript: transcript, model: model, pane: pane)
             } else if model.sessions.contains(where: { $0.id == sessionID }) {
                 // Nothing, rather than the `LoadingView` that used to be here. This branch is the

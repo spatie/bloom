@@ -57,6 +57,7 @@ struct CenterColumnView: View {
         // The worktree was cut seconds ago and its setup script may still be running, so the port
         // is answering nothing: an opening tab on a refused connection would be an error page as
         // the first thing a new workspace shows. The address field is where somebody says.
+        guard opening.cliAgentKind == nil else { return }
         NewPane.open(opening.pane, in: model) { WorkspaceTabsStore.shared.select($0, in: model) }
     }
 }

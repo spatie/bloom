@@ -140,7 +140,7 @@ final class CenterTabStore {
     @discardableResult
     func add(
         kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil,
-        directory: String = ""
+        directory: String = "", agentSessionID: SessionID? = nil
     ) -> CenterTab {
         var tabs = tabs(for: workspaceID)
         let tab = CenterTab(
@@ -149,11 +149,16 @@ final class CenterTabStore {
             title: title ?? Self.nextTitle(for: kind, in: tabs),
             url: url,
             isNamed: title != nil,
-            directory: directory
+            directory: directory,
+            agentSessionID: agentSessionID
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)
         return tab
+    }
+
+    func terminal(for sessionID: SessionID, in workspaceID: WorkspaceID) -> CenterTab? {
+        tabs(for: workspaceID).first { $0.kind == .terminal && $0.agentSessionID == sessionID }
     }
 
     /// Every terminal tab of a workspace, by id, without loading the workspace into the cache.

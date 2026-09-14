@@ -601,6 +601,13 @@ final class TranscriptModel {
     /// `sending`.
     func submit(_ text: String) async {
         guard !isWorkspaceArchiving else { return }
+        if usesInteractiveTerminal {
+            app.alert = BloomAlert(
+                title: "This agent runs in a terminal",
+                message: "Open its agent tab and enter the prompt in the CLI."
+            )
+            return
+        }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
@@ -719,6 +726,7 @@ final class TranscriptModel {
     /// for at that moment, and both are covered by the queue simply sitting there, visibly, until
     /// somebody says something.
     func drain() async {
+        guard !usesInteractiveTerminal else { return }
         guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
         guard drainState.begin() else { return }
         var allowRepeat = true
@@ -1258,6 +1266,7 @@ final class TranscriptModel {
     /// second caller of this would take the app down. There is no reason for the guarantee to be
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
+        guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
         let preferences = RunnerPreferences(session: session)
@@ -1284,6 +1293,12 @@ final class TranscriptModel {
         runnerPreferences = preferences
         if pumpTask == nil { startPump(on: runner) }
         return runner
+    }
+
+    private var usesInteractiveTerminal: Bool {
+        guard let workspaceID = session.workspaceID else { return false }
+        CenterTabStore.shared.load(workspaceID: workspaceID)
+        return CenterTabStore.shared.terminal(for: session.id, in: workspaceID) != nil
     }
 
     /// The one place a backend becomes a process. Static and taking only values, so which runner a

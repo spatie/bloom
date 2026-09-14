@@ -397,6 +397,16 @@ final class AppModel {
             // AFTER both migrations above, and that order is load bearing rather than tidy: the
             // sweep kills every session no tab names, and until those tabs have moved into the
             // centre column no tab names any of them.
+            TerminalSessionStore.shared.onAgentActivityChanged = { [weak self] in
+                self?.noteAgentTurnsChanged()
+            }
+            TerminalSessionStore.shared.onAgentTurnFinished = { [weak self] workspaceID in
+                guard let self else { return }
+                try? await store.touch(workspaceID: workspaceID, unread: self.selection.workspaceID != workspaceID)
+                if let model = self.existingModel(for: workspaceID) {
+                    Task { await model.onTurnFinished() }
+                }
+            }
             TerminalSessionStore.shared.useStore(store)
             BottomPanelDefaults.forget()
             bridge = makeBridge(on: store)
@@ -598,6 +608,7 @@ final class AppModel {
             // The models hold a copy of their `Workspace`, and this is where those copies go
             // stale. Refreshing here keeps `model(for:)` out of every view body.
             for workspace in workspaces {
+                CenterTabStore.shared.load(workspaceID: workspace.id)
                 if let existing = workspaceModels[workspace.id], existing.workspace != workspace {
                     existing.workspace = workspace
                 }
@@ -1135,7 +1146,9 @@ final class AppModel {
     /// Each set is written only when it has actually moved. An identical value assigned back is
     /// still a mutation to the Observation runtime, and this runs on every session write.
     private func recomputeAgentTurns() {
+        let terminalTurns = TerminalSessionStore.shared.agentTurns
         let live = workspaceModels.values.flatMap { $0.liveTurns }
+            .filter { terminalTurns[$0.sessionID] == nil } + Array(terminalTurns.values)
         let running = AgentTurns.workspaces(.running, stored: storedActivity, live: live)
         let waiting = AgentTurns.workspaces(.awaitingPermission, stored: storedActivity, live: live)
         if runningWorkspaceIDs != running { runningWorkspaceIDs = running }

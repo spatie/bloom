@@ -89,4 +89,75 @@ public struct ProcessTable: Sendable, Equatable {
         let leaders = children.filter { $0.pid == $0.group }
         return (leaders.isEmpty ? children : leaders).last?.command
     }
+    // This shares foregroundCommand's job heuristic; process presence does not prove an active turn.
+    public func interactiveAgent(ofShell shell: Int32) -> AgentKind? {
+        interactiveAgentProcess(ofShell: shell).flatMap { Self.interactiveAgent(command: $0.command) }
+    }
+
+    public func interactiveAgentProcess(ofShell shell: Int32) -> Row? {
+        guard shell > 0 else { return nil }
+        let children = rows.filter { $0.parent == shell && $0.pid != shell }
+        let leaders = children.filter { $0.pid == $0.group }
+        guard let job = (leaders.isEmpty ? children : leaders).last else { return nil }
+        var pending = [job]
+        var visited: Set<Int32> = []
+        while let process = pending.popLast() {
+            guard visited.insert(process.pid).inserted else { continue }
+            if Self.interactiveAgent(command: process.command) != nil { return process }
+            pending.append(contentsOf: rows.filter { $0.parent == process.pid })
+        }
+        return nil
+    }
+
+    public static func interactiveAgent(command: String) -> AgentKind? {
+        var arguments = command.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard let executable = arguments.first else { return nil }
+        let name = URL(fileURLWithPath: executable).lastPathComponent
+        if name == "node" || name == "nodejs" || name == "bun" {
+            arguments.removeFirst()
+            guard let script = arguments.first else { return nil }
+            if script.hasSuffix("/@anthropic-ai/claude-code/cli.js") {
+                arguments[0] = "claude"
+            } else if script.hasSuffix("/@openai/codex/bin/codex.js") {
+                arguments[0] = "codex"
+            } else {
+                return nil
+            }
+        }
+        guard let commandName = arguments.first else { return nil }
+        let binary = URL(fileURLWithPath: commandName).lastPathComponent
+        let flags = arguments.dropFirst().prefix { $0 != "--" }
+        if flags.contains("--help") || flags.contains("-h")
+            || flags.contains("--version") || flags.contains("-V") { return nil }
+        switch binary {
+        case "claude":
+            guard !flags.contains(where: {
+                $0 == "--print" || $0.hasPrefix("--print=") || $0 == "-p"
+                    || $0.hasPrefix("--output-format")
+            }) else { return nil }
+            let commands: Set<String> = ["auth", "mcp", "plugin", "install", "update", "doctor", "setup-token"]
+            guard arguments.dropFirst().first.map({ !commands.contains($0) }) ?? true else { return nil }
+            return .claudeCode
+        case "codex":
+            let commands: Set<String> = ["exec", "e", "review", "app-server", "mcp-server", "mcp", "login", "logout", "completion", "sandbox", "debug", "apply", "cloud", "features", "help"]
+            let valueOptions: Set<String> = ["-c", "--config", "-m", "--model", "-C", "--cd", "-s", "--sandbox", "-a", "--ask-for-approval", "-i", "--image", "-p", "--profile", "--add-dir", "--enable", "--disable"]
+            var index = 1
+            while index < arguments.count {
+                let argument = arguments[index]
+                if argument == "--" { break }
+                if valueOptions.contains(argument) {
+                    index += 2
+                } else if argument.hasPrefix("-") {
+                    index += 1
+                } else {
+                    guard !commands.contains(argument) else { return nil }
+                    break
+                }
+            }
+            return .codex
+        default:
+            return nil
+        }
+    }
+
 }
