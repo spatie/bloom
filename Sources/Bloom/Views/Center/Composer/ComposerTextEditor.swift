@@ -224,6 +224,8 @@ struct ComposerTextEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        _ = ColourThemePreference.shared.choice
+        scrollView.documentView?.needsDisplay = true
         guard let textView = scrollView.documentView as? ComposerTextView else { return }
         context.coordinator.parent = self
         handle?.textView = textView
@@ -285,7 +287,10 @@ struct ComposerTextEditor: NSViewRepresentable {
         /// An update can precede attachment to a window, even from a SwiftUI task. Retry the
         /// current request on attachment, without retaining a stale request after focus moved.
         func applyFocus(to textView: ComposerTextView) {
-            guard let window = textView.window else { return }
+            guard let window = textView.window,
+                  AutomaticFocus.mayUpdateResponder(applicationIsActive: NSApp.isActive,
+                                                    windowIsKey: window.isKeyWindow,
+                                                    windowIsVisible: window.isVisible) else { return }
             let holdsKeyboard = window.firstResponder === textView
             if ComposerFocus.shouldTakeKeyboard(
                 wantsFocus: parent.isFocused, holdsKeyboard: holdsKeyboard,
@@ -380,10 +385,11 @@ struct ComposerTextEditor: NSViewRepresentable {
                 return parent.onKey(flags.contains(.command) ? .commandReturn : .returnKey)
             case 53: // Escape
                 return parent.onKey(.escape)
-            case 125: // Down
-                return parent.onKey(.down)
-            case 126: // Up
-                return parent.onKey(.up)
+            case 125, 126: // Down, Up
+                // Bare arrows only. Shift extends a selection and Command and Option jump the caret,
+                // and none of those should step through a menu or recall a sent prompt.
+                guard flags.isDisjoint(with: [.shift, .command, .option, .control]) else { return false }
+                return parent.onKey(event.keyCode == 126 ? .up : .down)
             case 48: // Tab
                 return parent.onKey(.tab)
             case 51: // Delete

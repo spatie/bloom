@@ -54,12 +54,21 @@ struct StartProjectView: View {
     /// the window appears, so it cannot move while somebody is typing.
     @State private var defaultLocation = ""
     @State private var projectsThere = 0
+    @State private var searchLocations: [String] = []
+    @State private var isLocationLoaded = false
+    @State private var completions: [String] = []
+    @State private var selectedCompletion: Int?
+    @State private var acceptedCompletion: String?
     /// What the first commit's branch will be. Read from git rather than asserted, because a
     /// machine with `init.defaultBranch` set gets its own answer. See `NewProjectStarter`.
     @State private var branch = "main"
     /// Set when git on this Mac has no name or address configured, in which case no commit can be
     /// made and the button is held before anything is written rather than half way through it.
     @State private var identityProblem: String?
+    /// What git said about the last target with a `.git` in it. Kept beside `facts` rather than
+    /// in them, because `facts` is replaced on every settled keystroke and this is asked once per
+    /// path. See `NewProjectStarter.repositoryProblem`.
+    @State private var repositoryCheck: RepositoryCheck?
     @State private var createTask: Task<Void, Never>?
     @State private var isStepSlow = false
     /// Set by every path that ends this window on purpose, so the close that follows is not read
@@ -90,7 +99,22 @@ struct StartProjectView: View {
 
     private var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
 
-    private var verdict: ProjectTargetVerdict { ProjectTargetVerdict.of(facts) }
+    private var verdict: ProjectTargetVerdict { ProjectTargetVerdict.of(checked(facts)) }
+
+    /// The facts, with git's answer folded in once it is about the same path.
+    private func checked(_ inspected: NewProjectFacts) -> NewProjectFacts {
+        var checked = inspected
+        if let repositoryCheck, repositoryCheck.path == inspected.path {
+            checked.gitProblem = repositoryCheck.problem
+        }
+        return checked
+    }
+
+    /// The folder git has to be asked about, which is only ever one with a `.git` in it.
+    private var repositoryToCheck: String? {
+        guard facts.targetIsRepository, !facts.path.isEmpty else { return nil }
+        return facts.path
+    }
 
     private var hasTyped: Bool {
         !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -98,6 +122,9 @@ struct StartProjectView: View {
 
     /// The block, from the core: the instruction before anything is typed, and the verdict after.
     private var consequence: ProjectConsequence {
+        guard isLocationLoaded else {
+            return ProjectConsequence(detail: "Loading project folders…", tone: .waiting)
+        }
         guard hasTyped else {
             return .opening(location: defaultLocation, projectsThere: projectsThere, home: home)
         }
@@ -132,15 +159,17 @@ struct StartProjectView: View {
         // worth saying once, which is why it moves rather than goes: "Setting up bloom" is what
         // the window is doing, and a failure's title is what went wrong.
         .navigationTitle(title)
-        .onAppear {
-            if defaultLocation.isEmpty {
-                let paths = app.repos.map(\.path)
-                defaultLocation = NewProjectPlan.suggestedLocation(projectPaths: paths, home: home)
-                projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: paths)
-            }
-            isFieldFocused = true
-        }
         .task {
+            let preferences: DirectoryPreferences
+            if let store = app.store { preferences = await DirectoryPreferences.load(from: store) } else {
+                preferences = DirectoryPreferences()
+            }
+            let paths = app.repos.map(\.path)
+            defaultLocation = preferences.projectLocation(projectPaths: paths, home: home)
+            searchLocations = preferences.searchLocations(projectPaths: paths, home: home)
+            projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: paths)
+            isLocationLoaded = true
+            isFieldFocused = true
             branch = await NewProjectStarter.plannedBranch()
             identityProblem = await RepositoryStarter.identityProblem(at: home)
         }
@@ -157,6 +186,29 @@ struct StartProjectView: View {
             }.value
             guard !Task.isCancelled else { return }
             facts = found
+        }
+        .task(id: typed + searchLocations.joined(separator: "\n")) {
+            completions = []
+            selectedCompletion = nil
+            guard typed != acceptedCompletion else { return }
+            try? await Task.sleep(for: Self.inspectionDelay)
+            guard !Task.isCancelled else { return }
+            let line = typed
+            let locations = searchLocations
+            let userHome = home
+            let matches = await Task.detached {
+                ProjectCompletion.matches(line, locations: locations, home: userHome)
+            }.value
+            guard !Task.isCancelled else { return }
+            completions = matches
+        }
+        // A `.git` on disk is not git agreeing, and Add runs git. Asked here so the block refuses
+        // before the button is pressed rather than the sidebar refusing after the window closed.
+        .task(id: repositoryToCheck) {
+            guard let path = repositoryToCheck else { return }
+            let problem = await NewProjectStarter.repositoryProblem(at: path)
+            guard !Task.isCancelled else { return }
+            repositoryCheck = RepositoryCheck(path: path, problem: problem)
         }
         // The counts under a Start Tracking verdict, which are a walk of the whole folder and so
         // are asked only once the target has settled on one. Keyed on the path rather than on the
@@ -192,6 +244,11 @@ struct StartProjectView: View {
     private struct Draft: Equatable {
         var typed: String
         var location: String
+    }
+
+    private struct RepositoryCheck: Equatable {
+        var path: String
+        var problem: GitRepositoryProblem?
     }
 
     /// The folder whose contents are worth counting, and nil for every other verdict.
@@ -250,8 +307,58 @@ struct StartProjectView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.body)
                 .focused($isFieldFocused)
-                .onSubmit(start)
+                .disabled(!isLocationLoaded)
+                .onKeyPress(.return) {
+                    guard let selectedCompletion else { return .ignored }
+                    acceptCompletion(selectedCompletion)
+                    return .handled
+                }
+                .onSubmit {
+                    if let selectedCompletion { acceptCompletion(selectedCompletion) } else { start() }
+                }
+                .onKeyPress(.downArrow) {
+                    guard !completions.isEmpty else { return .ignored }
+                    selectedCompletion = min((selectedCompletion ?? -1) + 1, completions.count - 1)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    guard !completions.isEmpty else { return .ignored }
+                    selectedCompletion = max((selectedCompletion ?? 1) - 1, 0)
+                    return .handled
+                }
+                .onKeyPress(.tab) {
+                    guard !completions.isEmpty else { return .ignored }
+                    acceptCompletion(selectedCompletion ?? 0)
+                    return .handled
+                }
+                .onKeyPress(.escape) {
+                    guard !completions.isEmpty else { return .ignored }
+                    completions = []
+                    selectedCompletion = nil
+                    return .handled
+                }
             Button("Choose\u{2026}", action: chooseFolder)
+        }
+
+        if !completions.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                ForEach(Array(completions.enumerated()), id: \.element) { index, path in
+                    Button { acceptCompletion(index) } label: {
+                        HStack {
+                            Image(systemName: "folder")
+                            Text((path as NSString).lastPathComponent)
+                            Spacer()
+                            Text(NewProjectPlan.display(path, home: home))
+                                .foregroundStyle(Palette.textSecondary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                        .padding(Metrics.spacingSmall)
+                        .background(selectedCompletion == index ? Palette.controlAccent.opacity(0.15) : .clear)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NewProjectPlan.display(path, home: home))
+                }
+            }
         }
 
         // Only where a commit is about to be made. Adding a repository writes nothing, so an
@@ -458,11 +565,20 @@ struct StartProjectView: View {
     }
 
     private var canStart: Bool {
-        guard hasTyped, verdict.isAllowed else { return false }
+        guard isLocationLoaded, hasTyped, verdict.isAllowed else { return false }
         return identityProblem == nil || !verdict.makesACommit
     }
 
     // MARK: - Work
+
+    private func acceptCompletion(_ index: Int) {
+        guard completions.indices.contains(index) else { return }
+        let path = NewProjectPlan.display(completions[index], home: home)
+        acceptedCompletion = path
+        typed = path
+        completions = []
+        selectedCompletion = nil
+    }
 
     private func chooseFolder() {
         // The panel lands on THIS window, and nothing here had to change for that: `present()`
@@ -491,16 +607,29 @@ struct StartProjectView: View {
         // keyboard on purpose, and Return is faster than that beat: without this, typing a name
         // and pressing Return in one movement pressed a button that was still looking at the empty
         // field. It is a handful of stats, once, on a key press.
-        let current = NewProjectStarter.inspect(typed: typed, defaultLocation: defaultLocation)
-        facts = current
+        let inspected = NewProjectStarter.inspect(typed: typed, defaultLocation: defaultLocation)
+        facts = inspected
+        let current = checked(inspected)
         let decided = ProjectTargetVerdict.of(current)
         guard decided.isAllowed, !current.path.isEmpty else { return }
         guard identityProblem == nil || !decided.makesACommit else { return }
 
         // Nothing is written for a repository that is already one, so there is no run to watch and
         // no failure to report: the project simply appears in the sidebar.
+        //
+        // Unless git has not been asked yet, which is Return pressed faster than the check above.
+        // Asked here then, so a git that will not read the folder refuses in this window.
         if case .add(let root) = decided {
-            finish(StartedProject(path: root, opensWorkspace: false))
+            if repositoryCheck?.path == current.path {
+                finish(StartedProject(path: root, opensWorkspace: false))
+                return
+            }
+            Task {
+                let problem = await NewProjectStarter.repositoryProblem(at: current.path)
+                repositoryCheck = RepositoryCheck(path: current.path, problem: problem)
+                guard problem == nil else { return }
+                finish(StartedProject(path: root, opensWorkspace: false))
+            }
             return
         }
 

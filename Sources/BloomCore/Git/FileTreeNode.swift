@@ -19,6 +19,14 @@ public struct FileTreeNode: Identifiable, Hashable, Sendable {
         self.isDirectory = isDirectory
     }
 
+    public static func ancestors(of path: String, in children: [String: [FileTreeNode]]) -> Set<String>? {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
+        let parent = parts.dropLast().joined(separator: "/")
+        guard children[parent]?.contains(where: { $0.path == path && !$0.isDirectory }) == true else { return nil }
+        return Set((1..<parts.count).map { parts.prefix($0).joined(separator: "/") })
+    }
+
     /// One pass over `git ls-files` output builds every directory's children, which is what makes
     /// expanding a folder free later on. A repository with fifty thousand files costs one
     /// subprocess and this dictionary, rather than fifty thousand live nodes.

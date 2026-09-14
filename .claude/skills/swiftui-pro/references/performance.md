@@ -1,46 +1,20 @@
-# Performance
+# SwiftUI performance
 
-- When toggling modifier values, prefer ternary expressions over if/else view branching to avoid `_ConditionalContent`, preserve structural identity, and avoid repeatedly recreating underlying platform views.
-- Avoid `AnyView` unless absolutely required. Use `@ViewBuilder`, `Group`, or generics instead.
-- If a `ScrollView` has an opaque, static, and solid background, prefer to use `scrollContentBackground(.visible)` to improve scroll-edge rendering efficiency.
-- It is more efficient to break views up by making dedicated SwiftUI views rather than place them into computed properties or methods. Using `@ViewBuilder` on a property or method does not solve this; breaking views up is strongly preferred.
-- Always ensure view initializers are kept as small and simple as possible, avoiding any non-trivial work. Flag any work that can be moved into a `task()` modifier to be run when the view is shown.
-- Similarly, assume each view’s `body` property is called frequently – if logic such as sorting or filtering can be moved out of there easily, it should be.
-- Avoid creating properties to store formatters such as `DateFormatter` unless they are required. A more natural approach is to use `Text` with a format, like this: `Text(Date.now, format: .dateTime.day().month().year())` or `Text(100, format: .currency(code: "USD"))`.
-- Avoid expensive inline transforms in `List`/`ForEach` initializers (e.g. `items.filter { ... }`) when they are repeated often.
-- Prefer deriving transformed data from the source-of-truth using `let`, or caching in `@State`. However, do not cache derived collections in `@State` unless you also own explicit invalidation logic to avoid stale UI.
-- For large data sets in `ScrollView`, use `LazyVStack`/`LazyHStack`; flag eager stacks with many children.
-- Prefer using `task()` over `onAppear()` when doing async work, because it will be cancelled automatically when the view disappears.
-- Avoid storing escaping `@ViewBuilder` closures on views when possible; store built view results instead.
+Start with a measured symptom or a concrete repeated cost. Avoid rewriting every view according
+to a fixed performance checklist.
 
-Example:
-
-```swift
-// Anti-pattern: stores an escaping closure on the view.
-struct CardView<Content: View>: View {
-    let content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            content()
-        }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 8))
-    }
-}
-
-// Preferred: store the built view value; the synthesized init handles calling the builder.
-struct CardView<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            content
-        }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 8))
-    }
-}
-```
+- Keep view initialisers and `body` free of expensive synchronous work. Move I/O and costly
+  transforms behind the appropriate model boundary and preserve cancellation and invalidation.
+- Extract a subview when it creates a useful observation or identity boundary. A small private
+  computed view property is fine for local composition; `@ViewBuilder` alone creates no boundary.
+- Use stable IDs for lists and workspace rows. Preserve structural identity when a state change
+  should update a view rather than destroy and recreate its state or native backing view.
+- Avoid type erasure in hot paths when generics or a builder suffice, but require a concrete
+  benefit before changing intentional `AnyView` boundaries.
+- Choose lazy containers for large collections when they fit the required sizing and scrolling
+  behaviour. Do not override Bloom's measured transcript layout without checking its constraints.
+- Prefer format styles for display where possible. Cache expensive formatters only when needed.
+- Keep derived collections cheap, or cache with explicit invalidation. Repeated filtering in
+  `ForEach` can be costly; copying it into `@State` without synchronisation produces stale UI.
+- Store built content when a container's content is static. Keep a closure when lazy evaluation,
+  changing inputs or presentation timing requires it; these forms are not interchangeable.

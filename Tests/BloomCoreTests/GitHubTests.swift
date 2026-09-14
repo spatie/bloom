@@ -126,6 +126,14 @@ struct GitHubTests {
         #expect(GitHub.indicatesNoPullRequest(stderr: "HTTP 503 service unavailable") == false)
     }
 
+    @Test("recognises gh giving up on a detached HEAD")
+    func detachedHeadError() {
+        let stderr = "could not determine current branch: failed to run git: not on any branch"
+        #expect(GitHub.indicatesDetachedHead(stderr: stderr))
+        #expect(GitHub.indicatesDetachedHead(stderr: "HTTP 503 service unavailable") == false)
+        #expect(GitHub.indicatesNoPullRequest(stderr: stderr) == false)
+    }
+
     private func decode(_ json: String) throws -> PullRequest {
         try GitHub.decodePullRequest(from: Data(json.utf8))
     }

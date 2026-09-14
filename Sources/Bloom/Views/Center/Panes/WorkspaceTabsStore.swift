@@ -456,6 +456,22 @@ final class WorkspaceTabsStore {
         adoptActiveSession(of: selected[model.workspace.id] ?? tab, in: model)
     }
 
+    /// `/clear` replaces a conversation in place, including any split tabs showing it.
+    func replaceConversation(_ previous: SessionID, with replacement: SessionID, in model: WorkspaceModel) {
+        let old = PaneContent.chat(previous)
+        let new = PaneContent.chat(replacement)
+        for arrangement in Array(arrangements.values) {
+            guard let stored = arrangement.stored else { continue }
+            apply(TabSurgery.replace(old, with: new, in: stored, root: arrangement.root),
+                  to: arrangement.root, in: model.workspace.id)
+        }
+        if selected[model.workspace.id] == old { selected[model.workspace.id] = new }
+        if let order = stripOrders[model.workspace.id] {
+            stripOrders[model.workspace.id] = order.map { $0 == old ? new : $0 }
+            persistStrip(model.workspace.id)
+        }
+    }
+
     /// Closes one pane. False means it was the only one, which is a column that cannot be closed:
     /// the strip's own close buttons are how a workspace loses a conversation or a tool.
     ///

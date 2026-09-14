@@ -17,6 +17,7 @@ import BloomCore
 final class SearchPanelModel {
     static let shared = SearchPanelModel()
 
+    private(set) var files: FileSearchModel?
     private(set) var isOpen = false
     private(set) var field = SearchPanelField()
     var scope: HomeScope = .all
@@ -40,9 +41,21 @@ final class SearchPanelModel {
 
     // MARK: - Opening and closing
 
+    func openFiles(app: AppModel) {
+        guard let workspace = app.selectedWorkspace else { return }
+        if isOpen, files?.workspace.id == workspace.id {
+            selectAllToken &+= 1
+            return
+        }
+        close(app: app)
+        files = FileSearchModel(workspace: workspace)
+        isOpen = true
+    }
+
     /// - Parameter scope: the chip to open on. Shift+Cmd+F opens on Transcripts, which is what that
     ///   key has always meant, and Cmd+K opens on Everything.
     func open(scope: HomeScope = .all, app: AppModel) {
+        if files != nil { close(app: app) }
         if isOpen {
             // The platform's rule for pressing a find key at an open find: select what is there,
             // so the next character replaces the query rather than extending it.
@@ -63,6 +76,7 @@ final class SearchPanelModel {
     func close(app: AppModel) {
         guard isOpen else { return }
         isOpen = false
+        files = nil
         field = SearchPanelField()
         scope = .all
         highlighted = nil
@@ -133,7 +147,7 @@ final class SearchPanelModel {
     /// One pass, on the same inputs Home builds its list from, called when those inputs move
     /// rather than while drawing.
     func rebuild(app: AppModel) {
-        guard isOpen else { return }
+        guard isOpen, files == nil else { return }
         switch field.mode {
         case .things:
             let reach = SearchPanelReach.reading(

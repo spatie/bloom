@@ -200,6 +200,86 @@ extension AppModel {
         )
     }
 
+    /// Books an archive a workspace's own agent has asked for, to be run when its turn ends.
+    ///
+    /// Nothing at all happens here, and that is the point. The agent that called `workspace_archive`
+    /// is inside the worktree, and `performArchive` stops a workspace's agents before git touches
+    /// a file, so archiving now would kill the turn that is waiting for this answer and leave the
+    /// tool result going nowhere. See `WorkspaceArchiveTool` for the rest of that argument.
+    func bookArchiveForBridge(of workspace: Workspace, after sessionID: SessionID) -> WorkspaceArchiveOutcome {
+        bookArchive(of: workspace.id, after: sessionID)
+        Log.archive.info(
+            "\(workspace.name, privacy: .public) is booked to be archived when its agent's turn ends"
+        )
+        return .requested
+    }
+
+    /// Runs a booked archive, now that the turn that asked for it has ended.
+    ///
+    /// The safety check is asked again, from scratch and with nothing excused. The first ask
+    /// happened inside the tool call, minutes and a whole turn ago, and everything it looked at
+    /// can have moved since: a crew member the agent started can still be running, the owner can
+    /// have queued a message, and the agent's own last act can have been to leave the worktree
+    /// dirty. See `WorkspaceArchiveSafety`.
+    ///
+    /// A refusal goes to the owner rather than to the caller, because there is no caller left to
+    /// tell: the turn that asked has ended, and the tool told it in so many words that it would
+    /// not hear the answer. A notice rather than an alert, because this is news about something
+    /// the app did while nobody was watching and the workspace is still in the sidebar where they
+    /// can archive it by hand.
+    ///
+    /// `wasStopped` is the owner pressing Stop, and it drops the booking rather than deferring it
+    /// again. Somebody who has just stepped into a turn is not somebody whose worktree should
+    /// disappear a second later, and a request that survived being overruled would go off at the
+    /// end of whatever turn they typed next, which is further from the decision rather than nearer
+    /// to it. They are told, because a request that quietly evaporates is one they would go on
+    /// waiting for.
+    func archiveIfRequested(
+        _ workspace: Workspace, endedIn sessionID: SessionID, wasStopped: Bool = false
+    ) async {
+        guard takeArchiveBooking(of: workspace.id, endedIn: sessionID) else { return }
+        guard let store else { return }
+
+        if wasStopped {
+            Log.archive.notice(
+                "the booked archive of \(workspace.name, privacy: .public) was dropped: its turn was stopped by hand"
+            )
+            notice = BloomNotice(
+                message: "\(workspace.name) had asked to be archived when its agent finished. You "
+                    + "stopped that turn, so nothing was archived and the request is dropped."
+            )
+            return
+        }
+
+        if let objection = await WorkspaceArchiveSafety.objection(
+            to: workspace, excusing: nil, store: store
+        ) {
+            Log.archive.notice(
+                "the booked archive of \(workspace.name, privacy: .public) was refused: \(objection, privacy: .public)"
+            )
+            notice = BloomNotice(
+                message: "\(workspace.name) asked to be archived when its agent finished, and it "
+                    + "was not. \(objection)"
+            )
+            return
+        }
+
+        // `deleteBranch: false` and `allowsConfirmation: false` are the same two arguments the
+        // owner's own client is archived under, and they are what keeps this from ever being more
+        // destructive than the tool's description promised: the branch is kept whatever the
+        // project's settings say, and a workspace with something at stake is refused rather than
+        // put behind a dialog nobody is sitting in front of.
+        switch await archive(workspace, deleteBranch: false, allowsConfirmation: false) {
+        case .archived, .requested:
+            break
+        case .refused(let reason):
+            notice = BloomNotice(
+                message: "\(workspace.name) asked to be archived when its agent finished, and it "
+                    + "was not. \(reason)"
+            )
+        }
+    }
+
     /// GitHub's verdict on this workspace's branch, from whichever of the two places has already
     /// asked: the open workspace's own model, or the store every sidebar row reads.
     ///

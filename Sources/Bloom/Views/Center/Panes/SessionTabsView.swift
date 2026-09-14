@@ -288,6 +288,10 @@ struct SessionTabsView: View {
             title: tabs.displayTitle(of: tab, in: model),
             icon: icon(for: tab),
             isActive: selected == .tool(tab.id),
+            // A run script's tab wears the dot a working conversation does while its command is
+            // going. An ordinary terminal never does: nothing polls it, and a shell somebody ran
+            // `ls` in is not a thing anybody is waiting on.
+            isRunning: launcher.isRunning(tab),
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             // What is on the tab, not what the tab is filed under. A browser showing "Spatie"
@@ -330,9 +334,20 @@ struct SessionTabsView: View {
            let agent = TerminalSessionStore.shared.detectedAgent(inTab: tab.id) {
             return .symbol(PaneGlyph.agentMark(for: agent))
         }
+        if tab.kind == .terminal, let script = runScript(of: tab) {
+            return .symbol(RunScriptGlyph.symbol(for: script.icon))
+        }
         guard tab.kind == .browser else { return .symbol(tab.icon) }
         return .page(BrowserFaviconStore.shared.icon(for: tab.url))
     }
+
+    /// The run script a terminal tab was opened for, as the settings file states it now.
+    private func runScript(of tab: CenterTab) -> RunScript? {
+        guard let id = tab.runScriptID else { return nil }
+        return model.settings.runScripts.first { $0.id == id }
+    }
+
+    private var launcher: RunScriptLauncher { .shared }
 
     private func closeTitle(for tab: CenterTab) -> String {
         switch tab.kind {
@@ -376,6 +391,7 @@ struct SessionTabsView: View {
                 .keyboardShortcut("d", modifiers: [.command, .shift])
             // An empty note is exactly what somebody opening this is about to fix.
             Button(CenterTab.notesTitle, systemImage: "note.text") { WorkspaceNotes.open(in: model) }
+            runScriptItems
         } label: {
             Label("New tab", systemImage: "plus")
                 .labelStyle(.iconOnly)
@@ -386,7 +402,62 @@ struct SessionTabsView: View {
         .menuIndicator(.hidden)
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
         .contentShape(Rectangle())
+        // Re-read on the way to the button, because a `Menu` has no moment of its own to do it
+        // in: its items are built before it opens. A run script added from a terminal inside
+        // Bloom changes no selection and brings no window forward, so without this it only reached
+        // the menu on the next switch. The read is coalesced and off the main actor, and the pointer
+        // takes longer to reach the button than the parse takes.
+        .onHover { if $0 { model.refreshSettings() } }
         .help("New tab in this workspace")
+    }
+
+    /// The project's run scripts, under their own heading, in the order the file states them.
+    ///
+    /// Absent rather than an empty heading for a project with none, so the menu is exactly what it
+    /// was before run scripts had tabs. Each row's second line is the command, so what runs can be
+    /// read before it runs, and a script already going says Running instead, because picking it
+    /// shows its tab rather than starting a second copy. The words are `RunScriptMenuItem`.
+    @ViewBuilder
+    private var runScriptItems: some View {
+        let scripts = model.settings.runScripts
+        if !scripts.isEmpty {
+            let running = runningScripts()
+            Divider()
+            Section("Run Scripts") {
+                ForEach(scripts) { script in
+                    let item = RunScriptMenuItem.make(
+                        script: script,
+                        isRunning: running.contains(script.id),
+                        missingFile: missingFile(of: script)
+                    )
+                    Button {
+                        launcher.pick(script, in: model)
+                    } label: {
+                        // A label and then a second text, which a menu draws as the title with
+                        // its glyph and a subtitle under it.
+                        Label {
+                            Text(verbatim: item.title)
+                        } icon: {
+                            Image(systemName: RunScriptGlyph.symbol(for: script.icon))
+                        }
+                        Text(verbatim: item.subtitle)
+                    }
+                    .disabled(!item.isEnabled)
+                }
+            }
+        }
+    }
+
+    /// The ids of the run scripts with a tab whose command is going.
+    private func runningScripts() -> Set<String> {
+        Set(tabs.tabs(for: model.workspace.id).compactMap { tab in
+            launcher.isRunning(tab) ? tab.runScriptID : nil
+        })
+    }
+
+    private func missingFile(of script: RunScript) -> String? {
+        guard let file = model.settings.scriptFiles[.run(script.id)], file.isMissing else { return nil }
+        return file.path
     }
 
     /// Whether this tab can be opened beside the one the user is in. The pair of menu items is
@@ -451,20 +522,12 @@ struct SessionTabsView: View {
 
     /// The `+` opens a browser on the workspace's own dev server, where a split opens one on
     /// nothing. That is not drift: this item is the one that means "look at what this workspace is
-    /// running", and it is the only route that has a port to hand.
+    /// running", and it is the only route that knows where that is.
     private func newBrowser() {
         Task {
-            await preparePort()
-            let address = model.port > 0 ? "http://localhost:\(model.port)" : ""
+            let address = await model.browserAddress()
             NewPane.open(.browser, in: model, url: address) { store.select($0, in: model) }
         }
-    }
-
-    /// The workspace's own port, which is what its setup and run scripts were told to bind and so
-    /// what its dev server is answering on. Allocation lives on the model, where concurrent
-    /// callers get one block. See `WorkspaceModel.ensurePort`.
-    private func preparePort() async {
-        await model.ensurePort()
     }
 
     // MARK: - Reordering

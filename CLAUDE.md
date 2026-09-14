@@ -1,12 +1,15 @@
 # Bloom
 
+Project skills for development builds, releases and Swift work are indexed in [AGENTS.md](AGENTS.md).
+Claude and Codex share the same skill files; load only the skill and references relevant to the task.
+
 A macOS 26 app for running coding agents in git worktrees. One window: a sidebar of projects and
 their workspaces, a transcript in the centre, a terminal, an inspector. A workspace is a real
 worktree on disk, which is why so much of what follows is about not destroying one.
 
 Longer documents, pointed at rather than repeated here: `README.md` for what the app is,
 `RELEASING.md` for signing, notarising and the appcast, `docs/CODEX.md` for the Codex app-server
-protocol as measured, `docs/PROTOCOL.md` for Claude Code's stream-json,
+protocol as measured, `docs/GROK.md` for Grok's ACP over stdio, `docs/PROTOCOL.md` for Claude Code's stream-json,
 `docs/AGENTS-INTEGRATION.md` for how the four CLIs are detected, `docs/BRIDGE.md` for the MCP
 bridge an agent calls back in through and which callers may call what, `docs/PLAN.md` for what was
 built and in what order, `docs/start-from.html` for the design note the create sheet's source picker
@@ -44,7 +47,8 @@ Everything real is a script in `Tools/`; the `Makefile` is the index.
     make swiftlint  Tools/swiftlint.sh
     make app        assemble a debug .app   make run        release .app, launched
     make master     install /Applications/Bloom.app   (see the guard below)
-    make dev        install ~/Applications/Bloom Dev.app
+    make dev-fast   install current edits as Bloom Dev (debug)
+    make dev        install committed HEAD as Bloom Dev (release)
     make dev-db     copy the real database into the dev copy
     make release    sign, notarise and staple a zip and a disk image into dist/
     make dmg        wrap the newest built .app in the beach disk image
@@ -313,8 +317,19 @@ projects, and he is using it right now.
 **Never touch any of these.** `/Applications/Bloom.app`. `~/Library/Application Support/Bloom/`.
 The `be.spatie.bloom` UserDefaults domain. Not to test something, not briefly.
 
-**`make dev` is how you get a build you can run.** It installs `~/Applications/Bloom Dev.app`: its
-own bundle id `be.spatie.bloom.dev`, and with it its own preferences domain, its own saved window
+**Use `make dev-fast` for everyday local development.** It builds current files in debug mode,
+including uncommitted edits and untracked files Git does not ignore, with a persistent cache per
+checkout. Use `make dev` for committed HEAD in release mode, or `./Tools/dev-build.sh <ref>` for a
+specific committed revision. Both install the same `~/Applications/Bloom Dev.app`, keep its
+existing dev data, and restart only the dev copy. Fast mode cannot be combined with a revision.
+
+For agent verification without installation or launch, use
+`./Tools/dev-build.sh --fast --no-install`. To install without restarting, use
+`./Tools/dev-build.sh --fast --no-launch`. Restarting the dev app still needs authorisation.
+See `.claude/skills/bloom-dev-build/SKILL.md` for the full workflow.
+
+**Bloom Dev has its own identity:** bundle id `be.spatie.bloom.dev`, and with it its own
+preferences domain, its own saved window
 state and its own notifications; its own database under `~/Library/Application Support/Bloom Dev/`
 through `BLOOM_DB_PATH` in `LSEnvironment`, and therefore its own tmux socket; its own `bloomdev:`
 URL scheme, so it cannot swallow a `bloom://` link meant for the real copy. It is told apart by a
@@ -341,5 +356,5 @@ and cannot delete a real worktree. `--keep-paths` opts out and says why you shou
 **`make master` will refuse if you are inside the app it would replace**, because that script
 removes `/Applications/Bloom.app` and kills the process running from it. `Tools/guard.sh` finds the
 app either as a real ancestor of this shell or, for a terminal pane whose tmux server has reparented
-away, by the socket name derived from the database path. Do not work around it. Build `make dev`
-instead.
+away, by the socket name derived from the database path. Do not work around it. Use the isolated
+dev build described above instead.

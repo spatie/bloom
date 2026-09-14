@@ -24,9 +24,16 @@ import Foundation
 ///
 /// ## What is deliberately not on the list
 ///
-/// Anything that destroys work. When `workspace_archive` lands it removes a worktree and can
-/// remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
-/// answer is sometimes no. A tool that can lose work is a tool a person answers for.
+/// Anything that destroys work. `workspace_archive` removes a worktree, and the whole reason Bloom
+/// asks before archiving by hand is that the answer is sometimes no. A tool that can lose work is
+/// a tool a person answers for.
+///
+/// That holds for both of its roles, and the workspace agent's arm is the one worth stating,
+/// because everything else on this list argues from the hung turn an unanswered ask costs. It does
+/// not apply here. The agent's call is a request booked for the end of its own turn, so the ask
+/// lands while the agent is still running and the owner is the only one who can still say no; and
+/// an ask nobody answers leaves the workspace exactly as it was, which is the outcome the caller
+/// was told to expect anyway. See `WorkspaceArchiveTool`.
 ///
 /// `quick_prompt_delete` and `quick_prompt_update` are the two on the bridge today that this
 /// applies to. Neither touches a repository, but both act on a few lines the owner wrote by hand,
@@ -159,6 +166,10 @@ public enum BridgeToolApproval {
         // already, none of it is the contents of a page, a diff or a note, and it is the first
         // call of any turn that then does something useful.
         "workspace_tabs",
+        // Stored conversations inside the caller's own workspace. Reading one does not select
+        // a tab, start a turn or reach another workspace, and both handlers enforce that scope.
+        "chat_list",
+        "chat_read",
         // Clicking a tab, which is `pane_open` with less in it: that one makes a tab AND brings it
         // to the front and is on this list, so a rule that asked before an agent could bring an
         // existing tab forward would cost a hung turn and protect nothing. What it changes is

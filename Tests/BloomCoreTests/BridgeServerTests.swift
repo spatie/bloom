@@ -109,7 +109,7 @@ struct BridgeServerTests {
         // again: a crew is rows in `sessions` joined by `parent_session_id`, so listing one
         // reaches nothing but the store, while starting, saying and stopping all need the window.
         #expect(names == [
-            "agent_list", "quick_prompt_create", "quick_prompt_list", "whoami",
+            "agent_list", "chat_list", "chat_read", "quick_prompt_create", "quick_prompt_list", "whoami",
             "workspace_rename",
         ])
 
@@ -127,6 +127,15 @@ struct BridgeServerTests {
         #expect(answer["session"]?["id"]?.stringValue == session.id.rawValue)
         #expect(answer["created_by"]?.stringValue == "owner")
         #expect(answer["role"]?.stringValue == "parent")
+
+        let readChat = try await caller.call(
+            #"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chat_read","arguments":{"chat":"First chat"}}}"#
+        )
+        #expect(readChat["result"]?["isError"] == .bool(false))
+        let chatText = try #require(readChat["result"]?["content"]?.arrayValue?.first?["text"]?.stringValue)
+        let chat = try #require(JSONValue.parse(chatText))
+        #expect(chat["chat_id"] == .string(session.id.rawValue))
+        #expect(chat["messages"] == .array([]))
 
         caller.connection.close()
     }

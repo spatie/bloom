@@ -62,6 +62,10 @@ public enum WorktreeScratch {
         let ignore = (full as NSString).appendingPathComponent(".gitignore")
         let manager = FileManager.default
         guard !manager.fileExists(atPath: ignore) else { return }
+        // A worktree that is not there gets no scratch folder. Creating the intermediate
+        // directories would otherwise rebuild the skeleton of a worktree somebody has already
+        // removed, which is a folder git knows nothing about standing where a workspace was.
+        guard manager.fileExists(atPath: worktree) else { return }
         // `.bloom` itself is created as a side effect and deliberately left bare. Its own
         // `.gitignore` is a file the team commits, and writing one here would put a file in the
         // user's pull request that they did not ask for, which is the bug this type exists to

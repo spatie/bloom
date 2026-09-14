@@ -15,6 +15,7 @@ struct ComposerPromptActions {
     /// half only. What a chosen prompt actually does is `QuickPromptDelivery`, decided by whoever
     /// owns the draft, because sending it and opening a chat for it are both things this surface
     /// has no way to do. `ComposerView.fire` is that decision made; the create window has neither
-    /// of the other two routes and so only ever calls this.
-    var insert: @MainActor (QuickPrompt) -> Void
+    /// of the other two routes and so only ever calls this. Either kind of row, the owner's or the
+    /// project's, since writing the words in is the same for both.
+    var insert: @MainActor (QuickPromptPanelRow) -> Void
 }

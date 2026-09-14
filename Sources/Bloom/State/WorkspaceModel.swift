@@ -19,6 +19,7 @@ final class WorkspaceModel {
     private unowned let app: AppModel
 
     var sessions: [Session] = []
+    var sideConversations: [SessionID: SideConversationState] = [:]
 
     /// Whether the store has answered about this workspace's sessions at all, this launch.
     ///
@@ -54,25 +55,33 @@ final class WorkspaceModel {
     private var transcripts: [SessionID: TranscriptModel] = [:]
 
     // Inspector.
-    /// How much of this workspace's work the Changes tab is showing.
-    ///
-    /// Read through the getter, which drops a scope this branch can no longer offer. A commit is
-    /// not a stable thing to hold on to: an amend, a rebase or a squash rewrites it, and a scope
-    /// pointing at a sha that resolves nowhere is a refresh that fails rather than a list that
-    /// narrows. Written through `setDiffScope`, because changing it has to send the pane back to
-    /// git and a property that quietly starts a subprocess is a property nobody expects.
+    private var lastChangesScope: DiffScope = .all
+    private var lastHistoryCommit: BranchCommit?
+    /// The comparison and its file list are adopted together after a refresh. Resolving the
+    /// scope in a getter could label the last commit's files as all branch changes after a rebase.
     private var storedDiffScope: DiffScope = .all
 
-    var diffScope: DiffScope {
-        // Only once git has answered. An empty list from a branch that genuinely has no commits
-        // of its own is a real answer and correctly drops a stale scope; the same empty list
-        // before anything has been asked is not, and would drop the reader's choice on arrival.
-        hasReadBranchCommits ? branchCommits.resolve(storedDiffScope) : storedDiffScope
-    }
-
-    /// The commits this branch put on top of its base, for the scope menu to offer.
+    var diffScope: DiffScope { storedDiffScope }
     private(set) var branchCommits = BranchCommitList()
     private(set) var hasReadBranchCommits = false
+    private(set) var historyError: String?
+    private(set) var historyNotice: String?
+    private var historyLimit = BranchCommitList.limit
+    var selectedChangeLayer: ChangeLayer?
+
+    var selectedChangeID: String? {
+        selectedFilePath.flatMap { selectedChangedFile(path: $0)?.id }
+    }
+
+    func selectedChangedFile(path: String) -> ChangedFile? {
+        changedFiles.first { $0.path == path && $0.layer == selectedChangeLayer }
+            ?? changedFiles.first { $0.path == path }
+    }
+
+    func loadMoreCommits() {
+        historyLimit += BranchCommitList.limit
+        Task { await refreshChanges(.requested) }
+    }
 
     /// What the reader last picked in the tab strip, which is not always what is on screen.
     ///
@@ -83,11 +92,31 @@ final class WorkspaceModel {
     /// The tabs the strip may draw for this workspace, and the one it is showing.
     var availableInspectorTabs: [InspectorTab] { InspectorTab.available(for: pullRequest) }
 
+    private var rememberedHistoryCommit: BranchCommit? {
+        guard let lastHistoryCommit, branchCommits.canOffer(.commit(lastHistoryCommit)) else { return nil }
+        return lastHistoryCommit
+    }
+
     var inspectorTab: InspectorTab {
         get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
-        set { chosenInspectorTab = newValue }
+        set {
+            chosenInspectorTab = newValue
+            if newValue == .changes, case .commit = diffScope {
+                setDiffScope(lastChangesScope)
+            } else if newValue == .history,
+                      let commit = rememberedHistoryCommit ?? branchCommits.commits.first {
+                setDiffScope(.commit(commit))
+            }
+        }
     }
-    var changedFiles: [ChangedFile] = []
+    var changedFiles: [ChangedFile] = [] {
+        didSet {
+            reviewFiles = changedFiles.contains { $0.layer != nil }
+                ? changedFiles : ChangedFileTree.orderedFiles(from: changedFiles)
+        }
+    }
+    /// Retain tree order across scroll updates; rebuild it only when the changed files change.
+    private(set) var reviewFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false
     /// Whether git has answered about this worktree at all, this launch.
@@ -147,6 +176,14 @@ final class WorkspaceModel {
     var pullRequest: PullRequest? {
         get { WorkspacePullRequests.shared.pullRequest(for: workspace.id) }
         set { WorkspacePullRequests.shared.set(newValue, for: workspace.id) }
+    }
+
+    var pullRequestRefreshFailure: GitHubReadFailure? {
+        WorkspacePullRequests.shared.failure(for: workspace.id)
+    }
+
+    func dismissPullRequestRefreshFailure() {
+        WorkspacePullRequests.shared.dismissFailure(for: workspace.id)
     }
 
     var isLoadingPullRequest = false
@@ -317,7 +354,7 @@ final class WorkspaceModel {
     private var arrivalTask: Task<Void, Never>?
 
     private var changesTask: Task<Result<ChangesAnswer, GitFailure>, Never>?
-    private var pullRequestTask: Task<PullRequest?, Never>?
+    private var pullRequestTask: Task<PullRequestRead, Never>?
     /// One repository settings read at a time. A request that arrives during a read is remembered,
     /// so the burst ends with one fresh read rather than silently keeping the older answer.
     @ObservationIgnored private var settingsRefresh = RefreshDemand()
@@ -326,6 +363,12 @@ final class WorkspaceModel {
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
     var pendingCLILaunches: Set<SessionID> = []
+    /// The script alone, where `setupTask` is the script and whatever follows it. Stop cancels
+    /// this one, so the queue behind the run still drains; archiving and quitting cancel the
+    /// outer task, which reaches this through `stream`'s cancellation handler.
+    @ObservationIgnored private var setupRunTask: Task<Bool, Never>?
+    /// Set by `stopSetup`, so a run the reader stopped is not announced as a failed setup.
+    @ObservationIgnored private var setupWasStopped = false
 
     init(workspace: Workspace, app: AppModel) {
         self.workspace = workspace
@@ -335,12 +378,12 @@ final class WorkspaceModel {
     }
 
     /// What this workspace's repository asks for: the setup script, the run scripts, the rest of
-    /// `.conductor/settings.toml`.
+    /// the repository settings files.
     ///
     /// Held here rather than read where it is needed because the Workspace menu reads it, and a
     /// `Commands` body is not a view: it cannot await a file, and it cannot carry a task. It is
-    /// re-read whenever the workspace is selected, so a run script added in the project settings
-    /// window is in the menu the next time the workspace is on screen.
+    /// re-read whenever the workspace is selected and after project settings are saved, so a new
+    /// run script appears in the menu without switching workspaces.
     private(set) var settings = RepoSettings()
 
     /// Off the main actor, because this parses up to six files and is called on every switch.
@@ -380,8 +423,8 @@ final class WorkspaceModel {
     // MARK: - Sessions
 
     var activeSession: Session? {
-        guard let activeSessionID else { return sessions.first }
-        return sessions.first { $0.id == activeSessionID } ?? sessions.first
+        guard let activeSessionID else { return sessions.first { $0.sideConversationParentID == nil } }
+        return sessions.first { $0.id == activeSessionID } ?? sessions.first { $0.sideConversationParentID == nil }
     }
 
     /// Reads the session list back from the store.
@@ -404,7 +447,7 @@ final class WorkspaceModel {
         if !hasReadSessions { hasReadSessions = true }
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
-            activeSessionID = sessions.first?.id
+            activeSessionID = sessions.first { $0.sideConversationParentID == nil }?.id
         } else {
             // The setter above prepares the transcript for us. This is the other branch, where the
             // active session has not moved and the transcript may still be the one this launch has
@@ -442,6 +485,7 @@ final class WorkspaceModel {
             session.effort = controls.effort
             session.agentKind = controls.agentKind
             session.permissionMode = controls.permissionMode
+            session.interactionMode = controls.interactionMode
         }
         guard let stored = try? await store.upsert(session) else { return nil }
         if let controls { await controls.store(sessionID: stored.id, in: store) }
@@ -449,6 +493,23 @@ final class WorkspaceModel {
         await reloadSessions()
         activeSessionID = stored.id
         return stored
+    }
+
+    /// Retires the old runner only after its replacement has been saved successfully.
+    func clearConversation(_ previous: Session, controls: ComposerControls) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        do {
+            let next = try await store.replaceWorkspaceConversation(id: previous.id, controls: controls)
+            transcripts.removeValue(forKey: previous.id)?.teardown()
+            app.bridge?.retire(sessionID: previous.id)
+            WorkspaceTabsStore.shared.replaceConversation(previous.id, with: next.id, in: self)
+            if let index = sessions.firstIndex(where: { $0.id == previous.id }) { sessions[index] = next }
+            activeSessionID = next.id
+            return next
+        } catch {
+            app.notice = BloomNotice(message: "Could not clear the conversation: \(error.readableMessage)")
+            return nil
+        }
     }
 
     /// Puts the workspace's conversations in a given order, and writes it back.
@@ -493,8 +554,38 @@ final class WorkspaceModel {
             || transcripts[session.id]?.subagents.isWorking == true
     }
 
+    /// Persist the replacement before stopping the old agent so a failed write leaves it usable.
+    func replaceSession(_ session: Session, controls: ComposerControls) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
+            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before replacing a conversation.")
+            return nil
+        }
+        do {
+            let next = try await store.replaceWorkspaceConversation(id: session.id, controls: controls)
+            transcripts.removeValue(forKey: session.id)?.teardown()
+            app.bridge?.retire(sessionID: session.id)
+            await reloadSessions()
+            activeSessionID = next.id
+            return next
+        } catch {
+            app.alert = BloomAlert(title: "Could not start a fresh chat", message: error.readableMessage)
+            return nil
+        }
+    }
+
     func closeSession(_ session: Session) async {
         guard let store else { return }
+        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
+            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before closing a conversation.")
+            return
+        }
+        do {
+            _ = try await store.update(sessionID: session.id) { $0.archivedAt = Date() }
+        } catch {
+            app.notice = BloomNotice(message: "Could not close the conversation: \(error.readableMessage)")
+            return
+        }
         if let terminal = CenterTabStore.shared.terminal(for: session.id, in: workspace.id) {
             await CenterTabStore.shared.close(terminal)
             pendingCLILaunches.remove(session.id)
@@ -504,7 +595,6 @@ final class WorkspaceModel {
         // Closing is one column. The strip's copy of this row can be a whole turn old, and the
         // runner has been writing the state, the counters and the agent session id into it all
         // the while.
-        _ = try? await store.update(sessionID: session.id) { $0.archivedAt = Date() }
         // The chat is over, so its bridge token is a token nothing may use again and the config
         // file carrying it is a dead letter. Nothing used to remove either, and the files are one
         // per session rather than one per instance, so they only ever grew.
@@ -910,6 +1000,7 @@ final class WorkspaceModel {
     /// agents are killed here rather than merely interrupted, and killed first, which is what lets
     /// every SIGTERM escalation run at the same time instead of one after another.
     func stopEverything() {
+        for state in sideConversations.values { state.task?.cancel() }
         for transcript in transcripts.values { transcript.terminateNow() }
         setupTask?.cancel()
         setupTask = nil
@@ -939,11 +1030,13 @@ final class WorkspaceModel {
         stopEverything()
         for transcript in transcripts.values { transcript.teardown() }
         transcripts.removeAll()
+        sideConversations.removeAll()
     }
 
     /// The quit path: the same teardown, but it waits for the agents to actually be gone rather
     /// than only asking them to leave.
     func shutdown() async {
+        for state in sideConversations.values { state.task?.cancel() }
         setupTask?.cancel()
         setupTask = nil
         // Nilled like the three above: a cancelled refresh returns through its
@@ -1041,14 +1134,23 @@ final class WorkspaceModel {
             SettingsLoader.load(repo: repoPath)
         }.value
 
-        if workspace.setupState == .pending, settings.setupScript != nil {
+        if workspace.setupState == .pending, settings.setupScript != nil || Git.hasSubmodules(in: workspace.path) {
             let succeeded = await stream(setupIn: repo, through: manager)
 
             // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
             // its way out is the one thing that must not happen here.
             guard !Task.isCancelled else { return }
 
-            if !succeeded {
+            // The worktree is built, so the run scripts that asked to start with it can. Not
+            // awaited: a dev server starting has nothing to do with the opening prompt going out.
+            if succeeded {
+                Task { [weak self] in
+                    guard let self else { return }
+                    await RunScriptLauncher.shared.considerAutostart(in: self)
+                }
+            }
+
+            if !succeeded, !setupWasStopped {
                 // The one sentence every route says about a failed setup, rather than a second
                 // one written here that would drift from it. It names no tab, which is what makes
                 // it survive the tab it used to name. See `SetupFailure`.
@@ -1117,6 +1219,40 @@ final class WorkspaceModel {
         return self.workspace.port
     }
 
+    /// Where a browser pane opened on this workspace should go.
+    ///
+    /// The port is allocated first because it is both the last-resort answer and a variable the
+    /// stated one may be written in terms of, and because a workspace nobody has opened a terminal
+    /// in yet holds no block at all. The decision itself is `WorkspaceBrowserURL`, which is where
+    /// the two ways a project can state an address, and the order between them, are written down.
+    ///
+    /// The settings are read again rather than taken from `settings`: this runs at the moment a
+    /// pane is opened, which is often the first thing that happens to a workspace, and an address
+    /// silently missing because the file had not been read yet is the sort of intermittent that
+    /// gets blamed on the script.
+    func browserAddress() async -> String {
+        let port = await ensurePort()
+        guard let repo, let store = app.store else {
+            return WorkspaceBrowserURL.resolve(
+                written: nil, stated: nil, environment: [:], port: port
+            )
+        }
+
+        let environment = WorkspaceManager(store: store).environment(
+            for: workspace, repo: repo, port: port
+        )
+        let worktree = workspace.path
+        let repoPath = repo.path
+        return await Task.detached(priority: .userInitiated) {
+            WorkspaceBrowserURL.read(
+                worktree: worktree,
+                settings: SettingsLoader.load(repo: repoPath),
+                environment: environment,
+                port: port
+            )
+        }.value
+    }
+
     /// One setup run: the state it resets, the output it streams, and what it leaves behind.
     ///
     /// Shared by the run a workspace opens with and by the re-run below, which differ only in what
@@ -1124,8 +1260,30 @@ final class WorkspaceModel {
     /// Setup tab, and the two had already drifted: only one of them cleared the exit status, so a
     /// re-run after a failure drew a red cross over a log that was still being written.
     @discardableResult
-    private func stream(setupIn repo: Repo, through manager: WorkspaceManager) async -> Bool {
+    private func stream(
+        setupIn repo: Repo, through manager: WorkspaceManager, operationLease: WorkspaceOperationLease? = nil
+    ) async -> Bool {
+        guard !HistoryWorkspaceGate.shared.holds(workspace.id),
+              let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup),
+              lease.isValid(in: workspace.path, operation: .setup) else {
+            operationLease?.release()
+            if operationLease != nil { isRunningSetup = false }
+            app.notice = BloomNotice(message: "Resolve the workspace's rewind before running setup.")
+            return false
+        }
         isRunningSetup = true
+        defer { isRunningSetup = false; lease.release() }
+        do {
+            guard let store = app.store,
+                  try await store.pendingCheckpointRewind(workspaceID: workspace.id) == nil else {
+                app.notice = BloomNotice(message: "Resolve the interrupted rewind before running setup.")
+                return false
+            }
+        } catch {
+            if !Task.isCancelled { app.notice = BloomNotice(message: "Bloom could not check this workspace's rewind state. Setup did not start.") }
+            return false
+        }
+        setupWasStopped = false
         setupStartedAt = .now
         setupDurationMS = nil
         setupExitStatus = nil
@@ -1148,14 +1306,25 @@ final class WorkspaceModel {
             }
         }
 
-        let succeeded = await manager.runSetup(
-            workspace: workspace, repo: repo, port: port,
-            onExit: { [weak self] status in
-                Task { @MainActor in self?.setupExitStatus = status }
+        let workspace = workspace
+        let port = port
+        let run = Task {
+            await manager.runSetup(
+                workspace: workspace, repo: repo, port: port, operationLease: lease,
+                onExit: { [weak self] status in
+                    Task { @MainActor in self?.setupExitStatus = status }
+                }
+            ) { line in
+                buffer.append(line)
             }
-        ) { line in
-            buffer.append(line)
         }
+        setupRunTask = run
+        let succeeded = await withTaskCancellationHandler {
+            await run.value
+        } onCancel: {
+            run.cancel()
+        }
+        if setupRunTask == run { setupRunTask = nil }
 
         flusher.cancel()
         appendSetupOutput(buffer.drain())
@@ -1176,7 +1345,7 @@ final class WorkspaceModel {
     /// that there is no script here to run.
     var setupRunOffer: SetupRunOffer? {
         SetupRunOffer.offer(
-            hasSetupScript: repo != nil && settings.setupScript != nil,
+            hasSetupScript: repo != nil && (settings.setupScript != nil || Git.hasSubmodules(in: workspace.path)),
             hasRunSetup: hasRunSetup,
             isRunning: isRunningSetup
         )
@@ -1212,15 +1381,33 @@ final class WorkspaceModel {
     /// Through the same `setupTask` the first run uses, so archiving or quitting stops a
     /// `composer install` started from here exactly as it stops one started at creation.
     func runSetupAgain() {
-        guard !app.isArchiving(workspace.id), canRunSetup, let repo, let manager = app.manager else { return }
+        guard !app.isArchiving(workspace.id), !HistoryWorkspaceGate.shared.holds(workspace.id),
+              canRunSetup, let repo, let manager = app.manager,
+              let lease = WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup) else { return }
+        // The scheduled task has not run yet. Reserve now so a rewind cannot pass its idle
+        // check in the interval between this button action and the task's first instruction.
+        isRunningSetup = true
         setupTask?.cancel()
         setupGeneration += 1
         let generation = setupGeneration
         setupTask = Task { [weak self] in
-            await self?.stream(setupIn: repo, through: manager)
-            guard let self, self.setupGeneration == generation else { return }
+            guard let self else { lease.release(); return }
+            await self.stream(setupIn: repo, through: manager, operationLease: lease)
+            guard self.setupGeneration == generation else { return }
             self.setupTask = nil
         }
+    }
+
+    /// Stops the setup script that is running in this worktree.
+    ///
+    /// Only the script: whatever was waiting for setup to finish goes on as it would after a
+    /// failure, so a prompt queued behind a seeder that hangs reaches the agent rather than
+    /// sitting there until the workspace is archived. The run is filed as failed, which is what
+    /// puts "Run setup again" on its row. See `WorkspaceManager.setupStoppedNote`.
+    func stopSetup() {
+        guard isRunningSetup, let run = setupRunTask else { return }
+        setupWasStopped = true
+        run.cancel()
     }
 
     /// Re-reads what setup ended up as.
@@ -1286,10 +1473,10 @@ final class WorkspaceModel {
         // chose nor can act on.
         let name = workspace.name
         let scope = diffScope
-        // Only on a refresh somebody asked for, which is an arrival, a finished turn or a press.
-        // Those are exactly the moments a commit can have appeared, and the six second poll is
-        // already four git calls without adding a `log` for a menu nobody has opened.
+        // Refresh history on quiet polls too: an agent can commit while its turn is still
+        // running. Only explicit refreshes need the manager's additional branch-name read.
         let wantsCommits = reason == .requested
+        let historyLimit = historyLimit
         let manager = app.manager
         let observedWorkspace = workspace
 
@@ -1299,32 +1486,32 @@ final class WorkspaceModel {
             // Quiet refreshes follow refreshDiffStat, which has already read HEAD this tick.
             if wantsCommits { await manager?.refreshBranch(workspace: observedWorkspace) }
             do {
-                // All three together rather than one after another. They ask three different
-                // questions of the same worktree and none of them reads another's answer, so
-                // running them in sequence only ever made the switch longer. `Git.baseline`, which
-                // the first and the third both open with, coalesces so that starting them at once
-                // does not resolve the merge base twice. See `BaselineCache`.
-                //
-                // In the same task as the file list rather than on a cadence of its own. The one
-                // extra command is `status --porcelain -z --branch`, which answers uncommitted,
-                // untracked and unpushed at once. Nothing stats the worktree on a redraw: the
-                // strip reads a value, and the value is only ever written here.
-                //
-                // Failing to answer it is not a failure of the refresh. The file list is what the
-                // reader asked for; a missing local count means the strip says nothing extra,
-                // which is the right answer when we do not know. Same forgiveness for the commit
-                // list: failing to read it costs the menu its rows, not the reader their files.
-                async let filesRead = Git.changedFiles(worktree: path, base: base, scope: scope)
+                // Resolve history first so an amended selection and the replacement file list
+                // arrive together. A history failure is separate from a failed diff read.
                 async let localRead = try? Git.localWork(worktree: path)
-                async let commitsRead: BranchCommitList? = wantsCommits
-                    ? try? Git.branchCommits(worktree: path, base: base)
-                    : nil
-
-                let files = try await filesRead
+                var commits: BranchCommitList?
+                var historyError: String?
+                do {
+                    commits = try await Git.branchCommits(worktree: path, base: base, limit: historyLimit)
+                } catch {
+                    historyError = "Could not read commit history. \(error.localizedDescription)"
+                }
+                var effectiveScope = scope
+                if let commits, case .commit(let commit) = scope,
+                   !commits.commits.contains(where: { $0.sha == commit.sha }) {
+                    let stillOnBranch = commits.isTruncated
+                        ? try await Git.containsCommit(commit, worktree: path) : false
+                    if !stillOnBranch { effectiveScope = .all }
+                }
+                let files = try await Git.changedFiles(worktree: path, base: base, scope: effectiveScope)
                 let local = await localRead
-                let commits = await commitsRead
-                let revisions = ReviewedFileFingerprint.revisions(for: files, worktree: path, base: base, scope: scope)
-                return .success(ChangesAnswer(files: files, local: local, commits: commits, revisions: revisions))
+                let revisions = ReviewedFileFingerprint.revisions(
+                    for: files, worktree: path, base: base, scope: effectiveScope
+                )
+                return .success(ChangesAnswer(
+                    files: files, local: local, commits: commits, revisions: revisions,
+                    scope: effectiveScope, historyError: historyError
+                ))
             } catch {
                 // Diagnosed rather than reported, in the register `WorkspaceStartFailure` set. A
                 // worktree deleted underneath Bloom used to surface here as "`git rev-parse
@@ -1363,8 +1550,15 @@ final class WorkspaceModel {
             // would show the user a clean workspace, which is the one answer that is certainly
             // wrong, so the last known list stays and the failure is reported instead.
             changesError = failure.message
+            if !hasReadBranchCommits { historyError = failure.message }
 
         case .success(let answer):
+            if answer.scope != storedDiffScope {
+                storedDiffScope = answer.scope
+                selectedChangeLayer = nil
+                historyNotice = "The selected commit is no longer on this branch. Showing all branch changes."
+            }
+            historyError = answer.historyError
             hasReadChanges = true
             changesGeneration &+= 1
             // Only when it actually moved. `AppModel`'s poll lands here every six seconds, and a
@@ -1389,9 +1583,11 @@ final class WorkspaceModel {
     struct ChangesAnswer: Sendable {
         var files: [ChangedFile]
         var local: LocalWork?
-        /// Nil when this refresh did not ask, which is every quiet poll.
+        /// Nil when Git could not answer, with the reason in historyError.
         var commits: BranchCommitList?
         var revisions: [String: String] = [:]
+        var scope: DiffScope = .all
+        var historyError: String?
     }
 
     /// Narrows or widens what the Changes tab is showing, and sends the pane back to git for it.
@@ -1400,8 +1596,20 @@ final class WorkspaceModel {
     /// compared against, so which files differ, and by how many lines, is a different question for
     /// each one and only git can answer it.
     func setDiffScope(_ scope: DiffScope) {
+        if case .commit(let commit) = scope {
+            lastHistoryCommit = commit
+        } else {
+            lastChangesScope = scope
+        }
         guard scope != storedDiffScope else { return }
+        changesTask?.cancel()
         storedDiffScope = scope
+        selectedChangeLayer = nil
+        historyNotice = nil
+        changedFiles = []
+        hasReadChanges = false
+        changesError = nil
+        changesGeneration &+= 1
         Task { await refreshChanges(.requested) }
     }
 
@@ -1455,6 +1663,9 @@ final class WorkspaceModel {
     /// `DiffView.body` reads this for every pass it makes over the diff and a keystroke must not
     /// be a reason to make one.
     var reviewDrafts: [String: ReviewDraft] = [:]
+
+    /// A browser review survives switching tabs, just like a half-written diff comment.
+    var browserReviews: [String: BrowserRegionCapture] = [:]
 
     /// Which comments are open for editing in place. Here for the same reason `reviewDrafts` is,
     /// and the reason is not hypothetical for an edit either: the band being edited sits in the
@@ -1622,14 +1833,14 @@ final class WorkspaceModel {
     /// go stale honestly when the agent edits the file afterwards. See `ReviewedFileFingerprint`.
     func setViewed(_ isViewed: Bool, file: ChangedFile) async {
         guard let store else { return }
-        let fingerprint = ReviewedFileFingerprint.of(file, revision: viewedRevisions[file.path] ?? "")
+        let fingerprint = ReviewedFileFingerprint.of(file, revision: viewedRevisions[file.id] ?? "")
         do {
             if isViewed {
                 try await store.markReviewed(ReviewedFile(
-                    workspaceID: workspace.id, path: file.path, fingerprint: fingerprint
+                    workspaceID: workspace.id, path: file.id, fingerprint: fingerprint
                 ))
             } else {
-                try await store.clearReviewed(workspaceID: workspace.id, path: file.path)
+                try await store.clearReviewed(workspaceID: workspace.id, path: file.id)
             }
         } catch {
             app.alert = BloomAlert(
@@ -1642,9 +1853,9 @@ final class WorkspaceModel {
         // learn: a refused write must not change what is on screen and then be put back by the
         // next reload with nothing said in between.
         if isViewed {
-            viewedFiles[file.path] = fingerprint
+            viewedFiles[file.id] = fingerprint
         } else {
-            viewedFiles[file.path] = nil
+            viewedFiles[file.id] = nil
         }
     }
 
@@ -1751,6 +1962,14 @@ final class WorkspaceModel {
     /// bug this closes, which is that changing centre tab destroys the review pane and coming back
     /// to it re-ran the same `git diff` on a worktree nothing had touched.
     func patch(for file: ChangedFile) async -> String {
+        (try? await readPatch(for: file)) ?? ""
+    }
+
+    nonisolated static func reviewContents(worktree: String, file: ChangedFile, scope: DiffScope) async -> String? {
+        try? await Git.reviewContents(worktree: worktree, file: file, scope: scope)
+    }
+
+    func readPatch(for file: ChangedFile) async throws -> String {
         let path = workspace.path
         let base = workspace.baseBranch
         // The same scope the list was built with, or the pane opens a file the list narrowed and
@@ -1761,19 +1980,24 @@ final class WorkspaceModel {
         )
         if let held = patches.patch(for: key) { return held }
 
-        let patch = await Task.detached(priority: .userInitiated) {
-            (try? await Git.patch(worktree: path, base: base, file: file, scope: scope)) ?? ""
-        }.value
+        let reading = Task.detached(priority: .userInitiated) {
+            try await Git.patch(worktree: path, base: base, file: file, scope: scope)
+        }
+        let patch = try await withTaskCancellationHandler {
+            try await reading.value
+        } onCancel: {
+            reading.cancel()
+        }
+        try Task.checkCancellation()
 
-        // Only an answer git actually gave. Empty is also what a failure comes back as, and
-        // holding one would turn a moment of git trouble into a file that reads as unchanged for
-        // as long as the generation lasts.
+        // An empty patch can mean the file changed again between the list and patch reads.
+        // Let the next request ask Git again rather than keeping that transient answer.
         guard !patch.isEmpty else { return patch }
         // Checked again on the way out, because a refresh can land while git is out. An answer
         // measured before that refresh says nothing about the worktree after it, and filing it
         // under the new generation would be a claim; filing it under the old one would sweep the
         // new generation's entries out. So it is handed back and not kept.
-        guard changesGeneration == key.generation else { return patch }
+        guard changesGeneration == key.generation, diffScope == scope else { return patch }
         patches.store(patch, for: key)
         return patch
     }
@@ -1873,7 +2097,7 @@ final class WorkspaceModel {
         let asked = workspace
 
         let task = Task.detached(priority: .utility) {
-            await GitHubBridge.pullRequest(for: asked, maxAge: maxAge)
+            await GitHubBridge.readPullRequest(for: asked, maxAge: maxAge)
         }
         pullRequestTask = task
         // Only before there has been any answer at all, for the same reason the changed file list
@@ -1885,7 +2109,7 @@ final class WorkspaceModel {
             isLoadingPullRequest = true
         }
 
-        let fresh = await task.value
+        let read = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
         pullRequestTask = nil
@@ -1893,16 +2117,14 @@ final class WorkspaceModel {
         // workspace having been looked at, and the next refresh has an answer on screen to leave
         // alone. Only a superseded or cancelled refresh, which returns above, says nothing.
         hasReadPullRequest = true
-        // A nil is not written, and that is the rule the shared cache has always had: nil is "gh
-        // could not answer" at least as often as it is "there is no pull request", so a slow
-        // network or a rate limit would otherwise drop the mark back to a plain branch.
-        //
-        // It matters more now than it did. This used to write into a copy only the inspector
-        // read; it writes into the one cache the sidebar glyph, the Home rail and the title bar
-        // strip all read, so a nil from this poll would clear the mark in four places at once.
-        // The deliberate clear is `WorkspacePullRequests.forget`, which `adopt` calls when a
-        // merge moves the worktree to a fresh branch.
-        if let fresh, pullRequest != fresh { pullRequest = fresh }
+        // Failed refreshes retain the last good content. An explicit no-PR answer can now
+        // clear it, because the read result distinguishes absence from an unavailable service.
+        WorkspacePullRequests.shared.record(read, for: workspace.id)
+        guard case .current(let current) = read else {
+            isLoadingPullRequest = false
+            return
+        }
+        let fresh = current
         // The number, written where a deleted branch cannot take it. This is the path the band
         // polls on, so it is the one that fills the column in for a workspace whose pull request
         // an agent opened rather than the create sheet. See `Workspace.pullRequestNumber`.
@@ -2001,6 +2223,11 @@ final class WorkspaceModel {
         // there is already one open by the time this button exists.
         await transcript(for: session).submit(render.text)
         return nil
+    }
+
+    func markReadyForReview(_ pullRequest: PullRequest) async throws {
+        try await GitHubBridge.markReadyForReview(pullRequest, worktree: workspace.path)
+        await refreshPullRequest()
     }
 
     /// Asks the workspace's agent to merge the pull request, instead of running `gh` from here.

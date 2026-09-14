@@ -47,9 +47,9 @@ struct DiffGutter: View {
     /// as content competing with the code beside it.
     private func number(_ value: Int?) -> some View {
         Text(value.map(String.init) ?? "")
-            .font(Typo.codeTiny)
+            .font(Font(CodeMetrics.numberFont))
             .monospacedDigit()
-            .foregroundStyle(Palette.textTertiary)
+            .foregroundStyle(Palette.codeGutter)
             .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
             .padding(.trailing, CodeMetrics.gutterPadding)
     }
@@ -87,7 +87,7 @@ struct DiffGutter: View {
 /// The one character column that says whether a line was added, removed or left alone.
 ///
 /// Beside the code rather than inside the gutter, and that is load bearing for the split layout:
-/// a row with nothing opposite it paints `Palette.surfaceSunken` from HERE to the end of the sheet,
+/// a row with nothing opposite it paints `Palette.codeBackground` from HERE to the end of the sheet,
 /// so a marker moved in with the numbers would leave a stripe of pane colour inside the sunken
 /// band. See `DiffRunView.wash` and `DiffLineView.content`, which both start the fill at this
 /// column's leading edge.
@@ -96,8 +96,8 @@ struct DiffMarker: View {
 
     var body: some View {
         Text(text)
-            .font(Typo.codeTiny)
-            .foregroundStyle(Palette.textTertiary)
+            .font(Font(CodeMetrics.numberFont))
+            .foregroundStyle(Palette.codeGutter)
             .frame(width: CodeMetrics.markerWidth, alignment: .center)
     }
 

@@ -397,6 +397,9 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ///
     /// Nil for every chat the owner made, which is nearly all of them.
     public var parentSessionID: SessionID?
+    /// A temporary conversation opened by the owner, separate from agent-created crew.
+    /// Cleared when kept as a regular chat; its context retains the link to the origin.
+    public var sideConversationParentID: SessionID?
     public var title: String
     public var agentSessionID: String?
     public var model: String
@@ -411,7 +414,10 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// Every row that existed before this column defaults to Claude Code, because that is what
     /// every one of them was.
     public var agentKind: AgentKind {
-        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+        didSet {
+            permissionMode = permissionMode.nearest(on: agentKind)
+            interactionMode = interactionMode.nearest(on: agentKind)
+        }
     }
     /// How much this chat may do without asking.
     ///
@@ -426,6 +432,9 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// The two observers hold the pair legal whichever of them is written, and in whichever order,
     /// so `sessionEditor.apply` setting a backend and a mode in one block cannot land a
     /// combination that does not exist. Writing inside a `didSet` does not run the observer again.
+    public var interactionMode: InteractionMode {
+        didSet { interactionMode = interactionMode.nearest(on: agentKind) }
+    }
     public var permissionMode: PermissionMode {
         didSet { permissionMode = permissionMode.nearest(on: agentKind) }
     }
@@ -451,12 +460,14 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
         parentSessionID: SessionID? = nil,
+        sideConversationParentID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
         agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
+        interactionMode: InteractionMode = .build,
         state: SessionState = .idle,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
@@ -471,6 +482,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.id = id
         self.workspaceID = workspaceID
         self.parentSessionID = parentSessionID
+        self.sideConversationParentID = sideConversationParentID
         self.title = title
         self.agentSessionID = agentSessionID
         self.model = model
@@ -479,6 +491,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         // Through the rule rather than straight in. See the property's own note: this is the one
         // door every `Session` comes through, the ones `Store` builds from a row included.
         self.permissionMode = permissionMode.nearest(on: agentKind)
+        self.interactionMode = interactionMode.nearest(on: agentKind)
         self.state = state
         self.sortOrder = sortOrder
         self.createdAt = createdAt
@@ -497,12 +510,14 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
         parentSessionID: SessionID? = nil,
+        sideConversationParentID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
         agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
+        interactionMode: InteractionMode = .build,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -516,12 +531,14 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
             id: id,
             workspaceID: workspaceID,
             parentSessionID: parentSessionID,
+            sideConversationParentID: sideConversationParentID,
             title: title,
             agentSessionID: agentSessionID,
             model: model,
             effort: effort,
             agentKind: agentKind,
             permissionMode: permissionMode,
+            interactionMode: interactionMode,
             state: .idle,
             sortOrder: sortOrder,
             createdAt: createdAt,
@@ -565,7 +582,7 @@ public enum MessageKind: String, Sendable, Codable, CaseIterable {
     case crew
 }
 
-public struct Message: Identifiable, Sendable, Hashable {
+public struct Message: Identifiable, Sendable, Hashable, Codable {
     public var id: Int64
     public var sessionID: SessionID
     public var seq: Int
@@ -683,6 +700,7 @@ public struct PullRequest: Sendable, Hashable, Codable {
 public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     case claudeCode
     case codex
+    case grok
     case cursor
     case openCode
 
@@ -692,6 +710,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        case .grok: "Grok"
         case .cursor: "Cursor"
         case .openCode: "OpenCode"
         }
@@ -701,6 +720,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: "claude"
         case .codex: "codex"
+        case .grok: "grok"
         case .cursor: "cursor-agent"
         case .openCode: "opencode"
         }
@@ -716,6 +736,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: return "\(home)/.claude/settings.json"
         case .codex: return "\(home)/.codex/config.toml"
+        case .grok: return "\(home)/.grok/config.toml"
         case .cursor: return "\(home)/.cursor"
         case .openCode: return "\(home)/.opencode"
         }
@@ -727,24 +748,25 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     }
 
     /// Kept separate from the executable so Settings can use the binary it actually detected,
-    /// including an override outside the external terminal's PATH.
+    /// including an override outside PATH.
     public var loginArguments: [String] {
         switch self {
-        case .claudeCode: ["/login"]
-        case .codex, .cursor: ["login"]
+        case .claudeCode: ["auth", "login"]
+        case .codex, .grok, .cursor: ["login"]
         case .openCode: ["auth", "login"]
         }
     }
 
     /// Whether Bloom can actually drive a chat with it.
     ///
-    /// Two, now. `AgentRunner` speaks Claude Code's stream-json and `CodexRunner` speaks Codex's
-    /// JSON-RPC, and both answer to `SessionRunner`. Cursor and OpenCode are detected and
-    /// configurable so the settings screen can be honest about what is installed, and neither has
-    /// a runner, so neither is offered anywhere a chat is started.
+    /// Three, now. `AgentRunner` speaks Claude Code's stream-json, `CodexRunner` speaks Codex's
+    /// JSON-RPC, and `GrokRunner` speaks Grok's ACP over stdio. All three answer to
+    /// `SessionRunner`. Cursor and OpenCode are detected and configurable so the settings screen
+    /// can be honest about what is installed, and neither has a runner, so neither is offered
+    /// anywhere a chat is started.
     public var canRunWorkspaces: Bool {
         switch self {
-        case .claudeCode, .codex: true
+        case .claudeCode, .codex, .grok: true
         case .cursor, .openCode: false
         }
     }
@@ -772,6 +794,11 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     /// sentence behind a refusal made the agent do the different thing that was asked for.
     /// `CodexRunner` has shipped it since, as the reason that travels behind a denial.
     ///
+    /// **Grok: no**, until measured. ACP's `session/prompt` stays open for the whole turn, and a
+    /// second prompt on the same session while one is in flight is not a documented call the way
+    /// Codex's `turn/steer` is. The TUI can interject; this wire has not been shown to. Queuing
+    /// until the turn ends is the honest default, and a measurement that says otherwise flips this.
+    ///
     /// **Cursor and OpenCode: no**, and not as a judgement about the CLIs. Neither has a runner,
     /// so there is no turn to write into and no wire to write on. This answers `false` for the
     /// same reason `canRunWorkspaces` does, and a backend that grows a runner has to measure this
@@ -785,7 +812,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     public var acceptsMidTurnMessage: Bool {
         switch self {
         case .claudeCode, .codex: true
-        case .cursor, .openCode: false
+        case .grok, .cursor, .openCode: false
         }
     }
 

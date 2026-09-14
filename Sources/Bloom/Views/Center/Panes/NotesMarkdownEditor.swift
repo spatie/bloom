@@ -125,7 +125,11 @@ final class NotesEditorController: NSHostingController<NativeTextViewWrapper> {
         }
         if needsFocus, let textView, textView.isEditable, let window = view.window {
             needsFocus = false
-            window.makeFirstResponder(textView)
+            if AutomaticFocus.mayUpdateResponder(applicationIsActive: NSApp.isActive,
+                                                 windowIsKey: window.isKeyWindow,
+                                                 windowIsVisible: window.isVisible) {
+                window.makeFirstResponder(textView)
+            }
         }
         reportFocus()
     }

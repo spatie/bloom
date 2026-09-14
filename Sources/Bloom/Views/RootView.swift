@@ -26,7 +26,11 @@ struct RootView: View {
     @Bindable private var feedback = FeedbackPresenter.shared
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var isStartingFreshAskConversation = false
+
+    private var sidebarTintOpacity: Double {
+        let preference = ColourThemePreference.shared
+        return preference.glass.tintOpacity(maximum: preference.choice.surfaces.glassTintOpacity ?? 0.4)
+    }
 
     var body: some View {
         @Bindable var app = app
@@ -37,15 +41,26 @@ struct RootView: View {
                 // The system toggle offers an irrelevant label-style context menu on macOS 26.
                 // BloomWindowToolbar replaces it with the same image-only action.
                 .toolbar(removing: .sidebarToggle)
-                // Leave the native source-list background in place so the sidebar and unified
-                // title bar share the system's appearance and accessibility treatment.
+                .scrollContentBackground(.hidden)
+                .background {
+                    Group {
+                        if ColourThemePreference.shared.glass == .off {
+                            Palette.surfaceSunken
+                        } else {
+                            SidebarMaterial(tint: Palette.sidebarGlassTint, opacity: sidebarTintOpacity)
+                        }
+                    }
+                    .ignoresSafeArea()
+                }
                 // The rule down the sidebar's trailing edge.
                 //
                 // `NavigationSplitView` draws none: measured across the boundary, the sidebar's last
                 // pixel is followed directly by the centre column's first, in both appearances. That
                 // is survivable while both columns are the system's own white, and it is not once
                 // they are two steps of a ramp, because then the two panes simply run into each other.
-                .overlay(alignment: .trailing) { Hairline(axis: .vertical) }
+                .overlay(alignment: .trailing) {
+                    Hairline(axis: .vertical).ignoresSafeArea(edges: .top)
+                }
                 // The ceiling is not always the reserve. On a display too narrow to hold all
                 // three panes at their minimums, the sidebar is the one that gives, because it is
                 // a list of rows that truncate where the other two hold a transcript and a diff
@@ -76,12 +91,13 @@ struct RootView: View {
                     isInspectorPresented: isInspectorPresented,
                     animated: !reduceMotion
                 )
+                    .background { Palette.sidebar.ignoresSafeArea() }
                     .toolbar {
                         BloomWindowToolbar(
                             app: app,
                             isSidebarVisible: columnVisibility != .detailOnly,
                             toggleSidebar: toggleSidebar,
-                            startFreshAskConversation: { isStartingFreshAskConversation = true }
+                            startFreshAskConversation: { Task { await app.ask.newConversation() } }
                         )
                     }
                     // Said here as well as under `navigationTitle` below, and deliberately.
@@ -119,6 +135,7 @@ struct RootView: View {
             // `menuWorkspace` rather than `selectedWorkspace`, so an archived workspace being read
             // names the window as well. It is still not what the inspector keys on, below: naming a
             // window costs nothing, and showing a diff for a worktree that is gone does not.
+            .containerBackground(.clear, for: .window)
             .navigationTitle(app.menuWorkspace?.name ?? "Bloom")
 
             // And then removed from the toolbar again, because `WindowTitleControl` draws the name
@@ -241,18 +258,6 @@ struct RootView: View {
                 // Naming what disappears, rather than asking "are you sure?". Written by
                 // `ArchiveRequest` in the core, where it can be tested.
                 Text(request.message)
-            }
-            .confirmationDialog(
-                "Start a new conversation?",
-                isPresented: $isStartingFreshAskConversation,
-                titleVisibility: .visible
-            ) {
-                Button("Start New Conversation") {
-                    Task { await app.ask.startFresh() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The current Ask Bloom conversation will be cleared from view.")
             }
             // The question asked before a session that is still working is closed. On the window for
             // the reason the archive confirmation above is: it is raised from the tab strip's close
@@ -385,11 +390,10 @@ struct RootView: View {
         // where the post was already being received and because `openWindow` needs a view: the
         // window itself is `CreateWorkspaceWindow`, and it is keyed by project, so asking twice
         // for the same project brings the first one forward with its draft still in it.
-        // File, New Ask Bloom Conversation. It raises the same confirmation the toolbar's glyph
-        // raises rather than starting fresh outright: the act archives the conversation on screen,
-        // and a menu item that discards a conversation with no question asked is not one.
+        // File, New Ask Bloom Conversation opens a tab and keeps the existing conversations.
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewAskConversation)) { _ in
-            isStartingFreshAskConversation = true
+            app.selection = .ask
+            Task { await app.ask.newConversation() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             if note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true {

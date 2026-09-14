@@ -97,16 +97,6 @@ public enum FileBarControls {
         )
     }
 
-    /// Handing the diff to whatever the Mac can send things to.
-    ///
-    /// **No longer a control in the bar**, and that is the whole point of it being here. It was a
-    /// share glyph sitting next to the copy glyph, which is two ways to do nearly the same thing
-    /// given equal weight in a row that was already too full, and it was reported as clutter. The
-    /// route is kept, one press further away, in the bar's own menu.
-    public static func share(filename: String) -> FileBarControl {
-        FileBarControl(title: "Share the diff", hint: "Send the diff for \(filename) somewhere else")
-    }
-
     /// Everything that is not worth a control of its own.
     public static let more = FileBarControl(
         title: "More",

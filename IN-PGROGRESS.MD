@@ -51,7 +51,8 @@ Suggested event mapping: `UserPromptSubmit`, `PreToolUse` and `PostToolUse` mean
 - The CLI owns its transcript. Bloom does not import terminal text as chat messages or forward its chat-only actions into terminal input.
 - If setup is interrupted, reopening offers the saved command. Check the existing setup warning before starting it.
 - Validation passed: `make build` with no warnings, `make lint`, `make swiftlint`, and 173 targeted tests in 19 suites. The test command was `BLOOM_TEST_ID=bloom-cli-integration ./Tools/test-core.sh InteractiveAgent TerminalCommandMemory WorkspaceStart SessionLifecycle`. `git diff --check` is clean. No live paid agent turn or interactive UI verification has run. Do not launch or activate applications for verification without the permission required by `AGENTS.md`.
-- Changes remain on the current branch. No commit, push or pull request is requested.
+- Initial implementation was committed and pushed to `alex/cli-agent-terminals`. No pull request is requested.
+- Merged current `main` to retain schema version 27 support after the first dev build could not open the newer dev database. The dev database was backed up and its integrity checked before app replacement. The existing database is kept in place. No database reset or schema downgrade is used. CLI integration remains alongside main's run scripts, terminal activity and workspace history guards.
 
 ## Manual checks still to run
 
@@ -61,4 +62,4 @@ Suggested event mapping: `UserPromptSubmit`, `PreToolUse` and `PostToolUse` mean
 4. Relaunch the dev app with tmux enabled, then with a stopped terminal. Verify reattachment or the existing Start offer resumes the native session without repeating the task.
 5. Close a linked session during setup. Verify it does not launch later or start another chat's runner.
 
-These are pending checks, not claimed results. No application was launched for this task.
+These are pending checks, not claimed results. The first dev launch hit the schema mismatch above. Reopening the compatible build is pending.

@@ -17,6 +17,7 @@ enum InspectorLayout {
     static let inset = Metrics.inset
     /// The tab row, and every other strip in the column.
     static let barHeight = Metrics.barHeight
+    static let reviewHeaderHeight: CGFloat = 40
     /// The pull request strip, which is taller than the rest of them on purpose.
     ///
     /// Derived from the type it holds, measured rather than guessed. `NSFont` reports the line
@@ -40,8 +41,8 @@ enum InspectorLayout {
     /// badge it replaces was 17 points tall, 11 point text and filled, which read as a sticker on
     /// the band rather than as something to press, and half of it was not pressable at all.
     ///
-    /// The inset is the horizontal padding of each half, so the seam between them sits at the
-    /// middle of the pair rather than being a third measurement. See `PullRequestBadge`.
+    /// The inset surrounds the number and arrow together so they read as one action.
+    /// See `PullRequestBadge`.
     static let badgeHeight: CGFloat = 24
     static let badgeInset: CGFloat = Metrics.spacingWide
     static let badgeStrokeOpacity: Double = 0.2

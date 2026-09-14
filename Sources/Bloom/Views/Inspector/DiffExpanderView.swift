@@ -24,8 +24,8 @@ struct DiffExpanderView: View {
                     .foregroundStyle(Palette.accent)
                     .accessibilityHidden(true)
                 Text(title)
-                    .font(Typo.codeTiny)
-                    .foregroundStyle(isHovered ? Palette.accent : Palette.textTertiary)
+                    .font(Font(CodeMetrics.numberFont))
+                    .foregroundStyle(isHovered ? Palette.accent : Palette.codeGutter)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, CodeMetrics.textInset)
@@ -33,7 +33,7 @@ struct DiffExpanderView: View {
             // The hover tint is a translucent wash, so it goes OVER the band's own fill. Swapped
             // for it, hovering made the strip lighter than its resting state instead of darker.
             .background(isHovered ? Palette.hover : .clear)
-            .background(Palette.surfaceSunken)
+            .background(Palette.codeBackground)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -7,6 +7,21 @@ struct ChangedFileTreeTests {
         ChangedFile(path: path, change: .modified, additions: additions, deletions: deletions)
     }
 
+    @Test("Review walks nested folders before sibling files and leaves root files last")
+    func reviewOrder() {
+        let files = [
+            file("README.md"), file("Sources/z.swift"), file("Sources/Nested/item10.swift"),
+            file("Config/features.json"), file("Sources/Nested/item2.swift"), file("Sources/a.swift"),
+        ]
+        let ordered = ChangedFileTree.orderedFiles(from: files)
+        #expect(ordered.map(\.path) == [
+            "Config/features.json", "Sources/Nested/item2.swift", "Sources/Nested/item10.swift",
+            "Sources/a.swift", "Sources/z.swift", "README.md",
+        ])
+        #expect(Set(ordered) == Set(files))
+        #expect(ChangedFileTree.orderedFiles(from: []).isEmpty)
+    }
+
     @Test("An empty change set produces no rows")
     func emptyList() {
         #expect(ChangedFileTree.build(from: []).isEmpty)

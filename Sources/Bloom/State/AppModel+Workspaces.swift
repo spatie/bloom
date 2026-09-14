@@ -331,7 +331,7 @@ extension AppModel {
         let resolved = ComposerDefaults.resolve(
             repo: repoSettings,
             app: appDefaults,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         )
 
         // The backend comes from the model now. It used to be left at its default here, with a
@@ -576,11 +576,15 @@ extension AppModel {
         let contextWindow = CodexContextWindow.normalised(try? await store.setting(
             ComposerControls.contextWindowKey(sessionID: session.id)
         ))
+        let codexFastMode = CodexSpeed.override(stored: try? await store.setting(
+            CodexSpeed.key(sessionID: session.id)
+        ))
         return ComposerControls(
             session: session,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
-            codexContextWindow: contextWindow
+            codexContextWindow: contextWindow,
+            codexFastMode: codexFastMode
         )
     }
 

@@ -215,6 +215,7 @@ struct SettingsWriterTests {
                 .branchPrefix("freek"),
                 .deleteBranchOnArchive(true),
                 .runMode("concurrent"),
+                .browserURL("http://localhost:$BLOOM_PORT/admin"),
             ],
             repo: repo,
             settings: settings
@@ -229,6 +230,7 @@ struct SettingsWriterTests {
         #expect(settings.branchPrefix == "freek")
         #expect(settings.deleteBranchOnArchive)
         #expect(settings.runMode == "concurrent")
+        #expect(settings.browserURL == "http://localhost:$BLOOM_PORT/admin")
     }
 
     @Test("clearing a value removes the key rather than writing an empty one")
@@ -336,6 +338,80 @@ struct SettingsWriterTests {
         let after = SettingsLoader.load(repo: repo)
         #expect(after.setupScript == "new")
         #expect(after.archiveScript == "added behind our back")
+    }
+
+    @Test("editing run scripts keeps an icon and autostart written by hand, byte for byte")
+    func runScriptExtrasSurviveAnEdit() throws {
+        let original = """
+        [scripts.run.vite]
+        name = "Vite Server"
+        command = "yarn dev"
+        icon = "bolt"
+        autostart = true
+
+        [scripts.run.seed]
+        name = "Seed Database"
+        command = "php artisan migrate:fresh --seed"
+        autostart = false
+
+        """
+        let repo = try makeRepo([".bloom/settings.toml": original])
+        let settings = SettingsLoader.load(repo: repo)
+
+        var draft = RepoSettingsDraft(settings)
+        #expect(draft.edits(comparedTo: settings).isEmpty)
+        draft.runScripts[1].command = "php artisan migrate:fresh --seed --force"
+        try SettingsWriter.write(draft.edits(comparedTo: settings), repo: repo, settings: settings)
+
+        let after = try #require(read(repo, ".bloom/settings.toml"))
+        #expect(after == original.replacingOccurrences(of: "--seed\"", with: "--seed --force\""))
+        let reloaded = SettingsLoader.load(repo: repo)
+        #expect(reloaded.runScripts.map(\.icon) == ["bolt", nil])
+        #expect(reloaded.runScripts.map(\.autostart) == [true, false])
+    }
+
+    @Test("run scripts moved into .bloom from .conductor take their icon and autostart with them")
+    func runScriptExtrasFollowTheScriptToBloom() throws {
+        let repo = try makeRepo([
+            ".conductor/settings.toml": "[scripts.run.vite]\ncommand = \"yarn dev\"\nicon = \"bolt\"\nautostart = true\n",
+        ])
+        let settings = SettingsLoader.load(repo: repo)
+        var draft = RepoSettingsDraft(settings)
+        draft.runScripts[0].name = "Vite Server"
+
+        try SettingsWriter.write(draft.edits(comparedTo: settings), repo: repo, settings: settings)
+
+        let reloaded = SettingsLoader.load(repo: repo)
+        #expect(reloaded.origins[.runScripts]?.hasSuffix(".bloom/settings.toml") == true)
+        #expect(reloaded.runScripts == [
+            RunScript(id: "vite", name: "Vite Server", command: "yarn dev", icon: "bolt", autostart: true),
+        ])
+    }
+
+    @Test("a run script the loader skipped as broken is not deleted by saving the others")
+    func skippedRunScriptTablesSurvive() throws {
+        let repo = try makeRepo([
+            ".bloom/settings.toml": """
+            [scripts.run.dev]
+            command = "bun dev"
+
+            [scripts.run.broken]
+            command = "bun test"
+            autostart = "yes"
+            """,
+        ])
+        let settings = SettingsLoader.load(repo: repo)
+        #expect(settings.runScripts.map(\.id) == ["dev"])
+
+        var draft = RepoSettingsDraft(settings)
+        draft.runScripts[0].command = "bun dev --host"
+        draft.runScripts.append(DraftRunScript(name: "Broken", command: "echo new"))
+        try SettingsWriter.write(draft.edits(comparedTo: settings), repo: repo, settings: settings)
+
+        let after = try #require(read(repo, ".bloom/settings.toml"))
+        #expect(after.contains("[scripts.run.broken]\ncommand = \"bun test\"\nautostart = \"yes\""))
+        // The new row was not given the broken table's name.
+        #expect(after.contains("[scripts.run.broken-2]"))
     }
 
     @Test("writing nothing new creates no file")

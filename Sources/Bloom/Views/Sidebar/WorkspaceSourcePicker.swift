@@ -51,6 +51,12 @@ struct WorkspaceSourcePicker: View {
     /// floats over the composer it is filtering. This one hangs off a control at the top of a
     /// sheet with nothing underneath it worth reading, and it is a list people scan rather than a
     /// glance, so it gets about eleven rows instead of eight.
+    ///
+    /// **A fixed height, never a `maxHeight`.** A popover sizes its content to its ideal size, and
+    /// a `ScrollView` capped only from above has almost none, so the list opened a row and a half
+    /// tall over a repository with dozens of branches. Fixed also means the panel keeps its size
+    /// while the query narrows the list and when the tab changes, so the search field never moves
+    /// under the pointer; the empty line sits in the same height for the same reason.
     private static let listHeight: CGFloat = 320
 
     private var matches: WorkspaceSourceMatches {
@@ -73,8 +79,32 @@ struct WorkspaceSourcePicker: View {
     }
 
     var body: some View {
+        HStack(spacing: Metrics.spacingSmall) {
+            sourceButton
+
+            if checkout == nil {
+                Button {
+                    present(.existingBranch)
+                } label: {
+                    ComposerControlLabel(
+                        systemImage: "arrow.triangle.branch",
+                        text: "Open existing branch…",
+                        tint: Palette.controlAccent
+                    )
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("Open a workspace on an existing branch or pull request")
+            }
+        }
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            panel
+        }
+    }
+
+    private var sourceButton: some View {
         Button {
-            isPresented = true
+            present(checkout == nil ? .newBranch : .existingBranch)
         } label: {
             ComposerControlLabel(
                 systemImage: glyph,
@@ -88,9 +118,14 @@ struct WorkspaceSourcePicker: View {
         .help("Open a pull request or a branch, or cut a new branch")
         .accessibilityLabel("Start from")
         .accessibilityValue(label)
-        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            panel
-        }
+    }
+
+    /// Both entry points use the same picker, but the explicit branch action skips the new tab.
+    private func present(_ openingTab: WorkspaceSourceTab) {
+        query = ""
+        tab = openingTab
+        selected = offering.search(query: "").rows(in: tab).first
+        isPresented = true
     }
 
     private var panel: some View {
@@ -106,13 +141,16 @@ struct WorkspaceSourcePicker: View {
             searchRow
             Hairline()
 
-            if matches.isEmpty(in: tab) {
-                MenuEmptyRow(
-                    text: query.isEmpty ? emptyTabText : "Nothing matches \(query)"
-                )
-            } else {
-                list(matches)
+            Group {
+                if matches.isEmpty(in: tab) {
+                    MenuEmptyRow(
+                        text: query.isEmpty ? emptyTabText : "Nothing matches \(query)"
+                    )
+                } else {
+                    list(matches)
+                }
             }
+            .frame(height: Self.listHeight, alignment: .top)
 
             if let unavailable, tab == .existingBranch {
                 Hairline()
@@ -126,14 +164,6 @@ struct WorkspaceSourcePicker: View {
         }
         .frame(width: Self.width)
         .background { tabShortcuts }
-        // A fresh query every time it opens. The panel is a way of finding one thing, not a filter
-        // somebody set and left, and reopening it onto yesterday's word would hide the list that
-        // has since loaded behind it.
-        .onAppear {
-            query = ""
-            tab = checkout == nil ? .newBranch : .existingBranch
-            selected = offering.search(query: "").rows(in: tab).first
-        }
     }
 
     /// `PanelTabs` rather than a segmented picker, and its own note carries the three measurements
@@ -209,7 +239,6 @@ struct WorkspaceSourcePicker: View {
                 }
                 .padding(Metrics.spacingSmall)
             }
-            .frame(maxHeight: Self.listHeight)
             .onChange(of: selected) { _, row in
                 guard let row else { return }
                 proxy.scrollTo(row.id)

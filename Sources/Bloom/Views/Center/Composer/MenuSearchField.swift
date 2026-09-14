@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 /// A one line field that types into a list rather than into a document: the arrow keys and Return
 /// belong to whatever it is filtering, and only the characters are its own.
@@ -126,7 +127,10 @@ struct MenuSearchField: NSViewRepresentable {
         func takeFocus(_ field: NSTextField) {
             guard !didFocus else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let self, !self.didFocus, let window = field.window else { return }
+                guard let self, !self.didFocus, let window = field.window,
+                      AutomaticFocus.mayUpdateResponder(applicationIsActive: NSApp.isActive,
+                                                        windowIsKey: window.isKeyWindow,
+                                                        windowIsVisible: window.isVisible) else { return }
                 didFocus = window.makeFirstResponder(field)
             }
         }

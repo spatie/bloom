@@ -18,7 +18,7 @@ public enum PaletteInk {
     /// A colour's two members. There is no third: `Palette.dynamicNSColor` picks between exactly
     /// these two, and a value that is one colour in both appearances says so by repeating itself,
     /// the way `accentFill` and `mergedFill` do.
-    public struct Pair: Sendable, Hashable {
+    public struct Pair: Codable, Sendable, Hashable {
         public let light: UInt32
         public let dark: UInt32
 
@@ -32,7 +32,8 @@ public enum PaletteInk {
         public func member(dark isDark: Bool) -> UInt32 { isDark ? dark : light }
     }
 
-    public static let windowBackground = Pair(light: 0xFFFFFF, dark: 0x0A1A25)
+    public static let windowBackground = surface
+    public static let sidebar = Pair(light: 0xF1F5F6, dark: 0x0E202D)
     public static let surface = Pair(light: 0xFFFFFF, dark: 0x0A1A25)
     public static let surfaceRaised = Pair(light: 0xFFFFFF, dark: 0x16303F)
     public static let surfaceSunken = Pair(light: 0xF7FAFA, dark: 0x0C1E2A)
@@ -52,7 +53,7 @@ public enum PaletteInk {
     public static let synType = Pair(light: 0x0B7285, dark: 0x5BC8DB)
     public static let synString = Pair(light: 0xC0392B, dark: 0xE8846E)
     public static let synNumber = Pair(light: 0x1C6FBB, dark: 0x7FB3F0)
-    public static let synComment = Pair(light: 0x6D7879, dark: 0x818189)
+    public static let synComment = Pair(light: 0x6D7879, dark: 0x9A9AA2)
     public static let synFunction = Pair(light: 0x2F5FD0, dark: 0x89AFF5)
     public static let synVariable = Pair(light: 0x6A3FB5, dark: 0xB49BF0)
     public static let synAttribute = Pair(light: 0x8A6A00, dark: 0xD9B65C)

@@ -12,7 +12,7 @@ import Foundation
 /// # The unit is consecutive activity
 ///
 /// Grey activity rows are the implementation log: tool calls, thinking, notices and settled
-/// questions. Consecutive rows of that kind fold into one line. Black assistant prose is the
+/// permissions. Consecutive rows of that kind fold into one line. Black assistant prose is the
 /// useful account of what the agent found or intends to do, so every prose row remains visible and
 /// divides the activity before and after it into separate groups.
 ///
@@ -53,10 +53,19 @@ import Foundation
 ///    that had to reveal a row it had hidden is a transcript rearranging itself under somebody who
 ///    is reading it. A tool call with no result yet, and a permission question nobody has answered
 ///    yet, are the same fact here. Completed actions after them can still join the fold.
+///
+///    **Except a call that has only just been made.** Most calls are a file read or a `sed` that
+///    comes back in tens of milliseconds, and holding every one of those out drew the call as a
+///    row of its own for a few frames and then pulled it into the count: a line appearing under
+///    the fold and jumping into it, on every action of a turn. So a call younger than
+///    `freshCall` folds as though it had settled, the live tail says what is running meanwhile,
+///    and only a call still running once that has passed is drawn on its own. That reveal is
+///    the one place a fold gives a row back, and it is an insertion at the live end of the work
+///    rather than a rearrangement: the call was never on screen to be moved.
 /// 2. **The agent stopping, and a row carrying content of its own.** An `error` row is the agent
-///    exiting in a way it did not choose, and inline media is deliberate content wearing an
-///    activity row's clothes. Both remain visible and divide the ordinary activity before and
-///    after them into separate compact groups.
+///    exiting in a way it did not choose. Inline media and agent question cards are conversation
+///    content wearing activity rows' clothes. They remain visible, including answered questions,
+///    and divide the ordinary activity before and after them into separate compact groups.
 ///
 ///    **A failed tool call is not one of these, and it used to be.** This rule said that a failed
 ///    command is the one you are scrolling to find, which read well and drew badly: an errored
@@ -74,7 +83,8 @@ import Foundation
 ///    an ordinary session, which teaches a reader nothing except to stop reading it.
 /// 3. **A permission question nobody has answered.** It is covered by 1, and it is written down
 ///    separately because burying a question the turn is stopped on would be the worst fault this
-///    file could have. Answered, it folds away with the rest.
+///    file could have. Settled tool permissions fold away; agent question cards stay visible
+///    under rule 2 so the reader can always see the questions and their answers.
 /// 4. **A row something has asked to be visible**: a tool result the reader opened, and the row
 ///    this session was opened on. The last of those is worse than cosmetic, because a scroll can
 ///    only find a row the table is DRAWING, so a search hit or an unread mark inside a fold is not
@@ -83,6 +93,14 @@ import Foundation
 /// Settling an action only adds it to the hidden rows. It never reveals completed work that
 /// was already folded, and the group keeps its identity while results arrive out of order.
 public enum TranscriptFold {
+    /// How long a tool call with no result may stay folded before it is drawn as running.
+    ///
+    /// Long enough to cover the calls that come back almost at once, which is most of them, and
+    /// short enough that a test run or a build is on screen by the time anybody wonders what the
+    /// turn is doing. A call that settles just after this still appears and folds, but it has been
+    /// on screen long enough to be read rather than flickering past.
+    public static let freshCall: Duration = .seconds(1)
+
     /// The fewest rows worth hiding.
     ///
     /// A fold costs one line for itself, so hiding N rows saves N minus one: at one it saves
@@ -197,8 +215,8 @@ public enum TranscriptFold {
         /// **This settles a row rather than holding it out of the fold.** A failed call folds
         /// away with the ordinary work around it; see rule 2 for why it stopped being a boundary.
         public var failed: Bool
-        /// Deliberate content carried by an activity-shaped row, such as inline media. It remains
-        /// visible and separates the ordinary implementation log on either side.
+        /// Deliberate content carried by an activity-shaped row, such as inline media or an agent
+        /// question card. It stays visible after settling and separates the log on either side.
         public var featured: Bool
         /// What `TranscriptRowInk` says, which is that most `system` rows draw no view at all.
         public var drawsNothing: Bool
@@ -211,6 +229,10 @@ public enum TranscriptFold {
         /// than trusting the caller: a result writes `is_error` and the payload in one go, so a
         /// call that could fail after being hidden would be a fold that has to unfold.
         public var settled: Bool
+        /// A tool call made less than `freshCall` ago, so it may fold before it has settled. See
+        /// the exception under rule 1. Ignored for every other kind: a permission question nobody
+        /// has answered is never hidden, however new it is.
+        public var isFresh: Bool
         /// This row's own call id, for a tool call, and what a child of it carries as its
         /// `parentToolUseID`. Nil for every other kind.
         public var toolUseID: String?
@@ -219,6 +241,11 @@ public enum TranscriptFold {
         /// Only compared, never parsed. It is already on the row for the indent the view draws,
         /// so the fold reads it for nothing.
         public var parentToolUseID: String?
+        /// The row says why a turn the CLI started by itself began, which is a background task
+        /// finishing. It stands where a prompt would, so it is a boundary like one and never
+        /// folds: counted into "17 actions" it would hide the one line explaining them. See
+        /// `BackgroundWake`.
+        public var opensTurn: Bool
 
         public init(
             seq: Int,
@@ -227,8 +254,10 @@ public enum TranscriptFold {
             featured: Bool = false,
             drawsNothing: Bool = false,
             settled: Bool = true,
+            isFresh: Bool = false,
             toolUseID: String? = nil,
-            parentToolUseID: String? = nil
+            parentToolUseID: String? = nil,
+            opensTurn: Bool = false
         ) {
             self.seq = seq
             self.kind = kind
@@ -236,8 +265,10 @@ public enum TranscriptFold {
             self.featured = featured
             self.drawsNothing = drawsNothing
             self.settled = settled
+            self.isFresh = isFresh
             self.toolUseID = toolUseID
             self.parentToolUseID = parentToolUseID
+            self.opensTurn = opensTurn
         }
 
         /// Whether this is a grey activity row that may belong to a compact group. Black prose and
@@ -462,8 +493,9 @@ public enum TranscriptFold {
             markHeader(of: fact)
             // A message and the footer settle everything above them. Neither belongs to an
             // activity group, and a crew row is a message: it is what another agent said to start
-            // this turn, in the place a user row sits when a person started it.
-            if fact.kind == .user || fact.kind == .crew || fact.kind == .result {
+            // this turn, in the place a user row sits when a person started it. A background
+            // task's notification is the same for a turn nobody started.
+            if fact.kind == .user || fact.kind == .crew || fact.kind == .result || fact.opensTurn {
                 close(hasAnswer: false)
                 resume = offset + 1
                 continue
@@ -489,8 +521,9 @@ public enum TranscriptFold {
                 // the monotonicity rests on.** A result writes `is_error` and the payload in one
                 // go, so a call cannot have failed without having settled; read the other way
                 // round, a row that is hidden has already settled and can therefore never turn into
-                // a failure afterwards.
-                ready: fact.settled || fact.failed,
+                // a failure afterwards. A fresh call is the exception, and it costs nothing: a
+                // failed call folds like any other, so failing while hidden reveals nothing.
+                ready: fact.settled || fact.failed || (fact.isFresh && fact.kind == .toolUse),
                 mustShow: fact.mustShow,
                 toolUseID: fact.toolUseID,
                 parentToolUseID: fact.parentToolUseID

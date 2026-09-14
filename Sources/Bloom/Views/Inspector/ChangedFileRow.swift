@@ -23,6 +23,7 @@ struct ChangedFileRow: View, Equatable {
             && lhs.isViewed == rhs.isViewed
             && lhs.fullPath == rhs.fullPath
             && lhs.depth == rhs.depth
+            && lhs.allowsWorktreeActions == rhs.allowsWorktreeActions
     }
 
     var file: ChangedFile
@@ -36,6 +37,7 @@ struct ChangedFileRow: View, Equatable {
     /// How many levels down the tree this row is drawn. Zero in the flat list, which is what
     /// leaves that shape with no indent and no guides while both shapes run this same row.
     var depth: Int = 0
+    var allowsWorktreeActions = true
     var onSelect: () -> Void
     var onRevert: () -> Void
     /// Opens this file as a page in the workspace's browser tab, and in the half a split opens.
@@ -93,25 +95,31 @@ struct ChangedFileRow: View, Equatable {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(HoverQuickLook(url: URL(fileURLWithPath: fullPath)))
+        .background {
+            if allowsWorktreeActions { HoverQuickLook(url: URL(fileURLWithPath: fullPath)) }
+        }
         // The real file, so a drop into Finder or an editor gets the document rather than a
         // sentence about where it lives. One file per drag: the list carries a single selection.
-        .fileDrag(path: fullPath)
+        .fileDrag(path: fullPath, enabled: allowsWorktreeActions)
         .contextMenu {
             // First, because it is the one item here about the reader's pass through the diff
             // rather than about handing the file to something else, and because it is the item
             // this menu is most often opened for during a review.
             Button(ReviewedMarkAction(isViewed: isViewed).title) { onSetViewed(!isViewed) }
             Divider()
-            OpenInItems(target: .file(fullPath))
-            Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
-            // With the two above rather than beside Copy path: all of them hand this row to
-            // something that opens it, and only the last is about the clipboard. The same grouping
-            // `FileTreeRow` puts `Open Terminal Tab Here` in.
-            LocalPageItems(path: fullPath, open: onOpenPage, split: onSplitPage)
+            if allowsWorktreeActions {
+                OpenInItems(target: .file(fullPath))
+                Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
+                // With the two above rather than beside Copy path: all of them hand this row to
+                // something that opens it, and only the last is about the clipboard. The same grouping
+                // `FileTreeRow` puts `Open Terminal Tab Here` in.
+                LocalPageItems(path: fullPath, open: onOpenPage, split: onSplitPage)
+            }
             Button("Copy path", action: copyPath)
             Divider()
-            Button("Revert this file", role: .destructive, action: onRevert)
+            if allowsWorktreeActions {
+                Button("Revert this file", role: .destructive, action: onRevert)
+            }
         }
         .help(file.path)
         .accessibilityInputLabels([file.filename])

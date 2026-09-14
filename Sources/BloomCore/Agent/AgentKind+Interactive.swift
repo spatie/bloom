@@ -72,7 +72,7 @@ public extension AgentKind {
             if !effort.isEmpty {
                 arguments += ["-c", "model_reasoning_effort=\(Self.interactiveTOMLString(effort))"]
             }
-        case .cursor, .openCode:
+        case .cursor, .openCode, .grok:
             return nil
         }
         if !model.isEmpty {

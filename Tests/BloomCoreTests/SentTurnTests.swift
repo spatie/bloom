@@ -111,6 +111,30 @@ struct SentTurnTests {
         #expect(titles == [SentTurn.mergeTitle, SentTurn.projectTitle])
     }
 
+    /// A pull request's instructions are a file and a merge's are a block, and both are drawn as a
+    /// chip named after the button, so the two turns read the same way.
+    @Test("Bloom's own instruction files carry the same titles as the blocks", arguments: [
+        (PullRequestInstructions.scratchPath, SentTurn.pullRequestTitle),
+        (PullRequestInstructions.projectPath, SentTurn.pullRequestTitle),
+        (ConflictInstructions.scratchPath, SentTurn.conflictTitle),
+        (ProjectInstructions.projectPath(for: .merge), SentTurn.projectTitle),
+        (ProjectInstructions.scratchPath(for: .merge), SentTurn.projectTitle),
+        (ProjectInstructions.projectPath(for: .fixConflicts), SentTurn.projectTitle),
+        (ProjectInstructions.scratchPath(for: .fixConflicts), SentTurn.projectTitle),
+    ])
+    func instructionFilesAreTitled(path: String, title: String) {
+        #expect(SentTurn.title(forFile: path) == title)
+    }
+
+    @Test("any other file keeps its own name", arguments: [
+        "README.md",
+        "docs/pr-instructions.md",
+        ".bloom/setup.sh",
+    ])
+    func otherFilesAreNotTitled(path: String) {
+        #expect(SentTurn.title(forFile: path) == nil)
+    }
+
     // MARK: - What is left alone
 
     @Test("a file named in the sentence is still a file")

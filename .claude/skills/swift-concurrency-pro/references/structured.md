@@ -1,101 +1,31 @@
-# Structured concurrency
+# Structured tasks
 
-## `async let` vs task groups
-
-Use `async let` when you have a fixed number of independent operations that return different types, e.g. fetching the news, the weather, and an app update at the same time. Use task groups when you have a dynamic number of operations of the same type, e.g. downloading all images in an array of URLs.
-
-
-## Task groups over loops
-
-It’s generally a bad idea to use unstructured tasks in a loop; prefer task groups.
+Use `async let` for a fixed set of independent operations, and task groups for a dynamic set.
+Children belong to the scope: the group waits for all of them before returning, even after
+cancellation. Keep unstructured tasks when their intended lifetime is independent of this caller.
 
 ```swift
-// WRONG: No cancellation propagation, no way to await all results, leaked tasks on failure.
-for url in urls {
-    Task { try await fetch(url) }
-}
-
-// RIGHT: Structured, cancellable, collects results.
-let results = try await withThrowingTaskGroup { group in
+let results = try await withThrowingTaskGroup(of: Data.self) { group in
     for url in urls {
         group.addTask { try await fetch(url) }
     }
-
-    var collected = [Data]()
+    var results: [Data] = []
     for try await result in group {
-        collected.append(result)
+        results.append(result)
     }
-    return collected
+    return results
 }
 ```
 
+Results arrive in completion order, not input order. Carry an index when input order matters.
+For large inputs, seed a bounded number of children and add another when one completes.
+`addTaskUnlessCancelled` can avoid adding work after cancellation.
 
-## `withDiscardingTaskGroup` (Swift 5.9+)
+An ordinary throwing task group's child error is surfaced when its result is consumed. It does
+not automatically cancel siblings merely by being thrown in the child. If the error escapes the
+group body, remaining children are cancelled and awaited. Catch errors inside children when
+partial results are the intended outcome, and consume results to avoid silently losing failures.
 
-When child tasks don't return meaningful results (fire-and-forget), use `withDiscardingTaskGroup` instead of `withTaskGroup`. It avoids accumulating unused results in memory.
-
-```swift
-// Preferred for side-effect-only child tasks
-await withDiscardingTaskGroup { group in
-    for connection in connections {
-        group.addTask { await connection.sendHeartbeat() }
-    }
-}
-```
-
-
-## Limiting concurrency
-
-Task groups launch all child tasks eagerly, which may be undesirable. Consider limiting concurrency manually when it is appropriate:
-
-```swift
-try await withThrowingTaskGroup { group in
-    let maxConcurrent = 4
-    var iterator = urls.makeIterator()
-
-    // Start initial batch
-    for _ in 0..<maxConcurrent {
-        guard let url = iterator.next() else { break }
-        group.addTask { try await fetch(url) }
-    }
-
-    // As each finishes, start the next
-    for try await result in group {
-        process(result)
-        if let url = iterator.next() {
-            group.addTask { try await fetch(url) }
-        }
-    }
-}
-```
-
-
-## Error handling with partial results
-
-When one child task throws, the group cancels all remaining children. If you need partial results, catch errors inside each child task:
-
-```swift
-await withTaskGroup(of: (URL, Result<Data, Error>).self) { group in
-    for url in urls {
-        group.addTask {
-            do {
-                return (url, .success(try await fetch(url)))
-            } catch {
-                return (url, .failure(error))
-            }
-        }
-    }
-
-    for await (url, result) in group {
-        switch result {
-        case .success(let data): handle(data)
-        case .failure(let error): log(error, for: url)
-        }
-    }
-}
-```
-
-
-## Inferring the type of task groups
-
-Swift is usually able to infer the type of task groups, but not always. Simple types like `String`, `URL`, `Data`, etc, usually work fine, but the example above uses `withTaskGroup(of: (URL, Result<Data, Error>).self)` and that is an example of the specific type being required – Swift would not be able to infer that.
+Use `withDiscardingTaskGroup` or its throwing variant for children whose results are unused.
+These still wait for children; they are not fire-and-forget. The throwing discarding variant
+cancels siblings on a child failure. Cancellation remains cooperative in either variant.

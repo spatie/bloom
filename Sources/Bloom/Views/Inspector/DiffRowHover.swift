@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 /// Which row of a run the pointer is over, told by AppKit rather than by SwiftUI.
 ///
@@ -35,6 +36,7 @@ struct DiffRowHover: NSViewRepresentable {
     var rowHeight: CGFloat
     /// How many rows the run holds, so a point past the last one reports nothing.
     var rowCount: Int
+    var rowHeights: [CGFloat]?
     /// Called when the row under the pointer changes, and with nil when it leaves.
     var onChange: (Int?) -> Void
 
@@ -42,6 +44,7 @@ struct DiffRowHover: NSViewRepresentable {
         let view = RowHoverView()
         view.rowHeight = rowHeight
         view.rowCount = rowCount
+        view.rowHeights = rowHeights
         view.onChange = onChange
         return view
     }
@@ -49,6 +52,7 @@ struct DiffRowHover: NSViewRepresentable {
     func updateNSView(_ view: RowHoverView, context: Context) {
         view.rowHeight = rowHeight
         view.rowCount = rowCount
+        view.rowHeights = rowHeights
         // Reassigned every pass because the closure is a fresh allocation each time, which is the
         // same reason `DiffRunView.==` cannot compare it.
         view.onChange = onChange
@@ -57,6 +61,7 @@ struct DiffRowHover: NSViewRepresentable {
     final class RowHoverView: NSView {
         var rowHeight: CGFloat = 1
         var rowCount = 0
+        var rowHeights: [CGFloat]?
         var onChange: ((Int?) -> Void)?
 
         /// The last row reported, so a move within one row says nothing. A run is 400 rows at
@@ -129,6 +134,7 @@ struct DiffRowHover: NSViewRepresentable {
 
         private func report(at point: NSPoint) {
             guard rowHeight > 0, bounds.contains(point) else { return report(nil) }
+            if let rowHeights { return report(DiffDragRange.row(at: point.y, heights: rowHeights)) }
             let index = Int(point.y / rowHeight)
             report((0..<rowCount).contains(index) ? index : nil)
         }

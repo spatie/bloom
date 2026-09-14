@@ -12,12 +12,22 @@ public struct DraftRunScript: Identifiable, Sendable, Hashable {
     public var key: String
     public var name: String
     public var command: String
+    /// Carried through untouched. The window has no field for either, and a row that forgot them
+    /// would make every Save of the run scripts take a hand-written icon or autostart out of the
+    /// file, and would make the draft differ from the file the moment it was opened.
+    public var icon: String?
+    public var autostart: Bool
 
-    public init(id: UUID = UUID(), key: String = "", name: String = "", command: String = "") {
+    public init(
+        id: UUID = UUID(), key: String = "", name: String = "", command: String = "",
+        icon: String? = nil, autostart: Bool = false
+    ) {
         self.id = id
         self.key = key
         self.name = name
         self.command = command
+        self.icon = icon
+        self.autostart = autostart
     }
 }
 
@@ -43,6 +53,13 @@ public struct RepoSettingsDraft: Sendable, Hashable {
     /// most projects, which is the answer that sends a turn with nothing attached to it.
     public var mergeInstructions = ""
     public var conflictInstructions = ""
+    /// What a browser pane opens on, as typed, with the variables left unexpanded. Empty for the
+    /// port Bloom allocated, which is what most projects want.
+    public var browserURL = ""
+    /// Table names under `scripts.run` that the file holds and the loader skipped as broken. A new
+    /// row must not be given one of them, or its keys would land in the broken table the writer
+    /// deliberately leaves alone. See `SettingsWriter.skippedRunScripts`.
+    public var reservedRunScriptKeys: Set<String> = []
 
     public init() {}
 
@@ -51,13 +68,44 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         archiveScript = settings.archiveScript ?? ""
         filesToCopyText = settings.filesToCopy.joined(separator: "\n")
         runScripts = settings.runScripts.map {
-            DraftRunScript(key: $0.id, name: $0.name, command: $0.command)
+            DraftRunScript(
+                key: $0.id, name: $0.name, command: $0.command, icon: $0.icon, autostart: $0.autostart
+            )
         }
+        reservedRunScriptKeys = Set(settings.issues.compactMap {
+            guard case .runScript(let key) = $0.entry else { return nil }
+            return key
+        })
         runMode = settings.runMode
         branchPrefix = settings.branchPrefix ?? ""
         deleteBranchOnArchive = settings.deleteBranchOnArchive
         mergeInstructions = settings.mergeInstructions ?? ""
         conflictInstructions = settings.conflictInstructions ?? ""
+        browserURL = settings.browserURL ?? ""
+    }
+
+    // MARK: - One run script, by identity
+
+    /// A run script's row reads and writes through these rather than through a position in the
+    /// array. `ForEach($model.draft.runScripts)` hands each row a binding that subscripts by index,
+    /// and a row removed from under it (its own minus button, a Revert, the files changing on
+    /// disk) could still be asked for its value once more, at an index that no longer existed.
+    /// That is `Index out of range` inside SwiftUI, and it was two SIGABRT reports in Flare, on
+    /// 1.6.0 and 1.9.1, both stopping in the key path getter for `RepoSettingsModel.draft`. By
+    /// identity, a stale row reads nothing and writes nothing.
+    public func runScript(id: DraftRunScript.ID) -> DraftRunScript? {
+        runScripts.first { $0.id == id }
+    }
+
+    /// Writes a row back in place. A row that has already gone is left gone rather than appended,
+    /// because a late keystroke from a removed row must not bring it back.
+    public mutating func updateRunScript(_ script: DraftRunScript) {
+        guard let index = runScripts.firstIndex(where: { $0.id == script.id }) else { return }
+        runScripts[index] = script
+    }
+
+    public mutating func removeRunScript(id: DraftRunScript.ID) {
+        runScripts.removeAll { $0.id == id }
     }
 
     /// The patterns, one per line. A blank line is not a pattern, and an empty field means "copy
@@ -72,7 +120,7 @@ public struct RepoSettingsDraft: Sendable, Hashable {
     /// The run scripts with a table name worked out for the ones that do not have one yet, and
     /// with the empty rows dropped: a row with no command is a row somebody started and abandoned.
     public var resolvedRunScripts: [RunScript] {
-        var used = Set(runScripts.map(\.key).filter { !$0.isEmpty })
+        var used = Set(runScripts.map(\.key).filter { !$0.isEmpty }).union(reservedRunScriptKeys)
         return runScripts.compactMap { script in
             let command = script.command.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !command.isEmpty else { return nil }
@@ -82,7 +130,10 @@ public struct RepoSettingsDraft: Sendable, Hashable {
                 used.insert(key)
             }
             let name = script.name.trimmingCharacters(in: .whitespaces)
-            return RunScript(id: key, name: name.isEmpty ? key.capitalizedFirst : name, command: command)
+            return RunScript(
+                id: key, name: name.isEmpty ? key.capitalizedFirst : name, command: command,
+                icon: script.icon, autostart: script.autostart
+            )
         }
     }
 
@@ -141,6 +192,10 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         let conflicts = conflictInstructions.trimmed
         if conflicts != (settings.conflictInstructions ?? "").trimmed {
             edits.append(.conflictInstructions(conflicts))
+        }
+        let url = browserURL.trimmed
+        if url != (settings.browserURL ?? "") {
+            edits.append(.browserURL(url))
         }
         return edits
     }

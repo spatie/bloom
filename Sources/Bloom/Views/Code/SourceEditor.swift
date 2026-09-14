@@ -23,15 +23,15 @@ struct SourceEditor: NSViewRepresentable {
     /// Off for a value that is being shown rather than edited, such as the resolved settings the
     /// preferences window mirrors. The caret and the find bar go with it.
     var isEditable = true
-    /// The ground the code and the gutter are drawn on.
-    ///
-    /// `nil` keeps `NSColor.textBackgroundColor`, which is what a full pane editor wants. A field
-    /// inside a form passes the form's own sunken surface instead, because the app's dark
-    /// appearance is a deep blue and the system's text background is very nearly black next to it.
-    var ground: Color?
     /// Drawn in place of the text while the buffer is empty. A script nobody has written yet is
     /// otherwise an unexplained empty box.
     var placeholder = ""
+    var editorState: SourceEditorState?
+    var onOpenReference: ((String, Int, Bool) -> Void)?
+    var onDefinition: ((Int) -> Void)?
+    var onReferences: ((Int) -> Void)?
+    var onNavigateSymbol: ((Int, Bool) -> Void)?
+    var onAsk: (() -> Void)?
 
     /// Past this the colour pass costs more than it is worth on every keystroke, and a file this
     /// long is not one anybody is hand editing in a review pane. It still opens, in plain
@@ -41,8 +41,7 @@ struct SourceEditor: NSViewRepresentable {
     /// The ground as an `NSColor`, resolved on the main actor where the SwiftUI environment is
     /// available, so no draw pass ever has to do the conversion.
     private var resolvedGround: NSColor {
-        guard let ground else { return .textBackgroundColor }
-        return NSColor(ground)
+        NSColor(Palette.codeBackground)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
@@ -75,8 +74,8 @@ struct SourceEditor: NSViewRepresentable {
         textView.backgroundColor = resolvedGround
         textView.drawsBackground = true
         textView.placeholder = placeholder
-        textView.usesFindBar = isEditable
-        textView.isIncrementalSearchingEnabled = isEditable
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
         // Every one of these turns a helpful editing feature into a source code corruption:
         // smart quotes in a string literal, an en dash in an operator, a "corrected" identifier.
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -100,7 +99,7 @@ struct SourceEditor: NSViewRepresentable {
         // with and the gutter is drawn on top of the first few characters of every line.
         let ruler = LineNumberRuler(scrollView: scrollView, textView: textView)
         ruler.fill = resolvedGround
-        ruler.numberColor = NSColor(Palette.textTertiary)
+        ruler.numberColor = NSColor(Palette.codeGutter)
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
@@ -109,6 +108,15 @@ struct SourceEditor: NSViewRepresentable {
 
         context.coordinator.attach(textView: textView, ruler: ruler)
         context.coordinator.replace(text: text, language: language, appearance: colorScheme)
+        configure(textView, scrollView: scrollView)
+        if let editorState {
+            let length = textView.string.utf16.count
+            let start = min(editorState.selection.location, length)
+            textView.setSelectedRange(NSRange(location: start, length: min(editorState.selection.length, length - start)))
+            scrollView.contentView.scroll(to: editorState.scrollOrigin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        context.coordinator.restorePosition()
         return scrollView
     }
 
@@ -125,19 +133,43 @@ struct SourceEditor: NSViewRepresentable {
         scrollView.backgroundColor = ground
         if let ruler = scrollView.verticalRulerView as? LineNumberRuler {
             ruler.fill = ground
-            ruler.numberColor = NSColor(Palette.textTertiary)
+            ruler.numberColor = NSColor(Palette.codeGutter)
             ruler.needsDisplay = true
         }
+
+        configure(textView, scrollView: scrollView)
 
         // Only when the buffer genuinely differs, because assigning `string` throws away the
         // selection and the undo stack, and SwiftUI re-runs this on every unrelated update.
         // Language and appearance both change what the colour pass produces, so either one moving
         // has to re-run it even when the buffer is untouched.
-        if textView.string != text
-            || context.coordinator.language != language
-            || context.coordinator.appearance != colorScheme {
+        if !textView.string.utf8.elementsEqual(text.utf8) {
             context.coordinator.replace(text: text, language: language, appearance: colorScheme)
         }
+        context.coordinator.refreshTheme(language: language, appearance: colorScheme)
+        context.coordinator.restorePosition()
+    }
+
+    private func configure(_ view: CodeTextView, scrollView: NSScrollView) {
+        view.insertionPointColor = NSColor(Palette.codeCaret)
+        view.selectedTextAttributes = [.backgroundColor: NSColor(Palette.codeSelection), .foregroundColor: NSColor(Palette.codeForeground)]
+        view.defaultParagraphStyle = WrappedCodeLayout.paragraph()
+        view.editorState = editorState
+        editorState?.textView = view
+        view.codeLanguage = language
+        view.onOpenReference = onOpenReference
+        view.onDefinition = onDefinition
+        view.onReferences = onReferences
+        view.onNavigateSymbol = onNavigateSymbol
+        view.onAsk = onAsk
+        let wraps = editorState?.wraps ?? false
+        view.isHorizontallyResizable = !wraps
+        view.autoresizingMask = wraps ? [.width] : []
+        view.textContainer?.widthTracksTextView = wraps
+        let width = wraps ? scrollView.contentSize.width : CGFloat.greatestFiniteMagnitude
+        view.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        if wraps { view.setFrameSize(NSSize(width: scrollView.contentSize.width, height: view.frame.height)) }
+        scrollView.hasHorizontalScroller = !wraps
     }
 
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
@@ -156,6 +188,8 @@ struct SourceEditor: NSViewRepresentable {
         var text: Binding<String>
         private(set) var language: Language = .plainText
         private(set) var appearance: ColorScheme = .light
+        private var scheme: CodeScheme?
+        private var typography: ThemeTypography?
 
         private weak var textView: NSTextView?
         private weak var ruler: LineNumberRuler?
@@ -169,7 +203,9 @@ struct SourceEditor: NSViewRepresentable {
         /// opening a file in Edit mode took the only way back from an archive with it.
         private let editorUndo = UndoManager()
 
-        func undoManager(for view: NSTextView) -> UndoManager? { editorUndo }
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            editorUndo
+        }
 
         init(text: Binding<String>) {
             self.text = text
@@ -180,7 +216,32 @@ struct SourceEditor: NSViewRepresentable {
             self.ruler = ruler
         }
 
+        func refreshTheme(language: Language, appearance: ColorScheme) {
+            let scheme = ColourThemePreference.shared.codeScheme
+            let typography = ColourThemePreference.shared.codeTypography
+            guard self.scheme != scheme || self.typography != typography
+                    || self.language != language || self.appearance != appearance else { return }
+            self.scheme = scheme
+            self.typography = typography
+            self.language = language
+            self.appearance = appearance
+            applyTypography()
+            highlight(immediately: true)
+        }
+
+        private func applyTypography() {
+            if textView?.font != CodeMetrics.font { textView?.font = CodeMetrics.font }
+            if ruler?.numberFont != CodeMetrics.numberFont { ruler?.numberFont = CodeMetrics.numberFont }
+        }
+
         func detach() {
+            if let view = textView as? CodeTextView, let state = view.editorState {
+                state.selection = view.selectedRange()
+                state.scrollOrigin = view.enclosingScrollView?.contentView.bounds.origin ?? .zero
+                if state.textView === view { state.textView = nil }
+            }
+            (textView as? CodeTextView)?.updateNavigationHint(command: false)
+            (textView as? CodeTextView)?.bracketTask?.cancel()
             highlightTask?.cancel()
         }
 
@@ -193,9 +254,21 @@ struct SourceEditor: NSViewRepresentable {
             guard let textView else { return }
             language = newLanguage
             appearance = scheme
-            if textView.string != value {
+            self.scheme = ColourThemePreference.shared.codeScheme
+            typography = ColourThemePreference.shared.codeTypography
+            applyTypography()
+            if !textView.string.utf8.elementsEqual(value.utf8) {
+                let selection = textView.selectedRange()
+                let origin = textView.enclosingScrollView?.contentView.bounds.origin
                 textView.string = value
+                let start = min(selection.location, value.utf16.count)
+                textView.setSelectedRange(NSRange(location: start, length: min(selection.length, value.utf16.count - start)))
+                if let origin, let scroll = textView.enclosingScrollView {
+                    scroll.contentView.scroll(to: origin)
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
                 // Only this editor's stack, which is what `editorUndo` exists to make true.
+                // Each native view owns its undo registrations. A recreated view starts a fresh stack.
                 editorUndo.removeAllActions()
             }
             ruler?.refresh()
@@ -204,9 +277,35 @@ struct SourceEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
+            (textView as? CodeTextView)?.updateNavigationHint(command: false)
             text.wrappedValue = textView.string
             ruler?.refresh()
             highlight(immediately: false)
+        }
+
+        func restorePosition() {
+            guard let view = textView as? CodeTextView, let state = view.editorState,
+                  let request = state.request, state.appliedRevision != state.revision else { return }
+            state.appliedRevision = state.revision
+            let offset = CodeLocation.offset(in: view.string, line: request.line, column: request.column)
+            view.setSelectedRange(NSRange(location: offset, length: 0))
+            view.scrollRangeToVisible(NSRange(location: offset, length: 0))
+            view.showFindIndicator(for: (view.string as NSString).lineRange(for: NSRange(location: offset, length: 0)))
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let view = textView as? CodeTextView else { return }
+            view.needsDisplay = true
+            view.updateBracketMatch()
+            let selection = view.selectedRange()
+            let position = CodeLocation.position(in: view.string, offset: selection.location)
+            // TextKit can call the delegate during a SwiftUI update. Publish after that pass.
+            Task { @MainActor [weak view] in
+                guard let view, view.selectedRange() == selection, let state = view.editorState else { return }
+                state.selection = selection
+                state.line = position.line
+                state.column = position.column
+            }
         }
 
         /// Re-colour the buffer.
@@ -239,6 +338,8 @@ struct SourceEditor: NSViewRepresentable {
         }
 
         private func applyPlain() {
+            (textView as? CodeTextView)?.navigationSource = nil
+            (textView as? CodeTextView)?.navigationTokens = []
             guard let storage = textView?.textStorage else { return }
             storage.beginEditing()
             storage.setAttributes(Self.base, range: NSRange(location: 0, length: storage.length))
@@ -248,6 +349,8 @@ struct SourceEditor: NSViewRepresentable {
         private func apply(_ runs: [ColorRun], matching source: String) {
             guard let storage = textView?.textStorage, storage.string == source else { return }
 
+            (textView as? CodeTextView)?.navigationSource = source
+            (textView as? CodeTextView)?.navigationTokens = runs
             var colors: [TokenKind: NSColor] = [:]
             for kind in TokenKind.allCases { colors[kind] = NSColor(CodeText.color(for: kind)) }
 
@@ -261,10 +364,10 @@ struct SourceEditor: NSViewRepresentable {
             storage.endEditing()
         }
 
-        private static let base: [NSAttributedString.Key: Any] = [
-            .font: CodeMetrics.font,
-            .foregroundColor: NSColor.labelColor,
-        ]
+        private static var base: [NSAttributedString.Key: Any] {
+            [.font: CodeMetrics.font, .foregroundColor: NSColor(Palette.codeForeground),
+             .paragraphStyle: WrappedCodeLayout.paragraph()]
+        }
     }
 
     /// The one place tokens become spans. Pure and off the main actor, so it can run detached.
@@ -303,7 +406,22 @@ struct SourceEditor: NSViewRepresentable {
 /// `lineFragmentPadding` is the five points the container then takes off the front of every line.
 /// The prompt was drawn from the inset alone and sat five points to the left of the text it was
 /// standing in for, which is small enough to read as a rendering quirk and is not one.
-final class CodeTextView: NSTextView {
+class CodeTextView: NSTextView {
+    weak var editorState: SourceEditorState?
+    var codeLanguage: Language = .plainText
+    var onOpenReference: ((String, Int, Bool) -> Void)?
+    var onDefinition: ((Int) -> Void)?
+    var onReferences: ((Int) -> Void)?
+    var onNavigateSymbol: ((Int, Bool) -> Void)?
+    var onAsk: (() -> Void)?
+    var navigationRange: NSRange?
+    var navigationTokens: [SourceEditor.ColorRun] = []
+    var navigationSource: String?
+    var definitionChoice: ((CodeLocation) -> Void)?
+    var contextOffset = 0
+    var bracketRange: NSRange?
+    var bracketTask: Task<Void, Never>?
+
     var placeholder = "" {
         didSet { if placeholder != oldValue { needsDisplay = true } }
     }

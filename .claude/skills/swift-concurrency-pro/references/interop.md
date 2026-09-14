@@ -1,129 +1,18 @@
-# Interop and migration
+# Interop
 
-Approved patterns for migrating legacy concurrency mechanisms to Swift concurrency.
+Preserve working framework integration unless migration is needed for the task. GCD, locks,
+delegates and Combine are not automatically bugs in Bloom's AppKit and subprocess code.
 
-## Completion handlers → `async`/`await`
-
-Unless the user requested you to modernize their code, it’s better to leave existing completion handler code alone because it’s understood, tested, and mature.
-
-Instead, provide modern Swift concurrency wrappers for it using `withCheckedThrowingContinuation`. Resume exactly once on every path. See `bridging.md` for detailed rules.
-
-```swift
-func loadUser(id: String) async throws -> User {
-    try await withCheckedThrowingContinuation { continuation in
-        api.fetchUser(id: id) { result in
-            continuation.resume(with: result)
-        }
-    }
-}
-```
-
-If the SDK already provides an async overload, use it directly instead of wrapping.
-
-
-## Delegates → `AsyncStream`
-
-Delegates that deliver multiple values over time map well to `AsyncStream`. Use `makeStream(of:)` and yield from delegate callbacks. See `bridging.md` for the full pattern.
-
-Single-shot delegates (one callback, then done) can use `withCheckedContinuation` instead.
-
-
-## `DispatchQueue.main.async` → `@MainActor`
-
-```swift
-// Before
-DispatchQueue.main.async {
-    self.label.text = "Done"
-}
-
-// After – make the enclosing function or type @MainActor
-@MainActor
-func updateLabel() {
-    label.text = "Done"
-}
-```
-
-If called from a non-isolated async context, the `await` at the call site replaces the dispatch:
-
-```swift
-await updateLabel()
-```
-
-
-## `DispatchQueue.global().async` → `@concurrent` or Task Group
-
-For one-off background work:
-
-```swift
-// Before
-DispatchQueue.global().async {
-    let result = heavyComputation()
-    DispatchQueue.main.async { self.result = result }
-}
-
-// After (Swift 6.2)
-@concurrent
-func heavyComputation() async -> ComputationResult { ... }
-
-// At call site:
-self.result = await heavyComputation()
-```
-
-A plain `async` helper does not offload CPU work by itself. If the goal is to leave the caller's executor, make that explicit.
-
-For parallel batch work, use `withTaskGroup`. See `structured.md`.
-
-
-## Serial `DispatchQueue` → `actor`
-
-A serial dispatch queue protecting mutable state maps directly to an `actor`:
-
-```swift
-// Before
-class TokenStore {
-    private let queue = DispatchQueue(label: "token-store")
-    private var token: String?
-
-    func setToken(_ t: String) {
-        queue.sync { token = t }
-    }
-
-    func getToken() -> String? {
-        queue.sync { token }
-    }
-}
-
-// After
-actor TokenStore {
-    private var token: String?
-
-    func setToken(_ t: String) { token = t }
-    func getToken() -> String? { token }
-}
-```
-
-
-## Locks and checked sendability
-
-If the API must stay synchronous, prefer a lock over introducing actor isolation just to serialize access.
-
-- `Mutex` gives the best compile time and can preserve checked `Sendable` on the owning type.
-- Traditional locks still work, but the owning reference type often ends up with `@unchecked Sendable`.
-
-*Choose an actor only when the API itself should become actor-isolated.*
-
-
-## Moving from Combine to `AsyncSequence`
-
-| Combine | Swift Concurrency |
-|---------|-------------------|
-| `publisher.sink { }` | `for await value in stream { }` |
-| `publisher.map { }` | `stream.map { }` |
-| `publisher.filter { }` | `stream.filter { }` |
-| `PassthroughSubject` | `AsyncStream` via `makeStream(of:)` |
-| `CurrentValueSubject` | No direct equivalent (see note below) |
-| `publisher.values` | Already an `AsyncSequence` – use directly |
-
-If a Combine publisher already exposes a `.values` property, consume that directly rather than wrapping it in a new `AsyncStream`.
-
-Combine is not officially deprecated at this time, but Apple’s advice is to avoid using it.
+- Wrap a single completion in a checked continuation when an async entry point is needed.
+  Do not add a wrapper when a suitable async overload exists.
+- A repeated delegate stream can use `AsyncStream` with explicit producer cleanup.
+- `@MainActor` expresses UI isolation. Replacing `DispatchQueue.main.async` with a direct call can
+  change deferred ordering, so preserve any reason the work was queued for a later turn.
+- A serial queue protecting state can become an actor if callers can use an async interface.
+  For synchronous APIs, `Synchronization.Mutex` can keep protected state behind a Sendable boundary.
+  Never hold a blocking lock across suspension or block a cooperative thread waiting for async work.
+- `@concurrent` can explicitly move CPU-heavy async work off an actor. See
+  [isolation settings](new-features.md) rather than assuming any `async` function runs in the background.
+- Combine's `publisher.values` provides async iteration, but subscriber demand, buffering and
+  event loss still need checking. `AsyncStream` is not a drop-in replacement for broadcast or
+  replaying subjects. Keep Combine when those semantics or existing integration matter.

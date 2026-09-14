@@ -1,67 +1,29 @@
 # Async streams
 
-## Prefer `makeStream(of:)` factory
+Use `AsyncStream.makeStream(of:)` when both the stream and continuation need to be stored.
+The closure initialiser remains valid when it naturally owns registration and cleanup.
 
-The modern way to create an `AsyncStream` is the static factory method, which returns both the stream and its continuation as a tuple. This avoids capturing the continuation in a closure.
+## Lifecycle
 
-```swift
-// OLD: Closure-based, awkward to store the continuation.
-var continuation: AsyncStream<Event>.Continuation?
-let stream = AsyncStream<Event> { cont in
-    continuation = cont
-}
+`AsyncStream.Continuation.finish()` ends production and is idempotent; later finishes or yields
+have no effect. This differs from `CheckedContinuation`, which must be resumed exactly once.
+Finish finite streams on completion and error paths, and connect consumer termination to producer
+cleanup with `onTermination`. That handler is `@Sendable` and must respect isolation.
 
-// NEW: Clean, no closure capture needed.
-let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
-```
+Breaking out of `for await` is not an explicit cancellation API for a retained stream. Ensure
+producer shutdown through ownership or a stop method when early loop exit must release resources.
+Do not rely on a retained continuation or iterator being destroyed immediately.
 
-This also works with `AsyncThrowingStream.makeStream(of:throwing:)`.
+`AsyncStream` responds to cancellation while waiting for the next element. Arbitrary
+`AsyncSequence` implementations define their own cancellation behaviour, and long work in a loop
+body may need explicit cancellation checks. Code after a normally finished loop still runs.
 
+## Buffering
 
-## Continuation lifecycle
+The default buffer is unbounded. Select `.bufferingNewest(n)` or `.bufferingOldest(n)` when
+lossy delivery is acceptable. Inspect `yield` results if dropped values matter. A bounded buffer
+is a drop policy, not backpressure; `yield` does not suspend a fast producer. For lossless events,
+such as agent output, use an appropriate flow-control strategy rather than silently dropping data.
 
-A continuation must always be finished exactly once. Failing to finish it causes the consumer's `for await` loop to hang indefinitely. Finishing it twice is a programmer error (although `AsyncStream.Continuation` tolerates it, `CheckedContinuation` does not).
-
-Always finish in cleanup paths:
-
-```swift
-let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
-
-let monitor = NetworkMonitor()
-
-monitor.onEvent = { event in
-    continuation.yield(event)
-}
-
-monitor.onComplete = {
-    continuation.finish()
-}
-
-// If the monitor can be deallocated before completing:
-continuation.onTermination = { _ in
-    monitor.stop()
-}
-```
-
-
-## Buffering and back pressure
-
-`AsyncStream` has a default buffer of unlimited size. For high-throughput producers, this can cause unbounded memory growth. Specify a buffering policy:
-
-```swift
-let (stream, continuation) = AsyncStream.makeStream(
-    of: SensorReading.self,
-    bufferingPolicy: .bufferingNewest(100)
-)
-```
-
-Choose from:
-
-- `.bufferingNewest(n)` keeps the most recent `n` elements, dropping older ones.
-- `.bufferingOldest(n)` keeps the first `n` elements, dropping newer ones.
-- `.unbounded` is the default; use only when the consumer keeps up.
-
-
-## `for await` and cancellation
-
-A `for await` loop automatically stops when the task is cancelled or the stream finishes. You do not need to manually check cancellation inside the loop – but code *after* the loop does run, so handle cleanup there if needed.
+Do not treat one stream as a broadcast channel for multiple consumers. Give subscribers their
+own streams and lifecycle management when every subscriber must receive every event.

@@ -23,9 +23,6 @@ import BloomCore
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Whether this window is the one being used, which is what tells a loud selection from a
-    /// resting one. See `selectionFill(for:)` for what this can and cannot say.
-    @Environment(\.controlActiveState) private var activeState
     /// The window's undo manager. Only a view can see it, and `AppModel` is where the archive
     /// that wants it happens, so the sidebar hands it over. Any view in the window would do; this
     /// is the one that is always on screen.
@@ -256,14 +253,12 @@ struct SidebarView: View {
         // a workspace must not start a fold, and a running agent rewrites its diff stat
         // every few seconds, which would otherwise animate the whole column once a second.
         .animation(foldMotion, value: foldedProjects)
-        // Hiding and unhiding, which is a different curve from folding because it is a different
-        // change: a fold hides rows the list still holds, and this inserts or removes them. The
-        // value is the projects that are hidden and the switch that decides whether being hidden
-        // takes a row out of the pane at all, so both halves of the one gesture reach the table
-        // through the same transaction. See `ProjectVisibilityMotion`, which is where the two
-        // halves are told apart.
+        // Observe the displayed project IDs alongside their dimmed state. With hidden projects
+        // filtered out, `hiddenProjects` stays empty even as a project leaves. The preference
+        // changes before `regroup` publishes the rows, so animating that switch misses the row
+        // update too. Both values here come from the groups published with `paneRows`.
         .animation(visibilityMotion, value: hiddenProjects)
-        .animation(visibilityMotion, value: showsHiddenProjects)
+        .animation(visibilityMotion, value: projectIdentities)
         // Membership is published with the rows, after asynchronous creates, archives, deletes
         // and restores reach the model. A set ignores renames, status updates and reordering;
         // pending and stored workspaces share an id, so finishing a create does not reinsert it.
@@ -416,9 +411,12 @@ struct SidebarView: View {
         groups.filter(\.repo.collapsed).map(\.id)
     }
 
-    /// Which projects are hidden, in order. The same discipline `foldedProjects` is under: this
-    /// must change when one is hidden or unhidden and at no other time, or a diff stat landing
-    /// mid animation would restart it.
+    /// Membership only, so renames, reordering and status updates do not trigger visibility motion.
+    private var projectIdentities: Set<RepoID> {
+        Set(groups.map(\.id))
+    }
+
+    /// Hidden projects still on screen, whose headers dim when "Show hidden projects" is on.
     private var hiddenProjects: [RepoID] {
         groups.filter(\.repo.hidden).map(\.id)
     }
@@ -542,7 +540,8 @@ struct SidebarView: View {
             break
 
         case .project(let id, let offset):
-            Task { await app.reorderProjects(id: id, to: offset) }
+            let visible = groups.map(\.id)
+            Task { await app.reorderProjects(id: id, visible: visible, to: offset) }
 
         case .workspace(let projectID, let offsets, let offset, let landedOutside):
             guard let group = groups.first(where: { $0.id == projectID }) else { return }
@@ -649,19 +648,7 @@ struct SidebarView: View {
     /// Nothing rather than `Color.clear`, deliberately: a `listRowBackground` of clear REPLACES
     /// the list's own drawing, so an unselected row handed one loses its hover wash.
     ///
-    /// It says loud or resting on the window alone, and that is one step coarser than AppKit was.
-    /// The table dimmed its own highlight when the pane lost the KEYBOARD as well, so clicking a
-    /// workspace and then typing in the composer used to quieten the row. Neither signal a
-    /// `listRowBackground` can see says that. `backgroundProminence` is SwiftUI's own answer to
-    /// the question and it is right inside a row, which is what still inverts the row's ink, but
-    /// it arrives here increased whenever the row is selected and whatever the pane is doing.
-    /// `@FocusState` on the list is no better: it reported focused with the table demonstrably
-    /// not the first responder. Both were photographed before either was believed.
-    ///
-    /// So a selected row stays loud while this window is the one being used, and goes quiet when
-    /// it is not. That is a fair thing for this pane to say: it is the window's navigation, and
-    /// where you are does not stop being where you are because the caret moved to the composer.
-    /// The row still says it more quietly the moment you look at another window.
+    /// Always the quiet fill; see `isEmphasized(_:)` for why the sidebar no longer uses the accent.
     @ViewBuilder
     private func selectionFill(for target: SidebarSelection) -> some View {
         if listSelection == target {
@@ -669,16 +656,20 @@ struct SidebarView: View {
         }
     }
 
-    /// Whether this row is the one wearing the loud fill.
+    /// Whether this row is the one wearing the loud fill. In the sidebar, never.
     ///
-    /// One answer, read by the fill and by the ink on top of it, and that is not tidiness. The
-    /// first version of this asked two different questions: the fill asked the window whether it
-    /// was active, and the ink asked `backgroundProminence`, which a `listRowBackground` does not
-    /// move. So the pane painted Spatie Blue under a label that had never been told to invert, and
-    /// Home came out near black on mid teal. A fill and the thing standing on it have to be one
-    /// decision.
+    /// The selected workspace used to be painted in the accent whenever the window was active,
+    /// with its label, counts and status mark inverted to white. The owner compared it with
+    /// Finder's sidebar, where the selected item sits on a quiet grey in its ordinary ink, and asked
+    /// for the quieter one: the sidebar is glanced at all day while the work happens elsewhere,
+    /// and a saturated bar there outshouts the conversation it only points at. So the selected row
+    /// always takes `Palette.sidebarSelected`, active window or not.
+    ///
+    /// Kept as the one answer the fill and the ink both read, for the reason it was written: the
+    /// first version asked the two questions separately and painted Spatie Blue under a label
+    /// that had never been told to invert.
     private func isEmphasized(_ target: SidebarSelection) -> Bool {
-        listSelection == target && activeState != .inactive
+        false
     }
 
     // MARK: - Empty
@@ -808,12 +799,13 @@ struct SidebarNavRow: View {
 
 /// What a selected row in the pane is painted with.
 ///
-/// Two fills, and the difference between them is whether this window is the one being used.
+/// Two fills, though `SidebarView.isEmphasized(_:)` only ever asks for the quiet one now.
 ///
-/// The two values are `Palette.selectedEmphasized` and `Palette.selected`, which is exactly the
-/// pair `RowBackground` uses. This view exists rather than a call to
-/// `rowBackground(isSelected:isHovered:isFocused:)` because a `listRowBackground` is handed a view
-/// to draw and not a modifier to apply to a row.
+/// The loud one is `Palette.selectedEmphasized`, as in `RowBackground`. The quiet one is
+/// `Palette.sidebarSelected` rather than `Palette.selected`, because this pane is glass and the
+/// opaque fill vanished into it; see that colour for the measurement. This view exists rather
+/// than a call to `rowBackground(isSelected:isHovered:isFocused:)` because a `listRowBackground`
+/// is handed a view to draw and not a modifier to apply to a row.
 struct SidebarSelectionFill: View {
     /// Whether this window is the one being used. See `SidebarView.selectionFill(for:)` for why
     /// this is passed in rather than read from the environment here.
@@ -821,7 +813,7 @@ struct SidebarSelectionFill: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-            .fill(isEmphasized ? Palette.selectedEmphasized : Palette.selected)
+            .fill(isEmphasized ? Palette.selectedEmphasized : Palette.sidebarSelected)
             .padding(.horizontal, SidebarMetrics.selectionInset)
     }
 }

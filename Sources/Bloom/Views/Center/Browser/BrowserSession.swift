@@ -29,6 +29,8 @@ final class BrowserSession {
     /// the web view, so the two move between panes together.
     let pageView = BrowserHostView()
 
+    var viewport = BrowserViewport()
+
     private(set) var canGoBack = false
     private(set) var canGoForward = false
     private(set) var isLoading = false

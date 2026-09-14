@@ -60,9 +60,13 @@ through one piece of code on purpose.
 
 1. Push a tag, or let GitHub create one when you publish.
    Tags look like `v1.4.0`, or `v1.4.0-beta.1` for a prerelease.
-2. Write the release notes. They become the description Sparkle shows.
+2. Generate release notes from the commits and merged PRs since the preceding release, checking
+   them against the selected commit. Describe user-visible changes in concise British English.
+   Publish them on GitHub; they become the description Sparkle shows.
 3. Publish. Tick "set as a pre-release" for anything you do not want everyone
    offered.
+4. After the release workflow succeeds, [publish the website release notes](#publish-the-website-release-notes)
+   and verify the release assets, appcast, changelog and website download flow.
 
 A prerelease is anything whose tag has a semver prerelease part, or anything
 you ticked the box on. Either one puts the item on Sparkle's `beta` channel,
@@ -72,9 +76,48 @@ The version in the bundle comes from the tag, not from `Resources/Info.plist`.
 The build number is the number of commits reachable from the tag, which is what
 Sparkle compares, and is why the workflow checks out with full history.
 
-To rebuild a tag that already exists, run the workflow by hand from the Actions
-tab and give it the tag. Re-running is safe: the appcast entry for a version is
-replaced rather than added again.
+To retry a release, prefer rerunning its original release-event workflow with
+`gh run rerun <run-id>`. This preserves the GitHub prerelease flag and asset attachment step.
+The appcast entry for a version is replaced rather than duplicated.
+
+A manual workflow dispatch can rebuild an existing tag, but it does not receive the GitHub
+prerelease flag and does not attach assets to the GitHub release. Only use it when the tag itself
+preserves the intended channel: a stable version or a semver prerelease suffix. Dispatching a
+plain tag that was marked prerelease on GitHub would incorrectly publish it as stable in the
+appcast. Verify GitHub assets separately after a dispatch.
+
+## Publish the website release notes
+
+A release is not complete until its generated notes are published on
+[runbloom.app/changelog](https://runbloom.app/changelog), as well as on GitHub. The website is a
+separate Laravel application in [spatie/runbloom.app](https://github.com/spatie/runbloom.app).
+The app's release workflow does not publish the website entry.
+
+1. After the new release reaches the appcast, ensure the production website has imported it.
+   The website schedules `php artisan bloom:sync-releases` hourly. That command refreshes the
+   appcast, records releases and generates summaries for entries that have none. It leaves new
+   entries unpublished. `--draft-only` skips importing the appcast, so it cannot discover a new
+   release. Use the site's established production access if an immediate sync is needed, and
+   inspect the current command before running it: it can draft multiple missing summaries,
+   incur AI costs and send draft-ready Slack alerts. These are not commands to run in the app repo.
+2. In the production website's `/admin` panel, open **Releases** and edit the matching version.
+   Review or write its **Headline** and Markdown **Summary** using the verified release notes.
+   Keep the headline within 120 characters. **Draft again** replaces the existing summary, so
+   use it only when regeneration is intended. Prereleases may be excluded from automatic drafting;
+   write their notes explicitly and identify them as prereleases without changing the stable download.
+3. Enable **On the changelog page** and save. Draft generation and appcast import do not set this
+   flag. Publishing also triggers the website's configured Slack notification; use this workflow
+   within the user's release authorisation and any applicable messaging permissions.
+4. Fetch the public changelog and verify the version, headline and summary at `#v<version>`.
+   An admin save or a green app workflow alone does not prove the notes are public.
+
+Use the same release facts on GitHub and the website; the website may use a shorter editorial
+summary. If production access is missing, leave the prepared text and report website publication
+as outstanding. Do not mark the release complete.
+
+The current procedure is implemented by the website's `SyncReleasesCommand`,
+`DraftReleaseSummary`, `ReleaseForm` and `Release` model. Check those files when the admin labels
+or automation differ, rather than guessing a production command or connection.
 
 ## Releasing from this machine
 

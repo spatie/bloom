@@ -63,6 +63,9 @@ final class AppModel {
     /// from one clock reading. The menu is built at the moment it opens, so it takes that reading
     /// itself and this stays the durable half.
     private(set) var quotas: [AgentQuota] = []
+    /// What each provider said about the account on the last ask: its plan and, for Codex, its
+    /// balances. In memory rather than in the store, for the reason `AgentAccount` gives.
+    private(set) var accounts: [AgentKind: AgentAccount] = [:]
 
     /// Selecting a workspace is the moment its live model should come into existence, rather than
     /// the moment some view body happens to ask for it. Doing it here keeps model creation out of
@@ -270,6 +273,33 @@ final class AppModel {
 
     func isArchiving(_ id: WorkspaceID) -> Bool { archivingWorkspaceIDs.contains(id) }
 
+    /// Workspaces whose own agent has asked to be archived, and the chat whose turn has to end
+    /// before that can happen.
+    ///
+    /// The booking is here rather than on `WorkspaceModel` because the model is torn down by the
+    /// archive it is waiting for, and a request held on the thing it is about is a request that
+    /// dies half way through being carried out. It is a dictionary rather than a set because the
+    /// chat is the point: a workspace running a crew ends several turns and only one of them is
+    /// the turn that asked. See `AppModel.archiveIfRequested`.
+    ///
+    /// One booking per workspace. A second call from the same agent overwrites the first rather
+    /// than queueing behind it, because both name the same worktree and the later one is the one
+    /// with the fresher chat behind it.
+    private var archiveBookings: [WorkspaceID: SessionID] = [:]
+
+    /// Books a workspace to be archived once the asking chat's turn has ended.
+    func bookArchive(of id: WorkspaceID, after sessionID: SessionID) {
+        archiveBookings[id] = sessionID
+    }
+
+    /// Takes the booking back, if there is one and this is the chat it was waiting on. Answers
+    /// whether the caller now owns it, so a booking cannot be acted on twice.
+    func takeArchiveBooking(of id: WorkspaceID, endedIn sessionID: SessionID) -> Bool {
+        guard archiveBookings[id] == sessionID else { return false }
+        archiveBookings[id] = nil
+        return true
+    }
+
     /// Workspaces the owner has asked for whose worktree is still being cut.
     ///
     /// The mirror of `archivingWorkspaceIDs` above: that one takes a row away before the disk work
@@ -313,7 +343,7 @@ final class AppModel {
     ///
     /// Outside observation for the same reason `lastDiffRefresh` is: nothing draws from it, and it
     /// is written by a background queue's hop onto this actor whenever an agent touches a file.
-    @ObservationIgnored private var changedWorkspaceIDs: Set<WorkspaceID> = []
+    @ObservationIgnored private var diffInvalidations = DiffRefreshInvalidations()
 
     /// The one watcher, over every active worktree. Built lazily so that a model made by a test or
     /// a probe with no workspaces at all never subscribes to anything.
@@ -327,8 +357,11 @@ final class AppModel {
     /// When the one asker last went out, and whether it is still out. Together they are what
     /// makes it one asker: every route into `askForQuotas` reads both, so a background poll, a
     /// menu opening and ten workspaces all collapse into a single question per interval.
-    @ObservationIgnored private var lastQuotaAskAt: Date?
-    @ObservationIgnored private var isAskingForQuotas = false
+    ///
+    /// Observed, because the usage panel's footer counts down to the next ask and says "Updating"
+    /// while one is out. Both change twice per ask, which is nothing to publish.
+    private(set) var lastQuotaAskAt: Date?
+    private(set) var isAskingForQuotas = false
     private var identityTask: Task<Void, Never>?
     /// The launch sweep for project icons. Not private, because the work it does is in
     /// `AppModel+ProjectIcons.swift`, and outside observation because nothing draws from it.
@@ -360,8 +393,10 @@ final class AppModel {
                 try Store(path: try Store.defaultPath())
             }.value
             self.store = store
+            ComposerModelCatalog.shared.configure(store: store)
             self.manager = WorkspaceManager(store: store)
             try await store.resetRunningSessions()
+            try await store.recoverDeliveryClaims()
             // The questions those sessions were blocked on. A pending ask whose agent is gone is
             // not a question, it is a row with four live buttons that answer nothing, so they are
             // closed here and the rows that asked them say what happened instead. Bloom denies
@@ -678,14 +713,26 @@ final class AppModel {
     /// Nothing is thrown and nothing is reported. A provider that is not installed or not logged
     /// in answers nothing, which is the same as never having been asked, and the panel keeps
     /// saying what it already knew.
+    ///
+    /// Not before the store is open. The windows an ask brings back are written to the store and
+    /// reach the panel through its feed, while the account facts are kept here in memory, so an
+    /// ask made with no store half landed: the plan and the Codex balances appeared, every window
+    /// was dropped, and the ask still counted, so nothing asked again for ten minutes. That is
+    /// what a panel opened in the first second of a launch, or on a database that would not open,
+    /// used to show.
     func refreshQuotas(after gap: TimeInterval = QuotaPollSchedule.interval) async {
-        guard !isAskingForQuotas,
+        guard store != nil,
+              !isAskingForQuotas,
               QuotaPollSchedule.isDue(lastAskedAt: lastQuotaAskAt, at: Date(), after: gap)
         else { return }
         isAskingForQuotas = true
         lastQuotaAskAt = Date()
         defer { isAskingForQuotas = false }
-        await recordQuotas(await AgentQuotaSources.readAll())
+        let report = await AgentQuotaSources.report()
+        for account in report.accounts where accounts[account.provider] != account {
+            accounts[account.provider] = account
+        }
+        await recordQuotas(report.quotas)
     }
 
     /// The background poll, which is what keeps the menu bar's own severity honest for somebody
@@ -839,7 +886,7 @@ final class AppModel {
     private func noteWorktreesChanged(_ paths: Set<String>) {
         let changed = workspaces.filter { paths.contains($0.path) }.map(\.id)
         guard !changed.isEmpty else { return }
-        changedWorkspaceIDs.formUnion(changed)
+        diffInvalidations.record(Set(changed))
     }
 
     /// - Returns: the workspaces this pass actually asked git about.
@@ -855,7 +902,7 @@ final class AppModel {
         // the backstop rotation comes round, which is what lets that rotation be slow. See
         // `WorktreeWatcher`.
         var busy = runningWorkspaceIDs
-        busy.formUnion(changedWorkspaceIDs)
+        busy.formUnion(diffInvalidations.pending)
         let due = Set(DiffRefreshSchedule.due(
             workspaces: workspaces.map(\.id),
             busy: busy,
@@ -872,6 +919,7 @@ final class AppModel {
         // remembered rather than pinning a path that no longer exists.
         let present = Set(workspaces.map(\.id))
         lastDiffRefresh = lastDiffRefresh.filter { present.contains($0.key) }
+        diffInvalidations.retain(present)
 
         let pending = workspaces.filter {
             // A worktree that has been removed outside Bloom would make git walk up to the parent
@@ -880,33 +928,33 @@ final class AppModel {
         }
 
         var refreshed: Set<WorkspaceID> = []
-        await withTaskGroup(of: WorkspaceID.self) { group in
+        await withTaskGroup(of: (WorkspaceID, UInt64, Bool).self) { group in
             var next = pending.startIndex
             var running = 0
             while next < pending.endIndex || running > 0 {
                 while running < DiffRefreshSchedule.width, next < pending.endIndex {
                     let workspace = pending[next]
+                    let generation = diffInvalidations.generation(for: workspace.id)
                     next = pending.index(after: next)
                     running += 1
                     // The deadline stays around each worktree rather than around the group, so one
                     // git blocked on an `index.lock` costs its own slot and nobody else's.
                     group.addTask {
-                        await Self.withTimeLimit(.seconds(5)) {
+                        let succeeded = await Self.withTimeLimit(.seconds(5)) {
                             await manager.refreshDiffStat(workspace: workspace)
                         }
-                        return workspace.id
+                        return (workspace.id, generation, succeeded)
                     }
                 }
-                guard let id = await group.next() else { break }
+                guard let (id, generation, succeeded) = await group.next() else { break }
                 running -= 1
+                diffInvalidations.finish(id, generation: generation, succeeded: succeeded)
                 // After the pass rather than before it, so a workspace whose git call took four
                 // seconds is not immediately due again on the next tick.
-                lastDiffRefresh[id] = Date()
-                // And it has now been asked about, so the watcher's report is spent. Anything that
-                // happened WHILE the pass ran is a fresh event and lands back in here behind us,
-                // which is the right answer: the numbers this pass read are already a moment old.
-                changedWorkspaceIDs.remove(id)
-                refreshed.insert(id)
+                if succeeded {
+                    lastDiffRefresh[id] = Date()
+                    refreshed.insert(id)
+                }
                 if Task.isCancelled {
                     group.cancelAll()
                     break
@@ -930,13 +978,14 @@ final class AppModel {
     /// actor it would hop back for the group's own bookkeeping, once per worktree, for nothing.
     private nonisolated static func withTimeLimit(
         _ limit: Duration,
-        _ work: @escaping @Sendable () async -> Void
-    ) async {
-        await withTaskGroup(of: Void.self) { group in
+        _ work: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
             group.addTask { await work() }
-            group.addTask { try? await Task.sleep(for: limit) }
-            await group.next()
+            group.addTask { try? await Task.sleep(for: limit); return false }
+            let succeeded = await group.next() ?? false
             group.cancelAll()
+            return succeeded
         }
     }
 
@@ -1222,6 +1271,10 @@ final class AppModel {
     func forgetWorkspace(_ id: WorkspaceID) {
         stopHidingFromSidebar(id)
         workspaceModels[id] = nil
+        // An archive that has happened cannot still be waiting to happen. Nothing books one twice
+        // today, but a booking outliving the worktree it names is a request that can only ever be
+        // refused, and it would be refused at the owner rather than at the agent that made it.
+        archiveBookings[id] = nil
         storedActivity.removeAll { $0.workspaceID == id }
         // The crew rows go for the same reason the activity rows above do: `ON DELETE CASCADE`
         // has taken this workspace's sessions with it, and rows read before that would keep
@@ -1541,10 +1594,9 @@ final class AppModel {
 
     /// What a drag on a project header ends in.
     ///
-    /// The projects are a flat list with one number ordering them, so there is none of the
-    /// translation a workspace drag needs: no filter hides a project and nothing sorts ahead of
-    /// anything. `to` is already an offset into this list, worked out by `SidebarReorder` from the
-    /// flattened rows the pane actually draws.
+    /// `to` indexes the visible projects from the pane that produced the drag. Hidden projects
+    /// still exist in `repos`, so applying that offset directly to it can leave the dragged
+    /// project where it started. `SidebarReorder` translates it while preserving hidden slots.
     ///
     /// The new order is put on screen before it is written, for the reason `reorderWorkspaces`
     /// gives: a drop is the end of a movement the table has already animated, and waiting for the
@@ -1556,9 +1608,9 @@ final class AppModel {
     /// or an icon that landed while the drag was happening. See e47a3b7. It is one transaction for
     /// the same reason `reorderWorkspaces` gives: one commit, one announcement, and no moment at
     /// which the observer can reload a half written order.
-    func reorderProjects(id: RepoID, to: Int) async {
+    func reorderProjects(id: RepoID, visible: [RepoID], to: Int) async {
         guard let store else { return }
-        let changes = SidebarReorder.move(projects: repos, id: id, to: to)
+        let changes = SidebarReorder.move(projects: repos, visible: visible, id: id, to: to)
         guard !changes.isEmpty else { return }
 
         let byID = Dictionary(changes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

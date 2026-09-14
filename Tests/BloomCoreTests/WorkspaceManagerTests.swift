@@ -220,6 +220,47 @@ struct WorkspaceManagerTests {
         #expect(try await store.workspace(id: workspace.id)?.setupState == .succeeded)
     }
 
+    /// The whole route, because the parts of it that can break are all outside the pure decision:
+    /// a variable the script cannot see, and a folder it cannot write into. See
+    /// `WorkspaceBrowserURL`.
+    @Test("a setup script can say where this workspace's browser panes open", .tags(.subprocess))
+    func setupScriptStatesTheBrowserAddress() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+
+        try repo.write(".conductor/settings.toml", """
+        [scripts]
+        setup = '''
+        echo "https://$BLOOM_PROJECT_NAME.test" > "$BLOOM_URL_FILE"
+        '''
+        """)
+
+        let store = try makeTestStore("wm")
+        let manager = WorkspaceManager(store: store)
+        let registered = try await manager.addRepository(at: repo.path)
+        let workspace = try await manager.createWorkspace(repo: registered, prompt: "Say where")
+
+        let succeeded = await manager.runSetup(
+            workspace: workspace, repo: registered, port: 3_100
+        ) { _ in }
+        #expect(succeeded)
+
+        let environment = manager.environment(for: workspace, repo: registered, port: 3_100)
+        let address = WorkspaceBrowserURL.read(
+            worktree: workspace.path,
+            settings: SettingsLoader.load(repo: repo.path),
+            environment: environment,
+            port: 3_100
+        )
+        #expect(address == "https://\(WorkspaceManager.projectName(for: registered)).test")
+
+        // Written into the worktree and invisible to git, which is the half a pull request would
+        // otherwise carry. See `WorktreeScratch`.
+        let worktree = TempRepo(existing: workspace.path)
+        #expect(worktree.exists(WorkspaceBrowserURL.file))
+        #expect(environment["CONDUCTOR_URL_FILE"] == environment["BLOOM_URL_FILE"])
+    }
+
     @Test("records a failing setup script rather than pretending it worked", .tags(.subprocess))
     func recordsFailingSetup() async throws {
         let repo = try await TempRepo()
@@ -243,6 +284,53 @@ struct WorkspaceManagerTests {
         let stored = try await store.workspace(id: workspace.id)
         #expect(stored?.setupState == .failed)
         #expect(stored?.setupLog.contains("about to fail") == true)
+    }
+
+    @Test(
+        "cancelling a setup run stops the script and files it as stopped",
+        .tags(.subprocess), .timeLimit(.minutes(1))
+    )
+    func cancellingSetupStopsTheScript() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        // Ignores SIGTERM, which is what a Stop has to get past as well as the ordinary case.
+        // The loop is timed by `SECONDS`, a zsh builtin, and forks nothing whose death could end
+        // it early. It used to be `for _ in $(seq 1 6000)` after the echo, and the test cancels
+        // the moment it reads that line: the SIGTERM reached `seq` while it was still running,
+        // because `trap ''` does not carry into a command substitution, the loop came out empty
+        // and `touch` ran straight away. A stop that does not work still fails, on the time limit.
+        try repo.write(".conductor/settings.toml", """
+        [scripts]
+        setup = '''
+        trap '' TERM
+        echo "seeding"
+        while (( SECONDS < 300 )); do sleep 0.05; done
+        touch finished.txt
+        '''
+        """)
+
+        let store = try makeTestStore("wm")
+        let manager = WorkspaceManager(store: store)
+        let registered = try await manager.addRepository(at: repo.path)
+        let workspace = try await manager.createWorkspace(repo: registered, prompt: "Stop setup")
+
+        let collector = LineCollector()
+        let run = Task {
+            await manager.runSetup(workspace: workspace, repo: registered, port: 0) { collector.append($0) }
+        }
+        await waitUntil("the script has printed its first line") {
+            collector.joined.contains("seeding")
+        }
+
+        run.cancel()
+        let succeeded = await run.value
+        #expect(succeeded == false)
+
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.setupState == .failed)
+        #expect(stored.setupLog.contains("seeding"))
+        #expect(stored.setupLog.contains(WorkspaceManager.setupStoppedNote))
+        #expect(!TempRepo(existing: workspace.path).exists("finished.txt"), Comment(rawValue: stored.setupLog))
     }
 
     @Test(

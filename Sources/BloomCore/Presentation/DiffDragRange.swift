@@ -62,16 +62,32 @@ public enum DiffDragRange {
     ///     is the merge base's copy of the file and the new side is the worktree's.
     /// - Returns: the line the range now ends at, or nil when no row between the start and the
     ///   pointer answers for that side, which the caller reads as "leave the range as it was".
+    /// Hit a logical source line after wrapping has given rows different heights.
+    public static func row(at offset: CGFloat, heights: [CGFloat]) -> Int? {
+        guard offset >= 0, offset.isFinite else { return nil }
+        var end: CGFloat = 0
+        for (index, height) in heights.enumerated() {
+            end += height
+            if offset < end { return index }
+        }
+        return nil
+    }
+
     public static func spot(
         from start: Int,
         translation: CGFloat,
         rowHeight: CGFloat,
+        rowHeights: [CGFloat]? = nil,
         spots: [ReviewSpot?],
         side: ReviewCommentSide
     ) -> ReviewSpot? {
-        let target = row(
-            from: start, translation: translation, rowHeight: rowHeight, count: spots.count
-        )
+        let target: Int
+        if let rowHeights, rowHeights.count == spots.count, rowHeights.indices.contains(start) {
+            let y = rowHeights.prefix(start).reduce(0, +) + rowHeight / 2 + translation
+            target = row(at: max(0, y), heights: rowHeights) ?? max(0, spots.count - 1)
+        } else {
+            target = row(from: start, translation: translation, rowHeight: rowHeight, count: spots.count)
+        }
         guard spots.indices.contains(target), spots.indices.contains(start) else { return nil }
         let step = target >= start ? -1 : 1
         var index = target

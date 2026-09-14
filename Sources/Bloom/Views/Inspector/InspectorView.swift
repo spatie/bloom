@@ -31,6 +31,37 @@ struct InspectorView: View {
                 InspectorNotice(notice: notice) { model.pullRequestNotice = nil }
                 Hairline()
             }
+            if let failure = model.pullRequestRefreshFailure {
+                HStack(alignment: .top, spacing: InspectorLayout.gap) {
+                    VStack(alignment: .leading, spacing: InspectorLayout.tight) {
+                        Text(model.pullRequest == nil ? "GitHub could not refresh" : "Showing the last GitHub update")
+                            .font(Typo.captionEmphasis)
+                            .foregroundStyle(Palette.textPrimary)
+                        Text(failure.message).font(Typo.micro).foregroundStyle(Palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        if let retryAt = failure.retryAt {
+                            Text("Next refresh after \(retryAt.formatted(date: .omitted, time: .shortened))")
+                                .font(Typo.micro).foregroundStyle(Palette.textSecondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Polling does not stop while the banner is closed; the same failure stays
+                    // hidden and a different one, or a success, resets it. See
+                    // `PullRequestRefreshState.visibleFailure`.
+                    Button("Dismiss", systemImage: "xmark") { model.dismissPullRequestRefreshFailure() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .foregroundStyle(Palette.textTertiary)
+                        .help("Dismiss")
+                }
+                .padding(.horizontal, InspectorLayout.inset)
+                .padding(.vertical, Metrics.spacing)
+                .accessibilityElement(children: .contain)
+                Hairline()
+            }
 
             // The tab row, and the boundary between it and the pane, as one band.
             //
@@ -62,10 +93,10 @@ struct InspectorView: View {
             // marks them off the same list, so a narrowed scope quietly takes marks off that tree
             // too. A tab where the scope has an effect is a tab where it has to be explained. The
             // checks list is GitHub's and owes nothing to any of this.
-            if model.inspectorTab != .checks, model.diffScope.isNarrowed {
+            if model.inspectorTab == .allFiles, model.diffScope.isNarrowed {
                 DiffScopeBand(
                     scope: model.diffScope,
-                    fileCount: model.changedFiles.count,
+                    fileCount: Set(model.changedFiles.map(\.path)).count,
                     note: model.scopeNote
                 ) {
                     model.setDiffScope(.all)
@@ -119,8 +150,8 @@ struct InspectorView: View {
         switch model.inspectorTab {
         case .allFiles:
             FileTreeView(model: model)
-        case .changes:
-            ChangedFileList(model: model)
+        case .changes, .history:
+            ChangesBrowser(model: model)
         case .checks:
             ChecksView(model: model)
         }
