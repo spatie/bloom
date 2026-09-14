@@ -15,12 +15,14 @@ struct FileTreeRow: View, Equatable {
             && lhs.item.depth == rhs.item.depth
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isChanged == rhs.isChanged
+            && lhs.containsChanges == rhs.containsChanges
             && lhs.fullPath == rhs.fullPath
     }
 
     var item: FileTreeRowItem
     var isExpanded: Bool
     var isChanged: Bool
+    var containsChanges: Bool = false
     /// The node's location on disk, for the menu items that hand it to another app.
     var fullPath: String
     var action: () -> Void
@@ -107,7 +109,8 @@ struct FileTreeRow: View, Equatable {
     /// A file has no disclosure state to report, and an empty value is one VoiceOver skips.
     private var disclosureState: String {
         guard item.node.isDirectory else { return "" }
-        return isExpanded ? "Expanded" : "Collapsed"
+        let state = isExpanded ? "Expanded" : "Collapsed"
+        return containsChanges ? "\(state), contains changed files" : state
     }
 
     /// Always the closed chevron for a directory. Open is the same glyph, turned.
