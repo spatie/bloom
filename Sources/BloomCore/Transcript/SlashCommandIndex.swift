@@ -1,14 +1,9 @@
 import Foundation
 
-/// Finds every `/command` the Claude Code CLI would resolve for one checkout.
+/// Finds commands and skills for Bloom's shared slash menu. Codex's own list supplies its
+/// enabled skills and plugins; its standard folders are a fallback when the server is unavailable.
 ///
-/// This is Claude Code's list and nothing else's. `AgentKind.canRunWorkspaces` is true for exactly
-/// one agent today, and the layout below is that agent's: a Codex or OpenCode session has its own
-/// idea of what a slash means, and offering it a Claude Code skill would be offering it something
-/// it cannot run. When a second backend can drive a workspace, it gets its own index rather than a
-/// flag on this one.
-///
-/// Six sources, in the order the CLI resolves them, later winning a name collision:
+/// Claude sources, in discovery order, later winning a name collision:
 ///
 ///   1. A short built in list. The CLI's own commands live inside its binary, so they cannot be
 ///      read off disk; see `builtIns` for why the list is as short as it is.
@@ -18,6 +13,10 @@ import Foundation
 ///   4. Every enabled plugin's own `commands/` and `skills/`, namespaced `plugin:name`.
 ///   5. `<checkout>/.claude/commands/**.md`.
 ///   6. `<checkout>/.claude/skills/*/SKILL.md`.
+///
+/// Codex and shared skills follow Claude entries within each scope. Workspace entries always
+/// override user entries. A supplied Codex list replaces the fallback, including when empty,
+/// so a disabled skill is not silently reintroduced from disk.
 ///
 /// Nothing here opens a credential. `~/.claude.json`, `~/.claude/.credentials.json` and
 /// `~/.codex/auth.json` are never touched. The only files read are markdown frontmatter,
@@ -44,7 +43,9 @@ public enum SlashCommandIndex {
     ///
     /// Synchronous and pure with respect to its arguments, so the tests can point it at a fixture
     /// tree and the app can run it on a background task.
-    public static func discover(home: String, project: String?) -> [SlashCommand] {
+    public static func discover(
+        home: String, project: String?, codexSkills: [SlashCommand]? = nil, codexHome: String? = nil
+    ) -> [SlashCommand] {
         var byName: [String: SlashCommand] = [:]
 
         func add(_ commands: [SlashCommand]) {
@@ -56,10 +57,25 @@ public enum SlashCommandIndex {
         add(skills(in: "\(home)/.claude/skills", namespace: nil, scope: .user))
         add(pluginEntries(home: home, project: project))
 
+        let codexRoot = codexHome ?? "\(home)/.codex"
+        if let codexSkills {
+            add(codexSkills.filter { $0.scope != .project })
+        } else {
+            add(skills(in: "\(codexRoot)/skills/.system", namespace: nil, scope: .user))
+            add(skills(in: "\(codexRoot)/skills", namespace: nil, scope: .user))
+            add(skills(in: "\(home)/.agents/skills", namespace: nil, scope: .user))
+        }
+
         if let project {
             add(commands(in: "\(project)/.claude/commands", namespace: nil, scope: .project))
             add(skills(in: "\(project)/.claude/skills", namespace: nil, scope: .project))
+            if codexSkills == nil {
+                add(skills(in: "\(project)/.codex/skills", namespace: nil, scope: .project))
+                add(skills(in: "\(project)/.agents/skills", namespace: nil, scope: .project))
+            }
         }
+
+        add(codexSkills?.filter { $0.scope == .project } ?? [])
 
         return byName.values.sorted { $0.name < $1.name }
     }
