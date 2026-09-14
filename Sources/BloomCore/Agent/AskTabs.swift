@@ -13,10 +13,7 @@ public enum AskTabs {
     public static func selectionAfterClosing(
         _ id: SessionID, selected: SessionID?, sessions: [Session]
     ) -> SessionID? {
-        let remaining = sessions.filter { $0.id != id }
-        if selected != id, remaining.contains(where: { $0.id == selected }) { return selected }
-        let index = sessions.firstIndex { $0.id == id } ?? 0
-        return remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
+        TabClosure.selectionAfterClosing(id, selected: selected, tabs: sessions.map(\.id))
     }
 
     /// An explicitly chosen folder must exist. A missing volume must not silently change cwd.

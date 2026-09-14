@@ -201,6 +201,20 @@ final class WorkspaceTabsStore {
         persistStrip(workspaceID)
     }
 
+    /// Capture selection before removing the content. A background close must not fall back to
+    /// the workspace's active conversation, and a split tab keeps its surviving panes.
+    func prepareToClose(_ content: PaneContent, in model: WorkspaceModel) {
+        let entries = entries(in: model)
+        guard let current = selectedTab(in: model, entries: entries) else { return }
+        if selected[model.workspace.id] != current { selected[model.workspace.id] = current }
+        guard current == content,
+              layout(of: current).panes.allSatisfy({ self.content(of: $0, in: current) == content })
+        else { return }
+        if let next = TabClosure.selectionAfterClosing(content, selected: current, tabs: entries) {
+            select(next, in: model)
+        }
+    }
+
     /// Writes down the order the user has just dragged the strip into.
     ///
     /// Only the interleaving lives here. Each kind's own order goes back to the store that owns it,
@@ -562,7 +576,7 @@ final class WorkspaceTabsStore {
     /// be a pane of a tab the user is not looking at, and a pane holding a dead pointer would show
     /// an empty state until something else happened to reload the workspace.
     ///
-    /// No `WorkspaceModel`, because `CenterTabStore.close` has none to give.
+    /// The caller chooses a neighbouring tab before removal when the whole active tab closes.
     func forget(_ content: PaneContent, workspaceID: WorkspaceID) {
         for arrangement in arrangements.values {
             guard let stored = arrangement.stored else { continue }

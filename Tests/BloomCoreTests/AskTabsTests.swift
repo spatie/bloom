@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Ask conversation tabs", .scratchDirectory)
 struct AskTabsTests {
+    @Test func closingTheMiddleAskTabSelectsLeftOnlyWhenActive() {
+        let sessions = (0..<3).map { _ in AskConversation.newSession() }
+        let middle = sessions[1].id
+        #expect(AskTabs.selectionAfterClosing(middle, selected: middle, sessions: sessions) == sessions[0].id)
+        #expect(AskTabs.selectionAfterClosing(middle, selected: sessions[2].id, sessions: sessions) == sessions[2].id)
+    }
+
     @Test func creatingTabsPreservesConversationsAndDirectories() async throws {
         let store = try makeTestStore("ask-tabs")
         let first = try await store.createAskConversation(directory: "/first")

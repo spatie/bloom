@@ -583,6 +583,9 @@ final class WorkspaceModel {
             app.notice = BloomNotice(message: "Could not close the conversation: \(error.readableMessage)")
             return
         }
+        let tabs = WorkspaceTabsStore.shared
+        tabs.prepareToClose(.chat(session.id), in: self)
+        tabs.forget(.chat(session.id), workspaceID: workspace.id)
         transcripts[session.id]?.teardown()
         transcripts[session.id] = nil
         // Closing is one column. The strip's copy of this row can be a whole turn old, and the

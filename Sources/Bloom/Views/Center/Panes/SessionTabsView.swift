@@ -282,7 +282,7 @@ struct SessionTabsView: View {
                 tabs.rename(tab, to: $0)
             },
             onCancelRename: { renamingID = nil },
-            onClose: { Task { await tabs.close(tab) } },
+            onClose: { Task { await tabs.close(tab, in: model) } },
             onSplitRight: splitAction(.tool(tab.id), axis: .horizontal, selected: selected),
             onSplitDown: splitAction(.tool(tab.id), axis: .vertical, selected: selected),
             namespace: selection
