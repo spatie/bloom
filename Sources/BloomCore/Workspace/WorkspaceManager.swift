@@ -3,6 +3,9 @@ import os
 
 public enum WorkspaceError: Error, CustomStringConvertible {
     case notARepository(String)
+    /// git could not say whether it is one. Kept apart from the case above, because reporting a
+    /// git that does not run as a folder that is not a repository sent a user round in circles.
+    case gitCannotRead(GitRepositoryProblem)
     case pathInUse(String)
     /// Archiving would destroy work that exists nowhere else. Carries the full report so the UI
     /// can list what is at stake instead of asking "are you sure?" about nothing in particular.
@@ -16,6 +19,7 @@ public enum WorkspaceError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .notARepository(let path): "\(path) is not a git repository"
+        case .gitCannotRead(let problem): problem.sentence
         case .pathInUse(let path): "\(path) already exists"
         case .unsafeToArchive(let report):
             "archiving would permanently destroy " + report.losses.joined(separator: ", ")
@@ -63,8 +67,10 @@ public struct WorkspaceManager: Sendable {
     @discardableResult
     public func addRepository(at path: String) async throws -> Repo {
         let expanded = (path as NSString).expandingTildeInPath
-        guard await Git.isRepository(expanded) else {
-            throw WorkspaceError.notARepository(expanded)
+        switch await Git.repositoryAnswer(expanded) {
+        case .repository: break
+        case .notARepository: throw WorkspaceError.notARepository(expanded)
+        case .problem(let problem): throw WorkspaceError.gitCannotRead(problem)
         }
         let root = try await Git.topLevel(of: expanded)
 
