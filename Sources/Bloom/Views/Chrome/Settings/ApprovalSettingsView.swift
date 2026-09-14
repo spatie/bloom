@@ -9,8 +9,6 @@ struct ApprovalSettingsView: View {
     var isReady: Bool
     @State private var failure: String?
 
-    private static let permissionModes = PermissionMode.allCases.filter { $0 != .autoReview }
-
     @State private var grants: [PermissionGrant] = []
     @State private var isLoaded = false
     /// The grant a second press would remove. Revoking is one press and then one more, rather than
@@ -21,16 +19,18 @@ struct ApprovalSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Picker("Default permission mode", selection: $defaults.permissionMode) {
-                    ForEach(Self.permissionModes, id: \.self) { mode in
-                        Text(mode.label).tag(mode)
+                ForEach(AgentKind.runnable, id: \.self) { backend in
+                    Picker(backend.label, selection: permissionMode(for: backend)) {
+                        ForEach(ComposerControls(agentKind: backend).availablePermissionModes, id: \.self) { mode in
+                            Text(mode.label(on: backend)).tag(mode)
+                        }
                     }
+                    .disabled(!isReady)
                 }
-                .disabled(!isReady)
             } header: {
                 Text("New sessions")
             } footer: {
-                Text("Controls what an agent can do without asking. Plan mode in Sessions takes priority. Existing sessions keep their permissions.")
+                Text("Default permissions for new sessions with each provider. Plan mode in Sessions takes priority. Existing sessions keep their permissions.")
                     .settingsFootnote()
             }
 
@@ -85,6 +85,15 @@ struct ApprovalSettingsView: View {
     }
 
     // MARK: Rows
+
+    private func permissionMode(for backend: AgentKind) -> Binding<PermissionMode> {
+        Binding(
+            get: { defaults.permissionMode(for: backend) },
+            set: { mode in
+                MainActor.assumeIsolated { defaults.setPermissionMode(mode, for: backend) }
+            }
+        )
+    }
 
     private func row(_ grant: PermissionGrant) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.spacing) {

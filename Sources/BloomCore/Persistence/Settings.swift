@@ -431,9 +431,7 @@ public struct AppDefaults: Sendable, Hashable {
     /// that stops to ask before its first command is a session somebody has to sit and watch,
     /// and Bloom exists to run several at once.
     ///
-    /// This is a fallback, not an override. The moment `defaults.permissionMode` holds anything
-    /// at all, the Settings, Models picker wins, which is why a copy of Bloom whose Models tab
-    /// has ever been saved keeps whatever that tab last wrote. See `AppDefaults.load`.
+    /// Settings, Permissions can override this for each provider.
     public static let fallbackPermissionMode = PermissionMode.bypassPermissions
 
     public var model: String
@@ -450,6 +448,7 @@ public struct AppDefaults: Sendable, Hashable {
     /// what lets them say so.
     public var reviewBackend: AgentKind
     public var permissionMode: PermissionMode
+    public internal(set) var providerPermissionModes: [AgentKind: PermissionMode] = [:]
     public var planMode: Bool
     public var fastMode: Bool
     /// Which output style a new session opens on, by name, or `OutputStyle.defaultName` for none.
@@ -521,6 +520,11 @@ public struct AppDefaults: Sendable, Hashable {
         if let raw = await value(Key.permissionMode), let mode = PermissionMode(rawValue: raw) {
             defaults.permissionMode = mode
         }
+        for backend in AgentKind.allCases {
+            if let raw = await value(permissionModeKey(for: backend)), let mode = PermissionMode(rawValue: raw) {
+                defaults.setPermissionMode(mode, for: backend)
+            }
+        }
         defaults.planMode = await value(Key.planMode) == "1"
         defaults.fastMode = await value(Key.fastMode) == "1"
         defaults.outputStyle = await value(Key.outputStyle) ?? OutputStyle.defaultName
@@ -533,7 +537,9 @@ public struct AppDefaults: Sendable, Hashable {
     public func saveChanges(from previous: AppDefaults, to store: Store) async throws {
         let values = storedValues
         let oldValues = previous.storedValues
-        var changed = Set(values.keys.filter { values[$0, default: nil] != oldValues[$0, default: nil] })
+        var changed = Set(values.keys).union(oldValues.keys).filter {
+            values[$0, default: nil] != oldValues[$0, default: nil]
+        }
         let modelKeys: Set<String> = [Key.model, Key.effort, Key.backend]
         let reviewKeys: Set<String> = [Key.reviewModel, Key.reviewEffort, Key.reviewBackend]
         if !changed.isDisjoint(with: modelKeys) {
@@ -550,7 +556,7 @@ public struct AppDefaults: Sendable, Hashable {
     }
 
     private var storedValues: [String: String?] {
-        [
+        var values: [String: String?] = [
             Key.model: model,
             Key.effort: effort,
             Key.backend: backend.rawValue,
@@ -563,6 +569,10 @@ public struct AppDefaults: Sendable, Hashable {
             Key.outputStyle: OutputStyle.isDefault(outputStyle) ? nil : outputStyle,
             Key.codexContextWindow: CodexContextWindow.stored(codexContextWindow),
         ]
+        for (backend, mode) in providerPermissionModes {
+            values[Self.permissionModeKey(for: backend)] = mode.rawValue
+        }
+        return values
     }
 
     public func save(to store: Store) async {
@@ -573,6 +583,9 @@ public struct AppDefaults: Sendable, Hashable {
         try? await store.setSetting(Key.reviewEffort, reviewEffort)
         try? await store.setSetting(Key.reviewBackend, reviewBackend.rawValue)
         try? await store.setSetting(Key.permissionMode, permissionMode.rawValue)
+        for backend in AgentKind.allCases {
+            try? await store.setSetting(Self.permissionModeKey(for: backend), providerPermissionModes[backend]?.rawValue)
+        }
         try? await store.setSetting(Key.planMode, planMode ? "1" : "0")
         try? await store.setSetting(Key.fastMode, fastMode ? "1" : "0")
         // Nil rather than the word, so "never chosen" and "chosen and then cleared" cannot drift

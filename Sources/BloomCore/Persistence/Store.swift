@@ -3249,20 +3249,34 @@ public actor Store {
             mode = PlanApproval.implementationMode(session.permissionMode)
         } else {
             guard remembered == nil else { return }
-            mode = try planImplementationMode(sessionID: session.id, hasWorktree: session.workspaceID != nil)
+            if let stored = try self.session(id: session.id), stored.permissionMode != .plan {
+                mode = PlanApproval.implementationMode(stored.permissionMode)
+            } else {
+                mode = try defaultImplementationMode(for: session, hasWorktree: session.workspaceID != nil)
+            }
         }
         if remembered != mode.rawValue { try setSetting(key, mode.rawValue) }
     }
 
     public func planImplementationMode(sessionID: SessionID, hasWorktree: Bool) throws -> PermissionMode {
-        if let session = try session(id: sessionID), session.permissionMode != .plan {
+        let session = try session(id: sessionID)
+        if let session, session.permissionMode != .plan {
             return PlanApproval.implementationMode(session.permissionMode)
         }
         if let raw = try setting(PlanApproval.modeKey(sessionID: sessionID)),
            let mode = PermissionMode(rawValue: raw) {
             return PlanApproval.implementationMode(mode)
         }
+        return try defaultImplementationMode(for: session, hasWorktree: hasWorktree)
+    }
+
+    private func defaultImplementationMode(for session: Session?, hasWorktree: Bool) throws -> PermissionMode {
         guard hasWorktree else { return AskConversation.permissionMode }
+        if let session,
+           let raw = try setting(AppDefaults.permissionModeKey(for: session.agentKind)),
+           let mode = PermissionMode(rawValue: raw) {
+            return PlanApproval.implementationMode(mode.nearest(on: session.agentKind))
+        }
         let configured = try setting(AppDefaults.Key.permissionMode).flatMap(PermissionMode.init(rawValue:))
         return PlanApproval.implementationMode(configured ?? AppDefaults.fallbackPermissionMode)
     }

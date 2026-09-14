@@ -204,6 +204,19 @@ public struct ComposerControls: Equatable, Sendable {
         )
     }
 
+    /// Used while choosing a model before creation. Existing sessions keep their own permissions.
+    public mutating func applyPermissionDefault(from defaults: AppDefaults) {
+        permissionMode = hasWorktree
+            ? defaults.permissionMode(for: agentKind) : AskConversation.permissionMode
+        if hasWorktree && defaults.planMode {
+            if offersInteractionMode {
+                interactionMode = .plan
+            } else {
+                permissionMode = .plan
+            }
+        }
+    }
+
     // MARK: - The three that are not columns
 
     /// Fast mode has no column on `Session`, so it lives in the store's key value table. Per

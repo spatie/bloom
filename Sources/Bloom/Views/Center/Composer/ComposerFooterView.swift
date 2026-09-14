@@ -10,6 +10,8 @@ import BloomCore
 struct ComposerFooterView: View {
     var controls: ComposerControls
     var onChange: @MainActor (ComposerControls) -> Void
+    /// Only supplied before creation, when choosing a provider also chooses its default permissions.
+    var permissionDefaults: AppDefaults?
     /// Nil until the session has run a turn, because that is the first moment the agent says
     /// anything about the window. Absent rather than zero: a gauge reading 0% would be a claim.
     /// Always nil in the create window, where there is not yet anything to report.
@@ -412,10 +414,12 @@ struct ComposerFooterView: View {
     /// forks rather than changing. See `BackendChange`.
     private func selectModel(_ id: String) {
         let backend = catalog.backend(ofModel: id, current: controls.agentKind)
+        let changedProvider = backend != controls.agentKind
         edit {
             $0.model = id
             $0.agentKind = backend
             $0.effort = catalog.resolvedEffort($0.effort, for: backend, model: id)
+            if changedProvider, let permissionDefaults { $0.applyPermissionDefault(from: permissionDefaults) }
             // The permission mode moves itself. A mode the new backend does not have cannot
             // survive the move (Codex has no Plan, Claude Code has no Approve for me), and that
             // used to be arranged here, in a view, by one of the four places a backend changes.

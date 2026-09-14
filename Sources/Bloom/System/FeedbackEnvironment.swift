@@ -152,7 +152,7 @@ enum FeedbackEnvironment {
     static func permissionMode(app: AppModel?) async -> PermissionMode {
         guard let store = app?.store else { return AppDefaults.fallbackPermissionMode }
         let defaults = await AppDefaults.load(from: store)
-        return defaults.planMode ? .plan : defaults.permissionMode
+        return ComposerDefaults.resolve(repo: RepoSettings(), app: defaults).permissionMode
     }
 
     /// The per-agent executable paths the Agents pane stored, so an agent installed somewhere

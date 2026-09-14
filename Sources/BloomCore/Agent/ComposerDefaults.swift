@@ -99,7 +99,8 @@ public struct ComposerDefaults: Equatable {
             // is the whole point of settling the two together: Plan plus a Codex default used to
             // depend on the caller passing the right backend in, and the create window passed none.
             permissionMode: (hasWorktree
-                ? (app.planMode && resolved.kind != .codex ? .plan : app.permissionMode)
+                ? (app.planMode && resolved.kind != .codex
+                    ? .plan : app.permissionMode(for: resolved.kind))
                 : AskConversation.permissionMode).nearest(on: resolved.kind),
             backend: resolved.kind,
             interactionMode: hasWorktree && app.planMode && resolved.kind == .codex ? .plan : .build

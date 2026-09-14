@@ -89,6 +89,16 @@ struct PlanApprovalTests {
         #expect(try await store.session(id: session.id)?.permissionMode == .plan)
     }
 
+    @Test("starting in Plan remembers the provider override after settings change")
+    func startsInPlanWithProviderOverride() async throws {
+        let store = try makeTestStore("plan-provider-default")
+        let key = AppDefaults.permissionModeKey(for: .claudeCode)
+        try await store.setSetting(key, PermissionMode.acceptEdits.rawValue)
+        let session = try await session(in: store, mode: .plan)
+        try await store.setSetting(key, PermissionMode.bypassPermissions.rawValue)
+        #expect(try await store.planImplementationMode(sessionID: session.id, hasWorktree: true) == .acceptEdits)
+    }
+
     @Test("entering Plan retains the last session choice through both preference write paths")
     func remembersSessionChoice() async throws {
         let store = try makeTestStore("plan-remember")

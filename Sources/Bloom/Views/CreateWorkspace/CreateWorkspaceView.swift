@@ -43,6 +43,7 @@ struct CreateWorkspaceView: View {
     /// Resolved from the same precedence chain a new session would use, so the window opens showing
     /// what would have happened anyway rather than a second set of defaults.
     @State private var controls = ComposerControls()
+    @State private var permissionDefaults = AppDefaults()
 
     @State private var baseBranch = ""
     @State private var branches: [String] = []
@@ -586,6 +587,7 @@ struct CreateWorkspaceView: View {
             ComposerFooterView(
                 controls: controls,
                 onChange: { controls = $0 },
+                permissionDefaults: permissionDefaults,
                 canSend: canCreate,
                 intent: .create,
                 // This window's width is fixed and was chosen for this row with its words on, so
@@ -945,6 +947,7 @@ struct CreateWorkspaceView: View {
         hasSetupScript = !(context.settings.setupScript ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         isNamingAvailable = context.isNamingAvailable
+        permissionDefaults = appDefaults
         controls = ComposerControls(
             // The Codex list only sharpens the effort here, and the sheet's own footer is what
             // fetches it: a window opened before that call returns still gets the backend the
