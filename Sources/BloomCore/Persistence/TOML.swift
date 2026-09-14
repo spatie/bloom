@@ -52,6 +52,60 @@ public indirect enum TOMLValue: Sendable, Equatable {
     }
 }
 
+/// Where each key of a parsed file first appeared: its position among its siblings, and its line.
+///
+/// **A side record rather than an ordered `.table`, and the choice is about who pays.** A settings
+/// file is a list somebody wrote in an order they chose, and the tab strip's `+` menu has to show
+/// run scripts in that order. `TOMLValue.table` is a dictionary, so the order is gone by the time
+/// anything reads it, and they used to come out sorted by id. Making the case hold an ordered
+/// container instead would change the type every consumer of `TOMLValue` switches over, every
+/// `Equatable` comparison between two parsed files (one that differed only in key order would stop
+/// comparing equal), and every literal in the tests. Only one reader wants the order. So the
+/// parser writes it down beside the value it already builds, `TOML.parse` hands back exactly what
+/// it always did, and the one reader that cares asks `TOML.parseOutlined` instead.
+///
+/// Keyed by the table's path, with an array of tables addressed by its index as a component, the
+/// same way the parser addresses it: `["quick_prompts", "0"]`.
+public struct TOMLOutline: Sendable, Equatable {
+    fileprivate var order: [[String]: [String]] = [:]
+    fileprivate var lines: [[String]: Int] = [:]
+
+    public init() {}
+
+    /// The keys of `table`, which lives at `path`, in the order the file first stated them.
+    ///
+    /// Total, whatever was recorded: a key the outline has no position for (the inside of an
+    /// inline table, which is built before the parser knows where it will be put) goes after the
+    /// ones it does, sorted, which is the order every key came out in before this existed.
+    public func keys(of table: [String: TOMLValue], at path: [String]) -> [String] {
+        let recorded = (order[path] ?? []).filter { table[$0] != nil }
+        let known = Set(recorded)
+        return recorded + table.keys.filter { !known.contains($0) }.sorted()
+    }
+
+    /// The line a key or a table header was first stated on, or nil when it was not recorded.
+    public func line(of path: [String]) -> Int? {
+        lines[path]
+    }
+
+    fileprivate mutating func note(_ path: [String], line: Int) {
+        for depth in path.indices {
+            let parent = Array(path.prefix(depth))
+            let prefix = Array(path.prefix(depth + 1))
+            if lines[prefix] == nil {
+                lines[prefix] = line
+                order[parent, default: []].append(path[depth])
+            }
+        }
+    }
+}
+
+/// A parsed file together with the order its keys were stated in. See `TOMLOutline`.
+public struct TOMLDocument: Sendable, Equatable {
+    public let value: TOMLValue
+    public let outline: TOMLOutline
+}
+
 public struct TOMLError: Error, CustomStringConvertible {
     public let message: String
     public let line: Int
@@ -62,13 +116,25 @@ public struct TOMLError: Error, CustomStringConvertible {
 /// keys, the four string forms, numbers, booleans, arrays and inline tables. No dates.
 public enum TOML {
     public static func parse(_ source: String) throws -> TOMLValue {
-        var parser = Parser(source: Array(source.unicodeScalars))
-        return try parser.parse()
+        try parseOutlined(source).value
     }
 
     public static func parse(contentsOf path: String) throws -> TOMLValue? {
+        try parseOutlined(contentsOf: path)?.value
+    }
+
+    /// The value and the order its keys were written in. See `TOMLOutline` for why the two are
+    /// separate.
+    public static func parseOutlined(_ source: String) throws -> TOMLDocument {
+        var parser = Parser(source: Array(source.unicodeScalars))
+        let value = try parser.parse()
+        return TOMLDocument(value: value, outline: parser.outline)
+    }
+
+    /// Nil when there is no file, which is not an error: most repositories have no settings file.
+    public static func parseOutlined(contentsOf path: String) throws -> TOMLDocument? {
         guard FileManager.default.fileExists(atPath: path) else { return nil }
-        return try parse(String(contentsOfFile: path, encoding: .utf8))
+        return try parseOutlined(String(contentsOfFile: path, encoding: .utf8))
     }
 
     private struct Parser {
@@ -77,6 +143,7 @@ public enum TOML {
         var line = 1
         var root: [String: TOMLValue] = [:]
         var currentPath: [String] = []
+        var outline = TOMLOutline()
 
         init(source: [Unicode.Scalar]) {
             self.source = source
@@ -90,7 +157,10 @@ public enum TOML {
                 if peek() == "[" {
                     try parseTableHeader()
                 } else {
+                    // Before the value is read, because a multi-line string moves `line` on.
+                    let startLine = line
                     let (path, value) = try parseKeyValue()
+                    outline.note(currentPath + path, line: startLine)
                     insert(value, at: currentPath + path)
                 }
             }
@@ -168,8 +238,12 @@ public enum TOML {
 
             if isArrayOfTables {
                 appendTable(at: path)
-            } else if valueAt(path) == nil {
-                insert(.table([:]), at: path)
+                outline.note(currentPath, line: line)
+            } else {
+                outline.note(path, line: line)
+                if valueAt(path) == nil {
+                    insert(.table([:]), at: path)
+                }
             }
         }
 

@@ -39,7 +39,7 @@ public enum PendingMessageReturn {
     /// coming back as the machine's rendering of itself. It keeps its place and its order, and the
     /// owner still has Delete on it.
     public static func canReturn(_ delivery: Delivery) -> Bool {
-        delivery.kind == .owner
+        delivery.state == .pending && delivery.kind == .owner
             && delivery.crewPayload == nil
             && PendingMessageEdit.canEdit(delivery)
     }

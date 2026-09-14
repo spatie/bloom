@@ -218,7 +218,7 @@ struct QuickPromptGallery: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(prompts.enumerated()), id: \.offset) { index, prompt in
                             QuickPromptRow(
-                                prompt: prompt,
+                                row: .personal(prompt),
                                 isSelected: index == selected,
                                 onPick: {}, onHover: {}, onEdit: {}, onDelete: {}
                             )

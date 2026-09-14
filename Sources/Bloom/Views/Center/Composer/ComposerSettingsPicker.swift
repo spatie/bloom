@@ -19,6 +19,9 @@ struct ComposerSettingsPicker: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
     var onContextWindow: @MainActor (Int) -> Void
+    var codexSpeed: CodexSpeed?
+    var codexSpeedFailed = false
+    var onInteractionMode: @MainActor (InteractionMode) -> Void = { _ in }
 
     @State private var isOpen = false
 
@@ -49,7 +52,10 @@ struct ComposerSettingsPicker: View {
                 onOutputStyle: onOutputStyle,
                 onPermissionMode: onPermissionMode,
                 onFastMode: onFastMode,
-                onContextWindow: onContextWindow
+                onContextWindow: onContextWindow,
+                codexSpeed: codexSpeed,
+                codexSpeedFailed: codexSpeedFailed,
+                onInteractionMode: onInteractionMode
             )
             .environment(\.fontScale, 1)
         }
@@ -79,6 +85,9 @@ private struct ComposerSettingsPanel: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
     var onContextWindow: @MainActor (Int) -> Void
+    var codexSpeed: CodexSpeed?
+    var codexSpeedFailed = false
+    var onInteractionMode: @MainActor (InteractionMode) -> Void = { _ in }
 
     private static let width: CGFloat = 300
 
@@ -98,6 +107,29 @@ private struct ComposerSettingsPanel: View {
                             options: outputStyles,
                             onSelect: onOutputStyle
                         )
+                    }
+                }
+
+                if controls.offersInteractionMode {
+                    settingRow("Work mode") {
+                        if ComposerPlanningSupport.shared.isAvailable {
+                            optionPicker(
+                                "Work mode", selection: controls.interactionMode.rawValue,
+                                options: InteractionMode.allCases.map { ComposerOption(id: $0.rawValue, label: $0.label) },
+                                onSelect: { value in
+                                    if let mode = InteractionMode(rawValue: value) { onInteractionMode(mode) }
+                                }
+                            )
+                        } else if controls.interactionMode == .plan {
+                            Button("Use Build") { onInteractionMode(.build) }
+                        } else {
+                            Text("Build")
+                        }
+                    }
+                    if !ComposerPlanningSupport.shared.isAvailable {
+                        Text(CodexPlanningCapability.explanation).font(Typo.caption)
+                        Button("Check Again") { Task { await ComposerPlanningSupport.shared.checkAgain() } }
+                            .disabled(ComposerPlanningSupport.shared.isChecking)
                     }
                 }
 
@@ -123,18 +155,28 @@ private struct ComposerSettingsPanel: View {
             Hairline()
 
             HStack(spacing: Metrics.spacing) {
-                Text("Prefer faster replies")
+                Text(fastModeLabel)
                     .font(Typo.label)
 
                 Spacer(minLength: Metrics.spacing)
 
-                Toggle("Prefer faster replies", isOn: fastBinding)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
+                if controls.agentKind == .codex, codexSpeed == nil {
+                    Text(codexSpeedFailed ? "Unavailable" : "Loading…")
+                        .font(Typo.label)
+                        .foregroundStyle(Palette.textSecondary)
+                } else {
+                    Toggle(fastModeLabel, isOn: fastBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .disabled(controls.agentKind == .codex && codexSpeed?.supportsFast != true)
+                }
             }
             .padding(.horizontal, Metrics.gutter)
             .padding(.vertical, Metrics.inset)
+            .help(controls.agentKind == .codex
+                  ? "Faster replies use more of your Codex allowance. Changes apply to this conversation."
+                  : "Disable thinking for faster replies.")
         }
         .frame(width: Self.width)
     }
@@ -211,9 +253,17 @@ private struct ComposerSettingsPanel: View {
         Binding(get: { controls.model }, set: { id in MainActor.assumeIsolated { onModel(id) } })
     }
 
+    private var fastModeLabel: String {
+        controls.agentKind == .codex ? "Fast mode" : "Prefer faster replies"
+    }
+
     private var fastBinding: Binding<Bool> {
         Binding(
-            get: { controls.isFastMode },
+            get: {
+                controls.agentKind == .codex
+                    ? codexSpeed?.isFast(override: controls.codexFastMode) ?? false
+                    : controls.isFastMode
+            },
             set: { value in MainActor.assumeIsolated { onFastMode(value) } }
         )
     }

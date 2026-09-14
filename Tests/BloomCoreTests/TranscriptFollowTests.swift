@@ -58,16 +58,25 @@ struct TranscriptFollowTests {
 
     // MARK: - Where the travel starts
 
-    @Test("a row landing under a reader at the end is put back by its own height")
-    func takesBackTheRow() {
-        #expect(TranscriptFollow.start(offset: 10_000, end: 10_000, grew: 22, ownsGap: false) == 9_978)
+    @Test("a message and activity line travel their full height without an initial jump")
+    func sendsDoNotSkipTheFirstPartOfTheirTravel() {
+        #expect(TranscriptFollow.start(offset: 700, end: 784, grew: 84, ownsGap: true) == 700)
+    }
+
+    @Test("a height correction never replays an arrival backwards")
+    func doesNotRewindPinnedContent() {
+        for ownsGap in [false, true] {
+            for growth in [22.0, 64, 4_000] {
+                #expect(TranscriptFollow.start(offset: 10_000, end: 10_000, grew: growth, ownsGap: ownsGap) == 10_000)
+            }
+        }
     }
 
     /// A tool result unfolding, or a long answer landing whole. Travelling all of that would be a
     /// tour of what just arrived rather than a settle onto it.
     @Test("a tall arrival is capped rather than travelled in full")
     func capsTheTakeBack() {
-        let offset = TranscriptFollow.start(offset: 10_000, end: 10_000, grew: 4_000, ownsGap: false)
+        let offset = TranscriptFollow.start(offset: 6_000, end: 10_000, grew: 4_000, ownsGap: true)
         #expect(offset == 10_000 - TranscriptFollow.takeBack)
     }
 
@@ -76,7 +85,7 @@ struct TranscriptFollowTests {
     @Test("a full take-back still counts as being at the end")
     func takeBackStaysBelowTheThreshold() {
         let end = 10_000.0
-        let offset = TranscriptFollow.start(offset: end, end: end, grew: 5_000, ownsGap: false)
+        let offset = TranscriptFollow.start(offset: end - 5_000, end: end, grew: 5_000, ownsGap: true)
         #expect(
             ScrollEnd.isAtEnd(contentHeight: end + 700, viewportHeight: 700, offset: offset)
         )

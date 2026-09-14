@@ -4,15 +4,17 @@ import Foundation
 
 @Suite("Onboarding flow")
 struct OnboardingFlowTests {
-    @Test("A greeting, the checks, an offer that is usually not there, a prompt, and a postcard")
+    @Test("A greeting, the checks, two offers that are usually not there, a prompt, and a postcard")
     func order() {
         #expect(
             OnboardingStep.order
-                == [.greeting, .checks, .commandLine, .promptSubmission, .postcard]
+                == [.greeting, .checks, .keepAwake, .commandLine, .promptSubmission, .postcard]
         )
         #expect(!OnboardingStep.greeting.isOptional)
         #expect(!OnboardingStep.checks.isOptional)
         #expect(OnboardingStep.commandLine.isOptional)
+        // A Mac with no lid has nothing to approve, so the step is not in its sequence at all.
+        #expect(OnboardingStep.keepAwake.isOptional)
         // The one the owner asked for, and the reason it is not optional: nothing about a Mac can
         // make it empty, so there is no state in which leaving it out would be the honest answer.
         #expect(!OnboardingStep.promptSubmission.isOptional)
@@ -23,6 +25,9 @@ struct OnboardingFlowTests {
         let plain = OnboardingFlow(step: .greeting)
         #expect(plain.steps == [.greeting, .checks, .promptSubmission, .postcard])
         #expect(plain.next == .checks)
+
+        let lid = OnboardingFlow(step: .greeting, offersKeepAwake: true)
+        #expect(lid.steps == [.greeting, .checks, .keepAwake, .promptSubmission, .postcard])
 
         let offered = OnboardingFlow(step: .greeting, offersCommandLine: true)
         #expect(

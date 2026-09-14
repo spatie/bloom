@@ -6,11 +6,6 @@ import SwiftTerm
 /// SwiftTerm values.
 @MainActor
 enum TerminalGhostty {
-    /// Shared by the terminal and the switch in Settings. It defaults to on: following the
-    /// terminal the user already configured beats inventing a second look, and a machine without
-    /// Ghostty is unaffected either way.
-    static let defaultsKey = "useGhosttyTerminalTheme"
-
     /// Read once per appearance per launch. Ghostty itself only re-reads on an explicit reload, and
     /// every terminal in the window asks for this on every appearance change, so re-reading four
     /// files each time would buy nothing.
@@ -21,9 +16,21 @@ enum TerminalGhostty {
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
         if let cached = cache[key] { return cached }
 
+        // Raw, with no defaults filled in: which gaps get Ghostty's defaults and which get the
+        // theme's depends on what the config set, and that is `GhosttyTheme.layered(over:)`.
         let loaded = GhosttyConfigLoader.load(appearance: key)
         cache[key] = loaded
         return loaded
+    }
+
+    /// The colours a terminal in this appearance draws with: the selected scheme, with the user's
+    /// Ghostty configuration over it when they follow one.
+    static func colours(for appearance: NSAppearance) -> GhosttyTheme {
+        let preference = ColourThemePreference.shared
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let scheme = isDark ? preference.terminalScheme.dark : preference.terminalScheme.light
+        guard preference.followsGhostty, let ghostty = theme(for: appearance) else { return scheme }
+        return ghostty.layered(over: scheme)
     }
 
     /// How Ghostty fades the panes that do not have the keyboard. Read once per launch, because

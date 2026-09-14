@@ -15,12 +15,14 @@ struct FileTreeRow: View, Equatable {
             && lhs.item.depth == rhs.item.depth
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isChanged == rhs.isChanged
+            && lhs.containsChanges == rhs.containsChanges
             && lhs.fullPath == rhs.fullPath
     }
 
     var item: FileTreeRowItem
     var isExpanded: Bool
     var isChanged: Bool
+    var containsChanges: Bool = false
     /// The node's location on disk, for the menu items that hand it to another app.
     var fullPath: String
     var action: () -> Void
@@ -33,7 +35,6 @@ struct FileTreeRow: View, Equatable {
     var onSplitPage: @MainActor (SplitAxis) -> Void
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The dot marking a file the agent touched. Punctuation, not a badge.
     private static let changedDotSize: CGFloat = 5
@@ -41,21 +42,7 @@ struct FileTreeRow: View, Equatable {
     var body: some View {
         Button(action: action) {
             HStack(spacing: InspectorLayout.gap) {
-                Image(systemName: symbol)
-                    .font(Typo.micro)
-                    .imageScale(.small)
-                    .foregroundStyle(.tertiary)
-                    // One chevron turned rather than two symbols swapped, which is what a
-                    // disclosure triangle on this platform does. Its own `.animation` and not the
-                    // tree's transaction, so it still turns on an expansion too big for the rows
-                    // below to travel. See `TreeDisclosureMotion`.
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .animation(
-                        TreeDisclosureMotion.chevron(reduceMotion: reduceMotion).animation,
-                        value: isExpanded
-                    )
-                    .frame(width: InspectorLayout.glyphWidth, alignment: .leading)
-                    .accessibilityHidden(true)
+                FileTreeIcon(name: item.node.name, isDirectory: item.node.isDirectory, isExpanded: isExpanded)
                 // A directory is one step quieter than a file, said with the hierarchical style so
                 // it still inverts on a selected row.
                 Text(item.node.name)
@@ -107,12 +94,8 @@ struct FileTreeRow: View, Equatable {
     /// A file has no disclosure state to report, and an empty value is one VoiceOver skips.
     private var disclosureState: String {
         guard item.node.isDirectory else { return "" }
-        return isExpanded ? "Expanded" : "Collapsed"
-    }
-
-    /// Always the closed chevron for a directory. Open is the same glyph, turned.
-    private var symbol: String {
-        item.node.isDirectory ? "chevron.right" : "doc"
+        let state = isExpanded ? "Expanded" : "Collapsed"
+        return containsChanges ? "\(state), contains changed files" : state
     }
 
     private func copyPath() {

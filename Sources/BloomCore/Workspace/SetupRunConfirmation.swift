@@ -44,16 +44,16 @@ public enum SetupRunConfirmation {
     /// The title follows the item that was pressed, which says "again" only when there was a first
     /// time. See `WorkspaceModel.hasRunSetup`.
     public static func question(hasRunSetup: Bool, isAgentRunning: Bool) -> Question {
-        var message = "This project\u{2019}s setup script runs in the worktree. It can take "
-            + "minutes, and Bloom cannot undo what it writes."
+        var message = "Setup runs in the worktree, preparing its submodules and running any configured "
+            + "setup script. It can take minutes, and Bloom cannot undo what it writes."
 
         if isAgentRunning {
-            message += "\n\nAn agent is mid turn here. The script does not stop it, so both "
+            message += "\n\nAn agent is mid turn here. Setup does not stop it, so both "
                 + "write to this worktree at once."
         }
 
         return Question(
-            title: hasRunSetup ? "Run the setup script again?" : "Run the setup script?",
+            title: hasRunSetup ? "Run setup again?" : "Run setup?",
             message: message,
             confirmLabel: hasRunSetup ? "Run Setup Again" : "Run Setup",
             cancelLabel: "Don\u{2019}t Run"

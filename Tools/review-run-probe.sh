@@ -2,6 +2,7 @@
 # Runs the diff comment regression in an invisible, isolated bundle after swift build.
 # Pass --review-compare-eager to also measure the previous 5,000-line renderer.
 # Pass --review-navigation-only to check file jumps without sending any input events.
+# Pass --changes-review-only to check history and staging in invisible windows, without input events.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

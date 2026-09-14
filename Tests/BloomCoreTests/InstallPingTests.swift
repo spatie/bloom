@@ -59,7 +59,7 @@ struct InstallPingTests {
         #expect(json["theme"] as? String == "dark")
     }
 
-    @Test("cannot carry anything about the user or their work")
+    @Test("omits personal details when no computer name is supplied")
     func bodyCarriesNothingElse() throws {
         let data = try InstallPing.body(payload(theme: .light))
         let text = try #require(String(data: data, encoding: .utf8))
@@ -82,7 +82,7 @@ struct InstallPingTests {
         let value = InstallPing.Payload(
             token: "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
             appVersion: "0.4.0", macOSVersion: "26.1.0", agent: "claude", theme: .dark,
-            appBuild: "42", architecture: .arm64, translated: false,
+            appBuild: "42", computerName: "Zoë's MacBook Pro", architecture: .arm64, translated: false,
             screenWidth: 1512, screenHeight: 982, displayScale: 2, displayCount: 2,
             memoryBucket: .upTo32GiB
         )
@@ -90,9 +90,10 @@ struct InstallPingTests {
         #expect(Set(json.keys) == [
             "token", "app_version", "macos_version", "agent", "theme", "app_build",
             "architecture", "translated", "screen_width", "screen_height", "display_scale",
-            "display_count", "memory_bucket",
+            "display_count", "memory_bucket", "computer_name",
         ])
         #expect(json["app_build"] as? String == "42")
+        #expect(json["computer_name"] as? String == "Zoë's MacBook Pro")
         #expect(json["architecture"] as? String == "arm64")
         #expect(json["translated"] as? Bool == false)
         #expect(json["screen_width"] as? Int == 1500)
@@ -115,6 +116,24 @@ struct InstallPingTests {
         #expect(InstallPing.roundedScreenDimension(-1) == nil)
         #expect(InstallPing.roundedScreenDimension(20_001) == nil)
         #expect(InstallPing.roundedScreenDimension(20_000) == 20_000)
+    }
+
+    @Test("trims computer names and omits unavailable or invalid names", arguments: [
+        (nil, nil), ("", nil), ("   ", nil),
+        ("  Zoë's MacBook Pro  ", "Zoë's MacBook Pro"),
+        ("開発用 💻", "開発用 💻"),
+        ("Mac\nBook", nil), ("Mac\u{0000}Book", nil),
+        (String(repeating: "é", count: 255), String(repeating: "é", count: 255)),
+        (String(repeating: "é", count: 256), nil),
+    ] as [(String?, String?)])
+    func computerNames(value: String?, expected: String?) throws {
+        let payload = InstallPing.Payload(
+            token: "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+            appVersion: "0.4.0", macOSVersion: "26.1.0", agent: "claude", theme: .dark,
+            computerName: value
+        )
+        #expect(try object(payload)["computer_name"] as? String == expected)
+        #expect(try InstallPing.body(payload).count < InstallPing.maximumBodyBytes)
     }
 
     @Test("groups memory at the documented boundaries")
@@ -488,6 +507,8 @@ struct InstallPingTests {
             #expect(InstallPing.settingDetail.localizedCaseInsensitiveContains(word))
         }
         #expect(InstallPing.settingDetail.contains("random"))
+        #expect(InstallPing.settingDetail.contains("computer name"))
+        #expect(InstallPing.settingFooter.contains("Your computer name may include your name"))
         #expect(InstallPing.settingFooter.contains("100 points"))
         #expect(InstallPing.settingFooter.contains("account details"))
         #expect(InstallPing.settingFooter.contains("email"))

@@ -249,11 +249,13 @@ extension AppModel {
             let contextWindow = CodexContextWindow.normalised(try await store.setting(
                 ComposerControls.contextWindowKey(sessionID: sessionID)
             ))
+            let codexFastMode = CodexSpeed.override(stored: try await store.setting(CodexSpeed.key(sessionID: sessionID)))
             controls = ComposerControls(
                 session: session,
                 isFastMode: false,
                 outputStyle: OutputStyle.defaultName,
-                codexContextWindow: contextWindow
+                codexContextWindow: contextWindow,
+                codexFastMode: codexFastMode
             )
         }
         controls = try await workspaceControls(for: order, inheriting: controls)

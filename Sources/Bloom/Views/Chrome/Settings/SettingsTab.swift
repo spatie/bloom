@@ -2,6 +2,7 @@
 enum SettingsTab: String, Hashable, CaseIterable {
     case general
     case appearance
+    case menuBar
     case notifications
     case agents
     case sessions
@@ -14,6 +15,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         switch self {
         case .general: "General"
         case .appearance: "Appearance"
+        case .menuBar: "Menu Bar"
         case .notifications: "Notifications"
         case .agents: "Agents"
         case .sessions: "Sessions"
@@ -28,6 +30,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         switch self {
         case .general: "gear"
         case .appearance: "paintbrush"
+        case .menuBar: "menubar.rectangle"
         case .notifications: "bell"
         case .agents: "person.2"
         case .sessions: "bubble.left.and.bubble.right"

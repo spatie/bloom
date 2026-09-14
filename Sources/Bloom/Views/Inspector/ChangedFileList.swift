@@ -317,6 +317,7 @@ struct ChangedFileList: View {
                 isViewed: model.isViewed(file),
                 fullPath: fullPath(file.path),
                 depth: depth,
+                allowsWorktreeActions: !model.diffScope.isHistorical,
                 // Always a selection, never a toggle. Clicking the open row used to close the diff
                 // under the list; there is no diff under the list any more, and a click that
                 // deselected would now close nothing while making the row you just aimed at go
@@ -596,6 +597,7 @@ struct ChangedFileList: View {
     /// the keyboard is actually on. A directory resolves to nothing, which disarms the preview
     /// rather than opening a panel on a folder.
     private func refreshPreview() {
+        guard !model.diffScope.isHistorical else { previewURL = nil; return }
         previewURL = cursor.flatMap { QuickLookTarget.url(for: fullPath($0)) }
     }
 
@@ -611,6 +613,7 @@ struct ChangedFileList: View {
     /// Revert buttons in this column gave the file two different contents. Renames were handled by
     /// neither half.
     private func revert(_ file: ChangedFile) {
+        guard model.diffScope.allowsWorktreeActions(for: file) else { return }
         let workspace = model.workspace
         let absolute = fullPath(file.path)
         Task {

@@ -21,9 +21,8 @@ import Foundation
 /// serialises instead: everybody gets their own run, one after another. `SingleFlight` is also
 /// `@MainActor`, and none of this is.
 ///
-/// Keyed on the repository path, because that is what the contention is over: two creates in two
-/// different projects share no branch list, no worktree directory and no git index, and making
-/// them queue behind each other would be a made up cost.
+/// Keyed on the canonical common Git directory. Two aliases or linked checkouts of one
+/// repository share refs and registrations, while unrelated projects can still cut in parallel.
 public actor WorktreeCutQueue {
     public static let shared = WorktreeCutQueue()
 

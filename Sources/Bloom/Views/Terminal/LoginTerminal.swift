@@ -77,9 +77,6 @@ final class LoginTerminalSession {
 struct LoginTerminal: NSViewRepresentable {
     let session: LoginTerminalSession
 
-    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
-    @AppStorage(TerminalTextSize.defaultsKey) private var fontSize = 0.0
-
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
         host.attach(session.terminal)
@@ -98,7 +95,6 @@ struct LoginTerminal: NSViewRepresentable {
     }
 
     private func configure() {
-        session.terminal.usesGhosttyTheme = usesGhosttyTheme
-        session.terminal.fontSizeOverride = fontSize > 0 ? CGFloat(fontSize) : nil
+        session.terminal.updateTheme()
     }
 }

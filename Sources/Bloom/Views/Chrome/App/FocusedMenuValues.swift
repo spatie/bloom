@@ -40,8 +40,9 @@ extension FocusedValues {
     ///
     /// AppKit checks a menu's key equivalents before the responder chain sees the key, so the text
     /// view never gets a chance to refuse. The menu item is what has to stand down, and this is how
-    /// it hears that it should. Every box that takes prose publishes it: the composer, the notes
-    /// pane, the rename fields, the quick prompt form, the free-text answer on a question card.
+    /// it hears that it should. The composer, notes, rename fields, quick prompt form and question
+    /// cards publish it. Other fields do not, so Archive also requires Shift to leave plain
+    /// Command-Backspace available for editing everywhere.
     ///
     /// Only Archive reads it today. It is a general fact rather than a private flag for one item,
     /// because the next destructive shortcut somebody gives a bare key will want the same answer.

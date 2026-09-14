@@ -79,9 +79,26 @@ final class TerminalCommandRecall {
     /// The user pressed Start. The offer goes because the command is running again, and it becomes
     /// what Bloom last sent into this pane, so the next poll records it as the pane's own text
     /// rather than as whatever `ps` calls it.
-    func accepted(inPane pane: String) {
-        if let command = offers.removeValue(forKey: pane) { sent[pane] = command }
+    ///
+    /// The command is the one that was typed, which for a run script's tab is what the settings
+    /// file says now rather than the text that was offered. See `RunScriptPaneStrip`.
+    func accepted(_ command: String, inPane pane: String) {
+        if offers.removeValue(forKey: pane) != nil { sent[pane] = command }
     }
+
+    /// The pane is running something again without the offer having been taken, which is a run
+    /// script being typed into its tab by Bloom or started by hand. The offer is no longer true, so
+    /// it goes; the stored row is left to the recorder, which will write what is running now.
+    ///
+    /// Remembered as well, because the offer is read back from the store asynchronously and can
+    /// land after the command it would offer has already been typed.
+    func withdraw(inPane pane: String) {
+        withdrawn.insert(pane)
+        if offers[pane] != nil { offers[pane] = nil }
+    }
+
+    /// Panes whose offer was overtaken by the command running again. See `withdraw`.
+    @ObservationIgnored private var withdrawn: Set<String> = []
 
     /// The user pressed the dismiss button, which is the one way a command is deliberately
     /// forgotten. It goes from the database too: an offer that came back after being waved away
@@ -99,6 +116,7 @@ final class TerminalCommandRecall {
             sent[pane] = nil
             recorded[pane] = nil
             busy.remove(pane)
+            withdrawn.remove(pane)
         }
         guard let store, !panes.isEmpty else { return }
         Task {
@@ -135,6 +153,7 @@ final class TerminalCommandRecall {
                 return
             }
         }
+        guard !withdrawn.contains(pane) else { return }
         offers[pane] = command
     }
 

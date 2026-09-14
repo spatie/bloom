@@ -158,9 +158,8 @@ public extension GitHub {
     /// this ladder was built for: a review of pull request #222 was squashed, the branch went on
     /// both sides, the worktree moved to `main`, and every route Bloom had ran out at once. `gh pr
     /// view sentry-worker-src-blob` answered "no pull requests found for branch", the unnamed
-    /// fallback answered the same about `main`, and because a nil is deliberately never written
-    /// over a known pull request (see `WorkspaceModel.refreshPullRequest`, and that rule is
-    /// right), the strip went on showing the snapshot taken before the merge: open, eighteen
+    /// fallback answered the same about `main`, and the old ambiguous nil preserved the known
+    /// pull request. The strip went on showing the snapshot taken before the merge: open, eighteen
     /// checks passed, and a live Squash and merge button over work GitHub had already landed.
     ///
     /// So, three routes, in order, each one only asked when the one above it came away empty:
@@ -193,20 +192,20 @@ public extension GitHub {
         }
 
         if let number = workspace.pullRequestNumber,
-           let found = await snapshot(forNumber: number, worktree: workspace.path, maxAge: maxAge) {
+           let found = try await snapshot(forNumber: number, worktree: workspace.path, maxAge: maxAge) {
             return found
         }
 
         let branchIsGone = await !Git.branchExists(head, in: workspace.path)
         guard branchIsGone else { return nil }
 
-        let matches = await pullRequestsWithHead(head, worktree: workspace.path)
+        let matches = try await pullRequestsWithHead(head, worktree: workspace.path)
         guard let chosen = PullRequestOwnership.choose(
             from: matches,
             startedAt: workspace.createdAt,
             checkedOutAs: await Git.checkedOutPullRequest(branch: head, worktree: workspace.path)
         ) else { return nil }
-        return await snapshot(forNumber: chosen, worktree: workspace.path, maxAge: maxAge)
+        return try await snapshot(forNumber: chosen, worktree: workspace.path, maxAge: maxAge)
     }
 
     /// This workspace's checks, which are the checks of this workspace's pull request.

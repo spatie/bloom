@@ -22,15 +22,8 @@ import Foundation
 /// strength of what the CLI said. Both captures are kept as fixtures, and
 /// `Tests/fixtures/codex-model-list-astra.json` is the newer one.
 ///
-/// **What is on the wire and deliberately not read here.** Every model in that capture also
-/// carries `serviceTiers` and `additionalSpeedTiers`: a `priority` tier the CLI calls "Fast",
-/// worth 2x speed on `gpt-6-astra` and 1.5x on the `gpt-5.6` family, for more of the account's
-/// usage allowance. `turn/start` takes it as `serviceTier` and `serviceTierForTurn`, so it is a
-/// real control rather than an unreachable field, and Bloom sends neither, so every Codex turn
-/// runs at standard speed. It is left out on purpose and not for want of a place to put it: it
-/// spends the user's allowance faster, and Bloom's own "Fast mode" switch is already a different
-/// thing on the other backend (Claude Code's `--thinking disabled`, see `AgentRunner`), so a
-/// second control by that name needs a decision about both rather than a field being decoded.
+/// Service tiers also come from the catalogue. `CodexSpeed` combines them with the merged
+/// configuration so the composer reflects an inherited fast default before a session exists.
 public struct CodexModel: Sendable, Hashable, Identifiable {
     public let id: String
     public let displayName: String
@@ -43,6 +36,8 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
     public let defaultEffort: String
     public let inputModalities: [String]
     public let supportsPersonality: Bool
+    public let fastServiceTier: String?
+    public let defaultServiceTier: String?
 
     public init(
         id: String,
@@ -53,7 +48,9 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
         supportedEfforts: [CodexReasoningEffort] = [],
         defaultEffort: String = "",
         inputModalities: [String] = [],
-        supportsPersonality: Bool = false
+        supportsPersonality: Bool = false,
+        fastServiceTier: String? = nil,
+        defaultServiceTier: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -64,6 +61,8 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
         self.defaultEffort = defaultEffort
         self.inputModalities = inputModalities
         self.supportsPersonality = supportsPersonality
+        self.fastServiceTier = fastServiceTier
+        self.defaultServiceTier = defaultServiceTier
     }
 
     public var acceptsImages: Bool { inputModalities.contains("image") }
@@ -99,7 +98,12 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
             supportedEfforts: efforts,
             defaultEffort: json["defaultReasoningEffort"]?.stringValue ?? "",
             inputModalities: (json["inputModalities"] ?? .null).stringArray,
-            supportsPersonality: json["supportsPersonality"]?.boolValue ?? false
+            supportsPersonality: json["supportsPersonality"]?.boolValue ?? false,
+            fastServiceTier: (json["serviceTiers"]?.arrayValue ?? []).first {
+                ["fast", "priority"].contains($0["id"]?.stringValue ?? "")
+            }?["id"]?.stringValue
+                ?? ((json["additionalSpeedTiers"] ?? .null).stringArray.contains("fast") ? "priority" : nil),
+            defaultServiceTier: json["defaultServiceTier"]?.stringValue
         )
     }
 
