@@ -977,21 +977,8 @@ enum Motion {
 /// Content strips stay opaque. The window title bar and navigation sidebar use their existing
 /// native materials, not per-view effect layers added to the scrolling surfaces here.
 extension View {
-    /// The strip a tab bar sits in: the chrome colour with the pane's top edge already on it.
-    ///
-    /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the
-    /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip
-    /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
-    /// that break is what joins the tab to the content below.
-    ///
-    /// `busy` puts the activity signal on that rule, and it goes in this background rather than in
-    /// an overlay for exactly the reason the rule does: the lit rule has to be broken by the
-    /// selected tab on the same pixels the rule is broken on, or the tab reads as sitting on top of
-    /// a line rather than as part of it. See `ActivityRule`.
-    ///
-    /// `busy` and no longer `pulsing`, because the signal no longer pulses: it is a crest running
-    /// the rule, and a parameter named after a figure that has been replaced is the next reader's
-    /// wrong turn. The same rename took `RuleSweep` to `RulePulse` when the light stopped sweeping.
+    /// The tab strip's background and lower divider. The activity signal shares that divider
+    /// in the centre pane, below the inset tab capsules.
     func tabStripMaterial(busy: Bool = false) -> some View {
         background {
             ZStack(alignment: .bottom) {

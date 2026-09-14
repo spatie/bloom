@@ -18,7 +18,6 @@ struct SessionTabsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var renamingID: String?
-    @State private var isNewTabHovered = false
     /// A tab being dragged along the strip, and the order the strip is showing because of it.
     ///
     /// The tabs move out from under the pointer while the drag is happening, so letting go changes
@@ -115,11 +114,8 @@ struct SessionTabsView: View {
         // is the moment after a tab is closed: aiming a scroll at an id that is no longer laid out
         // does nothing, and this says so rather than relying on that.
         let selectedID = selected.flatMap { entries.contains($0) ? AnyHashable($0.id) : nil }
-        return TabStrip(pane: Self.pane, selection: selectedID) {
-            // Keep the first tab clear of the sidebar rule so it has the same rounded leading
-            // corner as every other tab. Outside the scroller, the gutter stays visible when
-            // tabs overflow and leaves the row's drag coordinates unchanged.
-            Color.clear.frame(width: Metrics.spacingWide)
+        return TabStrip(tabCount: entries.count, pane: Self.pane, selection: selectedID) {
+            EmptyView()
         } tabs: {
             HStack(spacing: 0) {
                 // One run over one list. A conversation and a terminal are two kinds of thing kept
@@ -164,8 +160,8 @@ struct SessionTabsView: View {
             .dropDestination(for: String.self) { items, session in
                 commit(items.first, at: session.location.x)
             }
-            // Only when a drag moves the tabs. A reload that came from anywhere else, a session
-            // arriving or a tab being renamed, must not make the strip slide about.
+            // Animate reordering during a drag. TabStrip handles opening and closing tabs;
+            // a renamed tab must not make the strip slide about.
             //
             // `Motion.pane` rather than the `.snappy(duration: 0.18)` this was written as. The
             // length was already `pane`'s; what differed was the curve, and `.snappy` is a spring
@@ -174,13 +170,6 @@ struct SessionTabsView: View {
             // tab are the strip relaying out, not an event of their own.
             .animation(reduceMotion ? nil : Motion.pane, value: drag?.order)
         } append: {
-            // The rule between the last tab and the `+`, which is the same rule the tabs have
-            // between each other and goes the same way: hidden against the selected tab, whose
-            // own fill is its edge, and hidden again when there is no tab for it to come after.
-            // A workspace whose conversations have all been closed would otherwise open with a
-            // hairline standing against the rule down the edge of the pane.
-            TabStripSeparator(isHidden: entries.last.map { $0 == selected } ?? true)
-
             newTabMenu
         } trailing: {}
         // The list, and nothing else. Reconciling used to be here too, right after this line, and
@@ -248,7 +237,6 @@ struct SessionTabsView: View {
             ),
             isActive: selected == .chat(session.id),
             isRunning: model.isRunning(session),
-            isAtPaneEdge: false,
             isRenaming: renamingID == session.id.rawValue,
             // Always. The workspace's last conversation IS closable, and hiding the cross was the
             // only thing pretending otherwise: "Close Session" in the File menu holds Cmd+W and has
@@ -384,27 +372,21 @@ struct SessionTabsView: View {
         } label: {
             Label("New tab", systemImage: "plus")
                 .labelStyle(.iconOnly)
-                .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textSecondary)
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.regular)
+        .buttonSizing(.flexible)
+        .frame(width: TabItemView.tabHeight, height: TabItemView.tabHeight)
         .menuIndicator(.hidden)
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
-        .contentShape(Rectangle())
-        .background {
-            if isNewTabHovered {
-                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .fill(Palette.hover)
-                    .padding(Metrics.spacingTight)
-            }
-        }
         // Re-read on the way to the button, because a `Menu` has no moment of its own to do it
         // in: its items are built before it opens. A run script added from a terminal inside
         // Bloom changes no selection and brings no window forward, so without this it only reached
         // the menu on the next switch. The read is coalesced and off the main actor, and the pointer
         // takes longer to reach the button than the parse takes.
         .onHover {
-            isNewTabHovered = $0
             if $0 { model.refreshSettings() }
         }
         .help("New tab in this workspace")

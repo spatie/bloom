@@ -16,8 +16,6 @@ struct SessionTabView: View {
     var agentGlyph: String?
     var isActive: Bool
     var isRunning: Bool
-    /// Whether this is the tab the pane's leading edge runs through. See `TabItemView`.
-    var isAtPaneEdge: Bool
     var isRenaming: Bool
     var canClose: Bool
     var onSelect: @MainActor () -> Void
@@ -37,7 +35,6 @@ struct SessionTabView: View {
             icon: .symbol(PaneGlyph.chatTab(agentMark: agentGlyph)),
             isActive: isActive,
             isRunning: isRunning,
-            isAtPaneEdge: isAtPaneEdge,
             surface: TabPane.content.surface,
             isRenaming: isRenaming,
             editableTitle: session.title,
