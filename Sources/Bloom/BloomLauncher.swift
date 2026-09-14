@@ -6,6 +6,7 @@ import Foundation
 enum BloomLauncher {
     @MainActor
     static func main() async {
+        Log.launchStep("main")
         #if DEBUG
         if FlareProbe.isRequested { await FlareProbe.runAndExit() }
         if WelcomeLayoutProbe.isRequested { WelcomeLayoutProbe.runAndExit() }

@@ -1,5 +1,6 @@
 import Foundation
 import os
+import BloomCore
 
 /// Where the app says what it just refused to do.
 ///
@@ -46,6 +47,13 @@ enum Log {
     /// Nothing outside the process can see the moment `isLoaded` is set, so a sampler cannot
     /// answer this and a probe would have to be told when to start.
     static let launch = Logger(subsystem: subsystem, category: "launch")
+
+    /// One step of a launch, stamped with the time since the kernel created the process. Notice
+    /// rather than info, because info is not persisted and a launch is only ever read afterwards:
+    /// `log show --last 5m --predicate 'category == "launch"'`.
+    static func launchStep(_ step: String) {
+        launch.notice("\(step, privacy: .public) at \(ProcessClock.millisecondsSinceStart(), privacy: .public)ms")
+    }
 
     /// The workspace bridge: the socket it bound, the handshakes it refused, and the sessions it
     /// could not register. Every one of those is a tool the agent silently does not have, which is
