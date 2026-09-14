@@ -18,6 +18,8 @@ struct AppearanceSettingsView: View {
                 .pickerStyle(.segmented)
             }
 
+            FileIconsSettingsSection()
+
             Section {
                 Picker("Font", selection: fontSelection) {
                     Section {
