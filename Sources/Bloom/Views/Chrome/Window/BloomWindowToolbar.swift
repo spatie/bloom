@@ -11,6 +11,7 @@ struct BloomWindowToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             WindowTitleControl(app: app)
+                .padding(.leading, Metrics.spacingWide)
         }
         // The editable window title is text, so it does not need a button's background.
         .sharedBackgroundVisibility(.hidden)
