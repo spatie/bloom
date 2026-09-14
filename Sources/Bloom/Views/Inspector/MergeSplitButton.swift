@@ -148,8 +148,17 @@ private struct MergeControlHost<Content: View>: NSViewRepresentable {
         nsView.fittingSize
     }
 
+    /// Always drawn active. When the window is not key, AppKit draws the menu's bezel as an opaque
+    /// neutral capsule over the painted fill, and the strip came out with a grey Merge button and
+    /// dark ink in a green band. The offscreen probe never saw it because it asks for the active
+    /// state, and that override is exactly what keeps the band's colour here.
     private func root(_ context: Context) -> AnyView {
-        AnyView(content.environment(\.self, context.environment).environment(\.colorScheme, .dark))
+        AnyView(
+            content
+                .environment(\.self, context.environment)
+                .environment(\.colorScheme, .dark)
+                .environment(\.controlActiveState, .active)
+        )
     }
 
     final class MergeHostingView: NSHostingView<AnyView> {
