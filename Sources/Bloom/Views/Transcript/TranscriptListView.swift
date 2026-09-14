@@ -489,9 +489,9 @@ struct TranscriptListView: View {
                             onVisibilityChange: { showsSetup = $0 },
                             onShowLogEnd: { wasAsked in showSetupLogEnd(wasAsked: wasAsked) }
                         )
-                        // The air the lazy stack got from `.padding(.vertical)` on its content. It
-                        // cannot be a content inset here: see `TranscriptTable.makeNSView`.
-                        .padding(.top, TranscriptLayout.block)
+                        // Match Ask Bloom's opening space so the first bubble clears the tab bar.
+                        // This cannot be a content inset: see `TranscriptTable.makeNSView`.
+                        .padding(.top, Metrics.pane)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     )
                 }
