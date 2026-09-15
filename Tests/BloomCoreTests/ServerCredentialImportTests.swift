@@ -130,17 +130,28 @@ import Testing
 
     @Test func cancellationKillsTheProcessGroupWithoutWaitingForPipeEOF() async throws {
         let fixture = try ImportDirectory()
+        // The pid is written aside and renamed, so the file is complete whenever it exists.
         let marker = fixture.url.appendingPathComponent("ready")
+        // Timing is not what this test can assert. The core suite shares one executor and it
+        // stalls, 12.65 seconds at a time on CI, so a ten second timeout sometimes won the race
+        // against the cancellation that was supposed to beat it, and a two second bound on the
+        // cancel itself measured the stall. The timeout is long enough that only cancellation
+        // can end the command, and what is checked is what cancellation promises: the error is
+        // a cancellation and the process group is gone when it arrives. The bound kept only
+        // tells that from a command that ran its whole thirty seconds.
         let task = Task {
-            try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "touch \"$1\"; sleep 30", "fixture", marker.path], environment: ["PATH": "/usr/bin:/bin"], timeout: 10)
+            try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "echo $$ > \"$1.partial\" && mv \"$1.partial\" \"$1\" && exec sleep 30", "fixture", marker.path], environment: ["PATH": "/usr/bin:/bin"], timeout: 300)
         }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
         while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(FileManager.default.fileExists(atPath: marker.path))
+        let written = try #require(try? String(contentsOf: marker, encoding: .utf8))
+        let pid = try #require(Int32(written.trimmingCharacters(in: .whitespacesAndNewlines)))
         let start = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(start.duration(to: .now) < .seconds(2))
+        let stillExists = kill(pid, 0) == 0
+        #expect(!stillExists)
+        #expect(start.duration(to: .now) < .seconds(25))
     }
 }
 
