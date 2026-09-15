@@ -42,12 +42,29 @@ jobs:
         run: runuser -u bloom-ci -- python3 Tools/server-smoke.py .build/debug/bloom-server
       - name: Check script and installer regressions as Linux root
         run: python3 Tools/run-script-tests.py
-      - name: Package the server and its runtime
-        run: python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
+      # The release path, short of a release build and an upload: the version comes from a tag,
+      # and describe puts the package through the supervisor's own extraction and manifest checks
+      # before writing the checksum and metadata a release publishes. Debug, because this job has
+      # already built debug for the tests and a second, release build would double its time.
+      - name: Package and describe the server as a release would
+        shell: bash
+        env:
+          BLOOM_SERVER_VERSION: v0.0.0-ci.${{ github.run_number }}
+          TAG: v0.0.0-ci.${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          out=.build/server-release
+          python3 Tools/package-linux-server.py .build/debug/bloom-server "$out/bloom-server-linux-x86_64.tar.gz"
+          python3 Tools/server-release-assets.py describe "$out/bloom-server-linux-x86_64.tar.gz" \
+            --tag "$TAG" --output-dir "$out"
       - uses: actions/upload-artifact@v7
         with:
           name: bloom-server-linux-x86_64
-          path: .build/bloom-server-linux-x86_64.tar.gz
+          path: |
+            .build/server-release/bloom-server-linux-x86_64.tar.gz
+            .build/server-release/bloom-server-linux-x86_64.tar.gz.sha256
+            .build/server-release/bloom-server-linux-x86_64.json
+          if-no-files-found: error
           retention-days: 7
 
   packaged-runtime:
@@ -69,6 +86,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends python3 git
           if command -v swift >/dev/null; then exit 1; fi
+          (cd package && sha256sum -c bloom-server-linux-x86_64.tar.gz.sha256)
           tar -xzf package/bloom-server-linux-x86_64.tar.gz -C package
           python3 Tools/server-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
           python3 Tools/maintenance-runtime-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
