@@ -89,7 +89,6 @@ struct ComposerView: View {
             )
             .help("Drag to resize. Double-click to fit the text.")
 
-            TurnHistoryNotice(transcript: transcript)
             ComposerPlansView(transcript: transcript, model: model, controls: controls)
             composer
         }

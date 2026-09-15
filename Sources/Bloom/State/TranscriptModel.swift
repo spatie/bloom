@@ -402,6 +402,7 @@ final class TranscriptModel {
         self.workspace = workspace
         self.cwd = workspace.path
         self.app = app
+        history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
     /// The conversation that belongs to Bloom rather than to a workspace.
@@ -414,6 +415,7 @@ final class TranscriptModel {
         self.workspace = nil
         self.cwd = directory
         self.app = app
+        history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
     private var store: Store? { app.store }

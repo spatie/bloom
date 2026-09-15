@@ -11,8 +11,9 @@ extension Git {
         let temporary = (gitDirectory as NSString).appendingPathComponent("bloom-snapshot-\(snapshot.id)")
         let workIndex = temporary + "-work"
         let savedIndex = temporary + "-index"
+        let cleanIndex = temporary + "-clean"
         defer {
-            for path in [workIndex, savedIndex, workIndex + ".lock", savedIndex + ".lock"] {
+            for path in [workIndex, savedIndex, cleanIndex, workIndex + ".lock", savedIndex + ".lock", cleanIndex + ".lock"] {
                 try? FileManager.default.removeItem(atPath: path)
             }
         }
@@ -33,13 +34,27 @@ extension Git {
             try FileManager.default.copyItem(atPath: savedIndex, toPath: workIndex)
             // Worktree capture must read real file contents even when the owner's index tells
             // ordinary Git commands to skip them. Names travel as NUL-delimited bytes.
-            let paths = try await snapshotBytes(["ls-files", "-z"], in: worktree, index: workIndex)
+            let listing = try await snapshotBytes(["ls-files", "-s", "-z"], in: worktree, index: workIndex)
+            let paths = pathsByStage(listing)
+            // Only clean entries. A path with conflict stages has no stage 0 entry to flag, and
+            // `update-index` died on the first one with "Unable to mark file", so every turn sent
+            // while an agent was resolving a merge failed to capture.
             for flag in ["--no-assume-unchanged", "--no-skip-worktree"] {
                 _ = try await snapshotBytes(["update-index", flag, "-z", "--stdin"],
-                                            in: worktree, index: workIndex, stdin: paths)
+                                            in: worktree, index: workIndex, stdin: paths.merged)
             }
+            // `add` records the conflicted file as it stands on disk, which is what a turn changes.
             _ = try await snapshotCommand(["add", "-A", "--", "."], in: worktree, index: workIndex)
-            for (index, ref) in [(savedIndex, snapshot.indexRef), (workIndex, snapshot.worktreeRef)] {
+            // `write-tree` refuses an index with conflict stages in it. The staged tree drops those
+            // paths; the raw index blob above still holds every stage.
+            var stagedIndex = savedIndex
+            if !paths.unmerged.isEmpty {
+                stagedIndex = cleanIndex
+                try FileManager.default.copyItem(atPath: savedIndex, toPath: cleanIndex)
+                _ = try await snapshotBytes(["update-index", "--force-remove", "-z", "--stdin"],
+                                            in: worktree, index: cleanIndex, stdin: paths.unmerged)
+            }
+            for (index, ref) in [(stagedIndex, snapshot.indexRef), (workIndex, snapshot.worktreeRef)] {
                 let tree = try await snapshotCommand(["write-tree"], in: worktree, index: index).trimmed
                 let commit = try await snapshotCommand(
                     ["commit-tree", tree, "-m", "Bloom workspace snapshot"], in: worktree, index: index
@@ -58,6 +73,26 @@ extension Git {
         for ref in [snapshot.worktreeRef, snapshot.indexRef, snapshot.rawIndexRef] {
             _ = try await snapshotCommand(["update-ref", "-d", ref], in: worktree)
         }
+    }
+
+    /// `ls-files -s -z` split into paths with a clean entry and paths with conflict stages, each
+    /// NUL terminated for `update-index -z --stdin`. Bytes throughout, since a path need not be UTF-8.
+    private static func pathsByStage(_ listing: Data) -> (merged: Data, unmerged: Data) {
+        var merged = Data()
+        var unmerged = Data()
+        var seen = Set<Data>()
+        for entry in listing.split(separator: 0) {
+            guard let tab = entry.firstIndex(of: UInt8(ascii: "\t")), tab > entry.startIndex else { continue }
+            let path = Data(entry[entry.index(after: tab)...])
+            if entry[entry.index(before: tab)] == UInt8(ascii: "0") {
+                merged.append(path)
+                merged.append(0)
+            } else if seen.insert(path).inserted {
+                unmerged.append(path)
+                unmerged.append(0)
+            }
+        }
+        return (merged, unmerged)
     }
 
     private static func validateSnapshot(_ snapshot: GitSnapshot) throws {
