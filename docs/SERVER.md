@@ -183,6 +183,8 @@ server; archived workspaces can be restored with their conversation history and 
 
 The Mac assistant shows five steps throughout: Introduction, Server, Installation, Accounts and
 Finish. Continue moves between pages; Install is the explicit action that changes the server.
+A server that passes every check moves on to Installation by itself, and that page opens with
+what the check found (the connection, Ubuntu version and architecture, and any warnings).
 The Accounts step first offers credential copying, then a separate page for individual sign-ins.
 Import results finish with Done, including partial results, before account status is refreshed.
 

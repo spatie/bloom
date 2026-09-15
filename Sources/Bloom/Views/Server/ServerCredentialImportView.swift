@@ -6,7 +6,6 @@ import BloomCore
 struct ServerCredentialImportView: View {
     @State private var model: ServerCredentialImportModel
     let close: () -> Void
-    @State private var copied = false
     @State private var showsAccessHelp = false
 
     init(model: ServerCredentialImportModel, close: @escaping () -> Void) {
@@ -73,11 +72,6 @@ struct ServerCredentialImportView: View {
         .interactiveDismissDisabled(model.isBusy)
         .onExitCommand { if !model.isBusy { close() } }
         .task { await model.discover() }
-        .task(id: copied) {
-            guard copied else { return }
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
-            copied = false
-        }
         .onDisappear { model.cancel() }
     }
 
@@ -93,13 +87,6 @@ struct ServerCredentialImportView: View {
                 ProgressView().controlSize(.small)
                 Text(model.isStopping ? "Stopping…" : "Importing \(model.currentAccount ?? "account")…")
                     .font(Typo.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            if model.hasResults && !model.isImporting {
-                Button(copied ? "Copied" : "Copy Results") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(model.report, forType: .string)
-                    copied = true
-                }
             }
             Spacer()
             if showsResults {

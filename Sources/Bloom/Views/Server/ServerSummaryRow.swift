@@ -9,11 +9,11 @@ struct ServerSummaryRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
             Image(systemName: row.symbol)
                 .foregroundStyle(Palette.controlAccent)
-                .frame(width: 18)
+                .frame(width: 20)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title).font(Typo.captionEmphasis)
-                Text(row.detail).font(Typo.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text(row.title).font(Typo.bodyEmphasis)
+                Text(row.detail).font(Typo.label).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let location = row.location {
                     Text(location).font(Typo.codeSmall).foregroundStyle(.secondary).textSelection(.enabled)

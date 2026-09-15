@@ -6,6 +6,9 @@ struct ServerSetupCheckSummary: View {
     let check: ServerInstallCheck
     let showAdvanced: () -> Void
     var stopServer: (() -> Void)?
+    /// What a check with no blockers is called. The Installation page, which the wizard moves to
+    /// on its own after a clean check, says the connection worked rather than what comes next.
+    var readyTitle = "Ready for setup"
 
     var body: some View {
         HStack(alignment: .top, spacing: Metrics.spacingWide) {
@@ -37,12 +40,12 @@ struct ServerSetupCheckSummary: View {
     }
 
     private var status: some View {
-        Text(check.blockers.isEmpty ? "Ready for setup" : "Setup needs attention")
+        Text(check.blockers.isEmpty ? readyTitle : "Setup needs attention")
             .font(Typo.labelEmphasis)
             .foregroundStyle(check.blockers.isEmpty ? Palette.controlAccent : Palette.warning)
     }
 
     private var system: some View {
-        Text("\(check.platform) · \(check.architecture)").font(Typo.caption).foregroundStyle(.secondary)
+        Text("\(check.platform) · \(check.architecture)").font(Typo.label).foregroundStyle(.secondary)
     }
 }

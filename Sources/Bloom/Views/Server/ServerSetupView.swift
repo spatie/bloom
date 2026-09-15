@@ -35,7 +35,7 @@ struct ServerSetupView: View {
                             }
                         }
                         if !subtitle.isEmpty {
-                            Text(subtitle).font(Typo.label).foregroundStyle(.secondary)
+                            Text(subtitle).font(Typo.body).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -46,21 +46,27 @@ struct ServerSetupView: View {
                     Group {
                         if model.phase == .introduction {
                             ServerSetupIntroduction(showAdvanced: showAdvanced)
+                                .padding(.horizontal, Metrics.gutter * 2)
                         } else if model.phase == .installing || model.isInstallingOptionalTools {
                             ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.optionalDiagnostic, compact: true)
+                                .padding(.horizontal, Metrics.gutter * 2)
                         } else {
+                            // Clipped, with the page's margins inside the scroll view. It used to
+                            // draw unclipped with the margins outside, so a page taller than the
+                            // window scrolled its first rows over the title and subtitle, and the
+                            // scroller sat on top of the right-hand column's text.
                             ScrollView {
                                 VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
                                     if let failure = model.failure { ServerSetupFailureView(failure: failure) }
                                     phaseContent
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, Metrics.gutter * 2)
+                                .padding(.vertical, Metrics.spacingSmall)
                             }
                             .scrollBounceBehavior(.basedOnSize)
-                            .scrollClipDisabled()
                         }
                     }
-                    .padding(.horizontal, Metrics.gutter * 2)
                     .padding(.bottom, Metrics.gutter * 2)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
@@ -74,13 +80,6 @@ struct ServerSetupView: View {
                     }
                     .keyboardShortcut(.cancelAction).disabled(model.isStopping)
                 }
-                if model.failure != nil || !model.activity.lines.isEmpty {
-                    Button("Copy Report") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(model.diagnosticReport, forType: .string)
-                    }
-                    .help("Copy setup steps, server output and error details")
-                }
                 Spacer()
                 if model.phase != .introduction && model.phase != .complete {
                     Button("Back") {
@@ -91,7 +90,7 @@ struct ServerSetupView: View {
             }
             .padding(Metrics.gutter)
         }
-        .frame(width: 840, height: 640)
+        .frame(width: 840, height: 700)
         .confirmationDialog("Stop Bloom Server on \(model.label.isEmpty ? model.host : model.label)?", isPresented: $confirmsStopServer) {
             Button("Stop Server", role: .destructive) { Task { await model.stopServer() } }
             Button("Cancel", role: .cancel) { }
@@ -231,12 +230,17 @@ struct ServerSetupView: View {
 
     private var installationSummary: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
+            // The Server page moves on by itself once every check passes, so what the check found
+            // is said here instead of on the page that was left behind.
+            if let check = model.check {
+                ServerSetupCheckSummary(check: check, showAdvanced: showAdvanced, readyTitle: "Connected to your server")
+            }
             ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome,
                                    dataDirectory: model.check?.dataDirectory, serviceUser: model.check?.serviceUser,
                                    alreadyInstalled: model.hasInstalledServer)
             if !model.hasInstalledServer {
                 Divider()
-                Text("Optional extras").font(Typo.labelEmphasis)
+                Text("Optional extras").font(Typo.bodyEmphasis)
                 VStack(alignment: .leading, spacing: Metrics.gutter) {
                     optionalPart(.docker, isOn: $model.installsDocker)
                     optionalPart(.browser, isOn: $model.installsBrowserTools)
@@ -257,7 +261,7 @@ struct ServerSetupView: View {
                 ServerSetupHelpButton(title: part.title,
                                       details: part.details(serviceUser: model.check?.serviceUser ?? "bloom", serviceHome: model.check?.serviceHome))
             }
-            Text(part.summary).font(Typo.caption).foregroundStyle(.secondary)
+            Text(part.summary).font(Typo.label).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -310,7 +314,7 @@ struct ServerSetupView: View {
                         .disabled(model.check == nil || model.check?.blockers.isEmpty == false || model.isBusy)
                 }
             case .accounts:
-                Button(model.hasChosenAccountMethod ? "Connect to Server" : "Sign In Separately") {
+                Button(model.hasChosenAccountMethod ? "Finish Setup" : "Sign In Separately") {
                     if model.hasChosenAccountMethod { Task { await model.connect() } } else { model.hasChosenAccountMethod = true }
                 }
                 .keyboardShortcut(.defaultAction)

@@ -18,16 +18,16 @@ struct ServerSetupInstallPlan: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             HStack(spacing: Metrics.spacing) {
-                Text(alreadyInstalled ? "Your installation" : "What Bloom installs").font(Typo.labelEmphasis)
+                Text(alreadyInstalled ? "Your installation" : "What Bloom installs").font(Typo.bodyEmphasis)
                 ServerSetupHelpButton(title: "Where everything is", details: summary.locationDetails)
             }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: Metrics.gutter * 1.5, alignment: .topLeading),
                                 GridItem(.flexible(), alignment: .topLeading)],
-                      alignment: .leading, spacing: Metrics.gutter) {
+                      alignment: .leading, spacing: Metrics.gutter * 1.5) {
                 ForEach(summary.rows) { row in ServerSummaryRow(row: row) }
             }
             Text("This Mac’s private key never leaves this Mac. Existing projects, conversations and sign-ins are kept.")
-                .font(Typo.caption).foregroundStyle(.secondary)
+                .font(Typo.label).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

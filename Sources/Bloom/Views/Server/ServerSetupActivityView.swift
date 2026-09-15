@@ -11,6 +11,11 @@ struct ServerSetupActivityView: View {
     var compact = false
     var stages = ServerSetupActivity.Stage.allCases
     private var visibleStages: [ServerSetupActivity.Stage] { stages.filter { activity.status(of: $0) != .skipped } }
+    /// The left column takes the extra stage when the count is odd.
+    private var stageColumns: [[ServerSetupActivity.Stage]] {
+        let split = (visibleStages.count + 1) / 2
+        return [Array(visibleStages.prefix(split)), Array(visibleStages.dropFirst(split))]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
@@ -19,13 +24,20 @@ struct ServerSetupActivityView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Metrics.gutter) {
                         if let failure { ServerSetupFailureView(failure: failure) }
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 2), alignment: .leading, spacing: Metrics.spacing) {
-                            ForEach(visibleStages) { stage in stageRow(stage) }
+                        // Down the left column and then down the right, because the stages run in
+                        // that order. A grid fills across, which ticked them off left, right, left.
+                        HStack(alignment: .top, spacing: Metrics.gutter) {
+                            ForEach(Array(stageColumns.enumerated()), id: \.offset) { _, column in
+                                VStack(alignment: .leading, spacing: Metrics.spacing) {
+                                    ForEach(column) { stage in stageRow(stage) }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
                 }
                 .scrollBounceBehavior(.basedOnSize)
-                .frame(maxHeight: failure == nil ? CGFloat((visibleStages.count + 1) / 2) * 28 : 180)
+                .frame(maxHeight: failure == nil ? CGFloat((visibleStages.count + 1) / 2) * 30 : 180)
                 output
             } else {
                 if let failure { ServerSetupFailureView(failure: failure) }
@@ -51,7 +63,7 @@ struct ServerSetupActivityView: View {
         HStack(alignment: .top, spacing: Metrics.spacing) {
             statusIcon(activity.status(of: stage)).frame(width: 16)
             Text(stage.title)
-                .font(activity.status(of: stage) == .running ? Typo.captionEmphasis : Typo.caption)
+                .font(activity.status(of: stage) == .running ? Typo.labelEmphasis : Typo.label)
                 .foregroundStyle(activity.status(of: stage) == .pending || activity.status(of: stage) == .skipped ? Palette.textTertiary : Palette.textPrimary)
         }
         .accessibilityElement(children: .combine)

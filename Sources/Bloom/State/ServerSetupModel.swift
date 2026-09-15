@@ -144,7 +144,10 @@ final class ServerSetupModel {
                 let check = try await self.inspectConnection(connection, self.installerScript())
                 try Task.checkCancellation()
                 self.check = check
-                self.phase = .address
+                // A clean check leaves nothing to decide on the Server page, which used to sit
+                // showing "Ready for setup" until Continue was pressed. Installation says what the
+                // check found. A blocker keeps the page, because that is where it is fixed.
+                self.phase = check.blockers.isEmpty ? .readyToInstall : .address
             } catch let error as ServerSetupFailure where error.code == .hostUnknown {
                 let candidate = try await connection.candidateKey()
                 try Task.checkCancellation()

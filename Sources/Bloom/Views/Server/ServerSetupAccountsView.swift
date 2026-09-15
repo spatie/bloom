@@ -7,7 +7,6 @@ struct ServerSetupAccountsView: View {
     @State private var login: LoginTerminalSession?
     @State private var loginProblem: String?
     @State private var credentialImport: ServerCredentialImportModel?
-    @State private var showsServerTools = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
@@ -24,8 +23,6 @@ struct ServerSetupAccountsView: View {
         .sheet(isPresented: Binding(get: { credentialImport != nil }, set: { if !$0 { closeImport() } })) {
             if let credentialImport { ServerCredentialImportView(model: credentialImport, close: closeImport) }
         }
-        .onAppear { showsServerTools = hasToolFailure }
-        .onChange(of: hasToolFailure) { _, failed in if failed { showsServerTools = true } }
         .onDisappear { login?.stop(); login = nil; credentialImport?.cancel(); credentialImport = nil }
     }
 
@@ -76,24 +73,21 @@ struct ServerSetupAccountsView: View {
     }
 
     private var serverTools: some View {
-        DisclosureGroup(isExpanded: $showsServerTools) {
-            VStack(alignment: .leading, spacing: Metrics.gutter) {
-                browserRow
-                if model.installsDocker || model.dockerAttempted {
-                    Divider()
-                    dockerRow
-                }
-                if model.swapAttempted {
-                    Divider()
-                    swapRow
-                }
-            }
-            .padding(.top, Metrics.spacing)
-        } label: {
+        // Always open: three short rows, and a disclosure only added a click before reading them.
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
             Label(hasToolFailure ? "Server tools need attention" : "Server tools",
                   systemImage: hasToolFailure ? "exclamationmark.triangle" : "wrench.and.screwdriver")
                 .font(Typo.captionEmphasis)
                 .foregroundStyle(hasToolFailure ? Palette.warning : Palette.textSecondary)
+            browserRow
+            if model.installsDocker || model.dockerAttempted {
+                Divider()
+                dockerRow
+            }
+            if model.swapAttempted {
+                Divider()
+                swapRow
+            }
         }
     }
 
