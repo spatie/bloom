@@ -22,6 +22,43 @@ struct WorkspaceStartContextTests {
         )
     }
 
+    @Test("A branch only the remote has is offered as a base, once, in order")
+    func remoteOnlyBranchesAreBases() {
+        #expect(
+            WorkspaceStartContext.baseBranchOptions(
+                local: ["main", "wip"],
+                remote: ["main", "colleague/idea", "wip"],
+                defaultBranch: "main"
+            ) == ["colleague/idea", "main", "wip"]
+        )
+    }
+
+    @Test("Only the primary remote's branches are offered, origin first")
+    func primaryRemoteOnly() {
+        let references = ["origin/HEAD", "origin/main", "origin/idea", "upstream/elsewhere"]
+        #expect(
+            WorkspaceStartContext.primaryRemoteBranches(
+                references: references, remoteNames: ["upstream", "origin"]
+            ) == ["main", "idea"]
+        )
+        #expect(
+            WorkspaceStartContext.primaryRemoteBranches(
+                references: ["github/main"], remoteNames: ["github"]
+            ) == ["main"]
+        )
+        #expect(
+            WorkspaceStartContext.primaryRemoteBranches(references: [], remoteNames: []).isEmpty
+        )
+    }
+
+    @Test("No branches on either side still offers the default branch")
+    func noBasesFallBackToDefault() {
+        #expect(
+            WorkspaceStartContext.baseBranchOptions(local: [], remote: [], defaultBranch: "main")
+                == ["main"]
+        )
+    }
+
     // MARK: - Where the worktree is cut from
 
     @Test("A choice that survives the listing is kept")

@@ -11,13 +11,22 @@ import Foundation
 /// branch listing, a settings file chain and a PATH lookup, none of which belongs on the actor
 /// drawing a sheet), and the decisions are pure functions so the suite can hold them.
 public struct WorkspaceStartContext: Sendable {
+    /// The local branches, and only those: the window also asks this list which names are taken.
     public let branches: [String]
+    /// Branches the primary remote has, by their plain name, as this clone last fetched them.
+    public let remoteBranches: [String]
     public let settings: RepoSettings
     public let isNamingAvailable: Bool
 
     public static func load(repoPath: String) async -> WorkspaceStartContext {
-        WorkspaceStartContext(
-            branches: (try? await Git.branches(of: repoPath)) ?? [],
+        async let local = Git.branches(of: repoPath)
+        async let remote = Git.remoteBranches(of: repoPath)
+        async let names = Git.remoteNames(of: repoPath)
+        return WorkspaceStartContext(
+            branches: (try? await local) ?? [],
+            remoteBranches: primaryRemoteBranches(
+                references: (try? await remote) ?? [], remoteNames: (try? await names) ?? []
+            ),
             settings: SettingsLoader.load(repo: repoPath),
             isNamingAvailable: WorkspaceNamer.isAvailable
         )
@@ -28,6 +37,35 @@ public struct WorkspaceStartContext: Sendable {
     /// as broken rather than new.
     public static func branchOptions(branches: [String], defaultBranch: String) -> [String] {
         branches.isEmpty ? [defaultBranch] : branches
+    }
+
+    /// The plain names of the branches on the remote a bare base name resolves against.
+    ///
+    /// Only that remote, and the choice is `GitRepositoryContext.resolve`'s own when nothing is
+    /// configured: `origin` if there is one, otherwise the first remote by name. A branch only a
+    /// second remote has would be offered here and then looked for on the first, and not found.
+    static func primaryRemoteBranches(references: [String], remoteNames: [String]) -> [String] {
+        guard let primary = remoteNames.contains("origin") ? "origin" : remoteNames.min() else {
+            return []
+        }
+        return references.compactMap { WorkspaceCheckoutPlan.remoteBranchName($0, remote: primary) }
+    }
+
+    /// What a new branch may be cut from: every branch this clone knows of, local or remote.
+    ///
+    /// The picker used to list local branches alone, so a colleague's branch that had never been
+    /// checked out here could be opened from the other tab and not started from on this one. A
+    /// base is resolved remote first now, see `WorkspaceManager.startPoint`, so a name that exists
+    /// only on `origin` is as good a base as any. One row per name, sorted the way
+    /// `WorkspaceCheckoutPlan.offeredBranches` sorts the other tab.
+    public static func baseBranchOptions(
+        local: [String], remote: [String], defaultBranch: String
+    ) -> [String] {
+        let names = Set(local + remote).filter { !$0.isEmpty }
+        return branchOptions(
+            branches: names.sorted { $0.localizedStandardCompare($1) == .orderedAscending },
+            defaultBranch: defaultBranch
+        )
     }
 
     /// Where the worktree is cut from once the real branch list is in: the current choice if it

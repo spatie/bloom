@@ -214,8 +214,6 @@ public struct WorkspaceManager: Sendable {
         let settings = SettingsLoader.load(repo: repo.path)
         let base = baseBranch ?? repo.defaultBranch
         let repository = try await Git.repositoryContext(in: repo.path, baseBranch: base)
-        let start = await Git.revision(of: base, in: repo.path) == nil
-            ? (repository.baseTrackingRef ?? base) : base
 
         let existingBranches = Set(try await Git.branches(of: repo.path))
         let stem = Git.branchStem(prompt: prompt, prefix: settings.branchPrefix, branch: branch)
@@ -235,7 +233,11 @@ public struct WorkspaceManager: Sendable {
         // name that is not in `existingBranches` by construction. This is the one path where that
         // is known, and it is the path a person is waiting on. See `Git.addWorktree`.
         try await Git.addWorktree(
-            repo: repo.path, path: worktreePath, branch: finalBranch, base: start, branchIsNew: true
+            repo: repo.path,
+            path: worktreePath,
+            branch: finalBranch,
+            base: await Self.startPoint(of: base, in: repo.path),
+            branchIsNew: true
         )
         try await Git.recordBase(repository, for: finalBranch, in: worktreePath)
 
@@ -257,6 +259,28 @@ public struct WorkspaceManager: Sendable {
             origin: origin
         )
         return try await store.upsert(workspace)
+    }
+
+    /// The commit a new branch off `base` starts at.
+    ///
+    /// `<remote>/<base>` as a fetch has just left it, which is what "from main" means to anybody
+    /// starting work, rather than the local `main`, which Bloom never moves and which is weeks
+    /// old on a clone nobody pulls in. `Git.baseRevision` is the order of fallbacks and
+    /// `BaseBranchFetches` is why this rarely waits: the create window started the fetch already.
+    ///
+    /// The workspace row still records `base` by name. Only the starting commit changes, and
+    /// `Git.baseline` measures the diff against whichever of the two refs is further along.
+    ///
+    /// A base that is not a branch at all is passed through as it was given. The bridge accepts
+    /// whatever `base_branch` a caller writes, and a tag or a sha is something `git worktree add`
+    /// has always resolved on its own.
+    static func startPoint(of base: String, in repo: String) async -> String {
+        guard Git.isValidBranchName(base),
+              let resolved = try? await Git.baseRevision(
+                branch: base, in: repo, acceptingFetchWithin: BaseBranchFetches.recent
+              )
+        else { return base }
+        return resolved.revision
     }
 
     /// A worktree on a pull request or on a branch that already exists.
