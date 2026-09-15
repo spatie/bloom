@@ -68,7 +68,7 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                                 .id(file.id)
                             }
                         }
-                        .reviewProbeDocument()
+                        .coordinateSpace(.named(ReviewDocument.space))
                         .background {
                             ReviewNavigationInput(armed: pendingDestination != nil) {
                                 trace("input released \(pendingDestination ?? "nothing")")
@@ -77,6 +77,7 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                         }
                     }
                     .defaultScrollAnchor(.topLeading)
+                    .publishesReviewVisibleRect()
                     .onScrollPhaseChange { _, phase in
                         if phase == .tracking || phase == .interacting || phase == .decelerating {
                             if let pendingDestination { trace("scroll phase \(phase) released \(pendingDestination)") }

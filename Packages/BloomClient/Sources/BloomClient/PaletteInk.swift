@@ -48,6 +48,8 @@ public enum PaletteInk {
     public static let running = Pair(light: 0x006BC2, dark: 0x70B5FF)
     public static let merged = Pair(light: 0x8250DF, dark: 0xAA7BF8)
     public static let mergedFill = Pair(light: 0x8250DF, dark: 0x8250DF)
+    public static let workspaceMessage = Pair(light: 0x4F5BD5, dark: 0x8E9BFF)
+    public static let workspaceMessageFill = Pair(light: 0xE6E8FB, dark: 0x2A3470)
     public static let diffPositive = Pair(light: 0x28CD41, dark: 0x30D158)
     public static let synKeyword = Pair(light: 0x9B2393, dark: 0xD08EE0)
     public static let synType = Pair(light: 0x0B7285, dark: 0x5BC8DB)

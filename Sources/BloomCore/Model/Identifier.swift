@@ -8,6 +8,7 @@ public typealias TerminalTabID = BloomClient.TerminalTabID
 public typealias ReviewCommentID = BloomClient.ReviewCommentID
 public typealias QuickPromptID = BloomClient.QuickPromptID
 public typealias DeliveryID = BloomClient.DeliveryID
+public typealias WorkspaceMessageID = BloomClient.WorkspaceMessageID
 public typealias PermissionGrantID = BloomClient.PermissionGrantID
 public typealias SubagentID = BloomClient.SubagentID
 public typealias UsageMetricID = BloomClient.UsageMetricID

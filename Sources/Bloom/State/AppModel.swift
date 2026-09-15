@@ -401,6 +401,13 @@ final class AppModel {
     private var storeObservationTask: Task<Void, Never>?
     private var sessionObservationTask: Task<Void, Never>?
     private var quotaObservationTask: Task<Void, Never>?
+    private var workspaceMessageObservationTask: Task<Void, Never>?
+
+    /// Moves on every write to `workspace_messages`, so a `workspace_say` bubble in the chat that
+    /// sent it re-reads whether the message is still queued. A counter rather than the rows, because
+    /// each bubble reads its own one row and nothing needs the whole table in memory. See
+    /// `WorkspaceMessageSentRowView`.
+    private(set) var workspaceMessagesRevision = 0
     private var quotaPollTask: Task<Void, Never>?
     /// When the one asker last went out, and whether it is still out. Together they are what
     /// makes it one asker: every route into `askForQuotas` reads both, so a background poll, a
@@ -529,6 +536,7 @@ final class AppModel {
         startBackgroundRefresh()
         startObservingStore()
         startObservingSessions()
+        startObservingWorkspaceMessages()
         startObservingQuotas()
         startPollingQuotas()
         // After the bridge is bound, because it is the bridge that says what the entry should
@@ -628,6 +636,8 @@ final class AppModel {
         sessionObservationTask = nil
         quotaObservationTask?.cancel()
         quotaObservationTask = nil
+        workspaceMessageObservationTask?.cancel()
+        workspaceMessageObservationTask = nil
         quotaPollTask?.cancel()
         quotaPollTask = nil
         identityTask?.cancel()
@@ -885,6 +895,20 @@ final class AppModel {
                 guard let self else { return }
                 await self.refreshAgentTurns()
                 await self.refreshCrew()
+            }
+        }
+    }
+
+    /// Messages between workspaces, on a feed of their own, for the reason the quotas have one:
+    /// nothing else reads the table, and a message arriving must not drag a workspace reload.
+    /// Reads nothing and writes nothing, which is the first rule on `StoreChangeHub`.
+    private func startObservingWorkspaceMessages() {
+        guard let store else { return }
+        workspaceMessageObservationTask?.cancel()
+        workspaceMessageObservationTask = Task { [weak self] in
+            for await _ in store.changes(of: [.workspaceMessages]) {
+                guard let self else { return }
+                self.workspaceMessagesRevision += 1
             }
         }
     }

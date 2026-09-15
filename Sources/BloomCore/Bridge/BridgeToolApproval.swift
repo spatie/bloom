@@ -182,6 +182,12 @@ public enum BridgeToolApproval {
         // question in front of somebody who has just said out loud "show me those", and a hung ask
         // is a hung turn. See `RevealTool`.
         "reveal",
+        // A message to another workspace's agent. It carries the owner's authority, which is the
+        // owner's own decision, and what holds it is not an ask: it arrives queued in a chat he
+        // can see, headed with where it came from, and can be cancelled from either end until it
+        // goes. An ask in front of it would hang a turn that may be running with nobody watching,
+        // for a message that is already in front of a person. See `WorkspaceSayTool`.
+        "workspace_say",
     ]
 
     /// Whether this ask is Bloom answering itself.

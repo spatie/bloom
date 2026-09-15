@@ -1096,6 +1096,42 @@ public actor Store {
                     }
                 }
             },
+
+            // Messages one workspace's agent sent another through `workspace_say`. See
+            // `WorkspaceMessage`.
+            //
+            // Beside `deliveries` rather than a column on it, because the delivery is addressed to
+            // a chat and drained, and this is what the SENDING chat reads to draw its call: queued,
+            // delivered or cancelled. `state` follows the delivery, moved in the same statements
+            // that move it: see `markDelivered`, `cancelDelivery` and `restoreDelivery`.
+            //
+            // No foreign keys, following `deliveries`: a reply finds its chat through this row, and
+            // it should outlive either workspace being archived. The names are copied in for the
+            // same reason, so a bubble still says where a message came from afterwards.
+            sql("""
+            CREATE TABLE IF NOT EXISTS workspace_messages (
+                id TEXT PRIMARY KEY,
+                source_workspace_id TEXT,
+                source_workspace_name TEXT NOT NULL DEFAULT '',
+                source_project_name TEXT NOT NULL DEFAULT '',
+                source_session_id TEXT,
+                source_chat TEXT NOT NULL DEFAULT '',
+                target_workspace_id TEXT,
+                target_workspace_name TEXT NOT NULL DEFAULT '',
+                target_project_name TEXT NOT NULL DEFAULT '',
+                target_session_id TEXT,
+                target_chat TEXT NOT NULL DEFAULT '',
+                reply_session_id TEXT,
+                body TEXT NOT NULL,
+                delivery_id TEXT,
+                state TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                delivered_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS workspace_messages_delivery ON workspace_messages(delivery_id);
+            CREATE INDEX IF NOT EXISTS workspace_messages_route
+                ON workspace_messages(source_workspace_id, target_workspace_id, state);
+            """),
         ]
 
         let current = Int(try db.readUserVersion())
@@ -2859,7 +2895,15 @@ public actor Store {
             try db.run("UPDATE deliveries SET delivery_state = 'accepted', delivered_at = ?, provider_turn_id = ? WHERE id = ? AND delivery_state = 'uncertain'", [
                 .double(Date().timeIntervalSince1970), providerTurnID.map { .text($0) } ?? .null, .text(id),
             ])
-            if db.changedRowCount == 1, let accepted = try delivery(id: id) { try acceptPlanSource(delivery: accepted) }
+            if db.changedRowCount == 1, let accepted = try delivery(id: id) {
+                try acceptPlanSource(delivery: accepted)
+                // The agent has it, so the bubble in the sending chat stops saying "queued". See
+                // `markDelivered`, the other door a delivery goes out through.
+                try db.run(
+                    "UPDATE workspace_messages SET state = 'delivered', delivered_at = ? WHERE delivery_id = ? AND state = 'queued'",
+                    [.double(accepted.deliveredAt?.timeIntervalSince1970 ?? Date().timeIntervalSince1970), .text(id)]
+                )
+            }
         }
     }
 
@@ -2892,7 +2936,16 @@ public actor Store {
             "UPDATE deliveries SET delivered_at = ?, delivered_seq = ?, delivery_state = 'accepted' WHERE id = ? AND delivery_state = 'pending'",
             [.double(date.timeIntervalSince1970), seq.map { .int(Int64($0)) } ?? .null, .text(id)]
         )
-        return db.changedRowCount == 1
+        let marked = db.changedRowCount == 1
+        // A message from another workspace follows its delivery, here rather than in the drain, so
+        // the bubble in the sending chat cannot say "queued" about a turn that is already running.
+        if marked {
+            try db.run(
+                "UPDATE workspace_messages SET state = 'delivered', delivered_at = ? WHERE delivery_id = ? AND state = 'queued'",
+                [.double(date.timeIntervalSince1970), .text(id)]
+            )
+        }
+        return marked
     }
 
     /// Takes one back out of the queue, because whoever asked for it changed their mind.
@@ -2912,7 +2965,15 @@ public actor Store {
     @discardableResult
     public func cancelDelivery(id: DeliveryID) throws -> Bool {
         try db.run("DELETE FROM deliveries WHERE id = ? AND delivery_state IN ('pending', 'uncertain')", [.text(id)])
-        return db.changedRowCount == 1
+        let removed = db.changedRowCount == 1
+        // Whichever end cancelled it, the other end's bubble has to say so. See `markDelivered`.
+        if removed {
+            try db.run(
+                "UPDATE workspace_messages SET state = 'cancelled' WHERE delivery_id = ? AND state = 'queued'",
+                [.text(id)]
+            )
+        }
+        return removed
     }
 
     /// Puts one back in the queue after a send that never started a turn.
@@ -2926,6 +2987,101 @@ public actor Store {
             "UPDATE deliveries SET delivered_at = NULL, delivery_state = 'pending', provider_turn_id = NULL WHERE id = ?",
             [.text(id)]
         )
+        try db.run(
+            "UPDATE workspace_messages SET state = 'queued', delivered_at = NULL WHERE delivery_id = ? AND state = 'delivered'",
+            [.text(id)]
+        )
+    }
+
+    // MARK: - Workspace messages
+
+    /// Puts a message from another workspace in a chat's queue, and records it, in one transaction.
+    ///
+    /// One transaction because the two rows describe one thing from two ends: the delivery is what
+    /// the receiving chat drains, and this row is what the sending chat draws. A delivery with no
+    /// row would be a message its sender could never see the fate of; a row with no delivery would
+    /// be a bubble saying "queued" for ever.
+    @discardableResult
+    public func enqueueWorkspaceMessage(
+        _ message: WorkspaceMessage, into chat: Session
+    ) throws -> WorkspaceMessage {
+        try db.transaction {
+            let delivery = try enqueueDelivery(Delivery(
+                targetSessionID: chat.id,
+                sourceWorkspaceID: message.source.workspaceID,
+                kind: .message,
+                crew: message.crewMessage,
+                createdAt: message.createdAt
+            ))
+            try db.run(
+                """
+                INSERT INTO workspace_messages
+                    (id, source_workspace_id, source_workspace_name, source_project_name,
+                     source_session_id, source_chat, target_workspace_id, target_workspace_name,
+                     target_project_name, target_session_id, target_chat, reply_session_id, body,
+                     delivery_id, state, created_at, delivered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, NULL)
+                """,
+                [
+                    .text(message.id),
+                    message.source.workspaceID.map { .text($0) } ?? .null,
+                    .text(message.source.workspace),
+                    .text(message.source.project),
+                    message.source.sessionID.map { .text($0) } ?? .null,
+                    .text(message.source.chat),
+                    message.target.workspaceID.map { .text($0) } ?? .null,
+                    .text(message.target.workspace),
+                    .text(message.target.project),
+                    .text(chat.id),
+                    .text(chat.title),
+                    message.replySessionID.map { .text($0) } ?? .null,
+                    .text(message.text),
+                    .text(delivery.id),
+                    .double(message.createdAt.timeIntervalSince1970),
+                ]
+            )
+            return try workspaceMessage(id: message.id) ?? message
+        }
+    }
+
+    public func workspaceMessage(id: WorkspaceMessageID) throws -> WorkspaceMessage? {
+        try db.query("SELECT * FROM workspace_messages WHERE id = ?", [.text(id)])
+            .first.map(Self.workspaceMessage(from:))
+    }
+
+    public func workspaceMessage(deliveryID: DeliveryID) throws -> WorkspaceMessage? {
+        try db.query("SELECT * FROM workspace_messages WHERE delivery_id = ?", [.text(deliveryID)])
+            .first.map(Self.workspaceMessage(from:))
+    }
+
+    /// The last message from one workspace to another that was not taken back.
+    ///
+    /// The reply path turns on this. Its source chat is the chat an answer should land in, and its
+    /// existence is what lets a workspace an agent started answer a workspace that wrote to it.
+    public func latestWorkspaceMessage(
+        from source: WorkspaceID, to target: WorkspaceID
+    ) throws -> WorkspaceMessage? {
+        try db.query(
+            """
+            SELECT * FROM workspace_messages
+            WHERE source_workspace_id = ? AND target_workspace_id = ? AND state != 'cancelled'
+            ORDER BY created_at DESC, rowid DESC LIMIT 1
+            """,
+            [.text(source), .text(target)]
+        ).first.map(Self.workspaceMessage(from:))
+    }
+
+    /// Takes a queued message back out, from the chat that sent it. Nil when it had already gone.
+    ///
+    /// Through `cancelDelivery`, which is the same way out the receiving chat's Delete takes, so
+    /// both ends lose the same race with the drain the same way.
+    @discardableResult
+    public func cancelWorkspaceMessage(id: WorkspaceMessageID) throws -> WorkspaceMessage? {
+        guard let message = try workspaceMessage(id: id), message.state == .queued,
+              let deliveryID = message.deliveryID,
+              try cancelDelivery(id: deliveryID)
+        else { return nil }
+        return try workspaceMessage(id: id)
     }
 
     // MARK: - Review comments
@@ -3607,6 +3763,33 @@ public actor Store {
             state: Delivery.State(rawValue: row.string("delivery_state") ?? ""),
             interactionMode: row.string("interaction_mode").flatMap(InteractionMode.init(rawValue:)),
             providerTurnID: row.string("provider_turn_id")
+        )
+    }
+
+    private static func workspaceMessage(from row: Row) -> WorkspaceMessage {
+        WorkspaceMessage(
+            stored: WorkspaceMessageID(row.string("id") ?? newID()),
+            source: WorkspaceMessageEnd(
+                workspaceID: row.string("source_workspace_id").map(WorkspaceID.init),
+                workspace: row.string("source_workspace_name") ?? "",
+                project: row.string("source_project_name") ?? "",
+                sessionID: row.string("source_session_id").map(SessionID.init),
+                chat: row.string("source_chat") ?? ""
+            ),
+            target: WorkspaceMessageEnd(
+                workspaceID: row.string("target_workspace_id").map(WorkspaceID.init),
+                workspace: row.string("target_workspace_name") ?? "",
+                project: row.string("target_project_name") ?? "",
+                sessionID: row.string("target_session_id").map(SessionID.init),
+                chat: row.string("target_chat") ?? ""
+            ),
+            replySessionID: row.string("reply_session_id").map(SessionID.init),
+            text: row.string("body") ?? "",
+            deliveryID: row.string("delivery_id").map(DeliveryID.init),
+            // A word this build does not know is read as cancelled, which offers nothing to press.
+            state: WorkspaceMessage.State(rawValue: row.string("state") ?? "") ?? .cancelled,
+            createdAt: row.date("created_at") ?? Date(),
+            deliveredAt: row.date("delivered_at")
         )
     }
 

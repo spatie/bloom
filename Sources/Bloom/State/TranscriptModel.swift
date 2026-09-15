@@ -1023,6 +1023,12 @@ final class TranscriptModel {
             return
         }
 
+        // A message from another workspace: the chat that sent it is waiting on an answer, and
+        // has to be told there will not be one.
+        if delivery.crewMessage?.event == .relayed {
+            await app.noteDeliveryCancelled(delivery.id)
+        }
+
         if case .toComposer(let text) = recovery {
             draft = text
             await saveDraft()

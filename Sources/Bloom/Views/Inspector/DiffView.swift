@@ -816,8 +816,8 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                     ForEach(prepared.rows) { row in
                         let tracksRow = isDiffDestination(row) && navigationTarget
                         Group {
-                            if let heights = prepared.heights[row.id], let embeddedViewportHeight {
-                                ReviewDiffBlock(height: heights.reduce(0, +), viewportHeight: embeddedViewportHeight,
+                            if let heights = prepared.heights[row.id], embeddedViewportHeight != nil {
+                                ReviewDiffBlock(height: heights.reduce(0, +),
                                                 probeName: "\(file.id) block \(row.id.prefix(24))") {
                                     rowView(row, document: prepared.document, width: prepared.width, wrappedHeights: heights)
                                 }

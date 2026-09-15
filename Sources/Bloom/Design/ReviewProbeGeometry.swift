@@ -21,26 +21,13 @@ extension View {
         self
         #endif
     }
-
-    /// Names the review's stack, so a recorded frame is in document coordinates.
-    @ViewBuilder
-    func reviewProbeDocument() -> some View {
-        #if DEBUG
-        if ReviewRunProbe.isRecording {
-            coordinateSpace(.named(ReviewProbeGeometry.document))
-        } else {
-            self
-        }
-        #else
-        self
-        #endif
-    }
 }
 
 #if DEBUG
 struct ReviewProbeGeometry: ViewModifier {
     /// Read from the geometry transform, which is a Sendable closure, so it cannot be actor isolated.
-    nonisolated static let document = "review-probe-document"
+    /// The review's own document space, so the probe records the frames the blocks decide from.
+    nonisolated static var document: String { ReviewDocument.space }
 
     struct Record {
         var documentFrame: CGRect?

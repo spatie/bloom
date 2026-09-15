@@ -133,7 +133,11 @@ struct TranscriptRowView: View, Equatable {
             // and is a sentence rather than a turn's worth of blocks, so there is nothing here for
             // that cache to save.
             if let message = CrewMessage.decode(row.payload), !message.text.isEmpty {
-                CrewMessageRowView(message: message)
+                if message.event == .relayed {
+                    WorkspaceMessageRowView(message: message)
+                } else {
+                    CrewMessageRowView(message: message)
+                }
             }
 
         case .assistantText:
@@ -148,7 +152,9 @@ struct TranscriptRowView: View, Equatable {
 
         case .toolUse:
             if let use = toolUse {
-                if let media = successfulMediaRequest(use) {
+                if let sent = sentWorkspaceMessage(use) {
+                    WorkspaceMessageSentRowView(record: sent)
+                } else if let media = successfulMediaRequest(use) {
                     MediaShowRowView(request: media, home: home)
                 } else if let image = successfulCodexImageRequest(use) {
                     MediaShowRowView(
@@ -273,6 +279,19 @@ struct TranscriptRowView: View, Equatable {
     private func successfulMediaRequest(_ use: AgentToolUse) -> MediaShowRequest? {
         guard row.resultPayload != nil, !row.isError, row.refusal == nil else { return nil }
         return MediaShowRequest(use: use)
+    }
+
+    /// A `workspace_say` call that sent something, drawn as the message it sent.
+    ///
+    /// The name is checked before the result is decoded, so every other tool row pays one string
+    /// comparison. Read from the result payload directly rather than through `toolResult`, which is
+    /// only decoded for an open row, because this row is the message and is never folded.
+    private func sentWorkspaceMessage(_ use: AgentToolUse) -> WorkspaceSayRecord? {
+        guard WorkspaceSayRecord.isWorkspaceSay(use.name),
+              let payload = row.resultPayload, !row.isError, row.refusal == nil,
+              case .toolResult(let result)? = TranscriptEventCache.event(rowID: row.id, payload: payload)
+        else { return nil }
+        return WorkspaceSayRecord(toolName: use.name, input: use.input, resultText: result.text)
     }
 
     /// Codex's native image viewer is also deliberate visible content. Its absolute paths often

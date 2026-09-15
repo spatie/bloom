@@ -77,12 +77,21 @@ public enum BridgeUntrustedText {
     ///
     /// Compared on the trimmed line, because HTML rendering produces leading whitespace by the
     /// yard and a plain equality check would let a marker in behind two spaces. A line that would
-    /// read as either marker is quoted with a `>` instead, which keeps the words the page wrote
+    /// read as any marker is quoted with a `>` instead, which keeps the words the page wrote
+    /// The fence around a message from another workspace. See `WorkspaceMessage`.
+    ///
+    /// Here rather than beside that type, because the escaping below has to know it: a web page
+    /// holding this line would otherwise read, to a model, as a message carrying the owner's
+    /// authority. Every text that goes through either envelope has all four markers quoted.
+    public static let workspaceMessageOpening = "----- BEGIN MESSAGE FROM ANOTHER WORKSPACE -----"
+    public static let workspaceMessageClosing = "----- END MESSAGE FROM ANOTHER WORKSPACE -----"
+
+    static let markers: Set<String> = [opening, closing, workspaceMessageOpening, workspaceMessageClosing]
     /// where a reader can see them while making the line something no parser reads as the fence.
     public static func escaping(_ text: String) -> String {
         text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed == opening || trimmed == closing else { return String(line) }
+            guard markers.contains(trimmed) else { return String(line) }
             return "> " + line
         }
         .joined(separator: "\n")
