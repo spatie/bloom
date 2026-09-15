@@ -4,7 +4,10 @@ Publish a release on GitHub and `.github/workflows/release.yml` does the rest:
 it builds the tag, signs it with the Developer ID certificate, has Apple
 notarise it, staples the ticket, wraps the same bundle in the beach disk image
 and has that notarised and stapled too, uploads both files to the UpCloud
-bucket, and adds the release to the Sparkle appcast that lives beside it.
+bucket, and adds the release to the Sparkle appcast that lives beside it. It also
+builds the Linux server, bundles it into the app, and attaches it to the GitHub
+release, where every server's maintenance supervisor finds its next update; see
+[Bloom Server](#bloom-server).
 
 ## Two artefacts, and who each one is for
 
@@ -66,7 +69,8 @@ through one piece of code on purpose.
 3. Publish. Tick "set as a pre-release" for anything you do not want everyone
    offered.
 4. After the release workflow succeeds, [publish the website release notes](#publish-the-website-release-notes)
-   and verify the release assets, appcast, changelog and website download flow.
+   and verify the release assets, the [server assets](#checking-a-releases-server-assets), appcast,
+   changelog and website download flow.
 
 A prerelease is anything whose tag has a semver prerelease part, or anything
 you ticked the box on. Either one puts the item on Sparkle's `beta` channel,
@@ -84,7 +88,8 @@ A manual workflow dispatch can rebuild an existing tag, but it does not receive 
 prerelease flag and does not attach assets to the GitHub release. Only use it when the tag itself
 preserves the intended channel: a stable version or a semver prerelease suffix. Dispatching a
 plain tag that was marked prerelease on GitHub would incorrectly publish it as stable in the
-appcast. Verify GitHub assets separately after a dispatch.
+appcast. Verify GitHub assets separately after a dispatch, and attach the server assets from that
+run as described under [When the server asset is broken](#when-the-server-asset-is-broken).
 
 ## Publish the website release notes
 
@@ -118,6 +123,126 @@ as outstanding. Do not mark the release complete.
 The current procedure is implemented by the website's `SyncReleasesCommand`,
 `DraftReleaseSummary`, `ReleaseForm` and `Release` model. Check those files when the admin labels
 or automation differ, rather than guessing a production command or connection.
+
+## Bloom Server
+
+The same release publishes the Linux server. There is no separate server tag and no separate
+server version: the tag is both. Three files are attached to the GitHub release beside the zip and
+the disk image, and nothing server related goes to the bucket, because the only thing that
+downloads it reads GitHub.
+
+| Asset | Who reads it |
+| --- | --- |
+| `bloom-server-linux-x86_64.tar.gz` | The maintenance supervisor on every server, which updates to it. The Mac app bundles the same bytes for the setup assistant. |
+| `bloom-server-linux-x86_64.tar.gz.sha256` | People, and `install-bloom-server.py --sha256`. The format `sha256sum -c` reads. |
+| `bloom-server-linux-x86_64.json` | People and scripts: `tag`, `version`, `protocolVersion`, `maintenanceProtocolVersion`, `architecture`, `glibc`, `sha256` and `size`. |
+
+The supervisor reads neither sidecar. It trusts the SHA-256 digest GitHub computes for the uploaded
+tarball, and reads the version and protocol from the `manifest.json` inside it. The sidecars are
+there so a release can be checked by a person without the API.
+
+### How it is built
+
+The `server-package` job runs in `swift:6.3.3-noble`, which is Ubuntu 24.04: the package keeps the
+host's glibc, so the oldest supported Ubuntu sets the minimum, and `Tools/package-linux-server.py`
+refuses any other build environment. It builds `bloom-server` and `bloom-bridge` in release
+configuration with `-warnings-as-errors`, and packages with the tag in `BLOOM_SERVER_VERSION`, which
+is written into `manifest.json`.
+
+`Tools/server-release-assets.py describe` then puts the tarball through the supervisor's own
+extraction and manifest checks, imported from `Tools/bloom-maintenance.py` rather than restated,
+with the tag as the expected version and the wire protocol from `RemoteCommand.swift`. Only then
+does it write the two sidecars. A package this accepts is one every current supervisor would accept.
+
+The macOS job needs that one, so a server that fails to build or package stops the release before
+anything is signed. It checks the artefact's checksum, builds the app with the tarball embedded,
+and compares the embedded copy with `cmp`. After the appcast is written, the release event attaches
+all three files and `Tools/server-release-assets.py verify` reads the release back from the API and
+confirms GitHub's digest and size are those of the file the app bundled. The upload is after the
+appcast so a server is never offered a version whose app did not ship.
+
+The Server workflow runs the same packaging and `describe` on every pull request, on its debug
+build and with a `v0.0.0-ci.<run>` tag, then checks and runs that package on Ubuntu 24.04 and 26.04
+without Swift installed. `Tools/test-server-release-assets.py` covers the checks themselves.
+
+### How compatibility is decided
+
+The supervisor looks at `releases/latest` for `spatie/bloom`, which GitHub defines as the release
+marked latest, never a draft or a prerelease. It offers that release when it carries exactly one
+`bloom-server-linux-x86_64.tar.gz` with a digest and its tag is newer than the installed version.
+It never offers a downgrade. **Prereleases are never offered to servers**; there is no server beta
+channel.
+
+After downloading by asset ID it requires GitHub's digest, plain files and directories under
+`bloom-server-linux-x86_64/`, and a manifest naming the reviewed version, `x86_64`, maintenance
+protocol 1 and the wire protocol the supervisor was installed for. Any mismatch fails the job before
+the running release is touched. It then snapshots the database, starts the new release as a trial,
+and restores the previous release and database if startup verification fails, which the job reports
+as `rolledBack`.
+
+Compatibility is by protocol version, and today the accepted range is one version. The app, the
+gateway, the server and the supervisor all enforce 14, and the administrator installer writes
+`protocol_version=14` into the supervisor's configuration. So a release that raises
+`BloomWire.version` is refused with `incompatible_release` by every supervisor installed for the old
+protocol, and those servers move through **Update Server…** in the new app, which reinstalls the
+supervisor as well. Raising the protocol means changing `Tools/bloom_maintenance_install.py` in the
+same commit, and saying in the release notes that servers need the administrator update.
+
+`latest` is a flag on GitHub rather than the highest tag. A patch to an older line published with
+"Set as the latest release" would point every server at it, and servers already newer would see no
+update. Publish those with `--latest=false`.
+
+### Checking a release's server assets
+
+The workflow's verify step is the check. To repeat it, or after a dispatch:
+
+```sh
+tag=v1.4.0
+dir="$(mktemp -d)"
+gh release view "$tag" --repo spatie/bloom --json assets --jq '.assets[] | [.name, .size, .digest] | @tsv'
+gh api repos/spatie/bloom/releases/latest --jq .tag_name
+gh release download "$tag" --repo spatie/bloom --pattern 'bloom-server-linux-x86_64*' --dir "$dir"
+(cd "$dir" && shasum -a 256 -c bloom-server-linux-x86_64.tar.gz.sha256)
+gh api "repos/spatie/bloom/releases/tags/$tag" > "$dir/release.json"
+python3 Tools/server-release-assets.py verify "$dir/bloom-server-linux-x86_64.tar.gz" --release "$dir/release.json"
+```
+
+For a stable release `releases/latest` has to print the new tag, or no server is offered it. The
+`sha256` in `Bloom.app/Contents/Resources/ServerSetup/package.json` inside the published zip is the
+same digest.
+
+### How the in-app updater picks it up
+
+Server Settings > Updates asks the server's supervisor, which asks GitHub. It caches the answer for
+up to fifteen minutes, so a server may take that long to show the new version; reviewing an update
+always looks again, and the plan it returns pins the asset ID and digest it will install. A plan
+reviewed before an asset was replaced fails with `checksum_mismatch` rather than installing the
+replacement. [docs/SERVER.md](docs/SERVER.md#server-updates) describes the flow a person sees.
+
+### When the server asset is broken
+
+- **Packaging failed.** The macOS job never started, so nothing was signed or published. A runner
+  failure is a `gh run rerun <run-id>`. A real build failure is fixed on `main` and released as the
+  next patch version; a published tag is not moved.
+- **The app shipped but attaching or verifying failed.** Attach the artefact from that same run,
+  kept for thirty days for this, so the digest still matches the copy in the app:
+  `gh run download <run-id> --name bundled-linux-server --dir <dir>`, then
+  `gh release upload <tag> <dir>/bloom-server-linux-x86_64* --clobber`, then the check above. This
+  is also how a `workflow_dispatch` rebuild gets its server assets, since dispatch attaches nothing.
+- **Servers are rolling back from it.** Each server has already restored itself. Stop the offer
+  with `gh release delete-asset <tag> bloom-server-linux-x86_64.tar.gz --repo spatie/bloom --yes`,
+  and supervisors report that the release has no server package. Do not upload different bytes
+  under the same tag: the app of that version bundles the original. Ship the fix as a patch release.
+- **A server updated and needs the previous version.** The supervisor does not downgrade. Use
+  **Update Server…** from a Mac app that bundles the wanted version.
+
+### Why it stays in this repository
+
+The wire protocol, BloomCore and the tests that pin both are shared by the Mac app, the server and
+the iOS clients. In a repository of its own, every protocol change would be a coordinated release
+of two repositories with a window where the published halves disagree. Publishing the server on its
+own schedule never needed a second repository: it needs its own assets, which a release here
+already has.
 
 ## Releasing from this machine
 

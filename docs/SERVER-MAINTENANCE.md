@@ -107,6 +107,21 @@ only while that value is true and the phase is active. The supervisor checks aga
 request arrives. Closing a view, cancelling a status read or locking local maintenance access
 must not cancel a server job.
 
+## Server releases
+
+For the `server` component, the available version is the latest stable GitHub release of
+`spatie/bloom` carrying `bloom-server-linux-x86_64.tar.gz`, when its tag is newer than the installed
+version. Every Bloom release attaches one; [RELEASING.md](../RELEASING.md#bloom-server) describes how
+it is built and verified. When nothing is offered, `detail` carries the supervisor's reason, such as
+a release without a server package or an unreachable GitHub; show it rather than "up to date".
+
+A `prepare` looks at GitHub again and pins the asset ID and SHA-256 digest into the plan. The job
+downloads exactly that asset and fails with `checksum_mismatch`, `incompatible_release` or
+`release_version_mismatch`, before the running release is touched, when the bytes, the manifest's
+protocol or its version disagree with the plan. A package with another wire protocol version is
+refused this way, so a protocol change reaches such a server through the administrator installer
+instead. Startup verification failures after installation end in `rolledBack`.
+
 ## Shared Apple client
 
 `ServerMaintenanceSession` in BloomClient owns authentication state, plan review, mutation
