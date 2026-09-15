@@ -82,41 +82,19 @@ struct GitHubSignInSheet: View {
         }
     }
 
+    /// The panel's default 280 points, inside a 660 point sheet, is wide enough that gh's questions
+    /// do not wrap mid word and that the one-time code and the device URL are both readable on one
+    /// line, which matters because the code is the one thing the user has to copy by eye. Roughly
+    /// ninety columns at the default terminal size, and eighteen rows.
     private func terminal(_ session: LoginTerminalSession) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: InspectorLayout.gap) {
-                Text("Running \(session.label)")
-                    .font(Typo.codeSmall)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-
-                Button("Stop", systemImage: "xmark") { stop() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .foregroundStyle(Palette.textTertiary)
-                    .help("Stop and close")
-            }
-            .padding(.horizontal, InspectorLayout.inset)
-            .frame(height: InspectorLayout.barHeight)
-            .background(Palette.surfaceSunken)
-
-            Hairline()
-
-            // Wide enough that gh's questions do not wrap mid word and that the one-time code and
-            // the device URL are both readable on one line, which matters because the code is the
-            // one thing the user has to copy by eye. Roughly ninety columns at the default
-            // terminal size, and eighteen rows.
-            LoginTerminal(session: session)
-                .frame(height: 280)
+        LoginTerminalPanel(session: session, title: "Running \(session.label)") {
+            Button("Stop", systemImage: "xmark") { stop() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .foregroundStyle(Palette.textTertiary)
+                .help("Stop and close")
         }
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
-        .overlay(
-            RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
-        )
     }
 
     @ViewBuilder

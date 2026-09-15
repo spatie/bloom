@@ -4,7 +4,7 @@ import BloomCore
 /// Shared by first setup and existing-server settings. Sign-ins run as the server account.
 struct ServerSetupAccountsView: View {
     @Bindable var model: ServerSetupModel
-    @State private var login: LoginTerminalSession?
+    @State private var login: ServerSignInSession?
     @State private var loginProblem: String?
     @State private var credentialImport: ServerCredentialImportModel?
 
@@ -18,7 +18,7 @@ struct ServerSetupAccountsView: View {
             }
         }
         .sheet(isPresented: Binding(get: { login != nil }, set: { if !$0 { closeLogin() } })) {
-            if let login { ServerSetupLoginView(session: login, close: closeLogin) }
+            if let login { ServerSignInSheet(session: login, close: closeLogin) }
         }
         .sheet(isPresented: Binding(get: { credentialImport != nil }, set: { if !$0 { closeImport() } })) {
             if let credentialImport { ServerCredentialImportView(model: credentialImport, close: closeImport) }
@@ -92,9 +92,7 @@ struct ServerSetupAccountsView: View {
     }
 
     private func isAuthenticated(_ account: ServerSetupAccount) -> Bool {
-        if account == .github { return model.githubIsAuthenticated }
-        let agent: AgentKind = account == .codex ? .codex : .claudeCode
-        return model.agentAuthentication.contains { $0.agent == agent && $0.state == .ready }
+        model.isAuthenticated(account)
     }
 
     private var githubDetail: String {
@@ -128,7 +126,9 @@ struct ServerSetupAccountsView: View {
                     return
                 }
                 loginProblem = nil
-                login = LoginTerminalSession(launch: launch, label: "\(title) on \(model.host)") { _ in }
+                let session = ServerSignInSession(account: account, host: model.host, launch: launch, setup: model)
+                session.start()
+                login = session
             }
             .disabled(model.isBusy)
             .fixedSize()
@@ -205,8 +205,10 @@ struct ServerSetupAccountsView: View {
     }
 
     private func closeLogin() {
+        // A sheet that saw its sign-in succeed has just refreshed the accounts to find that out.
+        let alreadyChecked = login?.verdict == .signedIn
         login?.stop()
         login = nil
-        Task { await model.refreshAccounts() }
+        if !alreadyChecked { Task { await model.refreshAccounts() } }
     }
 }

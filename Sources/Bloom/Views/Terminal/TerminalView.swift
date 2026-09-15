@@ -128,6 +128,16 @@ final class BloomTerminalView: LocalProcessTerminalView {
     /// SwiftTerm's view consumes the right mouse event before SwiftUI sees it.
     var onContextMenu: (@MainActor () -> NSMenu?)?
 
+    /// Called after output from the child has been drawn. Only a server sign-in sets it, because
+    /// that is the one terminal whose link has to be read off the screen and opened on this Mac;
+    /// see `RemoteSignInReading` for why every other terminal is left unread.
+    var onOutput: (@MainActor () -> Void)?
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        super.dataReceived(slice: slice)
+        onOutput?()
+    }
+
     private let processObserver = TerminalProcessObserver()
 
     private var terminalScheme: TerminalScheme = .bloom

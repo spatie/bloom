@@ -126,17 +126,19 @@ enum ServerSetupProbe {
                     scroll.reflectScrolledClipView(scroll.contentView)
                 }
                 if configuration.githubSignIn == true, let launch = model.accountTerminal(.github) {
-                    let login = LoginTerminalSession(launch: launch, label: "GitHub on the new server") { _ in }
+                    let signIn = ServerSignInSession(account: .github, host: "the new server", launch: launch, setup: model)
+                    signIn.start()
+                    guard let login = signIn.terminal else { throw ServerFailure("The GitHub sign-in did not start.") }
                     let loginWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 540), styleMask: [.titled], backing: .buffered, defer: false)
                     loginWindow.isReleasedWhenClosed = false
                     loginWindow.title = "Bloom GitHub sign-in verification"
                     loginWindow.appearance = NSAppearance(named: .aqua)
-                    loginWindow.contentView = NSHostingView(rootView: ServerSetupLoginView(session: login, close: {}).environment(\.colorScheme, .light).background(Palette.windowBackground))
+                    loginWindow.contentView = NSHostingView(rootView: ServerSignInSheet(session: signIn, close: {}).environment(\.colorScheme, .light).background(Palette.windowBackground))
                     loginWindow.orderBack(nil)
                     login.start()
-                    try await Task.sleep(for: .seconds(2))
-                    login.terminal.send(txt: "\r")
-                    try await Task.sleep(for: .seconds(2))
+                    // The session answers gh's Git question itself, so only the Return that starts
+                    // gh polling is sent here, which is what Open GitHub does in the sheet.
+                    try await Task.sleep(for: .seconds(4))
                     login.terminal.send(txt: "\r")
                     try await Task.sleep(for: .seconds(3))
                     try await capture("github-device-sign-in", targetWindow: loginWindow)

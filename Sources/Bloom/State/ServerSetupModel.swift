@@ -88,6 +88,14 @@ final class ServerSetupModel {
 
     var canInstallOptionalTools: Bool { connection != nil && installed?.serviceHome != nil && !isBusy }
     var githubIsAuthenticated: Bool { accountChecks.contains { $0.id == .github && $0.status == .ready } }
+
+    /// What the last account check said. A sign-in sheet reads it after its command exits, because
+    /// a clean exit is not proof: a login backed out of exits zero as well.
+    func isAuthenticated(_ account: ServerSetupAccount) -> Bool {
+        if account == .github { return githubIsAuthenticated }
+        let agent: AgentKind = account == .codex ? .codex : .claudeCode
+        return agentAuthentication.contains { $0.agent == agent && $0.state == .ready }
+    }
     var canConnect: Bool { installed != nil && accountClient != nil && !isBusy && !server.isConnecting && !server.isSigningIn && !server.isPerformingCommand }
     private var support: URL { supportDirectory ?? Store.defaultDirectory.appendingPathComponent("server-setup", isDirectory: true) }
     private var knownHosts: URL { support.appendingPathComponent("known_hosts") }
@@ -559,13 +567,7 @@ final class ServerSetupModel {
 
     func accountTerminal(_ account: ServerSetupAccount) -> TerminalLaunch? {
         guard let connection = accountConnection else { return nil }
-        let command: String
-        switch account {
-        case .github: command = "GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web && gh auth setup-git"
-        case .codex: command = "export PATH=\"$HOME/.local/bin:$PATH\"; if ! command -v codex >/dev/null; then npm install --global --prefix \"$HOME/.local\" @openai/codex || exit; fi; codex login --device-auth"
-        case .claude: command = "export PATH=\"$HOME/.local/bin:$PATH\"; if ! command -v claude >/dev/null; then npm install --global --prefix \"$HOME/.local\" @anthropic-ai/claude-code || exit; fi; claude auth login"
-        }
-        guard var arguments = try? connection.arguments(command: command) else { return nil }
+        guard var arguments = try? connection.arguments(command: account.shellCommand) else { return nil }
         if let index = arguments.firstIndex(of: "-T") { arguments[index] = "-tt" }
         return TerminalLaunch(executable: "/usr/bin/ssh", execName: "ssh", arguments: arguments,
                               environment: Shell.environment().map { "\($0.key)=\($0.value)" }.sorted(), directory: NSTemporaryDirectory())
@@ -746,4 +748,4 @@ final class ServerSetupModel {
     }
 }
 
-enum ServerSetupAccount { case github, codex, claude }
+typealias ServerSetupAccount = RemoteSignInAccount

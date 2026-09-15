@@ -76,6 +76,64 @@ final class LoginTerminalSession {
     }
 }
 
+/// The framed terminal every sign-in sheet shows: what is running along the top, the live terminal
+/// under it. One view, so this Mac's sign-ins and a server's look like the same feature rather
+/// than three copies of the same frame drifting apart.
+struct LoginTerminalPanel<Accessory: View>: View {
+    let session: LoginTerminalSession
+    let title: String?
+    let height: CGFloat
+    let accessory: () -> Accessory
+
+    init(
+        session: LoginTerminalSession,
+        title: String? = nil,
+        height: CGFloat = 280,
+        @ViewBuilder accessory: @escaping () -> Accessory
+    ) {
+        self.session = session
+        self.title = title
+        self.height = height
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: InspectorLayout.gap) {
+                Text(title ?? session.label)
+                    .font(Typo.codeSmall)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(title ?? session.label)
+
+                Spacer(minLength: 0)
+
+                accessory()
+            }
+            .padding(.horizontal, InspectorLayout.inset)
+            .frame(height: InspectorLayout.barHeight)
+            .background(Palette.surfaceSunken)
+
+            Hairline()
+
+            LoginTerminal(session: session)
+                .frame(height: height)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
+        .overlay(
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
+        )
+    }
+}
+
+extension LoginTerminalPanel where Accessory == EmptyView {
+    init(session: LoginTerminalSession, title: String? = nil, height: CGFloat = 280) {
+        self.init(session: session, title: title, height: height) { EmptyView() }
+    }
+}
+
 /// The SwiftUI face of a login terminal. It owns nothing: the live view comes from the session.
 struct LoginTerminal: NSViewRepresentable {
     let session: LoginTerminalSession

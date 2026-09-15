@@ -337,30 +337,3 @@ struct ServerSetupView: View {
     }
 
 }
-
-struct ServerSetupLoginView: View {
-    let session: LoginTerminalSession
-    let close: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.gutter) {
-            Text(session.label).font(Typo.heading)
-            Text("Follow the prompts below. Open any sign-in link in your browser and return here when finished.")
-                .foregroundStyle(.secondary)
-            LoginTerminal(session: session)
-                .frame(height: 320)
-                .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
-            if !session.isRunning {
-                Text("The sign-in command finished. Close this window to check the server accounts.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            HStack {
-                Spacer()
-                Button(session.isRunning ? "Close" : "Check Accounts", action: close)
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(Metrics.gutter * 2)
-        .frame(width: 660)
-    }
-}
