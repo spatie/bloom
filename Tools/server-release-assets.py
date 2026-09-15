@@ -37,6 +37,7 @@ CHECKSUM = ASSET + '.sha256'
 METADATA = 'bloom-server-linux-x86_64.json'
 
 sys.path.insert(0, str(TOOLS))
+import bloom_wire  # noqa: E402
 _spec = importlib.util.spec_from_file_location('bloom_maintenance', TOOLS / 'bloom-maintenance.py')
 maintenance = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(maintenance)
@@ -47,8 +48,9 @@ class AssetError(Exception):
 
 
 def wire_protocol():
-    source = (ROOT / 'Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift').read_text()
-    return int(re.search(r'version = (\d+)', source)[1])
+    # Checked as the installed protocol: a server already running this checkout's protocol must
+    # accept the package, which also catches a package left behind on an older one.
+    return bloom_wire.wire_protocol(ROOT)
 
 
 def digest(path):

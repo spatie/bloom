@@ -11,8 +11,12 @@ import types
 import unittest
 from unittest import mock
 
-from bloom_maintenance_install import MaintenanceInstallation, MaintenanceInstallFailure
+from bloom_maintenance_install import MAINTENANCE_PROTOCOL_VERSION, MaintenanceInstallation, MaintenanceInstallFailure
 from bloom_install_process import standalone_installer_source
+from bloom_wire import wire_protocol
+
+# What CI's package manifest says today, read from BloomWire in the Swift rather than written here.
+WIRE = wire_protocol()
 
 
 class MaintenanceInstallTests(unittest.TestCase):
@@ -32,7 +36,7 @@ class MaintenanceInstallTests(unittest.TestCase):
         (self.bundle / 'licences').mkdir()
         (self.bundle / 'bin/bloom-server').write_text('binary')
         (self.bundle / 'bin/bloom-server').chmod(0o755)
-        (self.bundle / 'manifest.json').write_text(json.dumps(dict(architecture='x86_64', version='test-1', protocolVersion=14, maintenanceProtocolVersion=1)))
+        (self.bundle / 'manifest.json').write_text(json.dumps(dict(architecture='x86_64', version='test-1', protocolVersion=WIRE, maintenanceProtocolVersion=1)))
 
     def protect(self, path):
         # Keep tests independent of /tmp ownership while enforcing every fixture-owned ancestor.
@@ -64,7 +68,9 @@ class MaintenanceInstallTests(unittest.TestCase):
         self.assertEqual(config['gid'], 1235)
         self.assertEqual(config['access_token_sha256'], 'a' * 64)
         self.assertEqual(config['release_repository'], 'spatie/bloom')
-        self.assertEqual(config['protocol_version'], 14)
+        # A recorded wire protocol goes stale at the first supervised update; the supervisor reads
+        # the installed release's manifest instead.
+        self.assertNotIn('protocol_version', config)
         self.assertTrue(pathlib.Path(config['executable']).is_relative_to(self.installation.releases))
         self.assertTrue(self.installation.key_accepted)
         self.assertEqual(self.installation.config_path.stat().st_mode & 0o777, 0o600)
@@ -76,6 +82,54 @@ class MaintenanceInstallTests(unittest.TestCase):
         self.assertEqual(self.installation.process_module.read_text(), '# Trusted output redactor\n')
         self.assertEqual(pathlib.Path(config['executable']).stat().st_mode & 0o777, 0o755)
         self.assertEqual(self.installation.state.stat().st_mode & 0o777, 0o755)
+
+    def test_package_for_the_current_wire_protocol_is_accepted(self):
+        # The release blocker: a package built for protocol 15 was refused at Verify package as
+        # maintenance_package_required, because this installer required exactly 14.
+        self.assertEqual(self.installation.validate_bundle(self.bundle), 'test-1')
+
+    def test_a_later_wire_protocol_does_not_block_supervised_installation(self):
+        for wire in (WIRE + 1, WIRE + 20):
+            with self.subTest(wire=wire):
+                (self.bundle / 'manifest.json').write_text(json.dumps(dict(architecture='x86_64', version='test-1',
+                    protocolVersion=wire, maintenanceProtocolVersion=MAINTENANCE_PROTOCOL_VERSION)))
+                self.assertEqual(self.installation.validate_bundle(self.bundle), 'test-1')
+
+    def test_package_needs_this_maintenance_protocol_and_a_real_wire_protocol(self):
+        for changes in (dict(maintenanceProtocolVersion=MAINTENANCE_PROTOCOL_VERSION + 1), dict(maintenanceProtocolVersion=None),
+                        dict(protocolVersion=None), dict(protocolVersion=str(WIRE)), dict(protocolVersion=0), dict(protocolVersion=True)):
+            with self.subTest(changes=changes):
+                manifest = dict(architecture='x86_64', version='test-1', protocolVersion=WIRE,
+                                maintenanceProtocolVersion=MAINTENANCE_PROTOCOL_VERSION)
+                manifest.update(changes)
+                (self.bundle / 'manifest.json').write_text(json.dumps(manifest))
+                with self.assertRaises(MaintenanceInstallFailure) as refused:
+                    self.installation.validate_bundle(self.bundle)
+                self.assertEqual(refused.exception.code, 'maintenance_package_required')
+
+    def test_installer_supervisor_and_packager_agree_on_the_maintenance_protocol(self):
+        spec = importlib.util.spec_from_file_location('bloom_maintenance_agreement', pathlib.Path(__file__).with_name('bloom-maintenance.py'))
+        supervisor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(supervisor)
+        self.assertEqual(supervisor.MAINTENANCE_PROTOCOL_VERSION, MAINTENANCE_PROTOCOL_VERSION)
+        packager = pathlib.Path(__file__).with_name('package-linux-server.py').read_text()
+        self.assertIn('"maintenanceProtocolVersion": MAINTENANCE_PROTOCOL_VERSION', packager)
+
+    def test_a_package_the_installer_accepts_is_one_the_supervisor_installs(self):
+        # The same manifest through both gates, at today's protocol and the next one, so the two
+        # cannot drift apart again with the tests of each pinned to the same stale number.
+        spec = importlib.util.spec_from_file_location('bloom_maintenance_gates', pathlib.Path(__file__).with_name('bloom-maintenance.py'))
+        supervisor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(supervisor)
+        for wire in (WIRE, WIRE + 1):
+            with self.subTest(wire=wire):
+                (self.bundle / 'manifest.json').write_text(json.dumps(dict(architecture='x86_64', version='test-1',
+                    protocolVersion=wire, maintenanceProtocolVersion=MAINTENANCE_PROTOCOL_VERSION)))
+                self.installation.validate_bundle(self.bundle)
+                self.assertEqual(supervisor.validate_release_manifest(self.bundle, WIRE), self.bundle / 'bin/bloom-server')
+                metadata = dict(name=supervisor.RELEASE_PACKAGE, tag='v2.0.0', sha256='c' * 64, protocolVersion=wire,
+                                maintenanceProtocolVersion=MAINTENANCE_PROTOCOL_VERSION, architecture='x86_64')
+                self.assertIsNone(supervisor.release_incompatibility(metadata, dict(version='v2.0.0', sha256='c' * 64), WIRE, host=''))
 
     def test_existing_digest_is_not_rotated(self):
         self.publish()
@@ -129,7 +183,7 @@ class MaintenanceInstallTests(unittest.TestCase):
         self.assertTrue(self.installation.key_accepted)
 
     def test_unsupported_package_does_not_publish_any_root_files(self):
-        (self.bundle / 'manifest.json').write_text('{"version":"old","protocolVersion":14}')
+        (self.bundle / 'manifest.json').write_text(json.dumps(dict(version='old', protocolVersion=WIRE)))
         with self.assertRaises(MaintenanceInstallFailure):
             self.publish()
         self.assertFalse(self.installation.launcher.exists())
@@ -222,7 +276,7 @@ class MaintenanceInstallTests(unittest.TestCase):
     def test_rollback_restores_config_current_and_previous_supervisor(self):
         self.publish()
         before = {path: path.read_bytes() for path in (self.installation.config_path, self.installation.current_path, self.installation.launcher, self.installation.docker_module, self.installation.process_module)}
-        (self.bundle / 'manifest.json').write_text(json.dumps(dict(version='test-2', protocolVersion=14, maintenanceProtocolVersion=1)))
+        (self.bundle / 'manifest.json').write_text(json.dumps(dict(version='test-2', protocolVersion=WIRE, maintenanceProtocolVersion=1)))
         self.installation.publish(self.bundle, 'd' * 64, self.account, '# Updated supervisor\n', '# Updated Docker adapter\n', '# Updated output redactor\n')
         self.installation.rollback()
         for path, value in before.items():

@@ -4,11 +4,11 @@ import hashlib
 import json
 import os
 import pathlib
-import re
 import shutil
 import sys
 import tarfile
 from bloom_install_process import standalone_installer_source
+from bloom_wire import wire_protocol
 
 
 def embed(bundle, archive=None):
@@ -26,7 +26,8 @@ def embed(bundle, archive=None):
         if 'bloom-server-linux-x86_64/bin/bloom-server' not in names:
             raise ValueError('The archive is not a Bloom Linux x86_64 package')
         metadata = json.load(package.extractfile('bloom-server-linux-x86_64/manifest.json'))
-    protocol = int(re.search(r'version = (\d+)', (root / 'Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift').read_text())[1])
+    # Exact equality is right here, unlike on a server: the app bundles the server it was built with.
+    protocol = wire_protocol(root)
     if metadata.get('protocolVersion') != protocol:
         raise ValueError('The packaged server protocol does not match this app')
     shutil.copy2(archive, destination / 'server.tar.gz')

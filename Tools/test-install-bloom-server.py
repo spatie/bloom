@@ -22,6 +22,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from bloom_wire import wire_protocol
+
 spec = importlib.util.spec_from_file_location("installer", pathlib.Path(__file__).with_name("install-bloom-server.py"))
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
@@ -535,7 +537,7 @@ class InstallerTests(unittest.TestCase):
         installer.install_dependencies.assert_not_called()
 
     def installation_fixture(self, maintenance=False):
-        package, checksum = self.package(manifest={"architecture": "x86_64", "protocolVersion": 14,
+        package, checksum = self.package(manifest={"architecture": "x86_64", "protocolVersion": wire_protocol(),
             "maintenanceProtocolVersion": 1, "version": "test-1"} if maintenance else None)
         key = self.root / "client.pub"
         key.write_text(self.key())

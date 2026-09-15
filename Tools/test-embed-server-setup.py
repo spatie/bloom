@@ -14,7 +14,9 @@ root = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('embed_server_setup', root / 'Tools/embed-server-setup.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-protocol = int(re.search(r'version = (\d+)', (root / 'Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift').read_text())[1])
+sys.path.insert(0, str(root / 'Tools'))
+from bloom_wire import wire_protocol  # noqa: E402
+protocol = wire_protocol(root)
 
 
 class PackageTests(unittest.TestCase):

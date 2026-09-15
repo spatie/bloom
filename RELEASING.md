@@ -151,7 +151,8 @@ is written into `manifest.json`.
 
 `Tools/server-release-assets.py describe` then puts the tarball through the supervisor's own
 extraction and manifest checks, imported from `Tools/bloom-maintenance.py` rather than restated,
-with the tag as the expected version and the wire protocol from `RemoteCommand.swift`. Only then
+with the tag as the expected version and `BloomWire.version`, read by `Tools/bloom_wire.py`, as the
+installed protocol the package must not be older than. Only then
 does it write the two sidecars. A package this accepts is one every current supervisor would accept.
 
 The macOS job needs that one, so a server that fails to build or package stops the release before
@@ -179,27 +180,31 @@ channel.
 
 Before offering it, the supervisor downloads `bloom-server-linux-x86_64.json`. A description whose
 `name`, `tag` or `sha256` differs from the release it sits in is a broken release and is refused as
-`release_unavailable`. One naming another architecture, another wire or maintenance protocol, or a
-newer glibc than the server has, is shown with its reason and not offered, so an incompatible
+`release_unavailable`. One naming another architecture or maintenance protocol, a wire protocol
+older than the installed release's, or a newer glibc than the server has, is shown with its reason and not offered, so an incompatible
 release is explained in Updates rather than failing after a download. An unreadable description
 falls back to the behaviour of a release without one, because every rule it carries is checked
 again below.
 
 After downloading by asset ID it requires GitHub's digest, plain files and directories under
 `bloom-server-linux-x86_64/`, and a manifest naming the reviewed version, `x86_64`, maintenance
-protocol 1 and the wire protocol the supervisor was installed for. Any mismatch fails the job before
+protocol 1 and a wire protocol no older than the installed release's. Any mismatch fails the job before
 the running release is touched. It then snapshots the database, starts the new release as a trial,
 and restores the previous release and database if startup verification fails, which the job reports
 as `rolledBack`.
 
-Compatibility is by protocol version, and today the accepted range is one version. The app, the
-gateway, the server and the supervisor all enforce 14, and the administrator installer writes
-`protocol_version=14` into the supervisor's configuration. So a release that raises
-`BloomWire.version` is not offered by any supervisor installed for the old protocol, which says why
-in Updates, and those servers move through **Update Server…** in the new app, which reinstalls the
-supervisor as well. The workflow's verify step fails on exactly that, so a protocol change is
-noticed at release time rather than on a server. Raising the protocol means changing `Tools/bloom_maintenance_install.py` in the
-same commit, and saying in the release notes that servers need the administrator update.
+Two protocols are involved and only one of them gates an update. The wire protocol,
+`BloomWire.version`, is between the apps and the server: the server accepts every version in
+`BloomWire.supportedVersions` and a client negotiates down to it. So a release that raises it is
+offered and installs in place, and only a release older than the installed one is refused. The
+supervisor reads the installed wire protocol from that release's own manifest rather than from
+its configuration, and never pins the envelope's version itself. The maintenance protocol, 1
+today, is the supervisor's own contract: a release needing another one is not offered, and those
+servers move through **Update Server…** in the new app, which reinstalls the supervisor as well.
+Raising it means changing `MAINTENANCE_PROTOCOL_VERSION` in `Tools/bloom_maintenance_install.py`
+and `Tools/bloom-maintenance.py` in the same commit, and saying in the release notes that servers
+need the administrator update. No Python in `Tools/` writes the wire protocol as a literal:
+protocol 15 was refused by an installer that required exactly 14, with every test pinned to 14 too.
 
 `latest` is a flag on GitHub rather than the highest tag. A patch to an older line published with
 "Set as the latest release" would point every server at it, and servers already newer would see no

@@ -22,6 +22,12 @@ spec = importlib.util.spec_from_file_location('bloom_maintenance', SOURCE)
 maintenance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(maintenance)
 
+from bloom_wire import wire_protocol  # noqa: E402
+
+# BloomWire.version from the Swift. Fixtures pinned to 14 kept this suite green while the
+# supervisor refused every protocol 15 client and release.
+WIRE = wire_protocol()
+
 
 def fresh_id():
     return str(uuid.uuid4())
@@ -74,7 +80,7 @@ def published(version='v2.0.0', metadata=True, checksum='c' * 64):
 
 
 def description(version='v2.0.0', checksum='c' * 64, **changes):
-    value = dict(name='bloom-server-linux-x86_64.tar.gz', tag=version, version=version, protocolVersion=14,
+    value = dict(name='bloom-server-linux-x86_64.tar.gz', tag=version, version=version, protocolVersion=WIRE,
                  maintenanceProtocolVersion=1, architecture='x86_64', glibc='glibc 2.39', sha256=checksum, size=1024)
     value.update(changes)
     return value
@@ -92,7 +98,7 @@ class ReleaseCompatibilityTests(Fixture):
                 raise reader_error
             return metadata
         with mock.patch.object(maintenance, 'fetch_json', return_value=release):
-            return RELEASE_ASSET(self.config, 14, metadata_reader=reader)
+            return RELEASE_ASSET(self.config, WIRE, metadata_reader=reader)
 
     def components(self, release, metadata=None):
         supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock(), docker=None)
@@ -106,13 +112,33 @@ class ReleaseCompatibilityTests(Fixture):
         self.assertTrue(component['canUpdate'])
         self.assertNotIn('incompatible', component)
 
-    def test_newer_protocol_is_refused_before_download_with_a_reason(self):
-        _, component = self.components(published(), description(protocolVersion=15))
+    def test_newer_wire_protocol_is_offered(self):
+        # Refusing it stranded every installed server on the first release that raised
+        # BloomWire.version: the new runtime still answers older clients, so it installs in place.
+        for wire in (WIRE + 1, WIRE + 5):
+            with self.subTest(wire=wire):
+                _, component = self.components(published(), description(protocolVersion=wire))
+                self.assertTrue(component['canUpdate'])
+                self.assertNotIn('incompatible', component)
+
+    def test_older_wire_protocol_is_refused_before_download_with_a_reason(self):
+        _, component = self.components(published(), description(protocolVersion=WIRE - 1))
         self.assertFalse(component['canUpdate'])
         self.assertTrue(component['incompatible'])
         self.assertEqual(component['availableVersion'], 'v2.0.0')
-        self.assertIn('protocol 15', component['detail'])
-        self.assertIn('Update Server…', component['detail'])
+        self.assertIn(f'older protocol {WIRE - 1}', component['detail'])
+
+    def test_the_installed_protocol_comes_from_the_running_release(self):
+        release = self.releases / 'running'
+        (release / 'bin').mkdir(parents=True)
+        (release / 'manifest.json').write_bytes(maintenance.json_bytes(dict(protocolVersion=WIRE + 1)))
+        self.config['executable'] = str(release / 'bin/bloom-server')
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock(), docker=None)
+        self.assertEqual(supervisor.installed_protocol(), WIRE + 1)
+        (release / 'manifest.json').write_bytes(b'{"protocolVersion":"15"}')
+        self.assertIsNone(supervisor.installed_protocol())
+        (release / 'manifest.json').unlink()
+        self.assertIsNone(supervisor.installed_protocol())
 
     def test_other_maintenance_protocol_is_incompatible(self):
         _, component = self.components(published(), description(maintenanceProtocolVersion=2))
@@ -121,7 +147,7 @@ class ReleaseCompatibilityTests(Fixture):
 
     def test_prepare_refuses_an_incompatible_release_without_a_plan(self):
         supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock(), docker=None)
-        with mock.patch.object(maintenance, 'release_asset', lambda config, protocol: self.asset(published(), description(protocolVersion=15))), \
+        with mock.patch.object(maintenance, 'release_asset', lambda config, protocol: self.asset(published(), description(maintenanceProtocolVersion=2))), \
                 mock.patch.object(supervisor, 'account_command', return_value='{"method":null,"detail":"Not installed"}'), \
                 mock.patch.object(maintenance, 'https_open') as download:
             response = supervisor.handle(fresh_id(), dict(action='prepare', credential='fixture-admin-credential', component='server'))
@@ -134,7 +160,7 @@ class ReleaseCompatibilityTests(Fixture):
 
     def test_an_older_incompatible_release_is_not_announced(self):
         self.config['executable_version'] = 'v3.0.0'
-        supervisor, component = self.components(published(), description(protocolVersion=15))
+        supervisor, component = self.components(published(), description(maintenanceProtocolVersion=2))
         self.assertFalse(component['canUpdate'])
         self.assertNotIn('incompatible', component)
 
@@ -144,7 +170,7 @@ class ReleaseCompatibilityTests(Fixture):
         self.assertNotIn('incompatible', self.asset(published(), reader_error=ValueError('not json')))
 
     def test_description_of_another_package_is_a_broken_release(self):
-        for changes in (dict(sha256='e' * 64), dict(tag='v9'), dict(name='bloom-server-linux-arm64.tar.gz'), dict(protocolVersion='14')):
+        for changes in (dict(sha256='e' * 64), dict(tag='v9'), dict(name='bloom-server-linux-arm64.tar.gz'), dict(protocolVersion=str(WIRE))):
             with self.assertRaises(maintenance.MaintenanceError) as raised:
                 self.asset(published(), description(**changes))
             self.assertEqual(raised.exception.code, 'release_unavailable')
@@ -843,14 +869,14 @@ class ArchiveTests(Fixture):
         self.assertEqual(list(self.releases.iterdir()), [])
 
     def test_requires_maintenance_capable_manifest_even_at_matching_wire_version(self):
-        archive = self.archive([self.entry('bloom-server-linux-x86_64/manifest.json', b'{"architecture":"x86_64","protocolVersion":14}')])
+        archive = self.archive([self.entry('bloom-server-linux-x86_64/manifest.json', maintenance.json_bytes(dict(architecture='x86_64', protocolVersion=WIRE)))])
         with self.assertRaisesRegex(maintenance.MaintenanceError, 'incompatible'):
             maintenance.extract_release(archive, self.releases)
 
     def test_digest_valid_archive_with_wrong_reviewed_version_is_rejected(self):
         directory = tarfile.TarInfo('bloom-server-linux-x86_64/lib')
         directory.type = tarfile.DIRTYPE
-        manifest = maintenance.json_bytes(dict(architecture='x86_64', protocolVersion=14, maintenanceProtocolVersion=1, version='1.0.0'))
+        manifest = maintenance.json_bytes(dict(architecture='x86_64', protocolVersion=WIRE, maintenanceProtocolVersion=1, version='1.0.0'))
         archive = self.archive([self.entry('bloom-server-linux-x86_64/manifest.json', manifest),
                                 self.entry('bloom-server-linux-x86_64/bin/bloom-server', b'executable', 0o755),
                                 (directory, b'')])
@@ -865,7 +891,7 @@ class ArchiveTests(Fixture):
         (release / 'bin/bloom-server').write_bytes(b'executable')
         (release / 'bin/bloom-server').chmod(0o755)
         (release / 'manifest.json').write_bytes(maintenance.json_bytes(dict(architecture='x86_64',
-            protocolVersion=14, maintenanceProtocolVersion=1, version='1.0.0')))
+            protocolVersion=WIRE, maintenanceProtocolVersion=1, version='1.0.0')))
         supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=FakeRuntime())
         with mock.patch.object(maintenance, 'trusted_path'):
             with self.assertRaisesRegex(maintenance.MaintenanceError, 'does not match the reviewed'):
@@ -877,10 +903,25 @@ class ArchiveTests(Fixture):
             maintenance.extract_release(archive, self.releases)
         self.assertFalse((self.root / 'outside').exists())
 
-    def test_rejects_incompatible_protocol(self):
-        archive = self.archive([self.entry('bloom-server-linux-x86_64/manifest.json', b'{"architecture":"x86_64","protocolVersion":99}')])
+    def complete_archive(self, wire):
+        directory = tarfile.TarInfo('bloom-server-linux-x86_64/lib')
+        directory.type = tarfile.DIRTYPE
+        manifest = maintenance.json_bytes(dict(architecture='x86_64', protocolVersion=wire, maintenanceProtocolVersion=1, version='2.0.0'))
+        return self.archive([self.entry('bloom-server-linux-x86_64/manifest.json', manifest),
+                             self.entry('bloom-server-linux-x86_64/bin/bloom-server', b'executable', 0o755),
+                             (directory, b'')])
+
+    def test_rejects_a_wire_protocol_older_than_the_installed_one(self):
         with self.assertRaisesRegex(maintenance.MaintenanceError, 'incompatible'):
-            maintenance.extract_release(archive, self.releases)
+            maintenance.extract_release(self.complete_archive(WIRE - 1), self.releases, WIRE, 'v2.0.0')
+
+    def test_installs_the_current_and_the_next_wire_protocol(self):
+        for wire in (WIRE, WIRE + 1):
+            with self.subTest(wire=wire):
+                destination = self.releases / str(wire)
+                destination.mkdir()
+                executable = maintenance.extract_release(self.complete_archive(wire), destination, WIRE, 'v2.0.0')
+                self.assertEqual(executable, destination / 'bloom-server-linux-x86_64/bin/bloom-server')
 
 
 class WireTests(Fixture):
@@ -905,7 +946,7 @@ class WireTests(Fixture):
             self.assertFalse(thread.is_alive())
 
     def test_status_is_available_without_a_running_runtime(self):
-        request = dict(version=14, id=fresh_id(), operation=dict(maintenance={'_0': dict(action='status', credential='fixture-admin-credential')}))
+        request = dict(version=WIRE, id=fresh_id(), operation=dict(maintenance={'_0': dict(action='status', credential='fixture-admin-credential')}))
         response = self.exchange(request)
         self.assertEqual(response['id'], request['id'])
         self.assertTrue(response['result']['maintenance']['_0']['authorized'])
@@ -913,7 +954,7 @@ class WireTests(Fixture):
     def test_unauthorized_maintenance_never_forwards_credential_to_runtime(self):
         runtime = FakeRuntime()
         supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=runtime)
-        request = dict(version=14, id=fresh_id(), operation=dict(maintenance={'_0': dict(action='start', credential='wrong')}))
+        request = dict(version=WIRE, id=fresh_id(), operation=dict(maintenance={'_0': dict(action='start', credential='wrong')}))
         with mock.patch.object(maintenance.ControlServer, 'forward') as forward:
             response = self.exchange(request, supervisor)
         forward.assert_not_called()
@@ -924,7 +965,7 @@ class WireTests(Fixture):
         server = maintenance.ControlServer(supervisor)
         local, remote = socket.socketpair()
         server.connections.acquire()
-        request = dict(version=14, id=fresh_id(), operation=dict(send=dict(sessionID='fixture', text='hello')))
+        request = dict(version=WIRE, id=fresh_id(), operation=dict(send=dict(sessionID='fixture', text='hello')))
         with mock.patch.object(server, 'forward', side_effect=ConnectionResetError('reply lost')):
             thread = threading.Thread(target=server.serve_client, args=(remote,))
             thread.start()
@@ -939,8 +980,8 @@ class WireTests(Fixture):
 
     def test_large_normal_frames_do_not_use_maintenance_limit(self):
         text = 'x' * 140000
-        request = dict(version=14, id=fresh_id(), operation=dict(send=dict(text=text)))
-        expected = dict(version=14, id=request['id'], result=dict(file={'_0': dict(text=text)}))
+        request = dict(version=WIRE, id=fresh_id(), operation=dict(send=dict(text=text)))
+        expected = dict(version=WIRE, id=request['id'], result=dict(file={'_0': dict(text=text)}))
 
         def forward(_, value, raw):
             self.assertGreater(len(raw), maintenance.MAX_FRAME)
@@ -963,19 +1004,19 @@ class WireTests(Fixture):
             if request['id'] == first:
                 entered.set()
                 release.wait(timeout=3)
-            return maintenance.json_bytes(dict(version=14, id=request['id'], result=dict(hello=dict(name='fixture')))) + b'\n'
+            return maintenance.json_bytes(dict(version=WIRE, id=request['id'], result=dict(hello=dict(name='fixture')))) + b'\n'
 
         with mock.patch.object(server, 'forward', forward):
             thread = threading.Thread(target=server.serve_client, args=(remote,))
             thread.start()
             try:
                 local.settimeout(2)
-                local.sendall(maintenance.json_bytes(dict(version=14, id=first, operation=dict(hello={}))) + b'\n')
+                local.sendall(maintenance.json_bytes(dict(version=WIRE, id=first, operation=dict(hello={}))) + b'\n')
                 self.assertTrue(entered.wait(timeout=1))
-                local.sendall(maintenance.json_bytes(dict(version=14, id=second, operation=dict(hello={}))) + b'\n')
+                local.sendall(maintenance.json_bytes(dict(version=WIRE, id=second, operation=dict(hello={}))) + b'\n')
                 with local.makefile('rb') as reader:
                     self.assertEqual(json.loads(reader.readline())['id'], second)
-                    local.sendall(maintenance.json_bytes(dict(version=14, id=status, operation=dict(maintenance={
+                    local.sendall(maintenance.json_bytes(dict(version=WIRE, id=status, operation=dict(maintenance={
                         '_0': dict(action='status', credential='fixture-admin-credential')}))) + b'\n')
                     self.assertEqual(json.loads(reader.readline())['id'], status)
                     release.set()
@@ -1021,14 +1062,14 @@ class WireTests(Fixture):
         def forward(request, raw):
             entered.set()
             release.wait(timeout=2)
-            return maintenance.json_bytes(dict(version=14, id=request['id'], result=dict(hello=dict(name='done')))) + b'\n'
+            return maintenance.json_bytes(dict(version=WIRE, id=request['id'], result=dict(hello=dict(name='done')))) + b'\n'
 
         with mock.patch.object(server, 'forward', forward):
             thread = threading.Thread(target=server.serve_client, args=(remote,))
             thread.start()
             try:
                 local.settimeout(2)
-                local.sendall(maintenance.json_bytes(dict(version=14, id=request_id, operation=dict(hello={}))) + b'\n')
+                local.sendall(maintenance.json_bytes(dict(version=WIRE, id=request_id, operation=dict(hello={}))) + b'\n')
                 self.assertTrue(entered.wait(timeout=1))
                 time.sleep(.55)
                 self.assertTrue(thread.is_alive())
@@ -1054,12 +1095,46 @@ class WireTests(Fixture):
             with self.assertRaises(maintenance.MaintenanceError):
                 server.runtime_connection()
 
+    def test_any_wire_version_reaches_the_runtime_to_negotiate(self):
+        # Pinned to the installed protocol, the supervisor closed a newer client's hello before the
+        # runtime could answer with the version to fall back to, and after an update to a newer
+        # release it refused that release's own clients.
+        for version in (WIRE - 1, WIRE, WIRE + 1):
+            with self.subTest(version=version):
+                request = dict(version=version, id=fresh_id(), operation=dict(hello={}))
+                seen = []
+
+                def forward(_, value, raw):
+                    seen.append(value['version'])
+                    return maintenance.json_bytes(dict(version=version, id=value['id'], result=dict(hello=dict(name='runtime')))) + b'\n'
+
+                with mock.patch.object(maintenance.ControlServer, 'forward', forward):
+                    response = self.exchange(request)
+                self.assertEqual(seen, [version])
+                self.assertEqual(response['version'], version)
+
+    def test_a_version_that_is_not_a_number_closes_the_connection(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=FakeRuntime())
+        server = maintenance.ControlServer(supervisor)
+        local, remote = socket.socketpair()
+        server.connections.acquire()
+        thread = threading.Thread(target=server.serve_client, args=(remote,))
+        thread.start()
+        try:
+            local.settimeout(2)
+            local.sendall(maintenance.json_bytes(dict(version=str(WIRE), id=fresh_id(), operation=dict(hello={}))) + b'\n')
+            self.assertEqual(local.recv(1024), b'')
+        finally:
+            local.close()
+            thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+
     def test_hello_remains_available_while_runtime_is_down(self):
-        response = self.exchange(dict(version=14, id=fresh_id(), operation=dict(hello={})))
+        response = self.exchange(dict(version=WIRE, id=fresh_id(), operation=dict(hello={})))
         self.assertEqual(response['result']['hello']['name'], socket.gethostname())
 
     def test_diagnostics_advertise_maintenance_during_restart(self):
-        response = self.exchange(dict(version=14, id=fresh_id(), operation=dict(diagnostics={})))
+        response = self.exchange(dict(version=WIRE, id=fresh_id(), operation=dict(diagnostics={})))
         self.assertTrue(response['result']['diagnostics']['_0']['maintenanceManagement'])
 
 

@@ -10,6 +10,11 @@ import stat
 import tempfile
 from contextlib import closing
 
+# The supervisor contract this installer provisions, and the same number as
+# MAINTENANCE_PROTOCOL_VERSION in bloom-maintenance.py, which test-maintenance-install.py holds
+# them to. The app wire protocol is deliberately absent: see validate_bundle.
+MAINTENANCE_PROTOCOL_VERSION = 1
+
 
 class MaintenanceInstallFailure(Exception):
     def __init__(self, code, message, recovery):
@@ -136,8 +141,16 @@ class MaintenanceInstallation:
     def validate_bundle(self, bundle):
         try:
             manifest = json.loads((bundle / 'manifest.json').read_bytes())
-            if manifest.get('maintenanceProtocolVersion') != 1 or manifest.get('protocolVersion') != 14:
+            # Only the maintenance protocol is this installer's business. It used to require wire
+            # protocol 14 as well, so the first package built for 15 was refused on a real server
+            # as unable to support supervised maintenance. The Mac embeds only a package whose
+            # wire protocol matches its own (embed-server-setup.py), and the runtime negotiates
+            # with clients itself, so here the number only has to be a real one.
+            if manifest.get('maintenanceProtocolVersion') != MAINTENANCE_PROTOCOL_VERSION:
                 raise ValueError('missing supervisor support')
+            wire = manifest.get('protocolVersion')
+            if type(wire) is not int or wire < 1:
+                raise ValueError('missing wire protocol')
             version = manifest.get('version')
             if not isinstance(version, str) or not version.strip() or len(version) > 200:
                 raise ValueError('missing version')
@@ -228,7 +241,7 @@ class MaintenanceInstallation:
             self.protect(path)
         executable = str(release / 'bin/bloom-server')
         config = dict(uid=account.pw_uid, gid=account.pw_gid, state_dir=str(self.state), install_root=str(self.releases),
-                      executable=executable, executable_version=version, protocol_version=14,
+                      executable=executable, executable_version=version,
                       service_home=str(self.args.service_home), data_dir=str(self.args.data_dir),
                       runtime_socket=str(self.args.runtime_socket), maintenance_socket=str(self.socket_path),
                       access_token_sha256=digest, release_repository='spatie/bloom')

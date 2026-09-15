@@ -34,6 +34,9 @@ DESCRIPTION = 'bloom-server-linux-x86_64.json'
 # fails at once against the fake rather than waiting on the network or reaching the registry.
 HOSTS = ('api.github.com', 'github.com', 'release-assets.githubusercontent.com', 'registry.npmjs.org')
 TERMINAL = ('succeeded', 'failed', 'cancelled', 'rolledBack', 'interrupted')
+# The wire protocol of the package under test, read from its manifest in verify. A literal here
+# kept this smoke on 14 after the package moved to 15.
+WIRE = None
 
 
 def require(condition, message):
@@ -58,7 +61,7 @@ def fingerprint(value):
 
 
 def envelope(operation, request_id):
-    return json.dumps(dict(version=14, id=request_id, operation=operation)).encode() + b'\n'
+    return json.dumps(dict(version=WIRE, id=request_id, operation=operation)).encode() + b'\n'
 
 
 def rpc(path, operation, request_id=None):
@@ -83,12 +86,12 @@ def account_database(account, home, database, query):
     return result.stdout.strip()
 
 
-def bundle(source, destination, version, broken=False):
+def bundle(source, destination, version, broken=False, protocol=None):
     shutil.copytree(source, destination, symlinks=False)
     for path in [destination, *destination.rglob('*')]:
         path.chmod(0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
     (destination / 'manifest.json').write_text(json.dumps(dict(
-        architecture='x86_64', protocolVersion=14, maintenanceProtocolVersion=1, version=version)))
+        architecture='x86_64', protocolVersion=protocol or WIRE, maintenanceProtocolVersion=1, version=version)))
     if broken:
         executable = destination / 'bin/bloom-server'
         executable.rename(destination / 'bin/bloom-server-real')
@@ -248,6 +251,9 @@ def verify(binary, account):
     require(account.pw_uid > 0 and account.pw_gid > 0, 'The runtime account must not be root')
     source = binary.parent.parent
     require(binary.name == 'bloom-server' and (source / 'lib').is_dir(), 'Pass bin/bloom-server from an extracted Linux package')
+    global WIRE
+    WIRE = json.loads((source / 'manifest.json').read_bytes())['protocolVersion']
+    require(type(WIRE) is int and WIRE > 0, 'The package manifest names no wire protocol')
     socket_parent = pathlib.Path('/run/bloom-maintenance')
     created_socket_parent = not socket_parent.exists()
     socket_parent.mkdir(mode=0o755, exist_ok=True)
@@ -283,7 +289,7 @@ def verify(binary, account):
                 token = uuid.uuid4().hex
                 config = dict(uid=account.pw_uid, gid=account.pw_gid, service_home=str(home), data_dir=str(data),
                     state_dir=str(state), install_root=str(releases), executable=str(original / 'bin/bloom-server'),
-                    executable_version='v0.0.1', protocol_version=14, runtime_socket=str(sockets[1]),
+                    executable_version='v0.0.1', runtime_socket=str(sockets[1]),
                     maintenance_socket=str(sockets[0]), release_repository='spatie/bloom',
                     access_token_sha256=hashlib.sha256(token.encode()).hexdigest())
                 config_path = state / 'config.json'
@@ -304,9 +310,10 @@ def verify(binary, account):
                     payload = dict(action=action, credential=credential, **fields)
                     return rpc(sockets[0], {'maintenance': {'_0': payload}}, request_id)['maintenance']['_0']
 
-                def publish(version, broken=False, protocol=14):
+                def publish(version, broken=False, protocol=None, manifest_protocol=None):
+                    protocol = protocol or WIRE
                     staged, archive = root / ('candidate-' + version), root / (version + '.tar.gz')
-                    bundle(source, staged, version, broken)
+                    bundle(source, staged, version, broken, manifest_protocol)
                     with tarfile.open(archive, 'w:gz', compresslevel=1) as output:
                         output.add(staged, arcname='bloom-server-linux-x86_64')
                     package = archive.read_bytes()
@@ -347,18 +354,20 @@ def verify(binary, account):
                     settled(expected, installed, package_id)
                     print(f'Supervisor {version}: {expected} through the GitHub lookup and download, same-ID replay and database verified.', flush=True)
 
-                package_id = publish('v0.0.4', protocol=15)
+                package_id = publish('v0.0.4', protocol=WIRE - 1)
                 refused = request('prepare', component='server')
                 require((refused.get('error') or {}).get('code') == 'incompatible_release' and 'Update Server' in refused['error']['recovery']
                         and refused.get('plan') is None, f'An incompatible release was offered: {refused}')
                 component = next(item for item in request('inspect')['components'] if item['id'] == 'server')
                 require(component['availableVersion'] == 'v0.0.4' and not component['canUpdate'] and component.get('incompatible') is True
-                        and 'protocol 15' in component['detail'], f'Inspection did not explain the incompatible release: {component}')
+                        and f'older protocol {WIRE - 1}' in component['detail'], f'Inspection did not explain the incompatible release: {component}')
                 require(not github.downloaded(package_id), 'The incompatible package was downloaded')
                 require(supervisor.store.active() is None and supervisor.current['version'] == 'v0.0.2', 'The incompatible release changed the installation')
                 print('Supervisor v0.0.4: refused from its release description before download.', flush=True)
 
-                package_id = publish('v0.0.5')
+                # The next wire protocol, in both the description and the manifest, must install in
+                # place: a rule refusing it strands every server on the first protocol bump.
+                package_id = publish('v0.0.5', protocol=WIRE + 1, manifest_protocol=WIRE + 1)
                 prepared = request('prepare', component='server')
                 require(prepared.get('error') is None and prepared.get('plan'), f'Could not prepare v0.0.5: {prepared}')
                 github.stall_download(package_id)

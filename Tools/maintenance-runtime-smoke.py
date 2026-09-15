@@ -27,6 +27,8 @@ class Runtime:
         self.trial = str(uuid.uuid4()) if trial else None
         self.log = tempfile.TemporaryFile()
         self.data = data
+        # Speak the protocol the package says it was built for, not a number that goes stale.
+        self.wire = json.loads((pathlib.Path(binary).parent.parent / 'manifest.json').read_bytes())['protocolVersion']
         environment = dict(os.environ, BLOOM_MAINTENANCE_FD=str(inherited.fileno()))
         environment.pop('BLOOM_MAINTENANCE_TRIAL', None)
         if self.trial:
@@ -61,7 +63,7 @@ class Runtime:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(10)
             connection.connect(self.socket_path)
-            connection.sendall(json.dumps(dict(version=14, id=request_id, operation=operation)).encode() + b'\n')
+            connection.sendall(json.dumps(dict(version=self.wire, id=request_id, operation=operation)).encode() + b'\n')
             with connection.makefile('rb') as source:
                 value = receive(source)
         assert str(uuid.UUID(value.get('id'))) == request_id, value

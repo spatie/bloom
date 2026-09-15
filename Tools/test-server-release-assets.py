@@ -162,9 +162,9 @@ class VerifyTests(unittest.TestCase):
         seen = []
         original = assets.maintenance.release_incompatibility
 
-        def recording(metadata, asset, protocol_version=14, host=None):
-            seen.append((metadata, protocol_version))
-            return original(metadata, asset, protocol_version, host)
+        def recording(metadata, asset, installed_protocol=None, host=None):
+            seen.append((metadata, installed_protocol))
+            return original(metadata, asset, installed_protocol, host)
 
         assets.maintenance.release_incompatibility = recording
         self.addCleanup(setattr, assets.maintenance, 'release_incompatibility', original)
@@ -172,9 +172,16 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(seen, [(json.loads(self.description.read_text()), assets.wire_protocol())])
 
     def test_an_incompatible_description_fails_with_the_supervisors_reason(self):
-        self.rewrite(protocolVersion=assets.wire_protocol() + 1)
-        with self.assertRaisesRegex(assets.AssetError, 'refuse this release.*protocol'):
+        self.rewrite(protocolVersion=assets.wire_protocol() - 1)
+        with self.assertRaisesRegex(assets.AssetError, 'refuse this release.*older protocol'):
             assets.verify(self.archive, self.release(), self.description)
+
+    def test_a_newer_wire_protocol_is_still_offered(self):
+        # Protocol 15 was the first bump after supervisors shipped, and a rule refusing it would
+        # have had this check fail every release that raised BloomWire.version.
+        self.rewrite(protocolVersion=assets.wire_protocol() + 1)
+        asset, _ = assets.verify(self.archive, self.release(), self.description)
+        self.assertNotIn('incompatible', asset)
 
     def test_a_description_for_another_tag_or_package_is_release_unavailable(self):
         for change in (dict(tag='v1.4.1'), dict(sha256='e' * 64)):

@@ -30,12 +30,12 @@ the repository root.
    evidence. Pull requests build debug, so also dispatch the release build on that commit's branch,
    `gh workflow run server.yml --repo spatie/bloom --ref <branch> -f release_build=true`, and wait
    for its `release-package` job. Dispatching is a CI run, not a release, but ask before doing it.
-2. Compare `version = ` in `Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift` with the
-   previous release's tag. Supervisors read `bloom-server-linux-x86_64.json` before offering a
-   release, so if the wire protocol changed, every installed supervisor shows the release as
-   incompatible and does not offer it, and the release workflow's verify step fails on it. That is not a reason to stop the release, but
-   `Tools/bloom_maintenance_install.py` must accept the new protocol in the same release, and the
-   notes must say that servers need **Update Server…** in the new app.
+2. Compare `BloomWire.version` in `Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift`
+   with the previous release's tag. A raised wire protocol needs nothing extra: supervisors offer
+   it and install it in place, and only an older one is refused. If `MAINTENANCE_PROTOCOL_VERSION`
+   changed, every installed supervisor shows the release as incompatible and does not offer it.
+   That is not a reason to stop the release, but the notes must say that servers need
+   **Update Server…** in the new app.
 3. A patch to an older line is published with `--latest=false`, or every server is pointed at it.
 
 ## Publish
@@ -109,10 +109,10 @@ Start with the job's final phase and its error code, which the app shows and cop
 | Code or phase | Meaning | Next step |
 | --- | --- | --- |
 | `release_unavailable` | No stable latest release, no server asset in it, no digest, a description whose `name`, `tag` or `sha256` differs from the release, or GitHub unreachable. | Run the asset check above. Check `releases/latest`. |
-| Offered as incompatible | The description names another architecture, wire or maintenance protocol, or a newer glibc than the server. Updates shows the reason; nothing is downloaded. | A protocol change goes through **Update Server…** from the new app; a glibc one needs a newer Ubuntu. |
+| Offered as incompatible | The description names another architecture or maintenance protocol, a wire protocol older than the installed release's, or a newer glibc than the server. Updates shows the reason; nothing is downloaded. | A maintenance protocol change goes through **Update Server…** from the new app; a glibc one needs a newer Ubuntu. |
 | `release_changed` | The latest release changed between inspection and review. | Review again. |
 | `checksum_mismatch` | The downloaded bytes are not the digest in the plan, usually an asset replaced after review. | Check whether the asset was re-uploaded; review again. |
-| `incompatible_release` | Manifest protocol, maintenance protocol or architecture differs from the supervisor's. | Usually a wire protocol change; use **Update Server…** from the new app. |
+| `incompatible_release` | Manifest maintenance protocol or architecture differs from the supervisor's, or its wire protocol is older than the installed release's. | For a maintenance protocol change, use **Update Server…** from the new app. |
 | `release_version_mismatch` | The manifest version is not the tag. | A packaging fault: the release workflow should have refused it. Delete the asset and investigate. |
 | `unsafe_release`, `release_too_large` | The archive shape or size is refused. | Packaging fault, as above. |
 | `rolledBack` | The new release failed startup verification; previous release and database restored. | Read the job log and `journalctl -u bloom-server`. If other servers will hit it, delete the asset. |

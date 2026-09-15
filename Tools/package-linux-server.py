@@ -14,6 +14,9 @@ import sys
 import tarfile
 import tempfile
 
+from bloom_maintenance_install import MAINTENANCE_PROTOCOL_VERSION
+from bloom_wire import wire_protocol
+
 
 # Mixing a bundled glibc with the host's dynamic loader is unsupported. Build on the oldest
 # supported Ubuntu release; its glibc requirement is the package's minimum, even on newer hosts.
@@ -85,13 +88,13 @@ def package(binary, output):
                 if notice.is_file() and notice.name.upper().startswith(("LICENSE", "NOTICE")):
                     copy_notice(notice, notices / dependency / notice.relative_to(checkout))
 
-        protocol = int(re.search(r"version = (\d+)", (root / "Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift").read_text())[1])
+        protocol = wire_protocol(root)
         version = os.environ.get("BLOOM_SERVER_VERSION", "").removeprefix("v")
         if not version:
             version = "0.0.0-dev." + run("git", "rev-parse", "--short=12", "HEAD")
         if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
             raise RuntimeError("BLOOM_SERVER_VERSION must be an exact semantic version")
-        manifest = {"protocolVersion": protocol, "maintenanceProtocolVersion": 1, "version": version,
+        manifest = {"protocolVersion": protocol, "maintenanceProtocolVersion": MAINTENANCE_PROTOCOL_VERSION, "version": version,
                     "architecture": platform.machine(), "glibc": run("getconf", "GNU_LIBC_VERSION"),
                     "swift": swift_version, "libraries": {}}
         for name, source in sorted(libraries.items()):

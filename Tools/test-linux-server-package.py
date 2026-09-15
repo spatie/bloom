@@ -27,7 +27,7 @@ class PackageManifestTests(unittest.TestCase):
             files = {
                 repo / "LICENSE.md": "Bloom licence",
                 repo / "Tools/server-licences/ICU.txt": "ICU licence",
-                repo / "Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift": "version = 14",
+                repo / "Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift": "public enum BloomWire {\n    public static let version = 15\n}\n",
                 repo / ".build/checkouts/swift-crypto/LICENSE.txt": "Crypto licence",
                 repo / ".build/checkouts/swift-asn1/LICENSE.txt": "ASN.1 licence",
                 toolchain / "share/swift/LICENSE.txt": "Swift licence",

@@ -44,9 +44,13 @@ that can no longer be read safely authorises nobody.
 
 ## Request envelope
 
+`version` is the app wire version, `BloomWire.version`, not the maintenance protocol. The
+supervisor accepts any positive integer, replies with the same one, and leaves wire compatibility
+to the runtime it forwards other operations to.
+
 ```json
 {
-  "version": 14,
+  "version": 15,
   "id": "e784db85-ded5-4f25-a066-07ecb2b611a1",
   "operation": {
     "maintenance": {
@@ -137,9 +141,10 @@ a release without a server package or an unreachable GitHub; show it rather than
 A `prepare` looks at GitHub again and pins the asset ID and SHA-256 digest into the plan. The job
 downloads exactly that asset and fails with `checksum_mismatch`, `incompatible_release` or
 `release_version_mismatch`, before the running release is touched, when the bytes, the manifest's
-protocol or its version disagree with the plan. A package with another wire protocol version is
-refused this way, so a protocol change reaches such a server through the administrator installer
-instead. Startup verification failures after installation end in `rolledBack`.
+protocol or its version disagree with the plan. A package whose wire protocol is older than the
+installed release's, or which needs another maintenance protocol, is refused this way. A newer
+wire protocol installs in place; a maintenance protocol change reaches a server through the
+administrator installer instead. Startup verification failures after installation end in `rolledBack`.
 
 ## Shared Apple client
 

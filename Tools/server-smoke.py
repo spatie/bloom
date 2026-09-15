@@ -3,12 +3,13 @@
 
 import json
 import pathlib
-import re
 import selectors
 import subprocess
 import sys
 import tempfile
 import uuid
+
+from bloom_wire import wire_protocol
 
 
 def read_line(stream, timeout=10):
@@ -20,13 +21,7 @@ def read_line(stream, timeout=10):
 
 
 def protocol_version():
-    root = pathlib.Path(__file__).resolve().parent.parent
-    shared = root / "Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift"
-    source = shared if shared.exists() else root / "Sources/BloomCore/Server/ServerProtocol.swift"
-    match = re.search(r"public static let (?:protocolVersion|version) = (\d+)", source.read_text())
-    if match is None:
-        raise RuntimeError("The checkout does not declare its wire protocol version")
-    return int(match[1])
+    return wire_protocol()
 
 
 def check(binary):

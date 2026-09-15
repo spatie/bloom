@@ -72,7 +72,7 @@ then verifies the browser sandbox and a screenshot. A browser setup failure leav
 server usable and offers a retry. This host browser is separate from browser tooling inside a
 project's Docker container. See [browser provisioning](SERVER-BROWSER.md) for the boundaries.
 
-**Docker for container projects** is selected by default during installation and can be turned off. This installs
+**Docker for containers** is selected by default during installation and can be turned off. This installs
 Ubuntu's Docker, Compose and rootless dependencies, reserves subordinate user/group IDs and enables
 a separate lingering user service. Images and container data live under `~/bloom/docker/data`.
 Bloom never joins the rootful Docker group or exposes a public Docker socket. Ordinary Docker
@@ -742,11 +742,13 @@ access, so a Mac without the key shows nothing. `ServerUpdateCheckSchedule` and
 `ServerUpdateNotice` in BloomClient hold these decisions, for iPhone and iPad to share.
 
 Releases publish `bloom-server-linux-x86_64.json` beside the package. When a release has one, the
-supervisor reads it before offering the release: a different client protocol, a different
-maintenance protocol, another architecture or a newer glibc than the server has marks the release
-`incompatible` with the reason, instead of offering an update that would be refused after its
-download. A release with a newer protocol names the way forward: update Bloom on the Mac, then use
-**Update Server…**, which installs the server that app includes. Older releases without the
+supervisor reads it before offering the release: a wire protocol older than the installed
+release's, a different maintenance protocol, another architecture or a newer glibc than the server
+has marks the release `incompatible` with the reason, instead of offering an update that would be
+refused after its download. A newer wire protocol is offered, because the new server still accepts
+the older versions a client negotiates down to. A release needing another maintenance protocol
+names the way forward: update Bloom on the Mac, then use **Update Server…**, which installs the
+server and supervisor that app includes. Older releases without the
 description are offered as before, and every rule is still checked on the downloaded manifest.
 
 Maintenance requires `diagnostics.maintenanceManagement: true` and a separate administrator key.
@@ -799,9 +801,10 @@ stable release of `spatie/bloom` and offers it when its tag is newer than the in
 Prereleases are never offered, and neither is an older version. A server may take up to fifteen
 minutes to notice a new release; reviewing an update always checks again, and the plan pins the
 exact asset and its GitHub SHA-256 digest. The package manifest must name that version, `x86_64`,
-maintenance protocol 1 and the wire protocol the supervisor was installed for. A release with a
-different protocol version fails before anything is replaced, and such a server moves through
-**Update Server…** instead, which reinstalls the supervisor with it. Development bootstrap uses a
+maintenance protocol 1 and a wire protocol no older than the installed release's manifest names.
+A newer wire protocol installs in place. An older one, or another maintenance protocol, fails
+before anything is replaced, and a maintenance protocol change moves through **Update Server…**
+instead, which reinstalls the supervisor with it. Development bootstrap uses a
 matching packaged server payload; client builds alone do not install or enable the supervisor on an
 existing server.
 

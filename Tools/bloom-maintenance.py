@@ -26,6 +26,11 @@ except ImportError:
 MAX_FRAME = 65536
 MAX_RUNTIME_FRAME = 16_777_216
 TERMINAL_STATES = ('succeeded', 'failed', 'cancelled', 'rolledBack')
+# The maintenance contract this supervisor speaks and the release manifests it can install. The
+# app wire protocol has no constant here: a literal 14 in this file refused every client and every
+# release once BloomWire moved to 15. The installed release's manifest says which wire protocol is
+# running, and the runtime alone decides which clients it accepts.
+MAINTENANCE_PROTOCOL_VERSION = 1
 
 
 class MaintenanceError(Exception):
@@ -596,11 +601,11 @@ def https_open(url, accept='application/octet-stream'):
 RELEASE_PACKAGE = 'bloom-server-linux-x86_64.tar.gz'
 RELEASE_METADATA = 'bloom-server-linux-x86_64.json'
 # Replace an incompatible release through the Mac, whose app bundle carries a matching server
-# and supervisor. The supervisor cannot install a runtime its own clients cannot talk to.
+# and supervisor. A release needing another maintenance protocol cannot be installed by this one.
 UPDATE_THROUGH_MAC = 'Update Bloom on your Mac, then choose Update Server… in Server Settings > Updates to install the server it includes.'
 
 
-def release_asset(config, protocol_version=14, metadata_reader=None):
+def release_asset(config, installed_protocol=None, metadata_reader=None):
     import re
     value = fetch_json('https://api.github.com/repos/' + config['release_repository'] + '/releases/latest')
     require(isinstance(value, dict) and not value.get('draft') and not value.get('prerelease'),
@@ -627,7 +632,7 @@ def release_asset(config, protocol_version=14, metadata_reader=None):
             # degrades to the behaviour releases without one have, rather than hiding an update.
             metadata = None
         if metadata is not None:
-            reason = release_incompatibility(metadata, result, protocol_version)
+            reason = release_incompatibility(metadata, result, installed_protocol)
             if reason:
                 result['incompatible'] = reason
     return result
@@ -654,11 +659,19 @@ def host_glibc():
         return None
 
 
-def release_incompatibility(metadata, asset, protocol_version=14, host=None):
+def release_incompatibility(metadata, asset, installed_protocol=None, host=None):
     """Why this supervisor must not offer a described release, or None when it may.
 
     A mismatch between the description and GitHub's own release is a broken release rather than an
     incompatible one, so it is refused outright instead of being explained as a version problem.
+
+    `installed_protocol` is the wire protocol in the running release's manifest, or None when that
+    is unknown. A newer wire protocol is offered: the new runtime keeps answering the older
+    versions in `BloomWire.supportedVersions` and a client negotiates down to it, while a client
+    too old for it is told to update by the app rather than by this supervisor. Refusing it, as
+    this did when both numbers were pinned, stranded every installed server on the first release
+    that raised `BloomWire.version`. An older wire protocol is still refused, because it would
+    strand the clients that already moved.
     """
     require(isinstance(metadata, dict), 'release_unavailable', 'The server release description is invalid.')
     for key, expected in (('name', RELEASE_PACKAGE), ('tag', asset['version']), ('sha256', asset['sha256'])):
@@ -670,14 +683,11 @@ def release_incompatibility(metadata, asset, protocol_version=14, host=None):
         return f'Bloom Server {version} is built for {architecture}, not this x86_64 server.'
     wire = metadata.get('protocolVersion')
     require(wire is None or type(wire) is int, 'release_unavailable', 'The server release description is invalid.')
-    if wire is not None and wire != protocol_version:
-        if wire > protocol_version:
-            return (f'Bloom Server {version} uses protocol {wire}, which this installation (protocol {protocol_version}) '
-                    'cannot update to in place. ' + UPDATE_THROUGH_MAC)
-        return f'Bloom Server {version} uses the older protocol {wire} and cannot replace this installation (protocol {protocol_version}).'
+    if wire is not None and installed_protocol is not None and wire < installed_protocol:
+        return f'Bloom Server {version} uses the older protocol {wire} and cannot replace this installation (protocol {installed_protocol}).'
     supervisor = metadata.get('maintenanceProtocolVersion')
     require(supervisor is None or type(supervisor) is int, 'release_unavailable', 'The server release description is invalid.')
-    if supervisor is not None and supervisor != 1:
+    if supervisor is not None and supervisor != MAINTENANCE_PROTOCOL_VERSION:
         return f'Bloom Server {version} needs a different maintenance service than the one installed. ' + UPDATE_THROUGH_MAC
     required, available = glibc_version(metadata.get('glibc')), glibc_version(host if host is not None else host_glibc())
     if required and available and required > available:
@@ -694,7 +704,7 @@ def fsync_directory(path):
         os.close(descriptor)
 
 
-def extract_release(archive_path, destination, protocol_version=14, expected_version=None):
+def extract_release(archive_path, destination, installed_protocol=None, expected_version=None):
     import tarfile
     import shutil
     prefix = 'bloom-server-linux-x86_64'
@@ -724,7 +734,7 @@ def extract_release(archive_path, destination, protocol_version=14, expected_ver
                     os.fsync(output.fileno())
                 target.chmod(0o755 if member.mode & 0o111 else 0o644)
     bundle = pathlib.Path(destination) / prefix
-    executable = validate_release_manifest(bundle, protocol_version, expected_version)
+    executable = validate_release_manifest(bundle, installed_protocol, expected_version)
     directories = [bundle, *(item for item in bundle.rglob('*') if item.is_dir())]
     for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
         directory.chmod(0o755)
@@ -732,15 +742,27 @@ def extract_release(archive_path, destination, protocol_version=14, expected_ver
     return executable
 
 
-def validate_release_manifest(bundle, protocol_version=14, expected_version=None):
+def manifest_protocol(bundle):
+    """The wire protocol a release's manifest names, or None when it names none that can be read."""
+    try:
+        manifest = json.loads((pathlib.Path(bundle) / 'manifest.json').read_bytes())
+    except (OSError, ValueError):
+        return None
+    wire = manifest.get('protocolVersion') if isinstance(manifest, dict) else None
+    return wire if type(wire) is int and wire > 0 else None
+
+
+def validate_release_manifest(bundle, installed_protocol=None, expected_version=None):
     bundle = pathlib.Path(bundle)
     manifest_path = bundle / 'manifest.json'
     require(manifest_path.is_file() and manifest_path.stat().st_size <= MAX_FRAME,
             'unsafe_release', 'The package manifest is missing or too large.')
     manifest = json.loads(manifest_path.read_bytes())
     executable = bundle / 'bin/bloom-server'
-    require(isinstance(manifest, dict) and manifest.get('protocolVersion') == protocol_version
-            and manifest.get('maintenanceProtocolVersion') == 1
+    wire = manifest.get('protocolVersion') if isinstance(manifest, dict) else None
+    # The same rule as release_incompatibility: any real wire protocol not older than the running one.
+    require(type(wire) is int and wire > 0 and (installed_protocol is None or wire >= installed_protocol)
+            and manifest.get('maintenanceProtocolVersion') == MAINTENANCE_PROTOCOL_VERSION
             and manifest.get('architecture') == 'x86_64' and executable.is_file()
             and executable.stat().st_mode & 0o111 and (bundle / 'lib').is_dir(),
             'incompatible_release', 'The server package is incompatible with this supervisor and protocol.')
@@ -775,6 +797,14 @@ class Supervisor:
         self.recovering = False
         self.recovery_failed = False
         self.recovery_thread = None
+
+    def installed_protocol(self):
+        """The wire protocol of the release now committed, from its own manifest.
+
+        Read at the moment it is needed, rather than recorded in the configuration at installation,
+        because a supervised update changes it and the configuration is never rewritten by one.
+        """
+        return manifest_protocol(pathlib.Path(self.current['executable']).parent.parent)
 
     @staticmethod
     def signature(path):
@@ -896,7 +926,7 @@ class Supervisor:
         server = dict(id='server', title='Bloom Server', installedVersion=self.current.get('version'),
                       availableVersion=None, canUpdate=False, detail='Checking stable server releases.')
         try:
-            asset = release_asset(self.config, self.config.get('protocol_version', 14))
+            asset = release_asset(self.config, self.installed_protocol())
             newer = newer_version(asset['version'], self.current.get('version'))
             server.update(availableVersion=asset['version'], canUpdate=newer and not asset.get('incompatible'),
                           detail='Updates use the stable GitHub release and its published SHA-256 digest.')
@@ -944,7 +974,7 @@ class Supervisor:
                     restarts=['Bloom Server'], expiresAt=datetime.datetime.fromtimestamp(expires, datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
                     _expires=expires)
         if component == 'server':
-            asset = release_asset(self.config, self.config.get('protocol_version', 14))
+            asset = release_asset(self.config, self.installed_protocol())
             require(asset['version'] == plan['targetVersion'], 'release_changed', 'The stable release changed. Review it again.')
             if asset.get('incompatible'):
                 raise MaintenanceError('incompatible_release', asset['incompatible'], UPDATE_THROUGH_MAC)
@@ -1152,7 +1182,7 @@ class Supervisor:
             executable = destination / 'bin/bloom-server'
             trusted_path(executable)
             trusted_path(destination / 'manifest.json')
-            validate_release_manifest(destination, self.config.get('protocol_version', 14), plan['targetVersion'])
+            validate_release_manifest(destination, self.installed_protocol(), plan['targetVersion'])
             return str(executable)
         staging = pathlib.Path(self.config['install_root']) / ('.staging-' + job['id'])
         staging.mkdir(mode=0o700)
@@ -1170,7 +1200,7 @@ class Supervisor:
                 output.flush()
                 os.fsync(output.fileno())
             require(hmac.compare_digest(digest.hexdigest(), asset['sha256']), 'checksum_mismatch', 'The server package does not match the reviewed SHA-256 digest.')
-            executable = extract_release(archive, staging, self.config.get('protocol_version', 14), plan['targetVersion'])
+            executable = extract_release(archive, staging, self.installed_protocol(), plan['targetVersion'])
             os.replace(executable.parent.parent, destination)
             fsync_directory(destination.parent)
             return str(destination / 'bin/bloom-server')
@@ -1558,7 +1588,12 @@ class ControlServer:
                         request = json.loads(raw)
                         require(isinstance(request, dict), 'invalid_request', 'Invalid request frame.')
                         request['id'] = identifier(request.get('id'))
-                        require(request.get('version') == self.config.get('protocol_version', 14), 'unsupported_protocol', 'Unsupported protocol version.')
+                        # The envelope carries the app wire version, not a maintenance one. The runtime
+                        # decides wire compatibility and answers an unsupported version with the
+                        # reply a client negotiates down from. Pinning it here to the installed
+                        # protocol closed the connection on that negotiation instead, and after an
+                        # update to a newer protocol refused every client of the new release.
+                        require(type(request.get('version')) is int and request['version'] > 0, 'unsupported_protocol', 'Unsupported protocol version.')
                         operation = request.get('operation')
                         require(isinstance(operation, dict) and len(operation) == 1, 'invalid_request', 'Invalid operation frame.')
                         if 'maintenance' in operation:
