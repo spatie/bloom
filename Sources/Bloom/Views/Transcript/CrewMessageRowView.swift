@@ -47,8 +47,8 @@ struct CrewMessageRowView: View {
 
     @ViewBuilder private var content: some View {
         switch message.event {
-        case .said, .brief: spoken
-        case .stopped, .failed: fact
+        case .said, .brief, .relayed: spoken
+        case .stopped, .failed, .cancelled: fact
         }
     }
 
@@ -104,9 +104,12 @@ struct CrewMessageRowView: View {
         switch message.event {
         case .said: "said"
         case .brief: "started you with"
+        // Drawn by `WorkspaceMessageRowView` instead, which names the workspace. Answered here so
+        // the switch stays exhaustive.
+        case .relayed: "said"
         // Never drawn: a fact is its own line. Answered rather than defaulted so that a fifth
         // event has to be argued about here instead of arriving as the word "said".
-        case .stopped, .failed: ""
+        case .stopped, .failed, .cancelled: ""
         }
     }
 
@@ -207,6 +210,7 @@ enum CrewInk {
     static func rule(for sender: CrewMessage.Sender) -> Color? {
         switch sender {
         case .orchestrator, .subagent: Palette.accent
+        case .otherWorkspace: Palette.workspaceMessage
         case .bloom: nil
         }
     }

@@ -736,6 +736,22 @@ struct TranscriptListView: View {
                     // itself rather than as the owner's pending bubble: they did not write it,
                     // Edit and Discard mean nothing on it, and drawing it in their bubble is the
                     // bug `CrewMessageRowView` exists to end, in the one state that was missed.
+                    // From another workspace: on the right, dotted, and deletable the way the
+                    // owner's own queued turn is, but not editable or steerable, because the words
+                    // are not his. See `WorkspaceMessageRowView`.
+                    if let crew = delivery.crewMessage, crew.event == .relayed {
+                        return AnyView(
+                            WorkspaceMessageRowView(
+                                message: crew,
+                                isWaiting: true,
+                                holdSentence: holdSentence,
+                                onDelete: { transcript.askToDiscard(delivery) }
+                            )
+                            .messageArrival(transcript.messageArrivals.delivery(delivery.id))
+                            .padding(.horizontal, TranscriptLayout.inset)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        )
+                    }
                     if let crew = delivery.crewMessage {
                         return AnyView(
                             CrewMessageRowView(message: crew, isWaiting: true)

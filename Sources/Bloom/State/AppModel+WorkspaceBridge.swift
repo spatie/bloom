@@ -133,6 +133,14 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.stopCrewForBridge(name, from: sessionID, in: workspaceID)
             },
+            // A message to another workspace. The tool has resolved the target, checked who may
+            // write to it and recorded the message; only one that may go without the owner reaches
+            // this, and the approval card calls the same method for the rest. See
+            // `AppModel+WorkspaceMessages`.
+            WorkspaceSayTool { [weak self] message in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.deliverWorkspaceMessage(message)
+            },
         ])
     }
 

@@ -757,6 +757,48 @@ final class WorkspaceModel {
         )
     }
 
+    // MARK: - Messages from other workspaces
+
+    /// Which chat a message from another workspace goes into.
+    ///
+    /// The chat it answers, when that chat is still open here, because "message me when it is
+    /// released" means the conversation that asked. Otherwise the active chat, and otherwise a new
+    /// one, which is the order a Merge press uses.
+    func chatForWorkspaceMessage(preferring preferred: SessionID?) async -> Session? {
+        await reloadSessions()
+        if let preferred, let chat = sessions.first(where: { $0.id == preferred }) {
+            return chat
+        }
+        return await sessionForPullRequest(titledIfNew: "Messages")
+    }
+
+    /// Starts the queue moving in a chat a message from another workspace has just joined. The
+    /// delivery and its record were written together by `Store.enqueueWorkspaceMessage`. Not
+    /// selected: a message arriving must not take the centre column from somebody typing.
+    func drainWorkspaceMessage(into chat: Session) async {
+        let transcript = transcript(for: chat)
+        await transcript.refreshQueue()
+        await transcript.drain()
+    }
+
+    /// Tells the chat that sent a message that the owner cancelled it before it went.
+    func tellWorkspaceMessageCancelled(_ message: WorkspaceMessage) async {
+        guard let store, let sessionID = message.source.sessionID,
+              let chat = try? await store.session(id: sessionID), chat.archivedAt == nil
+        else { return }
+        _ = try? await store.enqueueDelivery(
+            Delivery(
+                targetSessionID: chat.id,
+                sourceWorkspaceID: message.target.workspaceID,
+                kind: .report,
+                crew: CrewMessage.cancelled(to: message.target.workspace, text: message.text)
+            )
+        )
+        let transcript = transcript(for: chat)
+        await transcript.refreshQueue()
+        await transcript.drain()
+    }
+
     /// Stops a crew member: the agent ends, its row leaves the sidebar, and its conversation
     /// stays where it is.
     ///

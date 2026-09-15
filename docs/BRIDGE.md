@@ -103,7 +103,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Thirty-eight, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Thirty-nine, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
@@ -119,6 +119,7 @@ places: the listing, the dispatch and the gate.
 | `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
 | `workspace_archive` | Archive a workspace through normal safety checks, keeping its branch and history. Its own, and only when the turn asking for it has ended, for a workspace agent; any of them, named out loud and at once, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
+| `workspace_say` | Put a message in another workspace's chat, with the owner's authority, headed with the workspace, project and chat it came from. Cancellable from either end while queued. A child may write only to the workspace that started it or to one that wrote to it first | ✓ | ✓ | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
 | `pane_split` | Add a pane inside the calling chat's tab, defaulting to a new chat on its right | ✓ | | |
@@ -149,8 +150,10 @@ places: the listing, the dispatch and the gate.
 | `quick_prompt_update` | Change one, field by field, leaving the fields it does not name alone | | | ✓ |
 | `quick_prompt_delete` | Take one out of the library for good | | | ✓ |
 
-**A child sees `whoami` and nothing else.** That is not an oversight and not a cost saving: a child
-is a workspace an agent asked for, which nobody weighed, so it reports and that is all.
+**A child sees `whoami` and `workspace_say`, and nothing else.** That is not an oversight and not a
+cost saving: a child is a workspace an agent asked for, which nobody weighed, so it reports and
+that is all. `workspace_say` is how it reports, and it is held to exactly that: see "Talking to
+another workspace" below.
 
 The gate is enforced twice on purpose. `tools/list` hides what the caller may not use, so a child
 never sees a tool to be tempted by, and `tools/call` refuses it again, so a process speaking raw
@@ -224,17 +227,17 @@ One number kept its old sense deliberately: `WorkspaceStartAllowance.running`, t
 eight on a parent agent's children, counts workspaces that are not archived and says so in its own
 doc comment. That is a brake on worktrees held open, not on turns in flight.
 
-### The twenty-four that need the app, and the fourteen that do not
+### The twenty-five that need the app, and the fourteen that do not
 
 `BridgeToolbox.standard` holds the fourteen that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
-`AppModel.bridgeToolbox()` adds the other twenty-four to it, because starting a workspace has to reach
+`AppModel.bridgeToolbox()` adds the other twenty-five to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
 takes, moving the selection is the window's own, and a pane is a thing the window owns. Each of
 those crosses the line as an injected closure
 (`WorkspaceStarting`, `WorkspaceMergeRequesting`, `Revealing`, `PaneOpening`, `PaneSplitting`,
 `PaneClosing`, `PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `TerminalStarting`,
-`TerminalPaneCommanding`, `WorkspaceTabListing`, `WorkspaceTabSelecting`, `CrewStarting`, `CrewSaying`, `CrewStopping`), so a pane an agent asks for is the pane the
+`TerminalPaneCommanding`, `WorkspaceTabListing`, `WorkspaceTabSelecting`, `CrewStarting`, `CrewSaying`, `CrewStopping`, `WorkspaceMessageDelivering`), so a pane an agent asks for is the pane the
 menu makes, unchanged and not copied. It adds them **to** `.standard` rather than listing its
 handlers again, because a copy of that list is a copy that drifts: a tool added to the core toolbox
 and not to the app's would pass every test in the suite and never reach the running app.
@@ -433,6 +436,45 @@ A message from a crew member reaches its orchestrator inside `BridgeUntrustedTex
 read off a web page does and for the same reason: a subagent is a model that has been reading
 files, and what it says back is data rather than an instruction from the person the orchestrator is
 working for. See `Crew.message(from:saying:)`.
+
+### Talking to another workspace
+
+`agent_say` stops at the edge of a worktree, and `workspace_start` used to be the last thing an
+agent could say to the workspace it started. "Fix this bug in the other repository, release it and
+tell me the version" had no way to follow up. Claude Code's own cross-session messaging delivers the
+text, and the agent receiving it rightly treats an unverified relay as one and will not merge or
+tag on its say-so. `workspace_say` is Bloom delivering the message itself.
+
+**It carries the owner's authority, and that is the owner's decision.** An approval step was built
+first: the message waited, a card showed the owner the text, and only an approved message arrived as
+theirs. It was taken out. Every agent here works for the same person, and the control the owner
+wanted is the one every queued message already has: taking it back out before it goes. So the
+envelope names the workspace, its id, its project and the chat that sent it, says the message
+carries the owner's authority, and says that anything it quotes from elsewhere is still data.
+
+**Addressed by workspace, delivered to a chat, queued like anything else.** The caller names a
+workspace by the id `workspace_list` reports, or by a name no other workspace shares. The message
+goes into the chat that last wrote to the caller's workspace from there, when it is answering
+something, and into that workspace's active chat otherwise. `Store.enqueueWorkspaceMessage` writes
+the delivery and a `workspace_messages` row in one transaction. The delivery is what the receiving
+chat drains; the row is what the sending chat reads.
+
+**Both ends are drawn, and both agree.** In the receiving chat the message is a periwinkle bubble on
+the right, with the owner's turns, because the right means "said to this agent"; the line above it
+names the workspace, project and chat. Queued, it is dotted and has Delete, like the owner's own
+queued turn, but not Edit or Steer, and its words never go back to the composer. In the sending chat
+the `workspace_say` call is drawn as an outlined bubble on the left, "To" the other workspace, saying
+queued (with Cancel), delivered and when, or cancelled. The row's `state` is moved inside
+`markDelivered`, `cancelDelivery` and `restoreDelivery`, in the same statements that move the
+delivery, so the two bubbles cannot disagree. A cancel from either end tells the sending chat.
+
+**The reply path is the same tool.** The envelope ends by naming the id to pass back, and
+`Store.latestWorkspaceMessage` routes the answer to the chat that asked rather than whichever chat
+is active there. A message from the owner's own client says there is no workspace to answer.
+
+**A child may write to the workspace that started it, and to one that wrote to it first.** It
+cannot open a conversation with a workspace that never spoke to it, and a child whose own row
+cannot be read is refused rather than let through.
 
 **One thing on the bridge can now be destroyed, and it is a few lines of the owner's own writing.**
 `quick_prompt_update` overwrites a prompt and `quick_prompt_delete` removes one, and Bloom keeps no
@@ -666,7 +708,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `chat_list`, `chat_read`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `chat_list`, `chat_read`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop`, `workspace_say` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.

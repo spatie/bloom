@@ -498,6 +498,16 @@ enum Palette {
     /// findable at all.
     static let mergedFill = dynamic(PaletteInk.mergedFill)
 
+    /// A message from another workspace, and nothing else.
+    ///
+    /// Periwinkle, because every nearer hue is already a word: teal is the accent and an agent
+    /// speaking, blue is running, violet is merged and amber is caution. The owner's own turns are
+    /// the filled teal on the right; a message from another workspace sits on the same side,
+    /// because both are said TO this agent, and this colour is what says who wrote it.
+    static let workspaceMessage = dynamic(PaletteInk.workspaceMessage)
+    /// The ground of a delivered message from another workspace. Text on it is `textPrimary`.
+    static let workspaceMessageFill = dynamic(PaletteInk.workspaceMessageFill)
+
     // MARK: Diffs
     //
     // Stated as an alpha over whatever the line is drawn on, rather than as an opaque hex per
