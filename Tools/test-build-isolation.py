@@ -175,7 +175,7 @@ class IOSBuildTests(unittest.TestCase):
         return ["bash", "-c", 'set -euo pipefail; source "$1"; ' + body, "fixture", str(source)], dict(self.environment, **environment)
 
     def paths(self, checkout, **environment):
-        command, env = self.shell(checkout, 'bloom_ios_begin archive; printf "%s\\n" "$project_dir" "$build_dir" "$archive_path"', **environment)
+        command, env = self.shell(checkout, 'bloom_ios_begin archive; bloom_ios_path project; bloom_ios_path build; bloom_ios_path archive', **environment)
         result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.splitlines()
