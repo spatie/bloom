@@ -230,34 +230,46 @@ struct AgentQuestionCard: View {
                         get: { box.draft.other[question.id] ?? "" },
                         set: { box.draft.other[question.id] = $0 }
                 )
-                Group {
-                    if question.isSecret {
-                        SecureField("Your answer", text: answer)
-                    } else {
-                        TextField("Your answer", text: answer, axis: .vertical)
+                // Once answered the words are drawn as text rather than as a disabled field,
+                // because a disabled field greys its contents down to placeholder grey and the
+                // one thing the person wrote read as the one thing they had not.
+                if !isOpen, !question.isSecret {
+                    Text(answer.wrappedValue)
+                        .font(Typo.label)
+                        .foregroundStyle(Palette.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Group {
+                        if question.isSecret {
+                            SecureField("Your answer", text: answer)
+                        } else {
+                            TextField("Your answer", text: answer, axis: .vertical)
+                        }
                     }
-                }
-                .textFieldStyle(.roundedBorder)
-                .font(Typo.label)
-                .lineLimit(1...4)
-                .focused($otherFocus, equals: question.id)
-                .disabled(!isOpen)
-                // Focus moves here when the row appears, but only when it was this drawing of the
-                // card that asked for it. See `openedOther`.
-                .task {
-                    guard openedOther.contains(question.id) else { return }
-                    otherFocus = question.id
-                }
-                // Return sends, because the field is the last thing anybody touches before the
-                // answer goes and reaching for the mouse to finish a sentence is not how a Mac
-                // works. "Send answer" carries `.defaultAction`, but this field is on a vertical
-                // axis so that a long answer wraps, and a vertical `TextField` takes Return for a
-                // newline before the default button ever sees it. Shift-Return still makes one,
-                // which is the pairing every composer in this app already uses.
-                .onKeyPress(keys: [.return]) { press in
-                    guard press.modifiers.isEmpty, isComplete else { return .ignored }
-                    send()
-                    return .handled
+                    .textFieldStyle(.roundedBorder)
+                    .font(Typo.label)
+                    .lineLimit(1...4)
+                    .focused($otherFocus, equals: question.id)
+                    .disabled(!isOpen)
+                    // Focus moves here when the row appears, but only when it was this drawing of the
+                    // card that asked for it. See `openedOther`.
+                    .task {
+                        guard openedOther.contains(question.id) else { return }
+                        otherFocus = question.id
+                    }
+                    // Return sends, because the field is the last thing anybody touches before the
+                    // answer goes and reaching for the mouse to finish a sentence is not how a Mac
+                    // works. "Send answer" carries `.defaultAction`, but this field is on a vertical
+                    // axis so that a long answer wraps, and a vertical `TextField` takes Return for a
+                    // newline before the default button ever sees it. Shift-Return still makes one,
+                    // which is the pairing every composer in this app already uses.
+                    .onKeyPress(keys: [.return]) { press in
+                        guard press.modifiers.isEmpty, isComplete else { return .ignored }
+                        send()
+                        return .handled
+                    }
                 }
             }
             .padding(.vertical, Metrics.spacing)
