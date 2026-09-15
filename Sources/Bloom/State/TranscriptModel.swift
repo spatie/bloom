@@ -578,7 +578,16 @@ final class TranscriptModel {
         // drawn twice. Retired here rather than after the send returns, because the pump can read
         // the row first: only one turn is ever in flight, so a user row landing while something is
         // sending is that sentence. See `sending`.
-        if message.kind == .user { sending = nil }
+        //
+        // A crew row is the same retirement for a message an agent wrote: the runner records it
+        // as `.crew` instead of `.user`. Checking only `.user` left a message from another
+        // workspace drawn a second time, as the owner's teal bubble under the turn it started,
+        // until something else cleared the slot. Only when what is sending IS a crew message,
+        // because Bloom writes some crew rows directly, and one of those landing mid send must not
+        // take the owner's own sentence off the screen early.
+        if message.kind == .user || (message.kind == .crew && sending?.crewMessage != nil) {
+            sending = nil
+        }
     }
 
     /// The turn somebody stopped, named by the `seq` of the row that closed it.

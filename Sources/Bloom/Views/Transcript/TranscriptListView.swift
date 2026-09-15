@@ -726,6 +726,24 @@ struct TranscriptListView: View {
             sentArrival: sending.flatMap { transcript.messageArrivals.delivery($0.id) },
             content: {
                 guard let sending else { return AnyView(EmptyView()) }
+                // A message an agent wrote is drawn as itself for the moment it is going, as it is
+                // in the queue above and in the transcript after. It used to fall through to the
+                // owner's teal bubble here, which is how a message from another workspace appeared
+                // twice: once as itself, and once more as though the owner had typed it.
+                if let crew = sending.crewMessage {
+                    return AnyView(
+                        Group {
+                            if crew.event == .relayed {
+                                WorkspaceMessageRowView(message: crew)
+                            } else {
+                                CrewMessageRowView(message: crew)
+                            }
+                        }
+                        .messageArrival(transcript.messageArrivals.delivery(sending.id))
+                        .padding(.horizontal, TranscriptLayout.inset)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    )
+                }
                 let review = ReviewTurn.split(sending.body)
                 let turn = AttachmentTrailer.split(sending.body)
                 return AnyView(

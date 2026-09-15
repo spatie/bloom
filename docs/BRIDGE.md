@@ -459,14 +459,17 @@ something, and into that workspace's active chat otherwise. `Store.enqueueWorksp
 the delivery and a `workspace_messages` row in one transaction. The delivery is what the receiving
 chat drains; the row is what the sending chat reads.
 
-**Both ends are drawn, and both agree.** In the receiving chat the message is a periwinkle bubble on
-the right, with the owner's turns, because the right means "said to this agent"; the line above it
-names the workspace, project and chat. Queued, it is dotted and has Delete, like the owner's own
+**Both ends are drawn, as the owner's own bubble in another colour.** In the receiving chat the
+message is a Starfish orange bubble on the right, with the owner's turns, because the right means
+"said to this agent", with "From" and the workspace's name above it; the name goes to that
+workspace, and the full prompt the model was handed opens under the pointer. It is drawn whole,
+because it is what that agent is answering. Queued, it is dotted and has Delete, like the owner's own
 queued turn, but not Edit or Steer, and its words never go back to the composer. In the sending chat
-the `workspace_say` call is drawn as an outlined bubble on the left, "To" the other workspace, saying
-queued (with Cancel), delivered and when, or cancelled. The row's `state` is moved inside
-`markDelivered`, `cancelDelivery` and `restoreDelivery`, in the same statements that move the
-delivery, so the two bubbles cannot disagree. A cancel from either end tells the sending chat.
+the `workspace_say` call is the same bubble mirrored on the left, "To" the other workspace, cut to
+three lines with Show all. It says no delivery state, because nothing else in the transcript does,
+except that it was cancelled before it went. The row's `state` is moved inside `markDelivered`,
+`cancelDelivery` and `restoreDelivery`, in the same statements that move the delivery. A Delete in
+the receiving chat tells the sending chat.
 
 **The reply path is the same tool.** The envelope ends by naming the id to pass back, and
 `Store.latestWorkspaceMessage` routes the answer to the chat that asked rather than whichever chat
