@@ -1540,6 +1540,19 @@ public actor Store {
                     "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
                     [.text(id)]
                 )
+                // A message between workspaces still queued into or out of this one will now never
+                // go, so the bubble in the other chat has to stop saying "queued" and offering Cancel.
+                try db.run(
+                    """
+                    UPDATE workspace_messages SET state = 'cancelled'
+                    WHERE state = 'queued' AND delivery_id IN (
+                        SELECT id FROM deliveries
+                        WHERE source_workspace_id = ?
+                           OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
+                    )
+                    """,
+                    [.text(id), .text(id)]
+                )
                 try db.run(
                     """
                     DELETE FROM deliveries
@@ -2984,34 +2997,61 @@ public actor Store {
             .first.map(Self.workspaceMessage(from:))
     }
 
-    /// The last message from one workspace to another that was not taken back.
+    /// The last message from one workspace that reached another's agent.
     ///
-    /// The reply path turns on this. Its source chat is the chat an answer should land in, and its
-    /// existence is what lets a workspace an agent started answer a workspace that wrote to it.
+    /// The reply path turns on this: its source chat is the chat an answer should land in.
+    /// Delivered only, because a message still queued has not been read, so nothing can be
+    /// answering it, and it may yet be cancelled.
     public func latestWorkspaceMessage(
         from source: WorkspaceID, to target: WorkspaceID
     ) throws -> WorkspaceMessage? {
         try db.query(
             """
             SELECT * FROM workspace_messages
-            WHERE source_workspace_id = ? AND target_workspace_id = ? AND state != 'cancelled'
+            WHERE source_workspace_id = ? AND target_workspace_id = ? AND state = 'delivered'
             ORDER BY created_at DESC, rowid DESC LIMIT 1
             """,
             [.text(source), .text(target)]
         ).first.map(Self.workspaceMessage(from:))
     }
 
-    /// Takes a queued message back out, from the chat that sent it. Nil when it had already gone.
+    /// Every workspace whose message has reached this one's agent, which is who a workspace an
+    /// agent started may answer. See `WorkspaceMessageReach`.
+    public func workspacesThatWrote(to target: WorkspaceID) throws -> Set<WorkspaceID> {
+        Set(try db.query(
+            """
+            SELECT DISTINCT source_workspace_id FROM workspace_messages
+            WHERE target_workspace_id = ? AND state = 'delivered' AND source_workspace_id IS NOT NULL
+            """,
+            [.text(target)]
+        ).compactMap { $0.string("source_workspace_id").map(WorkspaceID.init) })
+    }
+
+    /// Takes a queued message back out, from the chat that sent it. Nil when it had already gone,
+    /// or is going.
     ///
-    /// Through `cancelDelivery`, which is the same way out the receiving chat's Delete takes, so
-    /// both ends lose the same race with the drain the same way.
+    /// **Pending only, where the receiving chat's own Delete also takes `uncertain`.** A delivery is
+    /// uncertain while its turn is being started: the crew row is already in the receiving
+    /// transcript and the runner is waiting on the CLI. That chat's Delete is held off for exactly
+    /// that window by the transcript that is dispatching it, and this side cannot see that
+    /// transcript. Deleting here would tell the sender "its agent never saw it" about a turn that
+    /// then starts, so a message that far along is treated as gone.
     @discardableResult
     public func cancelWorkspaceMessage(id: WorkspaceMessageID) throws -> WorkspaceMessage? {
-        guard let message = try workspaceMessage(id: id), message.state == .queued,
-              let deliveryID = message.deliveryID,
-              try cancelDelivery(id: deliveryID)
-        else { return nil }
-        return try workspaceMessage(id: id)
+        try db.transaction {
+            guard let message = try workspaceMessage(id: id), message.state == .queued,
+                  let deliveryID = message.deliveryID
+            else { return nil }
+            try db.run(
+                "DELETE FROM deliveries WHERE id = ? AND delivery_state = 'pending'", [.text(deliveryID)]
+            )
+            guard db.changedRowCount == 1 else { return nil }
+            try db.run(
+                "UPDATE workspace_messages SET state = 'cancelled' WHERE id = ? AND state = 'queued'",
+                [.text(id)]
+            )
+            return try workspaceMessage(id: id)
+        }
     }
 
     // MARK: - Review comments

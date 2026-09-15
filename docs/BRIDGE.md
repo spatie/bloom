@@ -119,7 +119,7 @@ places: the listing, the dispatch and the gate.
 | `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
 | `workspace_archive` | Archive a workspace through normal safety checks, keeping its branch and history. Its own, and only when the turn asking for it has ended, for a workspace agent; any of them, named out loud and at once, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
-| `workspace_say` | Put a message in another workspace's chat, with the owner's authority, headed with the workspace, project and chat it came from. Cancellable from either end while queued. A child may write only to the workspace that started it or to one that wrote to it first | ✓ | ✓ | ✓ |
+| `workspace_say` | Put a message in another workspace's chat, with the owner's authority, headed with the workspace, project and chat it came from. Cancellable from either end while queued. A child may write only to the workspace that started it or to one whose message has reached it | ✓ | ✓ | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
 | `pane_split` | Add a pane inside the calling chat's tab, defaulting to a new chat on its right | ✓ | | |
@@ -472,7 +472,7 @@ delivery, so the two bubbles cannot disagree. A cancel from either end tells the
 `Store.latestWorkspaceMessage` routes the answer to the chat that asked rather than whichever chat
 is active there. A message from the owner's own client says there is no workspace to answer.
 
-**A child may write to the workspace that started it, and to one that wrote to it first.** It
+**A child may write to the workspace that started it, and to one whose message has reached it.** It
 cannot open a conversation with a workspace that never spoke to it, and a child whose own row
 cannot be read is refused rather than let through.
 

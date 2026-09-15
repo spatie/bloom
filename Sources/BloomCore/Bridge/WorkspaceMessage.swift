@@ -127,7 +127,8 @@ public struct WorkspaceMessage: Identifiable, Sendable, Hashable {
                 + "workspace_say. Answer in this chat."
         }
         return "To answer, call workspace_say with workspace \"\(workspaceID.rawValue)\". Your "
-            + "answer lands in the chat that sent this."
+            + "answer lands in the chat there that most recently wrote to you, which is the one "
+            + "that sent this unless another chat in that workspace has written to you since."
     }
 
     var envelope: String {
@@ -193,17 +194,17 @@ public struct WorkspaceMessageEnd: Sendable, Hashable, Codable {
 /// A parent and the owner may write to any active workspace but their own. A child is the one
 /// that needs a rule, because it is a workspace an agent asked for and nobody weighed, and
 /// everywhere else on the bridge it reports and that is all. `workspace_say` is how it reports,
-/// so it gets exactly that: the workspace that started it, and any workspace that has written to
-/// it first, so a message addressed to it can be answered.
+/// so it gets exactly that: the workspace that started it, and any workspace whose message has
+/// reached it, so that message can be answered.
+///
+/// A set rather than a yes or no about one target, because the lookup is narrowed to it BEFORE a
+/// name is resolved. Resolving first and checking after answered a child's nonsense name with the
+/// names of every active workspace, which is the list `workspace_list` exists to keep from it.
 public enum WorkspaceMessageReach {
-    public static func childMayWrite(
-        to target: WorkspaceID,
-        from child: Workspace,
-        hasHeardFromTarget: Bool
-    ) -> Bool {
-        if case .agent(let parentWorkspaceID, _) = child.origin, parentWorkspaceID == target {
-            return true
-        }
-        return hasHeardFromTarget
+    public static func reachable(from child: Workspace, heardFrom: Set<WorkspaceID>) -> Set<WorkspaceID> {
+        var reach = heardFrom
+        if case .agent(let parentWorkspaceID, _) = child.origin { reach.insert(parentWorkspaceID) }
+        reach.remove(child.id)
+        return reach
     }
 }
