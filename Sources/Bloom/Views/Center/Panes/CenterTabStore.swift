@@ -137,10 +137,13 @@ final class CenterTabStore {
     ///
     /// `directory` is a terminal's, and only a folder row in the inspector passes one. See
     /// `FolderTerminal`.
+    ///
+    /// `runScriptID` is passed by a run script opening its tab, so picking the script again can
+    /// find it. See `CenterTab.runScriptID`.
     @discardableResult
     func add(
         kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil,
-        directory: String = ""
+        directory: String = "", runScriptID: String? = nil
     ) -> CenterTab {
         var tabs = tabs(for: workspaceID)
         let tab = CenterTab(
@@ -149,7 +152,8 @@ final class CenterTabStore {
             title: title ?? Self.nextTitle(for: kind, in: tabs),
             url: url,
             isNamed: title != nil,
-            directory: directory
+            directory: directory,
+            runScriptID: runScriptID
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)

@@ -152,7 +152,7 @@ struct ServerSetupView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Button("Connect to an existing server with advanced settings…", action: showAdvanced)
-                .buttonStyle(.link)
+                .linkButton()
         }
         .disabled(model.isBusy)
     }

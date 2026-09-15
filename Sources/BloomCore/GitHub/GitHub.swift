@@ -173,6 +173,14 @@ public enum GitHub {
         "closedAt",
     ].joined(separator: ",")
 
+    /// Target the displayed pull request, even if the worktree's current branch has changed.
+    public static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
+        guard pullRequest.isOpen, pullRequest.isDraft else {
+            throw GitHubError("This pull request is no longer an open draft.")
+        }
+        try await checkGH(["pr", "ready", pullRequest.url], worktree: worktree)
+    }
+
     public static func isAvailable() async -> Bool {
         await access() == .ready
     }
@@ -381,6 +389,18 @@ public enum GitHub {
             || stderr.localizedCaseInsensitiveContains("could not resolve to a pullrequest")
     }
 
+    /// Whether an unnamed `gh pr view` failed because the worktree is on no branch at all.
+    ///
+    /// gh resolves "the current branch" itself and gives up on a detached HEAD with "could not
+    /// determine current branch: failed to run git: not on any branch". A rebase that stops part
+    /// way leaves a worktree exactly there, and the inspector put that sentence up as "GitHub could
+    /// not refresh" on every poll. A HEAD with no branch has no pull request to find, so it is the
+    /// same answer as none rather than a failure.
+    public static func indicatesDetachedHead(stderr: String) -> Bool {
+        stderr.localizedCaseInsensitiveContains("not on any branch")
+            || stderr.localizedCaseInsensitiveContains("could not determine current branch")
+    }
+
     static func snapshot(
         forBranch branch: String,
         worktree: String,
@@ -528,7 +548,9 @@ public enum GitHub {
     ) async throws -> PullRequestSnapshot? {
         let result = try await run("gh", ["pr", "view", "--json", fields], cwd: worktree)
         guard result.ok else {
-            if indicatesNoPullRequest(stderr: result.stderr) { return nil }
+            if indicatesNoPullRequest(stderr: result.stderr) || indicatesDetachedHead(stderr: result.stderr) {
+                return nil
+            }
             throw shellError(arguments: ["pr", "view"], result: result)
         }
 

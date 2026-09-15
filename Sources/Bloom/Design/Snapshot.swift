@@ -1269,12 +1269,12 @@ private struct LimitsStateGallery: View {
         )
     }
 
-    private static let scenes: [(String, [AgentQuota], QuotaFreshness)] = [
+    private static let scenes: [(String, [AgentQuota])] = [
         ("Quiet", [
             quota(.claudeCode, .named("five_hour"), 0.12, after: 15_600),
             quota(.claudeCode, .named("seven_day"), 0.09, after: week * 0.85),
             quota(.codex, .lasting(week, key: "primary"), 0.03, after: week * 0.7),
-        ], .current),
+        ]),
         ("The ramp, and the owner's own figures", [
             quota(.claudeCode, .named("five_hour"), 0.04, after: 3900),
             quota(.claudeCode, .named("seven_day"), 0.60, after: week * 0.535),
@@ -1285,16 +1285,16 @@ private struct LimitsStateGallery: View {
                 after: week * 0.535
             ),
             quota(.codex, .lasting(week, key: "primary"), 0, after: week * 0.9),
-        ], .current),
+        ]),
         ("Nobody measured the session window", [
             quota(.claudeCode, .named("five_hour"), nil, after: 9600),
             quota(.claudeCode, .named("seven_day"), 0.44, after: week * 0.6),
             quota(.codex, .lasting(week, key: "primary"), 0, after: week * 0.9),
-        ], .current),
+        ]),
         ("Codex absent, and one window spent", [
             quota(.claudeCode, .named("five_hour"), 1, after: 2900),
             quota(.claudeCode, .named("seven_day"), 0.88, after: week * 0.3),
-        ], .stale(11_000)),
+        ]),
         ("Model scoped rows and extra usage, both present", [
             quota(.claudeCode, .named("five_hour"), 0.22, after: 7900),
             quota(.claudeCode, .named("seven_day"), 0.66, after: week * 0.6),
@@ -1312,8 +1312,8 @@ private struct LimitsStateGallery: View {
                 observedAt: now
             ),
             quota(.codex, .lasting(week, key: "primary"), 0.58, after: week * 0.45),
-        ], .current),
-        ("Nothing reported at all", [], .current),
+        ]),
+        ("Nothing reported at all", []),
     ]
 
     var body: some View {
@@ -1324,11 +1324,7 @@ private struct LimitsStateGallery: View {
                     .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     .padding(.leading, 22)
                     .padding(.top, 20)
-                UsagePanelSnapshot(
-                    quotas: scene.1,
-                    staleAge: { if case .stale(let age) = scene.2 { return age } else { return nil } }(),
-                    now: Self.now
-                )
+                UsagePanelSnapshot(quotas: scene.1, now: Self.now)
             }
         }
         .padding(.bottom, 20)
@@ -1340,20 +1336,14 @@ private struct LimitsStateGallery: View {
 private struct UsagePanelSnapshot: View {
     let quotas: [AgentQuota]
     var accounts: [AgentAccount] = []
-    /// How old every figure is, for the scene that shows a card marked "Outdated".
-    var staleAge: TimeInterval?
     let now: Date
 
     var body: some View {
         let byProvider = Dictionary(accounts.map { ($0.provider, $0) }, uniquingKeysWith: { first, _ in first })
-        let observed = staleAge.map { age in
-            Dictionary(quotas.map { ($0.provider, now.addingTimeInterval(-age)) }, uniquingKeysWith: { first, _ in first })
-        } ?? MenuBarStatusItem.oldestReadings(quotas)
         UsageMenuBlock(
             model: UsageMenuModel.shared,
             metrics: UsageCatalogue.metrics(quotas: quotas, accounts: byProvider, at: now),
             accounts: byProvider,
-            observedAt: observed,
             now: now,
             canReorder: false
         )

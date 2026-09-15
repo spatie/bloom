@@ -36,10 +36,15 @@ final class LineNumberRuler: NSRulerView {
         didSet { attributes[.foregroundColor] = numberColor }
     }
 
+    var numberFont: NSFont = CodeMetrics.numberFont {
+        didSet {
+            attributes[.font] = numberFont
+            refresh()
+        }
+    }
+
     private var attributes: [NSAttributedString.Key: Any] = [
-        .font: NSFont.monospacedDigitSystemFont(
-            ofSize: max(9, CodeMetrics.font.pointSize - 1), weight: .regular
-        ),
+        .font: CodeMetrics.numberFont,
         .foregroundColor: NSColor.tertiaryLabelColor,
     ]
 

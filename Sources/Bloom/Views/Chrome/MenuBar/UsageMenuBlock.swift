@@ -11,8 +11,6 @@ struct UsageMenuBlock: View {
     let model: UsageMenuModel
     let metrics: [AgentKind: [UsageMetric]]
     let accounts: [AgentKind: AgentAccount]
-    /// The oldest reading behind each provider's card, which decides whether it says "Outdated".
-    let observedAt: [AgentKind: Date]
     let now: Date
     /// Off in the gallery, where nothing can be clicked anyway.
     var canReorder = true
@@ -58,12 +56,6 @@ struct UsageMenuBlock: View {
                     Text(plan)
                         .font(UsageScale.plan)
                         .foregroundStyle(MenuInk.secondary)
-                }
-                if let age = staleAge(section.provider) {
-                    Text("Outdated")
-                        .font(UsageScale.plan)
-                        .foregroundStyle(MenuInk.tertiary)
-                        .help("Last updated \(age) ago")
                 }
                 Spacer(minLength: 8)
                 if canMoveUp || canMoveDown {
@@ -121,12 +113,6 @@ struct UsageMenuBlock: View {
         }
     }
 
-    private func staleAge(_ provider: AgentKind) -> String? {
-        guard let observed = observedAt[provider],
-              case .stale(let age) = QuotaFreshness.of(observed, at: now)
-        else { return nil }
-        return UsageFormat.compactDuration(age)
-    }
 }
 
 /// One metric: a meter for a window, a line of text for a balance.

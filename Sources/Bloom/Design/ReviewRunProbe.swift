@@ -27,6 +27,16 @@ enum ReviewRunProbe {
             if !condition { failures.append(message) }
         }
 
+        if CommandLine.arguments.contains("--changes-review-only"),
+           let directory = ProbeHarness.value(for: "--review-run-probe") {
+            await ChangesReviewProbe.run(directory: directory, check: check)
+            let result: JSONValue = .object([
+                "checks": .integer(checks), "passed": .bool(failures.isEmpty), "failures": .strings(failures),
+            ])
+            if let data = try? JSONEncoder().encode(result) { FileHandle.standardOutput.write(data) }
+            exit(failures.isEmpty ? 0 : 1)
+        }
+
         if let directory = ProbeHarness.value(for: "--review-run-probe") {
             progress("Checking file navigation alignment")
             await ReviewNavigationProbe.run(directory: directory, check: check)

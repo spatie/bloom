@@ -55,25 +55,33 @@ final class WorkspaceModel {
     private var transcripts: [SessionID: TranscriptModel] = [:]
 
     // Inspector.
-    /// How much of this workspace's work the Changes tab is showing.
-    ///
-    /// Read through the getter, which drops a scope this branch can no longer offer. A commit is
-    /// not a stable thing to hold on to: an amend, a rebase or a squash rewrites it, and a scope
-    /// pointing at a sha that resolves nowhere is a refresh that fails rather than a list that
-    /// narrows. Written through `setDiffScope`, because changing it has to send the pane back to
-    /// git and a property that quietly starts a subprocess is a property nobody expects.
+    private var lastChangesScope: DiffScope = .all
+    private var lastHistoryCommit: BranchCommit?
+    /// The comparison and its file list are adopted together after a refresh. Resolving the
+    /// scope in a getter could label the last commit's files as all branch changes after a rebase.
     private var storedDiffScope: DiffScope = .all
 
-    var diffScope: DiffScope {
-        // Only once git has answered. An empty list from a branch that genuinely has no commits
-        // of its own is a real answer and correctly drops a stale scope; the same empty list
-        // before anything has been asked is not, and would drop the reader's choice on arrival.
-        hasReadBranchCommits ? branchCommits.resolve(storedDiffScope) : storedDiffScope
-    }
-
-    /// The commits this branch put on top of its base, for the scope menu to offer.
+    var diffScope: DiffScope { storedDiffScope }
     private(set) var branchCommits = BranchCommitList()
     private(set) var hasReadBranchCommits = false
+    private(set) var historyError: String?
+    private(set) var historyNotice: String?
+    private var historyLimit = BranchCommitList.limit
+    var selectedChangeLayer: ChangeLayer?
+
+    var selectedChangeID: String? {
+        selectedFilePath.flatMap { selectedChangedFile(path: $0)?.id }
+    }
+
+    func selectedChangedFile(path: String) -> ChangedFile? {
+        changedFiles.first { $0.path == path && $0.layer == selectedChangeLayer }
+            ?? changedFiles.first { $0.path == path }
+    }
+
+    func loadMoreCommits() {
+        historyLimit += BranchCommitList.limit
+        Task { await refreshChanges(.requested) }
+    }
 
     /// What the reader last picked in the tab strip, which is not always what is on screen.
     ///
@@ -84,12 +92,28 @@ final class WorkspaceModel {
     /// The tabs the strip may draw for this workspace, and the one it is showing.
     var availableInspectorTabs: [InspectorTab] { InspectorTab.available(for: pullRequest) }
 
+    private var rememberedHistoryCommit: BranchCommit? {
+        guard let lastHistoryCommit, branchCommits.canOffer(.commit(lastHistoryCommit)) else { return nil }
+        return lastHistoryCommit
+    }
+
     var inspectorTab: InspectorTab {
         get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
-        set { chosenInspectorTab = newValue }
+        set {
+            chosenInspectorTab = newValue
+            if newValue == .changes, case .commit = diffScope {
+                setDiffScope(lastChangesScope)
+            } else if newValue == .history,
+                      let commit = rememberedHistoryCommit ?? branchCommits.commits.first {
+                setDiffScope(.commit(commit))
+            }
+        }
     }
     var changedFiles: [ChangedFile] = [] {
-        didSet { reviewFiles = ChangedFileTree.orderedFiles(from: changedFiles) }
+        didSet {
+            reviewFiles = changedFiles.contains { $0.layer != nil }
+                ? changedFiles : ChangedFileTree.orderedFiles(from: changedFiles)
+        }
     }
     /// Retain tree order across scroll updates; rebuild it only when the changed files change.
     private(set) var reviewFiles: [ChangedFile] = []
@@ -156,6 +180,10 @@ final class WorkspaceModel {
 
     var pullRequestRefreshFailure: GitHubReadFailure? {
         WorkspacePullRequests.shared.failure(for: workspace.id)
+    }
+
+    func dismissPullRequestRefreshFailure() {
+        WorkspacePullRequests.shared.dismissFailure(for: workspace.id)
     }
 
     var isLoadingPullRequest = false
@@ -464,6 +492,23 @@ final class WorkspaceModel {
         await reloadSessions()
         activeSessionID = stored.id
         return stored
+    }
+
+    /// Retires the old runner only after its replacement has been saved successfully.
+    func clearConversation(_ previous: Session, controls: ComposerControls) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        do {
+            let next = try await store.replaceWorkspaceConversation(id: previous.id, controls: controls)
+            transcripts.removeValue(forKey: previous.id)?.teardown()
+            app.bridge?.retire(sessionID: previous.id)
+            WorkspaceTabsStore.shared.replaceConversation(previous.id, with: next.id, in: self)
+            if let index = sessions.firstIndex(where: { $0.id == previous.id }) { sessions[index] = next }
+            activeSessionID = next.id
+            return next
+        } catch {
+            app.notice = BloomNotice(message: "Could not clear the conversation: \(error.readableMessage)")
+            return nil
+        }
     }
 
     /// Puts the workspace's conversations in a given order, and writes it back.
@@ -1068,6 +1113,15 @@ final class WorkspaceModel {
             // its way out is the one thing that must not happen here.
             guard !Task.isCancelled else { return }
 
+            // The worktree is built, so the run scripts that asked to start with it can. Not
+            // awaited: a dev server starting has nothing to do with the opening prompt going out.
+            if succeeded {
+                Task { [weak self] in
+                    guard let self else { return }
+                    await RunScriptLauncher.shared.considerAutostart(in: self)
+                }
+            }
+
             if !succeeded, !setupWasStopped {
                 // The one sentence every route says about a failed setup, rather than a second
                 // one written here that would drift from it. It names no tab, which is what makes
@@ -1377,10 +1431,10 @@ final class WorkspaceModel {
         // chose nor can act on.
         let name = workspace.name
         let scope = diffScope
-        // Only on a refresh somebody asked for, which is an arrival, a finished turn or a press.
-        // Those are exactly the moments a commit can have appeared, and the six second poll is
-        // already four git calls without adding a `log` for a menu nobody has opened.
+        // Refresh history on quiet polls too: an agent can commit while its turn is still
+        // running. Only explicit refreshes need the manager's additional branch-name read.
         let wantsCommits = reason == .requested
+        let historyLimit = historyLimit
         let manager = app.manager
         let observedWorkspace = workspace
 
@@ -1390,32 +1444,32 @@ final class WorkspaceModel {
             // Quiet refreshes follow refreshDiffStat, which has already read HEAD this tick.
             if wantsCommits { await manager?.refreshBranch(workspace: observedWorkspace) }
             do {
-                // All three together rather than one after another. They ask three different
-                // questions of the same worktree and none of them reads another's answer, so
-                // running them in sequence only ever made the switch longer. `Git.baseline`, which
-                // the first and the third both open with, coalesces so that starting them at once
-                // does not resolve the merge base twice. See `BaselineCache`.
-                //
-                // In the same task as the file list rather than on a cadence of its own. The one
-                // extra command is `status --porcelain -z --branch`, which answers uncommitted,
-                // untracked and unpushed at once. Nothing stats the worktree on a redraw: the
-                // strip reads a value, and the value is only ever written here.
-                //
-                // Failing to answer it is not a failure of the refresh. The file list is what the
-                // reader asked for; a missing local count means the strip says nothing extra,
-                // which is the right answer when we do not know. Same forgiveness for the commit
-                // list: failing to read it costs the menu its rows, not the reader their files.
-                async let filesRead = Git.changedFiles(worktree: path, base: base, scope: scope)
+                // Resolve history first so an amended selection and the replacement file list
+                // arrive together. A history failure is separate from a failed diff read.
                 async let localRead = try? Git.localWork(worktree: path)
-                async let commitsRead: BranchCommitList? = wantsCommits
-                    ? try? Git.branchCommits(worktree: path, base: base)
-                    : nil
-
-                let files = try await filesRead
+                var commits: BranchCommitList?
+                var historyError: String?
+                do {
+                    commits = try await Git.branchCommits(worktree: path, base: base, limit: historyLimit)
+                } catch {
+                    historyError = "Could not read commit history. \(error.localizedDescription)"
+                }
+                var effectiveScope = scope
+                if let commits, case .commit(let commit) = scope,
+                   !commits.commits.contains(where: { $0.sha == commit.sha }) {
+                    let stillOnBranch = commits.isTruncated
+                        ? try await Git.containsCommit(commit, worktree: path) : false
+                    if !stillOnBranch { effectiveScope = .all }
+                }
+                let files = try await Git.changedFiles(worktree: path, base: base, scope: effectiveScope)
                 let local = await localRead
-                let commits = await commitsRead
-                let revisions = ReviewedFileFingerprint.revisions(for: files, worktree: path, base: base, scope: scope)
-                return .success(ChangesAnswer(files: files, local: local, commits: commits, revisions: revisions))
+                let revisions = ReviewedFileFingerprint.revisions(
+                    for: files, worktree: path, base: base, scope: effectiveScope
+                )
+                return .success(ChangesAnswer(
+                    files: files, local: local, commits: commits, revisions: revisions,
+                    scope: effectiveScope, historyError: historyError
+                ))
             } catch {
                 // Diagnosed rather than reported, in the register `WorkspaceStartFailure` set. A
                 // worktree deleted underneath Bloom used to surface here as "`git rev-parse
@@ -1454,8 +1508,15 @@ final class WorkspaceModel {
             // would show the user a clean workspace, which is the one answer that is certainly
             // wrong, so the last known list stays and the failure is reported instead.
             changesError = failure.message
+            if !hasReadBranchCommits { historyError = failure.message }
 
         case .success(let answer):
+            if answer.scope != storedDiffScope {
+                storedDiffScope = answer.scope
+                selectedChangeLayer = nil
+                historyNotice = "The selected commit is no longer on this branch. Showing all branch changes."
+            }
+            historyError = answer.historyError
             hasReadChanges = true
             changesGeneration &+= 1
             // Only when it actually moved. `AppModel`'s poll lands here every six seconds, and a
@@ -1480,9 +1541,11 @@ final class WorkspaceModel {
     struct ChangesAnswer: Sendable {
         var files: [ChangedFile]
         var local: LocalWork?
-        /// Nil when this refresh did not ask, which is every quiet poll.
+        /// Nil when Git could not answer, with the reason in historyError.
         var commits: BranchCommitList?
         var revisions: [String: String] = [:]
+        var scope: DiffScope = .all
+        var historyError: String?
     }
 
     /// Narrows or widens what the Changes tab is showing, and sends the pane back to git for it.
@@ -1491,8 +1554,20 @@ final class WorkspaceModel {
     /// compared against, so which files differ, and by how many lines, is a different question for
     /// each one and only git can answer it.
     func setDiffScope(_ scope: DiffScope) {
+        if case .commit(let commit) = scope {
+            lastHistoryCommit = commit
+        } else {
+            lastChangesScope = scope
+        }
         guard scope != storedDiffScope else { return }
+        changesTask?.cancel()
         storedDiffScope = scope
+        selectedChangeLayer = nil
+        historyNotice = nil
+        changedFiles = []
+        hasReadChanges = false
+        changesError = nil
+        changesGeneration &+= 1
         Task { await refreshChanges(.requested) }
     }
 
@@ -1716,14 +1791,14 @@ final class WorkspaceModel {
     /// go stale honestly when the agent edits the file afterwards. See `ReviewedFileFingerprint`.
     func setViewed(_ isViewed: Bool, file: ChangedFile) async {
         guard let store else { return }
-        let fingerprint = ReviewedFileFingerprint.of(file, revision: viewedRevisions[file.path] ?? "")
+        let fingerprint = ReviewedFileFingerprint.of(file, revision: viewedRevisions[file.id] ?? "")
         do {
             if isViewed {
                 try await store.markReviewed(ReviewedFile(
-                    workspaceID: workspace.id, path: file.path, fingerprint: fingerprint
+                    workspaceID: workspace.id, path: file.id, fingerprint: fingerprint
                 ))
             } else {
-                try await store.clearReviewed(workspaceID: workspace.id, path: file.path)
+                try await store.clearReviewed(workspaceID: workspace.id, path: file.id)
             }
         } catch {
             app.alert = BloomAlert(
@@ -1736,9 +1811,9 @@ final class WorkspaceModel {
         // learn: a refused write must not change what is on screen and then be put back by the
         // next reload with nothing said in between.
         if isViewed {
-            viewedFiles[file.path] = fingerprint
+            viewedFiles[file.id] = fingerprint
         } else {
-            viewedFiles[file.path] = nil
+            viewedFiles[file.id] = nil
         }
     }
 
@@ -1845,6 +1920,14 @@ final class WorkspaceModel {
     /// bug this closes, which is that changing centre tab destroys the review pane and coming back
     /// to it re-ran the same `git diff` on a worktree nothing had touched.
     func patch(for file: ChangedFile) async -> String {
+        (try? await readPatch(for: file)) ?? ""
+    }
+
+    nonisolated static func reviewContents(worktree: String, file: ChangedFile, scope: DiffScope) async -> String? {
+        try? await Git.reviewContents(worktree: worktree, file: file, scope: scope)
+    }
+
+    func readPatch(for file: ChangedFile) async throws -> String {
         let path = workspace.path
         let base = workspace.baseBranch
         // The same scope the list was built with, or the pane opens a file the list narrowed and
@@ -1855,19 +1938,24 @@ final class WorkspaceModel {
         )
         if let held = patches.patch(for: key) { return held }
 
-        let patch = await Task.detached(priority: .userInitiated) {
-            (try? await Git.patch(worktree: path, base: base, file: file, scope: scope)) ?? ""
-        }.value
+        let reading = Task.detached(priority: .userInitiated) {
+            try await Git.patch(worktree: path, base: base, file: file, scope: scope)
+        }
+        let patch = try await withTaskCancellationHandler {
+            try await reading.value
+        } onCancel: {
+            reading.cancel()
+        }
+        try Task.checkCancellation()
 
-        // Only an answer git actually gave. Empty is also what a failure comes back as, and
-        // holding one would turn a moment of git trouble into a file that reads as unchanged for
-        // as long as the generation lasts.
+        // An empty patch can mean the file changed again between the list and patch reads.
+        // Let the next request ask Git again rather than keeping that transient answer.
         guard !patch.isEmpty else { return patch }
         // Checked again on the way out, because a refresh can land while git is out. An answer
         // measured before that refresh says nothing about the worktree after it, and filing it
         // under the new generation would be a claim; filing it under the old one would sweep the
         // new generation's entries out. So it is handed back and not kept.
-        guard changesGeneration == key.generation else { return patch }
+        guard changesGeneration == key.generation, diffScope == scope else { return patch }
         patches.store(patch, for: key)
         return patch
     }
@@ -2095,25 +2183,9 @@ final class WorkspaceModel {
         return nil
     }
 
-    /// Uses the same transcript and permission mode as the other pull request actions.
-    func requestMarkReadyForReview(
-        _ pullRequest: PullRequest,
-        overrides: PromptOverrides = PromptOverrides()
-    ) async -> String? {
-        guard pullRequest.isOpen, pullRequest.isDraft else {
-            return "This pull request is no longer an open draft."
-        }
-        guard let session = await sessionForPullRequest(titledIfNew: "Mark ready for review") else {
-            return "Could not open a session in \(workspace.name) to send the request to."
-        }
-
-        let render = PromptTemplate.render(
-            overrides.template(for: .markReadyForReview),
-            values: [PromptRegistry.MarkReadyForReview.url: pullRequest.url]
-        )
-        activeSessionID = session.id
-        await transcript(for: session).submit(render.text)
-        return nil
+    func markReadyForReview(_ pullRequest: PullRequest) async throws {
+        try await GitHubBridge.markReadyForReview(pullRequest, worktree: workspace.path)
+        await refreshPullRequest()
     }
 
     /// Asks the workspace's agent to merge the pull request, instead of running `gh` from here.

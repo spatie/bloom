@@ -34,6 +34,9 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
     /// draws live buttons, and a row that offers buttons for a question already answered would
     /// write into a pipe nobody is reading.
     var permissionDecision: String?
+    /// Questions and their answers are conversation content, even after their controls settle.
+    /// Decoded when the row arrives so folding never reparses the question on a render pass.
+    var isQuestion = false
     /// What the transcript should say about how it was settled, when that is not obvious. Only
     /// ever set for a question a rule answered rather than a person.
     var permissionNote = ""
@@ -105,11 +108,15 @@ final class TranscriptModel {
     private(set) var presentationRevision = 0
     @ObservationIgnored private var foldCache = TranscriptFoldCache()
     @ObservationIgnored private var questionIndex = PinnedQuestionIndex()
+    /// Tool calls that arrived moments ago, by call id, which fold before their result is back.
+    /// See `TranscriptFold.freshCall`. Told through `presentationRevision`, like the cache above.
+    @ObservationIgnored private var freshCalls: Set<String> = []
 
     /// These caches write no observable state and are safe to consult during a render pass.
     /// Each belongs to this session, including when its pane is displaying another workspace.
     func presentationFolds() -> TranscriptFold.Folds {
-        foldCache.resolve(rows.lazy.map { row in
+        let freshCalls = freshCalls
+        return foldCache.resolve(rows.lazy.map { row in
             let settled: Bool
             switch row.kind {
             case .toolUse: settled = row.resultPayload != nil
@@ -120,15 +127,24 @@ final class TranscriptModel {
                 seq: row.seq,
                 kind: row.kind,
                 failed: row.isError || row.refusal != nil,
-                featured: MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
+                featured: row.isQuestion
+                    || MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
                 drawsNothing: TranscriptNoise.isHidden(row)
                     || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
                 settled: settled,
+                isFresh: row.kind == .toolUse && row.refID.map(freshCalls.contains) == true,
                 toolUseID: row.kind == .toolUse ? row.refID : nil,
                 parentToolUseID: row.parentToolUseID,
                 opensTurn: BackgroundWake.isRow(kind: row.kind, payload: row.payload)
             )
         })
+    }
+
+    /// Every prompt in the session, for the turn minimap. The same incremental index the pinned
+    /// question reads, so a body asking for this on each pass pays only for rows that are new.
+    func turns() -> [PinnedQuestion] {
+        questionIndex.update(session: session.id, rows: rows)
+        return questionIndex.all
     }
 
     func pinnedQuestion(atOrBefore seq: Int) -> PinnedQuestion? {
@@ -218,6 +234,11 @@ final class TranscriptModel {
 
     var draft = ""
 
+    /// How far Up and Down have walked back through this session's sent prompts. On the session
+    /// rather than in the composer's state, because one composer is handed from session to session
+    /// as a pane changes what it shows. See `PromptRecall`.
+    @ObservationIgnored var promptRecall = PromptRecall()
+
     /// What has been asked for on this session and has not gone yet, oldest first.
     ///
     /// Read by the transcript to draw the pending bubbles and by the drain to decide what goes
@@ -300,13 +321,27 @@ final class TranscriptModel {
     /// meant to carry on writing. A counter for `liveEndRequests`'s reason: two requests in a row
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
+    /// Where the last of those requests wants the caret. See `focusComposer(caretAtEnd:)`.
+    @ObservationIgnored private(set) var composerFocusCaretAtEnd = false
+
+    /// A passage of an answer, quoted at the end of the draft with the caret left under it.
+    func appendQuote(_ selection: String) {
+        guard let quoted = ReplyQuote.appending(selection, to: draft) else { return }
+        draft = quoted
+        focusComposer(caretAtEnd: true)
+    }
 
     func appendSourceContext(_ context: String) {
         draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
         focusComposer()
     }
 
-    func focusComposer() { composerFocusRequests += 1 }
+    /// - Parameter caretAtEnd: whether the caret goes after what arrived rather than before it. A
+    ///   queued message brought back to edit wants the start, a quote wants the line under it.
+    func focusComposer(caretAtEnd: Bool = false) {
+        composerFocusCaretAtEnd = caretAtEnd
+        composerFocusRequests += 1
+    }
 
     private var isReconcilingPresentation = false
     private var isReplayingPastTurn = false
@@ -344,6 +379,11 @@ final class TranscriptModel {
     /// When the current turn was handed to the runner, so a session row written before that can be
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
+
+    /// An old result must not hide the live tail of a turn the agent has just started itself.
+    func isCurrentTurnResult(_ row: TranscriptRow) -> Bool {
+        row.kind == .result && (!isRunning || turnStartedAt.map { row.createdAt >= $0 } ?? true)
+    }
 
     init(session: Session, workspace: Workspace, app: AppModel, remote: RemoteSessionConnection? = nil) {
         self.session = session
@@ -493,6 +533,7 @@ final class TranscriptModel {
         }.value
 
         foldCache.reset()
+        freshCalls = []
         questionIndex = PinnedQuestionIndex()
         rows = built.rows
         presentationRevision += 1
@@ -557,6 +598,7 @@ final class TranscriptModel {
         if message.kind == .permissionAsk,
            let ask = PermissionAsk.decode(payload: message.payload) {
             row.permissionDecision = decisions[ask.requestID]
+            row.isQuestion = ask.isQuestion
         }
         rows.append(row)
         if message.kind == .toolUse, let refID = message.refID {
@@ -1714,10 +1756,18 @@ final class TranscriptModel {
             // through. That is the only signal there is: the CLI announces a retry and never
             // announces a recovery, so the recovery is the next event of any kind.
             settleRetryRun()
+            let runningTool = streamingToolName
+            let callsBefore = freshCalls
             await appendLatestMessages()
             // Keep the live drawing while the store is awaited. Clearing first leaves an empty
             // frame between the stream and its saved row, interrupting the shared arrival.
             clearStreaming()
+            // A call that just arrived is folded out of sight for a moment, so the tail goes on
+            // naming it rather than saying the model is being waited on while a tool runs. Its
+            // result clears this like any other arrival. See `TranscriptFold.freshCall`.
+            if case .toolUse = event, !freshCalls.isSubset(of: callsBefore) {
+                streamingToolName = runningTool
+            }
 
         case .error(let failure):
             history.isFinalisingTurn = true
@@ -1974,6 +2024,7 @@ final class TranscriptModel {
         ) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
+        var calls: [String] = []
         // **Filtered against the cursor again, having already been queried against it.** The read
         // above is a suspension point, so two calls can both ask for everything after `n` and both
         // come back with the same rows: the cursor only moves in the loop below, which neither of
@@ -1987,12 +2038,46 @@ final class TranscriptModel {
             // Before folding, because a tool result changes an old row rather than appending one.
             // The cursor belongs to stored messages, not to their presentation.
             highestSeenMessageSeq = max(highestSeenMessageSeq, message.seq)
+            if message.kind == .toolUse, let id = message.refID { calls.append(id) }
             absorb(message)
+        }
+        // A question stops the turn on a person, and a running call drawn in above it a moment
+        // later would move the buttons they are reaching for. So it is drawn now, with the question.
+        if fresh.contains(where: { $0.kind == .permissionAsk }) {
+            endFreshCalls(Array(freshCalls))
+        } else if !calls.isEmpty {
+            beginFreshCalls(calls)
         }
         // Over what actually arrived, not over the transcript. A tool result folds onto a row that
         // is already there rather than appending, so the slice can be empty, and an empty one
         // leaves the held reading exactly where it was.
         noteContextWindow(in: rows[min(appendedFrom, rows.count)...])
+    }
+
+    /// Lets calls that have just arrived fold straight away, and draws any still running once
+    /// `TranscriptFold.freshCall` has passed.
+    ///
+    /// **A timer rather than waiting for the result, because a call can run for minutes.** Held out
+    /// of sight until its result, a test run would be a count and a status line and nothing else.
+    private func beginFreshCalls(_ calls: [String]) {
+        freshCalls.formUnion(calls)
+        Task { [weak self] in
+            try? await Task.sleep(for: TranscriptFold.freshCall)
+            self?.endFreshCalls(calls)
+        }
+    }
+
+    private func endFreshCalls(_ calls: [String]) {
+        var revealed = false
+        for id in calls where freshCalls.remove(id) != nil {
+            // A call that settled while fresh folds either way, so only a running one changes what
+            // the fold says.
+            guard let index = indexByRefID[id], rows.indices.contains(index),
+                  rows[index].resultPayload == nil else { continue }
+            foldCache.invalidate(row: index)
+            revealed = true
+        }
+        if revealed { presentationRevision += 1 }
     }
 
     /// Folds what the newest rows say about the context window into the held reading.

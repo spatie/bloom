@@ -26,10 +26,10 @@ struct DiffScopeMenuItems: View {
         }
 
         if !model.branchCommits.commits.isEmpty {
-            Section("Since a commit on this branch") {
+            Section("Commit history") {
                 ForEach(model.branchCommits.commits) { commit in
                     row(
-                        .since(commit),
+                        .commit(commit),
                         title: commit.subject,
                         subtitle: "\(commit.abbreviated) · \(commit.author) · \(Self.age.localizedString(for: commit.date, relativeTo: .now))",
                         scope: scope

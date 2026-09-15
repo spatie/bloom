@@ -131,6 +131,9 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
         get { server.review.selectedPath }
         set { server.review.selectedPath = newValue }
     }
+    /// The server lists each path once, so there is never a layer to choose between.
+    var selectedChangeLayer: ChangeLayer?
+    func selectedChangedFile(path: String) -> ChangedFile? { changedFiles.first { $0.path == path } }
     var changesError: String? { server.review.error }
     var isLoadingChanges: Bool { !server.review.hasReadFiles && server.review.error == nil }
     var hasReadChanges: Bool { server.review.hasReadFiles || server.review.error != nil }
@@ -214,6 +217,11 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
         }
     }
     func contents(of path: String) -> String? { heldContents[path] }
+    /// The server answers with an empty patch rather than a reason, so there is nothing here for
+    /// the diff pane's failure notice to say that "No diff" does not already say.
+    func readPatch(for file: ChangedFile) async throws -> String { await patch(for: file) }
+    /// The server's scopes are both of the present, so the worktree copy is the review copy.
+    func reviewContents(of file: ChangedFile) async -> String? { await readContents(of: file.path) }
     func readContents(of path: String) async -> String? {
         do {
             if case .file(let file) = try await read(.file(workspaceID: workspace.id, path: path)) {

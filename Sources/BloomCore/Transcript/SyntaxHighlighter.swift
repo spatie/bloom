@@ -1,7 +1,7 @@
 import Foundation
 
 /// Semantic categories keep source rendering independent from any particular colour palette.
-public enum TokenKind: String, Sendable, CaseIterable {
+public enum TokenKind: String, Codable, Sendable, CaseIterable {
     case plain, keyword, type, string, number, comment, function, variable
     case attribute, `operator`, punctuation, regex, constant
 }

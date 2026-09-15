@@ -7,6 +7,10 @@ import AppKit
 /// this neither creates offscreen cells nor measures SwiftUI content.
 @MainActor
 final class TranscriptTableView: NSTableView {
+    /// Puts a passage of this conversation into its own reply. Nil where the conversation has no
+    /// composer to reply in, which is an archived workspace. See `SelectionToChat`.
+    var quoteSelection: (@MainActor (String) -> Void)?
+
     private var isAligningRows = false
     private var alignmentWork: Task<Void, Never>?
 

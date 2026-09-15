@@ -185,9 +185,10 @@ enum FileReview {
         guard !files.isEmpty else { return }
 
         let current = currentPath(in: model)
-        let index = files.firstIndex { $0.path == current }
+        let index = files.firstIndex { $0.path == current && $0.layer == model.selectedChangeLayer }
         let next = index.map { ($0 + delta + files.count) % files.count } ?? 0
 
+        model.selectedChangeLayer = files[next].layer
         model.selectedFilePath = files[next].path
         open(path: files[next].path, in: model)
     }

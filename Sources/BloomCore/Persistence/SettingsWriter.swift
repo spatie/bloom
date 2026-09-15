@@ -300,12 +300,18 @@ public enum SettingsWriter {
             var document = SettingsDocument(contentsOf: path)
             let before = document.text
             for edit in fileEdits {
+                let overriding = overrides(edit.key, in: settings, file: path)
                 apply(
                     edit,
                     to: &document,
-                    overriding: overrides(edit.key, in: settings, file: path),
+                    overriding: overriding,
                     scriptFile: scripts[edit.key],
-                    runFiles: runFiles
+                    runFiles: runFiles,
+                    // Only when the scripts were read out of this very file. Anywhere else the
+                    // table being written replaces the one they came from, so every key has to be
+                    // stated here or it is lost.
+                    runScriptsInFile: overriding ? [] : settings.runScripts,
+                    keepingRunScripts: skippedRunScripts(in: settings, file: path)
                 )
             }
             guard document.text != before else { continue }
@@ -316,6 +322,20 @@ public enum SettingsWriter {
             written.append(path)
         }
         return written
+    }
+
+    /// The run script tables in `file` the loader skipped as broken.
+    ///
+    /// They are not in the list the window edits, so to the writer they look exactly like tables
+    /// the owner removed, and rewriting the list would have deleted them. A teammate's entry with
+    /// `autostart = "yes"` in it is a mistake to fix, not a line for Save to take away.
+    private static func skippedRunScripts(in settings: RepoSettings, file: String) -> Set<String> {
+        let loaded = Set(settings.runScripts.map(\.id))
+        return Set(settings.issues.compactMap { issue -> String? in
+            guard issue.path == file, case .runScript(let id) = issue.entry, !loaded.contains(id)
+            else { return nil }
+            return id
+        })
     }
 
     /// Whether this edit has to out-argue a value some other file still states.
@@ -330,7 +350,8 @@ public enum SettingsWriter {
 
     static func apply(
         _ edit: SettingsEdit, to document: inout SettingsDocument, overriding: Bool = false,
-        scriptFile: String? = nil, runFiles: [String: String] = [:]
+        scriptFile: String? = nil, runFiles: [String: String] = [:],
+        runScriptsInFile: [RunScript] = [], keepingRunScripts: Set<String> = []
     ) {
         switch edit {
         case .setupScript(let script):
@@ -362,7 +383,10 @@ public enum SettingsWriter {
             document.remove(at: ["files", "copy"])
             document.set(.strings(globs), at: SettingsKey.filesToCopy.path)
         case .runScripts(let scripts):
-            writeRunScripts(scripts, to: &document, files: runFiles)
+            writeRunScripts(
+                scripts, to: &document, files: runFiles, before: runScriptsInFile,
+                keeping: keepingRunScripts
+            )
         // Prose rather than a program, so it stays in the settings file whatever its length. A
         // script gets a file of its own because it wants a shebang, `shellcheck` and a terminal;
         // none of that is true of a paragraph an agent reads, and a project that would rather
@@ -422,14 +446,19 @@ public enum SettingsWriter {
     /// than useless: the loader reads a string OR a table, so a file holding both would keep
     /// answering with whichever the parser folded them into rather than with what the user just
     /// typed.
+    ///
+    /// `before` is what this same file said about the scripts when it was read, and `keeping` is
+    /// the tables it holds that the loader skipped. See `write`.
     private static func writeRunScripts(
-        _ scripts: [RunScript], to document: inout SettingsDocument, files: [String: String] = [:]
+        _ scripts: [RunScript], to document: inout SettingsDocument, files: [String: String] = [:],
+        before: [RunScript] = [], keeping: Set<String> = []
     ) {
         // Safe to do unconditionally: `remove` only ever matches a `key = value` line, never a
         // `[scripts.run.dev]` header, so this takes the legacy string and nothing else.
         document.remove(at: SettingsKey.runScripts.path)
 
-        let wanted = Set(scripts.map(\.id))
+        let wanted = Set(scripts.map(\.id)).union(keeping)
+        let previous = Dictionary(before.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for table in document.tables(under: ["scripts", "run"]) {
             guard let id = table.last, !wanted.contains(id) else { continue }
             document.removeTable(at: table)
@@ -451,6 +480,24 @@ public enum SettingsWriter {
                 document.remove(at: base + ["name"])
             } else {
                 document.set(.string(script.name), at: base + ["name"])
+            }
+            // The window does not edit either of these, so a value that has not changed is left
+            // exactly as the file spells it. Rewriting them from the parsed value would turn a
+            // hand-written `autostart = false` into no line at all, which reads the same and is
+            // still a line of somebody's file that Save took away.
+            if previous[script.id]?.icon != script.icon || previous[script.id] == nil {
+                if let icon = script.icon {
+                    document.set(.string(icon), at: base + ["icon"])
+                } else {
+                    document.remove(at: base + ["icon"])
+                }
+            }
+            if previous[script.id]?.autostart != script.autostart || previous[script.id] == nil {
+                if script.autostart {
+                    document.set(.boolean(true), at: base + ["autostart"])
+                } else {
+                    document.remove(at: base + ["autostart"])
+                }
             }
         }
     }

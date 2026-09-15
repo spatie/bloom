@@ -37,59 +37,20 @@ struct TabSurface: Equatable {
 
 /// Which of Bloom's grounds a strip of tabs opens onto.
 ///
-/// It settles two things at once and they are the same thing seen from either end: what an
-/// ordinary tab in that strip is filled with when selected, and how far the strip's own track has
-/// to be sunk below it.
+/// Determines the selected tab's background.
 enum TabPane {
     /// The reading ground: the centre column's conversations, terminals, browsers and reviews.
     case content
     /// A recessed pane: the bottom panel's setup log, run scripts and shells.
     case sunken
 
-    var surface: TabSurface {
+    @MainActor var surface: TabSurface {
         switch self {
         case .content: .pane(Palette.surface)
         case .sunken: .pane(Palette.surfaceSunken)
         }
     }
 
-    /// How far the track is tinted away from the tab selected on it, as an opacity on the primary
-    /// label colour so it darkens in a light appearance and lightens in a dark one.
-    ///
-    /// Safari's strip sits about twelve units out of 255 off the tab selected on it, and that step,
-    /// rather than the type, is the whole of how a selected tab is told from an unselected one.
-    /// Both strips stand on `Palette.sidebar`; what differs is the pane, so what differs is the
-    /// tint each of them needs to reach the same step.
-    ///
-    /// `.content`: `#FFFFFF` on `#F1F5F6` is already 14, 10 and 9 in a light appearance, which is
-    /// Safari's figure with no tint at all, and 0.045 of black on top took it to 25, 21 and 20,
-    /// roughly double, which read as a grey band rather than as a recess. In dark, `#0A1A25` on
-    /// `#0E202D` is 4, 6 and 8, which is nothing, and 0.045 of white brings it back.
-    ///
-    /// `.sunken`: `#F7FAFA` is five units nearer the chrome than the reading ground is, so a light
-    /// appearance has a step of 6, 5 and 4 to begin with and the difference has to be painted back
-    /// on. In dark the pane is BELOW the track rather than above it, `#0C1E2A` on `#0E202D`, a step
-    /// of 2, 2 and 3, and lightening the track moves it further away rather than nearer.
-    ///
-    /// Composited against the label colour these four resolve to a track of `#F1F5F6`, `#172935`,
-    /// `#EAEEEF` and `#182936`, which stands 14, 10, 9 / 13, 15, 16 / 13, 12, 11 / 12, 11, 12 off
-    /// the tab selected on it. Safari's figure in every one of them.
-    ///
-    /// A terminal carrying the user's own Ghostty theme is outside this: its tab is filled with
-    /// whatever that theme says, so the step against the track is whatever the theme happens to be
-    /// and can be almost nothing. `TabItemOutline` is what draws that tab's edge in that case, and
-    /// it is why the outline is part of the shared chrome rather than the centre column's alone.
-    ///
-    /// Re-measure rather than trust these numbers if either ground moves: what is being kept is the
-    /// twelve unit step, not the opacities.
-    func recess(_ colorScheme: ColorScheme) -> Double {
-        switch (self, colorScheme) {
-        case (.content, .dark): 0.045
-        case (.content, _): 0
-        case (.sunken, .dark): 0.05
-        case (.sunken, _): 0.035
-        }
-    }
 }
 
 /// The track a row of tabs sits in.
@@ -128,7 +89,6 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
     var append: Append
     var trailing: Trailing
 
-    @Environment(\.colorScheme) private var colorScheme
     /// The width the tabs have to fit in. Only used to re-aim the scroll when the window is
     /// resized, so it is stored rounded to whole points and changes about as often as they do.
     @State private var width: CGFloat = 0
@@ -217,8 +177,7 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
             trailing
         }
         .frame(height: Metrics.barHeight)
-        // Painted over the chrome and under the tabs. See `TabPane.recess`.
-        .background { Color.primary.opacity(pane.recess(colorScheme)) }
+        .background(Palette.sidebar)
         // The busy signal belongs to the rule under the title bar and to nothing else. The centre
         // column's strip is the only one drawn on that rule: the bottom panel's is a `.sunken`
         // strip halfway down the window, and a second line brightening there would be a second

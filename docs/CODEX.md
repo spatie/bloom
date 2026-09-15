@@ -166,10 +166,13 @@ model in that capture carries `serviceTiers` and `additionalSpeedTiers` beside i
 tier, `priority`, which the CLI labels "Fast" and describes as "2x speed, increased usage" on
 `gpt-6-astra` and "1.5x speed, increased usage" on the `gpt-5.6` family. `TurnStartParams` takes it
 two ways, `serviceTier` for this turn and the ones after it and `serviceTierForTurn` for this turn
-alone, with `"default"` meaning standard speed. **Bloom sends neither**, so every Codex turn runs
-at standard speed. Adding it is a decision about spending somebody's usage allowance faster, and
-about the name, because the composer's footer already has a Fast mode switch and that one is Claude
-Code's `--thinking disabled`.
+alone, with `"default"` meaning standard speed. Bloom reads `config/read` for the composer's
+project and combines `service_tier` with the selected model's advertised tiers. A missing Bloom
+session preference inherits this configuration. An explicit choice sends `serviceTier` on the
+next turn and is stored separately from Claude Code's `--thinking disabled` preference. Off is
+stored explicitly, since omitting the field would leave a configured fast tier enabled. Bloom
+does not write Codex's global configuration.
+
 
 ---
 

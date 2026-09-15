@@ -47,7 +47,14 @@ struct ComposerFooterView: View {
     /// What choosing a quick prompt does, or nil where there is nowhere to put one. Nil hides the
     /// button rather than disabling it: a control that can never do anything is not worth the room
     /// in a row that already loses its words at 420 points.
-    var onQuickPrompt: (@MainActor (QuickPrompt) -> Void)?
+    var onQuickPrompt: (@MainActor (QuickPromptPanelRow) -> Void)?
+    /// What the workspace's repository offers under the owner's own prompts. Empty in the create
+    /// window, which has no workspace model to have read a settings file.
+    var projectQuickPrompts: [ProjectQuickPrompt] = []
+    /// Called as the panel opens, so the settings file behind `projectQuickPrompts` can be read
+    /// again. Somebody who has just pulled a teammate's new prompt opens the panel to find it,
+    /// and until now nothing re-read that file short of switching workspace.
+    var onOpenQuickPrompts: (@MainActor () -> Void)?
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
     var onSideConversation: (@MainActor () -> Void)?
@@ -60,6 +67,20 @@ struct ComposerFooterView: View {
     var showsAgentControls: Bool = true
     var remote: RemoteSessionConnection?
     var creationSource: CreationComposerSource?
+
+    // Key the fetched value as well as the task, so changing projects cannot briefly show the
+    // previous project's speed before SwiftUI starts the replacement task.
+    @State private var loadedSpeed: CodexSpeed?
+    @State private var loadedSpeedRequest: [String]?
+    @State private var speedFailed = false
+
+    private var speedRequest: [String] {
+        [project ?? "", controls.agentKind.rawValue, controls.model, String(showsAgentControls)]
+    }
+
+    private var codexSpeed: CodexSpeed? {
+        loadedSpeedRequest == speedRequest ? loadedSpeed : nil
+    }
 
     /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
     /// so the menu can offer the way back. See `ComposerOption.adding`.
@@ -160,6 +181,27 @@ struct ComposerFooterView: View {
         // On appearance rather than on first use of the menu, so the Codex section is there when
         // the menu is opened rather than a moment after. It fetches once.
         .task { if showsAgentControls, remote == nil, creationSource == nil { catalog.load() } }
+        .task(id: speedRequest) {
+            let request = speedRequest
+            loadedSpeed = nil
+            loadedSpeedRequest = request
+            speedFailed = false
+            guard showsAgentControls, controls.agentKind == .codex else { return }
+            // The reading is this Mac's Codex configuration, and it says nothing about what a
+            // server would run the turn at. Reported as unavailable rather than left loading for
+            // ever, until the speed comes over the wire with the rest of the composer's state.
+            guard remote == nil, creationSource == nil else { speedFailed = true; return }
+            do {
+                let speed = try await CodexSpeed.read(
+                    cwd: project ?? AgentScratchDirectory.current(), modelID: controls.model
+                )
+                guard !Task.isCancelled else { return }
+                loadedSpeed = speed
+            } catch {
+                guard !Task.isCancelled else { return }
+                speedFailed = true
+            }
+        }
         // Re-run when the composer moves to another checkout, because a project's own styles are
         // that project's. The scan itself does nothing when the answer is already held and fresh.
         .task(id: project ?? remote?.sessionID.rawValue ?? "") {
@@ -226,25 +268,20 @@ struct ComposerFooterView: View {
                     onEffort: { id in edit { $0.effort = id } },
                     onOutputStyle: { id in edit { $0.outputStyle = id } },
                     onPermissionMode: selectPermissionMode,
-                    onFastMode: { value in edit { $0.isFastMode = value } },
+                    onFastMode: { value in
+                        edit {
+                            if $0.agentKind == .codex {
+                                $0.codexFastMode = value
+                            } else {
+                                $0.isFastMode = value
+                            }
+                        }
+                    },
                     onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
+                    codexSpeed: codexSpeed,
+                    codexSpeedFailed: loadedSpeedRequest == speedRequest && speedFailed,
                     onInteractionMode: { mode in edit { $0.interactionMode = mode } }
                 )
-            }
-
-            if showsAgentControls, controls.offersInteractionMode {
-                Button {
-                    edit { $0.interactionMode = controls.interactionMode == .plan ? .build : .plan }
-                } label: {
-                    Text(controls.interactionMode.label).font(Typo.label)
-                }
-                .buttonStyle(.plain)
-                .disabled(!ComposerPlanningSupport.shared.isAvailable && controls.interactionMode == .build)
-                .help(ComposerPlanningSupport.shared.isAvailable
-                    ? (controls.interactionMode == .plan ? "Switch to building" : "Plan before implementing")
-                    : CodexPlanningCapability.explanation)
-                .accessibilityLabel("Interaction mode")
-                .accessibilityValue(controls.interactionMode.label)
             }
 
             if intent != .create {
@@ -271,6 +308,7 @@ struct ComposerFooterView: View {
             // already about an AI, so a sparkle would distinguish nothing.
             if showsAgentControls, onQuickPrompt != nil {
                 Button {
+                    onOpenQuickPrompts?()
                     isShowingQuickPrompts = true
                 } label: {
                     ComposerControlLabel(
@@ -294,6 +332,7 @@ struct ComposerFooterView: View {
                     if let onQuickPrompt {
                         QuickPromptMenu(
                             catalog: QuickPromptCatalog.shared,
+                            projectPrompts: projectQuickPrompts,
                             draft: $quickPromptDraft,
                             onPick: onQuickPrompt,
                             onClose: { isShowingQuickPrompts = false }

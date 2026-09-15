@@ -7,7 +7,8 @@ import BloomCore
 /// you sent. It replaced a near white plate with a hairline around it, which sat on a near white
 /// transcript and separated from the reply under it by almost nothing: you scrolled past your own
 /// question without noticing it went by. A fill is the cheapest thing that says "this half is
-/// yours" without adding a second border to a column that already has enough lines in it.
+/// yours" without adding a second border to a column that already has enough lines in it. The
+/// theme presets put the plate back once, and the owner asked for the blue again the next day.
 ///
 /// **Only this side is bubbled, and that is deliberate.** The agent's replies stay unbubbled prose
 /// and must not be "finished off" later. iMessage works because both sides are a sentence long. An
@@ -120,26 +121,23 @@ struct UserTurnRowView: View {
             // and the fill already separates the turn from the ground in both appearances.
             //
             // Everything inside is told it is sitting on the accent fill, which is the same
-            // signal a selected sidebar row sends. `Chip`, `DiffStatLabel`, `RepoIcon` and now
-            // `AttachmentChip` all read it and swap to the variant that survives the
-            // inversion, so a chip inside a user turn needs no knowledge of this view.
+            // signal a selected sidebar row sends. `Chip`, `DiffStatLabel`, `RepoIcon` and
+            // `AttachmentChip` all read it and swap to the variant that survives the inversion,
+            // so a chip inside a user turn needs no knowledge of this view.
             .environment(\.isOnEmphasizedSelection, true)
             // And that the ground under them is dark, which on a light page it now is.
             //
             // This is not a stylistic flourish, it is what makes the text selectable in any
-            // useful sense. Selecting text in a `Text` paints `selectedTextBackgroundColor`
-            // BEHIND the glyphs and leaves the foreground exactly as it was: on the light ramp
-            // that colour is a pale blue, so dragging over a white sentence on this fill wrote
-            // it in white on near white and the selection was unreadable while it was being
-            // made. Measured off a probe of this exact bubble: the highlight comes out
-            // #BAD6FB and white on it is 1.5 to 1.
+            // useful sense. Selecting text paints `selectedTextBackgroundColor` BEHIND the glyphs
+            // and leaves the foreground exactly as it was: on the light ramp that colour is a pale
+            // blue, so dragging over a white sentence on this fill wrote it in white on near white
+            // and the selection was unreadable while it was being made. Measured off a probe of
+            // this exact bubble: the highlight comes out #BAD6FB and white on it is 1.5 to 1.
             //
-            // Naming the scheme resolves that colour, and every other appearance-dependent
-            // colour inside the bubble, on the dark ramp, where it is a muted slate that sits
-            // clearly on Spatie Blue and leaves the white text alone: #466288, which carries the
-            // same white text at 6.2 to 1. The claim is honest rather than a trick: this bubble IS
-            // a dark surface whatever the page around it is doing, and the selection is simply the
-            // one piece of it that had to be told.
+            // Naming the scheme resolves every appearance-dependent colour inside the bubble on
+            // the dark ramp. The claim is honest rather than a trick: this bubble IS a dark
+            // surface whatever the page around it is doing. AppKit cannot read it, which is why
+            // the text view below is handed `Palette.bubbleTextSelection` as well.
             .environment(\.colorScheme, .dark)
         }
         .padding(.horizontal, TranscriptLayout.inset)
@@ -186,7 +184,7 @@ struct UserTurnRowView: View {
                 // `TranscriptTextView` exists: a link inside a selectable `Text` is decoration.
                 // Measured on a real window, the cursor over one was an I-beam and a press routed
                 // nothing at all. See the note on that type.
-                    TranscriptTextView(
+                TranscriptTextView(
                     text: TranscriptLink.attributedString(
                         sent: text,
                         font: font,
@@ -204,7 +202,6 @@ struct UserTurnRowView: View {
                     linkColor: NSColor(Palette.linkInverted),
                     // The measured value from the note above: on the dark ramp the selection is a
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
-                    // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: Palette.bubbleTextSelection,
                     alignsBubbleInk: true,
                     actions: linkActions.opening(

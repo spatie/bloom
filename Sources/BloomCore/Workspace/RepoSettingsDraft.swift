@@ -12,12 +12,22 @@ public struct DraftRunScript: Identifiable, Sendable, Hashable {
     public var key: String
     public var name: String
     public var command: String
+    /// Carried through untouched. The window has no field for either, and a row that forgot them
+    /// would make every Save of the run scripts take a hand-written icon or autostart out of the
+    /// file, and would make the draft differ from the file the moment it was opened.
+    public var icon: String?
+    public var autostart: Bool
 
-    public init(id: UUID = UUID(), key: String = "", name: String = "", command: String = "") {
+    public init(
+        id: UUID = UUID(), key: String = "", name: String = "", command: String = "",
+        icon: String? = nil, autostart: Bool = false
+    ) {
         self.id = id
         self.key = key
         self.name = name
         self.command = command
+        self.icon = icon
+        self.autostart = autostart
     }
 }
 
@@ -46,6 +56,10 @@ public struct RepoSettingsDraft: Sendable, Hashable {
     /// What a browser pane opens on, as typed, with the variables left unexpanded. Empty for the
     /// port Bloom allocated, which is what most projects want.
     public var browserURL = ""
+    /// Table names under `scripts.run` that the file holds and the loader skipped as broken. A new
+    /// row must not be given one of them, or its keys would land in the broken table the writer
+    /// deliberately leaves alone. See `SettingsWriter.skippedRunScripts`.
+    public var reservedRunScriptKeys: Set<String> = []
 
     public init() {}
 
@@ -54,8 +68,14 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         archiveScript = settings.archiveScript ?? ""
         filesToCopyText = settings.filesToCopy.joined(separator: "\n")
         runScripts = settings.runScripts.map {
-            DraftRunScript(key: $0.id, name: $0.name, command: $0.command)
+            DraftRunScript(
+                key: $0.id, name: $0.name, command: $0.command, icon: $0.icon, autostart: $0.autostart
+            )
         }
+        reservedRunScriptKeys = Set(settings.issues.compactMap {
+            guard case .runScript(let key) = $0.entry else { return nil }
+            return key
+        })
         runMode = settings.runMode
         branchPrefix = settings.branchPrefix ?? ""
         deleteBranchOnArchive = settings.deleteBranchOnArchive
@@ -100,7 +120,7 @@ public struct RepoSettingsDraft: Sendable, Hashable {
     /// The run scripts with a table name worked out for the ones that do not have one yet, and
     /// with the empty rows dropped: a row with no command is a row somebody started and abandoned.
     public var resolvedRunScripts: [RunScript] {
-        var used = Set(runScripts.map(\.key).filter { !$0.isEmpty })
+        var used = Set(runScripts.map(\.key).filter { !$0.isEmpty }).union(reservedRunScriptKeys)
         return runScripts.compactMap { script in
             let command = script.command.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !command.isEmpty else { return nil }
@@ -110,7 +130,10 @@ public struct RepoSettingsDraft: Sendable, Hashable {
                 used.insert(key)
             }
             let name = script.name.trimmingCharacters(in: .whitespaces)
-            return RunScript(id: key, name: name.isEmpty ? key.capitalizedFirst : name, command: command)
+            return RunScript(
+                id: key, name: name.isEmpty ? key.capitalizedFirst : name, command: command,
+                icon: script.icon, autostart: script.autostart
+            )
         }
     }
 

@@ -37,20 +37,22 @@ struct MarkReadyForReviewTests {
         #expect(!request.status.canMerge)
     }
 
-    @Test("the turn targets the exact pull request and stops after clearing draft status")
-    func readyPrompt() {
-        let request = draft()
-        let render = PromptTemplate.render(
-            PromptRegistry.definition(for: .markReadyForReview).defaultTemplate,
-            values: [PromptRegistry.MarkReadyForReview.url: request.url]
-        )
+    @Test("non-draft and finished pull requests are refused before running gh", arguments: [
+        ("OPEN", false), ("CLOSED", true), ("MERGED", true),
+    ])
+    func refusesInvalidRequest(state: String, isDraft: Bool) async {
+        var request = draft()
+        request.state = state
+        request.isDraft = isDraft
 
-        #expect(render.unknown.isEmpty)
-        #expect(render.missing.isEmpty)
-        #expect(render.text.contains(request.url))
-        #expect(render.text.contains("gh pr ready"))
-        #expect(render.text.contains("verify its draft status is cleared"))
-        #expect(render.text.contains("Do not merge the pull request, commit or push changes"))
+        do {
+            try await GitHub.markReadyForReview(request, worktree: "/nonexistent")
+            Issue.record("An invalid pull request should be refused")
+        } catch let error as GitHubError {
+            #expect(error.message == "This pull request is no longer an open draft.")
+        } catch {
+            Issue.record("Expected refusal before running gh, got: \(error)")
+        }
     }
 
     private func draft() -> PullRequest {

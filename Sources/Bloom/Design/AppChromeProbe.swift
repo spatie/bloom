@@ -20,10 +20,11 @@ enum AppChromeProbe {
 
     private static func run() async {
         let availability = TextZoomAvailability.shared
-        let oldSize = ChatTextSize.current
-        var failures: [String] = []
+        let oldSize = ColourThemePreference.shared.chatTextSize
+        var failures = await checkColourThemes()
+        failures += await checkThemeSettings()
         for size in ChatTextSize.allCases {
-            ChatTextSize.current = size
+            ColourThemePreference.shared.chatTextSize = size
             for _ in 0..<100 {
                 NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: nil)
             }
@@ -35,9 +36,9 @@ enum AppChromeProbe {
             try? await Task.sleep(for: .milliseconds(50))
             if availability.canZoomIn != (size.stepped(by: 1) != nil) { failures.append("zoom in: \(size)") }
             if availability.canZoomOut != (size.stepped(by: -1) != nil) { failures.append("zoom out: \(size)") }
-            if availability.canResetSize != (size != .defaultChoice) { failures.append("reset: \(size)") }
+            if !availability.canResetSize { failures.append("reset: \(size)") }
         }
-        ChatTextSize.current = oldSize
+        ColourThemePreference.shared.chatTextSize = oldSize
         await render(ChromeTabsFixture(), size: CGSize(width: 720, height: 96), name: "tabs")
         await render(WelcomeGreeting(isFirstVisit: false, continueTitle: "See what Bloom needs", onContinue: {}),
                      size: CGSize(width: 520, height: 424), name: "welcome-inactive")
@@ -48,11 +49,152 @@ enum AppChromeProbe {
         if !narrowAligned { failures.append("narrow notes text does not align") }
         let formatting = await checkFormatting()
         failures += formatting.failures
-        let result: [String: Any] = ["notifications": 1000, "checks": 17 + formatting.checks, "passed": failures.isEmpty, "failures": failures]
+        let result: [String: Any] = ["notifications": 1000, "checks": 29 + formatting.checks, "passed": failures.isEmpty, "failures": failures]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             FileHandle.standardOutput.write(data)
         }
         exit(failures.isEmpty ? 0 : 1)
+    }
+
+    private static func checkThemeSettings() async -> [String] {
+        var failures: [String] = []
+        func check(_ condition: Bool, _ message: String) {
+            if !condition { failures.append(message) }
+        }
+        let domain = "bloom-theme-probe-\(UUID())"
+        guard let defaults = UserDefaults(suiteName: domain) else { return ["No isolated theme defaults"] }
+        defer { defaults.removePersistentDomain(forName: domain) }
+        defaults.set("neutral", forKey: ColourTheme.defaultsKey)
+        defaults.set("regular", forKey: "sidebarGlassOverride")
+        let state = ColourThemePreference(defaults: defaults)
+        check(state.glass == .regular, "Glass migration was lost")
+        state.overrides.codeScheme = "bloom"
+        state.overrides.terminalSource = .builtin("charcoal")
+        state.chatTextSize = .largest
+        state.choice = .bloom
+        check(state.glass == ColourTheme.bloom.glass && state.codeScheme == .bloom, "Theme overrides leaked")
+        check(state.chatTextSize == .largest, "Typography did not follow across themes")
+        state.choice = .charcoalGlass
+        check(state.glass == .regular && state.chatTextSize == .largest, "Switching themes lost overrides")
+        let restored = ColourThemePreference(defaults: defaults)
+        check(restored.codeScheme == .bloom && restored.terminalScheme == .charcoal, "Theme settings did not persist")
+        restored.restoreDefaults()
+        check(restored.glass == .thick && restored.codeScheme == .charcoal, "Theme reset failed")
+
+        let preference = ColourThemePreference.shared
+        let originalChoice = preference.choice
+        preference.choice = .charcoalGlass
+        let originalOverrides = preference.overrides
+        let originalTypography = preference.typographyOverrides
+        let originalFollowsGhostty = preference.followsGhostty
+        defer {
+            preference.followsGhostty = originalFollowsGhostty
+            preference.typographyOverrides = originalTypography
+            preference.overrides = originalOverrides
+            preference.choice = originalChoice
+        }
+        preference.overrides = ThemeOverrides()
+        var source = "let count = 1\n// theme probe\n"
+        let binding = Binding(get: { source }, set: { source = $0 })
+        let host = NSHostingView(rootView: SourceEditor(text: binding, language: .swift, colorScheme: .dark))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 300),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        try? await Task.sleep(for: .milliseconds(200))
+        guard let editor = textView(in: host) else { return failures + ["Theme editor was not created"] }
+        editor.insertText("2", replacementRange: NSRange(location: 12, length: 1))
+        editor.setSelectedRange(NSRange(location: 4, length: 5))
+        let before = editor.string
+        let selection = editor.selectedRange()
+        let couldUndo = editor.undoManager?.canUndo ?? false
+        let smallHeight = WrappedCodeLayout.height(of: String(repeating: "code ", count: 30), width: 180)
+        preference.overrides.codeScheme = "bloom"
+        preference.typographyOverrides.codeTypography = ThemeTypography(fontFamily: "Menlo", fontSize: 20, lineHeight: 1.5)
+        try? await Task.sleep(for: .milliseconds(250))
+        host.layoutSubtreeIfNeeded()
+        check(editor.string == before && editor.selectedRange() == selection, "Theme change changed the editor text or selection")
+        check(couldUndo && editor.undoManager?.canUndo == true, "Theme change lost editor undo")
+        check(editor.font?.pointSize == 20, "Existing editor font did not update")
+        let largeHeight = WrappedCodeLayout.height(of: String(repeating: "code ", count: 30), width: 180)
+        check(largeHeight > smallHeight, "Wrapped layout reused old font measurements")
+        editor.undoManager?.undo()
+        check(editor.string.contains("count = 1"), "Editor undo failed after a theme change")
+
+        let terminal = BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 600, height: 240))
+        terminal.feed(text: "theme probe")
+        // Off, so the checks below measure the built-in schemes rather than whatever Ghostty
+        // configuration the Mac running the probe happens to have.
+        preference.followsGhostty = false
+        preference.overrides.terminalSource = .builtin("bloom")
+        preference.typographyOverrides.terminalTypography = ThemeTypography(fontSize: 18, lineHeight: 1.4)
+        terminal.updateTheme()
+        check(terminal.font.pointSize == 18 && abs(terminal.lineSpacing - 1.4) < 0.001, "Terminal typography did not update")
+        preference.overrides.terminalSource = .builtin("charcoal")
+        terminal.updateTheme()
+        for name in [NSAppearance.Name.aqua, .darkAqua] {
+            terminal.appearance = NSAppearance(named: name)
+            terminal.applyAppearanceColors()
+            let dark = name == .darkAqua
+            let palette = dark ? TerminalScheme.charcoal.dark : TerminalScheme.charcoal.light
+            check(terminal.nativeBackgroundColor == palette.background.map(NSColor.init), "Terminal background differs from its palette")
+            let scroller = terminal.subviews.compactMap { $0 as? NSScroller }.first
+            check(scroller?.knobStyle == (dark ? .light : .dark), "Terminal scrollbar has the wrong contrast")
+        }
+        let buffer = String(data: terminal.getTerminal().getBufferAsData(), encoding: .utf8) ?? ""
+        check(buffer.contains("theme probe"), "Changing terminal theme lost its contents")
+        check(!window.isVisible && !window.isKeyWindow, "Theme probe displayed a window")
+        window.contentView = nil
+        return failures
+    }
+
+    private static func checkColourThemes() async -> [String] {
+        let preference = ColourThemePreference.shared
+        let original = preference.choice
+        defer { preference.choice = original }
+        var failures: [String] = []
+        for appearance in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua,
+                           .accessibilityHighContrastDarkAqua] {
+            preference.choice = .bloom
+            let host = NSHostingView(rootView: Hairline().frame(width: 80, height: 20))
+            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 80, height: 20),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: appearance)
+            window.contentView = host
+            func pixels() -> Data? {
+                host.layoutSubtreeIfNeeded()
+                guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                return bitmap.representation(using: .png, properties: [:])
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+            let before = pixels()
+            preference.choice = .charcoalGlass
+            try? await Task.sleep(for: .milliseconds(150))
+            let after = pixels()
+            if before == nil || after == nil || before == after {
+                failures.append("Live theme did not redraw: \(appearance.rawValue)")
+            }
+            preference.choice = .bloom
+            try? await Task.sleep(for: .milliseconds(150))
+            if pixels() != before { failures.append("Theme round trip changed rendering") }
+            if window.isVisible { failures.append("Theme probe displayed a window") }
+        }
+        for theme in ColourTheme.allCases {
+            preference.choice = theme
+            for scheme in [ColorScheme.light, .dark] {
+                let name = "\(theme.id)-\(scheme == .dark ? "dark" : "light")"
+                await render(AppearanceSettingsView(), size: CGSize(width: 650, height: 580),
+                             name: "theme-\(name)", scheme: scheme)
+                await render(UserTurnRowView(text: "Please review Sources/Bloom/Design/Theme.swift", home: TranscriptHome())
+                    .environment(AppModel()), size: CGSize(width: 650, height: 160),
+                             name: "bubble-\(name)", scheme: scheme)
+                await render(MergeSplitButton(method: .merge, canMerge: true, choose: { _ in }, merge: {}),
+                             size: CGSize(width: 300, height: 80), name: "merge-\(name)", scheme: scheme)
+            }
+        }
+        return failures
     }
 
     private static func checkFormatting() async -> (checks: Int, failures: [String]) {
@@ -131,14 +273,17 @@ enum AppChromeProbe {
     }
 
     @discardableResult
-    private static func render(_ content: some View, size: CGSize, name: String) async -> Bool {
+    private static func render(
+        _ content: some View, size: CGSize, name: String, scheme: ColorScheme = .light
+    ) async -> Bool {
         let host = NSHostingController(rootView: content
-            .environment(\.colorScheme, .light)
+            .environment(\.colorScheme, scheme)
             .environment(\.controlActiveState, .inactive)
             .transaction { $0.disablesAnimations = true }
             .frame(width: size.width, height: size.height)
             .background(Palette.sidebar))
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         window.contentViewController = host
         host.view.frame = CGRect(origin: .zero, size: size)
         host.view.layoutSubtreeIfNeeded()

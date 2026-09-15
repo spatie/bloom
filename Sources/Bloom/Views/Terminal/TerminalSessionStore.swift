@@ -40,7 +40,14 @@ final class TerminalSessionStore {
     /// it back. Nothing here ever starts a command; see `TerminalCommandRecall`.
     let recall = TerminalCommandRecall()
 
-    private init() {}
+    /// Whether each run script tab's command is still going. See `RunScriptActivityMonitor`.
+    let activity = RunScriptActivityMonitor()
+
+    private init() {
+        activity.probes = { [weak self] in self?.runScriptProbes() ?? [:] }
+        activity.persistence = { [weak self] in self?.persistence }
+        activity.onRunning = { [weak self] pane in self?.recall.withdraw(inPane: pane) }
+    }
 
     // MARK: - Terminals
 
@@ -56,7 +63,8 @@ final class TerminalSessionStore {
 
     /// Queues a command for the pane that has not been drawn yet, so the shell runs it the moment
     /// it is forked. Nothing happens if the pane's shell already exists: a run script opens a tab
-    /// of its own, and the tab is new every time.
+    /// of its own when it has none, and a tab that already has a shell is typed into through
+    /// `retype` instead. See `RunScriptLauncher`.
     func run(_ command: String, inPaneID paneID: String) {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -82,6 +90,7 @@ final class TerminalSessionStore {
         // unreachable the moment the pane goes and would sit in the settings table for the life of
         // the database.
         recall.forget(panes: [id], store: repoStore)
+        activity.forget(panes: [id])
         closedPanes.insert(id)
         guard let view = terminals[id] else { return }
         defer { terminals[id] = nil }
@@ -191,8 +200,46 @@ final class TerminalSessionStore {
         // Only a submitted line is a command. Bytes without a return are a keystroke into whatever
         // is already running, an answer to a prompt as often as not, and remembering those would
         // offer back half a sentence.
-        if submit { recall.remember(text, sentTo: paneID) }
+        if submit {
+            recall.remember(text, sentTo: paneID)
+            activity.typed(inPane: paneID)
+        }
         return true
+    }
+
+    /// A run script's command, typed again into the shell its tab already has.
+    ///
+    /// Through `type` rather than `write`, so a shell forked a moment ago for a tab this launch had
+    /// not drawn yet gets the same startup beat a new run script tab does. False when the pane has
+    /// no live shell to type into, which the caller answers by opening a tab of its own.
+    func retype(_ command: String, inPane pane: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let view = terminals[pane], view.process?.running == true,
+              !view.hasExited else { return false }
+        recall.remember(trimmed, sentTo: pane)
+        type(trimmed, into: view, pane: pane)
+        return true
+    }
+
+    /// How to ask each run script tab's shell who holds its terminal, for the ones that have a
+    /// shell alive this launch.
+    ///
+    /// The tab's own pane only, which is the one its command was typed into: a tab split after it
+    /// opened keeps that pane under the tab's id, and a shell in the other half is somebody else's.
+    private func runScriptProbes() -> [String: RunScriptActivityMonitor.Probe] {
+        var probes: [String: RunScriptActivityMonitor.Probe] = [:]
+        for tabs in CenterTabStore.shared.tabsByWorkspace.values {
+            for tab in tabs where tab.kind == .terminal && tab.runScriptID != nil {
+                guard let view = terminals[tab.id], let process = view.process, process.running,
+                      !view.hasExited else { continue }
+                if let session = paneSession[tab.id] {
+                    probes[tab.id] = .tmux(session: session)
+                } else {
+                    probes[tab.id] = .direct(descriptor: process.childfd, shell: process.shellPid)
+                }
+            }
+        }
+        return probes
     }
 
     func send(_ key: TerminalKey, paneID: String) -> Bool {
@@ -212,7 +259,7 @@ final class TerminalSessionStore {
     /// since it was forked.
     func startRemembered(_ command: String, inPane pane: String) {
         guard write(command, submit: true, paneID: pane) else { return }
-        recall.accepted(inPane: pane)
+        recall.accepted(command, inPane: pane)
     }
 
     /// The cross beside it, which is the only way a remembered command is deliberately forgotten.
@@ -278,8 +325,11 @@ final class TerminalSessionStore {
         }
 
         terminals[tab.id.rawValue] = view
-        if let command = pendingCommands.removeValue(forKey: tab.id.rawValue) { type(command, into: view) }
+        if let command = pendingCommands.removeValue(forKey: tab.id.rawValue) {
+            type(command, into: view, pane: tab.id.rawValue)
+        }
         offerLastCommand(inPane: tab.id.rawValue, decision: decision)
+        activity.ensurePolling()
         return view
     }
 
@@ -303,11 +353,12 @@ final class TerminalSessionStore {
     /// redraws over them. A tenth of a second is longer than any of that takes and is under what
     /// anybody reads as a delay. The command is still typed rather than exec'd, so a shell whose
     /// rc files run slower than this simply receives it a moment later.
-    private func type(_ command: String, into view: BloomTerminalView) {
+    private func type(_ command: String, into view: BloomTerminalView, pane: String) {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
             guard view.process?.running == true else { return }
             view.send(txt: command + "\n")
+            activity.typed(inPane: pane)
         }
     }
 
@@ -477,6 +528,7 @@ final class TerminalSessionStore {
                 paneSession[pane] = nil
             }
             recall.forget(panes: panes, store: repoStore)
+            activity.forget(panes: panes)
             TerminalSplitStore.shared.discard(ownerID: tab)
         }
 
@@ -496,6 +548,7 @@ final class TerminalSessionStore {
         // asked what these shells are running. Afterwards there is nothing left to read.
         recordTask?.cancel()
         recordTask = nil
+        activity.stop()
         await recordCommands()
 
         let views = Array(terminals.values)

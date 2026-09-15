@@ -29,16 +29,17 @@ public enum Git {
     ///   business being killed halfway through. Anything that touches the network passes one:
     ///   `GIT_TERMINAL_PROMPT=0` stops git asking for credentials, but nothing stops a TCP
     ///   connection to an unreachable host from hanging for minutes behind a spinner.
+    /// - Parameter environment: laid over the two variables every call sets.
     static func run(
         _ arguments: [String],
         in directory: String,
         stdin: String? = nil,
-        timeout: Duration? = nil
+        timeout: Duration? = nil,
+        environment: [String: String] = [:]
     ) async throws -> ShellResult {
-        try await Shell.run("git", arguments, cwd: directory, env: [
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_OPTIONAL_LOCKS": "0",
-        ], stdin: stdin, timeout: timeout)
+        let env = ["GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"]
+            .merging(environment) { _, extra in extra }
+        return try await Shell.run("git", arguments, cwd: directory, env: env, stdin: stdin, timeout: timeout)
     }
 
     @discardableResult
@@ -140,10 +141,28 @@ public enum Git {
     // MARK: - Repository facts
 
     public static func isRepository(_ path: String) async -> Bool {
-        guard let result = try? await run(["rev-parse", "--is-inside-work-tree"], in: path) else {
-            return false
+        await repositoryAnswer(path) == .repository
+    }
+
+    /// Whether a folder is a repository, or why git could not say. See `GitRepositoryAnswer`.
+    ///
+    /// - Parameter environment: for the suite, which sets `GIT_TEST_ASSUME_DIFFERENT_OWNER` to
+    ///   produce git's real ownership refusal without a second user account.
+    static func repositoryAnswer(
+        _ path: String,
+        environment: [String: String] = [:]
+    ) async -> GitRepositoryAnswer {
+        do {
+            // `LC_ALL=C` so the messages the answer is read from are the English ones.
+            let result = try await run(
+                ["rev-parse", "--is-inside-work-tree"],
+                in: path,
+                environment: environment.merging(["LC_ALL": "C"]) { _, locale in locale }
+            )
+            return .from(status: result.status, stdout: result.stdout, stderr: result.stderr, path: path)
+        } catch {
+            return .from(launchFailure: error)
         }
-        return result.ok && result.trimmed == "true"
     }
 
     public static func topLevel(of path: String) async throws -> String {

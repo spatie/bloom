@@ -186,6 +186,8 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             _ = model.options
             _ = model.iconStyle
             _ = model.showsUsage
+            _ = model.showsWaitingCount
+            _ = model.showsUnreadCount
             return UsageCatalogue.metrics(quotas: app.quotas, accounts: app.accounts)
         } onChange: { [weak self] in
             Task { @MainActor in self?.observeUsage() }
@@ -207,7 +209,12 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             button.image = Self.mark
         }
 
-        let segments = MenuBarSummary.segments(waiting: waitingCount, unread: unreadCount)
+        let segments = MenuBarSummary.segments(
+            waiting: waitingCount,
+            unread: unreadCount,
+            showsWaiting: model.showsWaitingCount,
+            showsUnread: model.showsUnreadCount
+        )
         let showsCup = keepsAwake && model.showsCup
         button.attributedTitle = Self.title(for: segments, keepsAwake: showsCup, font: button.font)
 
@@ -446,7 +453,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             model: model,
             metrics: metrics,
             accounts: app.accounts,
-            observedAt: Self.oldestReadings(app.quotas),
             now: Date()
         ))
         host.frame = CGRect(origin: .zero, size: host.fittingSize)
@@ -456,10 +462,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         item.isEnabled = false
         item.setAccessibilityLabel(MenuBarSummary.limitSentence(for: QuotaBoard.make(from: app.quotas)))
         return item
-    }
-
-    static func oldestReadings(_ quotas: [AgentQuota]) -> [AgentKind: Date] {
-        Dictionary(grouping: quotas, by: \.provider).compactMapValues { $0.map(\.observedAt).min() }
     }
 
     // MARK: Workspaces

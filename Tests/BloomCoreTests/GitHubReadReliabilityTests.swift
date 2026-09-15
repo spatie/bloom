@@ -52,6 +52,30 @@ struct GitHubReadReliabilityTests {
         #expect(state.failure == nil)
     }
 
+    @Test("a dismissed failure stays hidden until GitHub says something different")
+    func dismissedFailure() {
+        var state = PullRequestRefreshState()
+        let failure = GitHubReadFailure(reason: .unavailable, message: "argument required")
+        state.record(.unavailable(failure))
+        state.dismissFailure()
+        #expect(state.visibleFailure == nil)
+
+        state.record(.unavailable(failure))
+        #expect(state.visibleFailure == nil)
+
+        let limited = GitHubReadFailure(reason: .rateLimited, message: "rate limit", retryAt: Date(timeIntervalSince1970: 1))
+        state.record(.unavailable(limited))
+        #expect(state.visibleFailure == limited)
+        state.dismissFailure()
+        let later = GitHubReadFailure(reason: .rateLimited, message: "rate limit", retryAt: Date(timeIntervalSince1970: 2))
+        state.record(.unavailable(later))
+        #expect(state.visibleFailure == nil)
+
+        state.record(.current(nil))
+        state.record(.unavailable(later))
+        #expect(state.visibleFailure == later)
+    }
+
     @Test("identical concurrent reads execute once", .timeLimit(.minutes(1)))
     func sharedRead() async throws {
         let requests = GitHubRequests()
@@ -105,6 +129,19 @@ struct GitHubReadReliabilityTests {
             == ["run", "view", "456", "--log", "--repo", "github.com/organisation/project"])
         #expect(GitHub.repositoryArguments(["pr", "view", "123", "--repo", "other/repo"], context: context)
             == ["pr", "view", "123", "--repo", "other/repo"])
+    }
+
+    @Test("a pull request command resolving the checked out branch is not given a repository")
+    func unnamedLookupKeepsTheWorktree() {
+        let context = GitRepositoryContext.resolve(config: [
+            "remote.origin.url": "git@github.com:person/project.git",
+            "branch.main.remote": "origin",
+        ], base: "main", branch: "feature")
+        #expect(GitHub.repositoryArguments(["pr", "view", "--json", "number"], context: context)
+            == ["pr", "view", "--json", "number"])
+        #expect(GitHub.repositoryArguments(["pr", "checks"], context: context) == ["pr", "checks"])
+        #expect(GitHub.repositoryArguments(["pr", "list", "--state", "open"], context: context)
+            == ["pr", "list", "--state", "open", "--repo", "github.com/person/project"])
     }
 }
 

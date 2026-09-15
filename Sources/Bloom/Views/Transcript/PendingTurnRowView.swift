@@ -148,7 +148,6 @@ struct PendingTurnRowView: View {
                             chipGround: .composer
                         ),
                         linkColor: NSColor(Palette.link),
-                        selectionColor: .selectedTextBackgroundColor,
                         alignsBubbleInk: true,
                         actions: linkActions.opening(
                             file: open, hovering: { hovered = $0 },

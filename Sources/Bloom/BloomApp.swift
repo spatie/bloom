@@ -11,6 +11,8 @@ struct BloomApp: App {
         if AppChromeProbe.isRequested { AppChromeProbe.runAndExit() }
         if ComposerInputProbe.isRequested { ComposerInputProbe.runAndExit() }
         if InspectorVisibilityProbe.isRequested { InspectorVisibilityProbe.runAndExit() }
+        if TranscriptSendProbe.isRequested { TranscriptSendProbe.runAndExit() }
+        if TranscriptSelectionProbe.isRequested { TranscriptSelectionProbe.runAndExit() }
         if MarkdownTableProbe.isRequested { MarkdownTableProbe.runAndExit() }
         #endif
         if BrowserViewportDemo.isRequested { BrowserViewportDemo.schedule() }

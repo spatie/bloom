@@ -24,6 +24,9 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     /// The setup script failed, so this workspace never became usable.
     case setupFailed
     /// A turn finished and nobody has read what it said.
+    ///
+    /// The one case out of precedence order: it ranks below every pull request state and above
+    /// `changed` and `clean`. See `resolve`.
     case unread
     /// The pull request is in. This workspace is finished and can be archived.
     case merged
@@ -74,9 +77,17 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         if isAwaitingPermission { return .awaitingPermission }
         if isRunning { return .running }
         if workspace.setupState == .failed { return .setupFailed }
-        if workspace.unread { return .unread }
 
-        return ofBranch(workspace: workspace, pullRequest: pullRequest)
+        // **Below the pull request, and it used to be above it.** A turn that merged its own pull
+        // request ends unread, so the row drew the unread dot over the merge until somebody opened
+        // the workspace, and opening it was what "updated" the mark. The fact had arrived the moment
+        // the turn finished. That was reported as the sidebar being stale. The name already goes to
+        // medium weight for an unread row (`WorkspaceNameText`), so the dot was saying twice what
+        // the row says once and hiding the one thing only the mark can say.
+        let branch = ofBranch(workspace: workspace, pullRequest: pullRequest)
+        if branch.describesPullRequest { return branch }
+        if workspace.unread { return .unread }
+        return branch
     }
 
     /// The same verdict with the agent left out of it: what is true of the BRANCH and whatever

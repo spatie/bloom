@@ -209,6 +209,8 @@ public actor CodexRunner: SessionRunner {
         }
         try handle.check(generation)
 
+        let speed = CodexSpeed.override(stored: try await store.setting(CodexSpeed.key(sessionID: session.id)))
+        try handle.check(generation)
         let turn: CodexTurn
         do {
             turn = try await client.startTurn(
@@ -219,7 +221,8 @@ public actor CodexRunner: SessionRunner {
                 approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
                 sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
                 approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode),
-                interactionMode: interactionMode ?? session.interactionMode
+                interactionMode: interactionMode ?? session.interactionMode,
+                serviceTier: CodexSpeed.serviceTier(override: speed)
             )
         } catch {
             if await client.planningIsSupported == false {
