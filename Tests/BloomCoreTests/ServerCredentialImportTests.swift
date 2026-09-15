@@ -102,25 +102,26 @@ import Testing
         let pidFile = fixture.url.appendingPathComponent("pid")
         let start = ContinuousClock.now
         do {
-            _ = try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "echo $$ > \"$1\"; exec sleep 30", "fixture", pidFile.path], environment: ["PATH": "/usr/bin:/bin"], input: Data(repeating: 65, count: 131072), timeout: 0.15)
+            _ = try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "echo $$ > \"$1\"; exec sleep 600", "fixture", pidFile.path], environment: ["PATH": "/usr/bin:/bin"], input: Data(repeating: 65, count: 131072), timeout: 0.15)
             Issue.record("Expected the non-reading process to time out")
         } catch {
             #expect(error.localizedDescription.contains("timed out"))
             #expect(!String(reflecting: error).contains(String(repeating: "A", count: 20)))
         }
         // What a timeout promises is that the command is stopped and reaped rather than waited
-        // out, so that is what is checked: the process asked to sleep for thirty seconds no longer
+        // out, so that is what is checked: the process asked to sleep for ten minutes no longer
         // exists by the time the error arrives. This was a three second bound around the await,
         // and that measured the shared test executor as much as the runner: in the full core suite
-        // the 0.15 second timeout came back after 12.7 and 17 seconds on CI. The bound kept only
-        // tells a timeout from a command that ran its whole thirty seconds. No pid file means the
-        // command was stopped before the shell got as far as writing it, which is a pass too.
+        // the 0.15 second timeout came back after 12.7, 17 and then 20 seconds on CI. The bound
+        // kept is half the sleep, so it only tells a timeout from a command left to run, whatever
+        // the executor does. No pid file means the command was stopped before the shell got as
+        // far as writing it, which is a pass too.
         if let written = try? String(contentsOf: pidFile, encoding: .utf8),
            let pid = Int32(written.trimmingCharacters(in: .whitespacesAndNewlines)) {
             let stillExists = kill(pid, 0) == 0
             #expect(!stillExists)
         }
-        #expect(start.duration(to: .now) < .seconds(25))
+        #expect(start.duration(to: .now) < .seconds(300))
         await #expect(throws: ServerCredentialImport.Failure.self) {
             try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "printf fake-secret-output"], environment: [:], limit: 3)
         }
@@ -133,14 +134,14 @@ import Testing
         // The pid is written aside and renamed, so the file is complete whenever it exists.
         let marker = fixture.url.appendingPathComponent("ready")
         // Timing is not what this test can assert. The core suite shares one executor and it
-        // stalls, 12.65 seconds at a time on CI, so a ten second timeout sometimes won the race
-        // against the cancellation that was supposed to beat it, and a two second bound on the
-        // cancel itself measured the stall. The timeout is long enough that only cancellation
-        // can end the command, and what is checked is what cancellation promises: the error is
-        // a cancellation and the process group is gone when it arrives. The bound kept only
-        // tells that from a command that ran its whole thirty seconds.
+        // stalls, for twenty seconds at a time on CI, so a ten second timeout sometimes won the
+        // race against the cancellation that was supposed to beat it, and a two second bound on
+        // the cancel itself measured the stall. The timeout is far longer than the sleep, so only
+        // cancellation can end the command, and what is checked is what cancellation promises:
+        // the error is a cancellation and the process group is gone when it arrives. The bound
+        // kept is half the sleep, so it only tells that from a command left to run.
         let task = Task {
-            try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "echo $$ > \"$1.partial\" && mv \"$1.partial\" \"$1\" && exec sleep 30", "fixture", marker.path], environment: ["PATH": "/usr/bin:/bin"], timeout: 300)
+            try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "echo $$ > \"$1.partial\" && mv \"$1.partial\" \"$1\" && exec sleep 600", "fixture", marker.path], environment: ["PATH": "/usr/bin:/bin"], timeout: 900)
         }
         let deadline = ContinuousClock.now.advanced(by: .seconds(60))
         while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
@@ -151,7 +152,7 @@ import Testing
         await #expect(throws: CancellationError.self) { try await task.value }
         let stillExists = kill(pid, 0) == 0
         #expect(!stillExists)
-        #expect(start.duration(to: .now) < .seconds(25))
+        #expect(start.duration(to: .now) < .seconds(300))
     }
 }
 
