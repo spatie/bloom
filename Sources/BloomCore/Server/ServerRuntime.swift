@@ -559,9 +559,23 @@ public actor ServerRuntime {
         let manager = WorkspaceManager(store: store)
         let path = try await repositories.resolve(request.repositoryPath, dataDirectory: URL(fileURLWithPath: store.path).deletingLastPathComponent())
         let repo = try await manager.addRepository(at: path)
+        let suppliedName = request.mode == nil ? request.name : nil
+        // The same sea the local create window claims, from this server's own catalogue table.
+        // Without it a terminal or browser start with nothing typed came back as "New workspace"
+        // on `workspace`, `workspace-2`, while the same start on the Mac was a named sea. No
+        // automatic rename runs here, so a chat never claims one: its prompt is its name.
+        let sea = await WorkspaceSeaClaim.claim(
+            in: store, repositoryPath: repo.path,
+            userSuppliedName: suppliedName ?? request.checkout?.workspaceName, userSuppliedBranch: nil,
+            isChatWorkspace: mode.runsAnAgent, wantsAutomaticName: false,
+            hasTask: !(request.prompt ?? request.name).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
         let started = try await manager.start(WorkspaceStartRequest(
             repo: repo, prompt: request.prompt ?? request.name, origin: origin, baseBranch: request.baseBranch,
-            name: request.mode == nil ? request.name : nil, checkout: request.checkout, controls: controls,
+            branch: sea?.branch,
+            name: suppliedName ?? (mode.runsAnAgent ? nil
+                : WorkspaceStartPlan.terminalName(userSuppliedBranch: nil, claimedSea: sea?.pick.ocean.name)),
+            checkout: request.checkout, controls: controls,
             opensSession: mode.runsAnAgent, setupPolicy: request.runSetupScript == false ? .skip : .run
         ))
         var prompt = request.prompt ?? ""

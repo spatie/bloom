@@ -347,6 +347,39 @@ struct ServerRuntimeTests {
         await runtime.shutdown()
     }
 
+    @Test(arguments: [WorkspaceStartMode.terminal, .browser])
+    func sharedCreationWithoutANameClaimsASea(mode: WorkspaceStartMode) async throws {
+        let repository = try await TempRepo()
+        defer { repository.cleanUp() }
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime(availableAgents: [])
+        var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "")
+        request.mode = mode
+        request.runSetupScript = false
+        var started: [Workspace] = []
+        for _ in 0..<2 {
+            let response = await runtime.respond(to: ServerRequest(.create(request)))
+            guard case .creation(.workspaceStarted(let workspace, _, _, _)) = response.result else {
+                Issue.record("Missing workspace: \(String(describing: response.result))"); break
+            }
+            started.append(workspace)
+        }
+        defer { for workspace in started { try? FileManager.default.removeItem(atPath: workspace.path) } }
+        // A server start with nothing typed used to be "New workspace" on `workspace`, while the
+        // same start on the Mac claimed a sea. Both now name the workspace after the sea and cut
+        // the branch from its slug. The draw is over the whole catalogue, locally as well, so two
+        // starts may land on one sea; the branch is what `Git.uniqueBranch` keeps apart.
+        #expect(started.count == 2)
+        for workspace in started {
+            let ocean = try #require(OceanCatalog.all.first { $0.name == workspace.name })
+            let stem = workspace.branch.split(separator: "/").last.map(String.init) ?? ""
+            #expect(stem == ocean.slug || stem.hasPrefix(ocean.slug + "-"))
+        }
+        #expect(Set(started.map(\.branch)).count == started.count)
+        #expect(try await fixture.store.unusedOceanCount() < OceanCatalog.all.count)
+        await runtime.shutdown()
+    }
+
     @Test func sharedProjectInspectionAndRegistrationRejectChangedFolders() async throws {
         let repository = try await TempRepo()
         defer { repository.cleanUp() }
