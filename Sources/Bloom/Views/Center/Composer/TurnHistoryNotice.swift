@@ -11,7 +11,12 @@ struct TurnHistoryNotice: View {
                 Spacer(minLength: 0)
                 Button("Dismiss") { transcript.history.failure = nil }
             }
-            .padding(Metrics.spacingSmall)
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, Metrics.spacingSmall)
+            // The composer floats over the transcript, so a notice with no material of its own
+            // drew its text straight across whatever row was scrolled behind it.
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
+            .padding(.bottom, Metrics.spacingSmall)
         }
     }
 }
