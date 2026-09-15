@@ -164,12 +164,12 @@ final class CreateWorkspaceController: UITableViewController, UITextViewDelegate
         case .name: cell.selectionStyle = .none; embed(name, in: cell, height: 44); return cell
         case .prompt: cell.selectionStyle = .none; embed(prompt, in: cell, height: 110); return cell
         case .mode:
-            let picker = UISegmentedControl(items: WorkspaceStartMode.allCases.map(\.label))
-            picker.selectedSegmentIndex = WorkspaceStartMode.allCases.firstIndex(of: mode) ?? 0
+            let picker = UISegmentedControl(items: WorkspaceStartMode.pickerModes.map(\.label))
+            picker.selectedSegmentIndex = WorkspaceStartMode.pickerModes.firstIndex(of: mode) ?? 0
             picker.isEnabled = pending == nil && !isSubmitting
             picker.addAction(UIAction { [weak self, weak picker] _ in
-                guard let self, let index = picker?.selectedSegmentIndex, WorkspaceStartMode.allCases.indices.contains(index) else { return }
-                self.mode = WorkspaceStartMode.allCases[index]; self.tableView.reloadData(); self.updateButton()
+                guard let self, let index = picker?.selectedSegmentIndex, WorkspaceStartMode.pickerModes.indices.contains(index) else { return }
+                self.mode = WorkspaceStartMode.pickerModes[index]; self.tableView.reloadData(); self.updateButton()
             }, for: .valueChanged)
             picker.accessibilityLabel = "Open workspace with"
             cell.selectionStyle = .none

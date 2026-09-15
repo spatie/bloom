@@ -656,7 +656,9 @@ extension WorkspaceDeskController {
         loadViewIfNeeded()
         do {
             switch mode {
-            case .chat: break
+            // A CLI chat is launched in a shell on the Mac that asked for it, so a server
+            // workspace never starts in one, and the conversation pane is where it lands.
+            case .chat, .claudeCLI, .codexCLI: break
             case .terminal: _ = try await openPane(kind: .terminal)
             case .browser: _ = try await openPane(kind: .browser, address: workspace.port > 0 ? "http://localhost:\(workspace.port)" : nil)
             }
