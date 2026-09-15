@@ -293,8 +293,25 @@ extension SidebarReorder {
     /// right is not written. Every remaining project ends up holding its own index, which is what
     /// keeps the numbers from drifting into ties over a long series of drags.
     public static func move(projects: [Repo], id: RepoID, to: Int) -> [ProjectChange] {
-        guard let index = projects.firstIndex(where: { $0.id == id }) else { return [] }
-        let ordered = moving(projects, from: IndexSet(integer: index), to: to)
+        move(projects: projects, visible: projects.map(\.id), id: id, to: to)
+    }
+
+    /// The drop offset counts visible projects only. Reorder their slots in the full list so
+    /// hidden projects keep their places when they are shown again.
+    public static func move(
+        projects: [Repo], visible: [RepoID], id: RepoID, to: Int
+    ) -> [ProjectChange] {
+        guard let index = visible.firstIndex(of: id), (0...visible.count).contains(to) else { return [] }
+        let moved = moving(visible, from: IndexSet(integer: index), to: to)
+
+        let visibleIDs = Set(visible)
+        let stored = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        guard visibleIDs.count == visible.count, visible.allSatisfy({ stored[$0] != nil }) else { return [] }
+        var replacements = moved.makeIterator()
+        let ordered = projects.map { repo in
+            guard visibleIDs.contains(repo.id), let next = replacements.next() else { return repo }
+            return stored[next] ?? repo
+        }
         return ordered.enumerated().compactMap { offset, repo in
             guard repo.sortOrder != offset else { return nil }
             return ProjectChange(id: repo.id, sortOrder: offset)

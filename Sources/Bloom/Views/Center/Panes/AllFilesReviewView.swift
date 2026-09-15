@@ -7,10 +7,18 @@ struct AllFilesReviewView: View {
     let model: WorkspaceModel
     let selectedPath: String
     let navigationRevision: Int
-    /// Keep the destination anchored while loading replaces short placeholders with full diffs.
+    /// A prepared file can still move when neighbouring diffs load or the lazy stack lays out.
+    /// Hold the clicked destination until the reader scrolls or collapses a section.
     @State private var pendingDestination: String?
+    /// The anchor used to hold until the reader scrolled, however long that took. A reader who
+    /// clicked a file and sat reading it while an agent kept editing had every changes poll
+    /// resize the stack and call `scrollTo` again, and the lazy stack's height estimates then
+    /// bounced the view between the destination and its neighbour for seconds. Once nothing has
+    /// moved the destination for a second it is settled, and only a new width re-arms it.
+    @State private var destinationSettled = false
+    @State private var settleTask: Task<Void, Never>?
     @State private var layoutRevision = 0
-    @State private var preparedPaths: Set<String> = []
+    @State private var destinationPrepared = false
     @State private var collapsedPaths: Set<String> = []
     @State private var hasNavigated = false
 
@@ -21,6 +29,7 @@ struct AllFilesReviewView: View {
                 title: "No changes",
                 message: model.diffScope.emptyMessage(base: model.workspace.baseBranch)
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             GeometryReader { geometry in
                 ScrollViewReader { reader in
@@ -30,22 +39,34 @@ struct AllFilesReviewView: View {
                                 DiffView(
                                     model: model, file: file, embeddedWidth: geometry.size.width,
                                     embeddedViewportHeight: geometry.size.height,
-                                    isCollapsed: collapsedPaths.contains(file.path),
+                                    isCollapsed: collapsedPaths.contains(file.id),
                                     onScrollFocus: {
+                                        guard hasNavigated, pendingDestination == nil else { return }
                                         if model.selectedFilePath != file.path { model.selectedFilePath = file.path }
+                                        if model.selectedChangeLayer != file.layer { model.selectedChangeLayer = file.layer }
+                                    },
+                                    navigationTarget: pendingDestination == file.id,
+                                    onNavigationLayout: {
+                                        guard pendingDestination == file.id else { return }
+                                        follow(file.id, using: reader)
                                     },
                                     onPrepared: {
-                                        preparedPaths.insert(file.path)
+                                        if pendingDestination == file.id { destinationPrepared = true }
                                         layoutRevision += 1
                                     },
                                     onToggleCollapsed: {
                                         pendingDestination = nil
-                                        if !collapsedPaths.insert(file.path).inserted {
-                                            collapsedPaths.remove(file.path)
+                                        if !collapsedPaths.insert(file.id).inserted {
+                                            collapsedPaths.remove(file.id)
                                         }
                                     }
                                 )
-                                .id(file.path)
+                                .id(file.id)
+                            }
+                        }
+                        .background {
+                            ReviewNavigationInput(armed: pendingDestination != nil) {
+                                pendingDestination = nil
                             }
                         }
                     }
@@ -58,33 +79,71 @@ struct AllFilesReviewView: View {
                     .onScrollGeometryChange(for: Bool.self) { geometry in
                         geometry.contentOffset.y <= geometry.contentInsets.top
                     } action: { _, atTop in
-                        if atTop, let path = model.reviewFiles.first?.path,
-                           model.selectedFilePath != path {
-                            model.selectedFilePath = path
+                        if hasNavigated, pendingDestination == nil, atTop, let first = model.reviewFiles.first {
+                            if model.selectedFilePath != first.path { model.selectedFilePath = first.path }
+                            if model.selectedChangeLayer != first.layer { model.selectedChangeLayer = first.layer }
                         }
                     }
                     .onChange(of: navigationRevision, initial: true) { _, _ in
                         let requested = hasNavigated ? selectedPath : model.selectedFilePath ?? selectedPath
                         hasNavigated = true
-                        let path = requested.isEmpty ? model.reviewFiles.first?.path : requested
-                        guard let path, model.reviewFiles.contains(where: { $0.path == path }) else { return }
+                        let file = model.selectedChangedFile(path: requested) ?? model.reviewFiles.first
+                        guard let file else { return }
+                        let path = file.id
                         collapsedPaths.remove(path)
-                        pendingDestination = preparedPaths.contains(path) ? nil : path
+                        destinationPrepared = false
+                        destinationSettled = false
+                        pendingDestination = path
+                        model.selectedFilePath = file.path
+                        model.selectedChangeLayer = file.layer
                         reader.scrollTo(path, anchor: .top)
+                        restartSettleTimer()
+                    }
+                    .onScrollGeometryChange(for: CGSize.self) { geometry in
+                        geometry.contentSize
+                    } action: { _, _ in
+                        if let path = pendingDestination { follow(path, using: reader) }
                     }
                     .onChange(of: layoutRevision) { _, _ in
-                        if let path = pendingDestination {
-                            reader.scrollTo(path, anchor: .top)
-                            if preparedPaths.contains(path) { pendingDestination = nil }
-                        }
+                        if let path = pendingDestination { follow(path, using: reader) }
                     }
-                    .onChange(of: model.reviewFiles.map(\.path)) { _, paths in
+                    .onChange(of: geometry.size.width) { _, _ in
+                        // Rewrapping moves every line above the destination, which the reader did not ask for.
+                        guard let path = pendingDestination else { return }
+                        destinationSettled = false
+                        follow(path, using: reader)
+                    }
+                    .onChange(of: model.reviewFiles.map(\.id)) { _, paths in
                         collapsedPaths.formIntersection(paths)
-                        preparedPaths.formIntersection(paths)
                         if let pendingDestination, !paths.contains(pendingDestination) { self.pendingDestination = nil }
                     }
                 }
             }
+        }
+    }
+
+    private func follow(_ path: String, using reader: ScrollViewProxy) {
+        guard !destinationSettled else { return }
+        scroll(to: path, using: reader)
+        restartSettleTimer()
+    }
+
+    private func restartSettleTimer() {
+        settleTask?.cancel()
+        settleTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            destinationSettled = true
+        }
+    }
+
+    private func scroll(to path: String, using reader: ScrollViewProxy) {
+        let relative = model.reviewFiles.first { $0.id == path }?.path ?? path
+        let absolute = (model.workspace.path as NSString).appendingPathComponent(relative)
+        if destinationPrepared, model.diffScope == .all, let destination = SourceEditorState.file(absolute).diffRequest {
+            reader.scrollTo("\(path):definition:\(destination.line)", anchor: .center)
+        } else {
+            reader.scrollTo(path, anchor: .top)
         }
     }
 }

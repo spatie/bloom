@@ -29,10 +29,8 @@ extension Git {
 
     // MARK: - Cutting a branch from an updated base
 
-    /// The remote Bloom talks to. Spelled once here rather than threaded through every call: the
-    /// rest of the app already hardcodes it (`GitHub.push`, `GitHub.deleteRemoteBranch`), and a
-    /// second, configurable idea of which remote is the real one would only be able to disagree
-    /// with those.
+    /// The conventional fallback for caller-facing defaults. Live operations resolve the
+    /// repository's configured base and publication destinations through repositoryContext.
     public static let remote = "origin"
 
     /// Updates one branch's remote-tracking ref, and says whether it worked.
@@ -45,9 +43,15 @@ extension Git {
     /// Never throws. Being offline is an ordinary thing rather than an error, and every caller
     /// here has somewhere to fall back to.
     public static func fetch(
-        _ branch: String, in directory: String, timeout: Duration = .seconds(20)
+        _ branch: String, in directory: String, remote: String? = nil,
+        timeout: Duration = .seconds(20)
     ) async -> Bool {
         guard isValidBranchName(branch) else { return false }
+        let destination: String?
+        if let remote { destination = remote } else {
+            destination = try? await repositoryContext(in: directory, baseBranch: branch).baseRemote
+        }
+        guard let remote = destination, (try? validate(ref: remote, label: "remote")) != nil else { return false }
         let refspec = "+refs/heads/\(branch):refs/remotes/\(remote)/\(branch)"
         let result = try? await run(
             ["fetch", "--no-tags", "--", remote, refspec], in: directory, timeout: timeout
@@ -80,9 +84,13 @@ extension Git {
         branch: String, in directory: String
     ) async throws -> (revision: String, base: ContinuationBase) {
         try validate(branch: branch)
-        let fetched = await fetch(branch, in: directory)
+        let context = try await repositoryContext(in: directory, baseBranch: branch)
+        let fetched = if let remote = context.baseRemote {
+            await fetch(context.baseBranch, in: directory, remote: remote)
+        } else { false }
 
-        if let revision = await revision(of: "refs/remotes/\(remote)/\(branch)", in: directory) {
+        if let tracking = context.baseTrackingRef,
+           let revision = await revision(of: tracking, in: directory) {
             return (revision, fetched ? .fetched : .cachedRemote)
         }
         if let revision = await revision(of: "refs/heads/\(branch)", in: directory) {
@@ -91,7 +99,7 @@ extension Git {
         throw ShellError(
             command: "git rev-parse \(branch)",
             status: 1,
-            stderr: "Bloom could not find \(branch) here, on \(remote) or on this disk."
+            stderr: "Bloom could not find \(branch) in this repository or on its configured base remote."
         )
     }
 

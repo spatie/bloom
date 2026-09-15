@@ -68,9 +68,9 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return self.showMediaForBridge(order, in: workspaceID)
             },
-            PaneSplitTool { [weak self] order, axis, workspaceID in
+            PaneSplitTool { [weak self] order, axis, anchor, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
-                return await self.splitPaneForBridge(order, axis: axis, in: workspaceID)
+                return await self.splitPaneForBridge(order, axis: axis, anchor: anchor, in: workspaceID)
             },
             PaneCloseTool { [weak self] kind, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
@@ -249,11 +249,13 @@ extension AppModel {
             let contextWindow = CodexContextWindow.normalised(try await store.setting(
                 ComposerControls.contextWindowKey(sessionID: sessionID)
             ))
+            let codexFastMode = CodexSpeed.override(stored: try await store.setting(CodexSpeed.key(sessionID: sessionID)))
             controls = ComposerControls(
                 session: session,
                 isFastMode: false,
                 outputStyle: OutputStyle.defaultName,
-                codexContextWindow: contextWindow
+                codexContextWindow: contextWindow,
+                codexFastMode: codexFastMode
             )
         }
         controls = try await workspaceControls(for: order, inheriting: controls)
@@ -299,13 +301,12 @@ extension AppModel {
         // stays on the backend that was inherited. See `DefaultBackend`.
         let agent = order.agent
             ?? order.model.map {
-                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, codexModels: [])
+                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, models: [:])
             }
             ?? inheritedAgent
         controls.agentKind = agent
 
-        switch agent {
-        case .claudeCode:
+        if agent == .claudeCode {
             let models = Set(ComposerOption.models.map(\.id))
             if let model = order.model {
                 guard models.contains(model) else {
@@ -319,30 +320,25 @@ extension AppModel {
             } else if agent != inheritedAgent {
                 controls.model = AppDefaults.fallbackModel
             }
-        case .codex:
+        } else {
+            guard let source = AgentModelSource.live(store: store)[agent] else {
+                throw BridgeWorkspaceModelFailure.noneAvailable(agent)
+            }
             if order.model == nil, agent == inheritedAgent { return controls }
 
-            let models = try await CodexModelCatalog.live().pickerModels()
-            let chosen: CodexModel?
-            if let requested = order.model {
-                chosen = models.first { $0.id == requested }
-                guard chosen != nil else {
+            let models = try await source.models()
+            guard let chosen = AgentModel.selection(requested: order.model, from: models) else {
+                if let requested = order.model {
                     throw BridgeWorkspaceModelFailure.invalid(
                         model: requested,
                         agent: agent,
-                        available: models.map(\.id)
+                        available: models.filter { !$0.hidden }.map(\.id)
                     )
                 }
-            } else {
-                chosen = models.first { $0.isDefault } ?? models.first
-            }
-            guard let chosen else {
                 throw BridgeWorkspaceModelFailure.noneAvailable(agent)
             }
             controls.model = chosen.id
             controls.effort = chosen.resolvedEffort(preferring: controls.effort)
-        case .cursor, .openCode:
-            throw BridgeWorkspaceModelFailure.noneAvailable(agent)
         }
 
         return controls
@@ -411,7 +407,7 @@ extension AppModel {
     static let noWorkspaceForPane =
         "That workspace is not open in Bloom any more, so there is nowhere to put a pane."
 
-    /// `pane_open`, through the same door the tab strip's `+` menu uses.
+    /// `pane_open`, through the same door the title bar's `+` menu uses.
     ///
     /// `NewPane.open` and not a copy of it: a chat has to be made in the store before it can be a
     /// tab, and a terminal deliberately does not start its shell here. Reusing it is what keeps a
@@ -430,28 +426,6 @@ extension AppModel {
             }
         }
         return .opened(order.confirmation)
-    }
-
-    /// `pane_split`, through the same door Cmd+D uses.
-    ///
-    /// The refusal comes from `PaneSplit`, which is what greys Split Right in the menu, so a pane
-    /// the menu will not divide is one this declines with the menu's own reason rather than with a
-    /// second opinion.
-    func splitPaneForBridge(
-        _ order: PaneOrder, axis: SplitAxis, in workspaceID: WorkspaceID
-    ) async -> PaneOutcome {
-        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = WorkspaceTabsStore.shared
-        guard let tab = tabs.selectedTab(in: model) else {
-            return .refused(
-                "There is no tab open in that workspace to split. Use pane_open instead."
-            )
-        }
-        NewPane.open(order.kind, in: model, url: order.url ?? "", title: order.title) { content in
-            tabs.split(tab: tab, axis: axis, showing: content)
-        }
-        let where_ = axis == .horizontal ? "beside" : "below"
-        return .opened("Opened \(order.kind.title) \(where_) what was already on screen.")
     }
 
     /// Which pane of the tab in front a kind names, or the sentence saying why none does.

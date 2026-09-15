@@ -43,7 +43,7 @@ import Foundation
 /// height is set once, looked at, and left. Three more items in View, or a second pair of keys for
 /// `TextZoom` to route between a terminal and a chat, would be menu weight for something nobody
 /// opens a menu for twice.
-public enum ChatLineHeight: String, CaseIterable, Identifiable, Sendable {
+public enum ChatLineHeight: String, Codable, CaseIterable, Identifiable, Sendable {
     case tightest
     case tighter
     case standard
@@ -91,21 +91,6 @@ public enum ChatLineHeight: String, CaseIterable, Identifiable, Sendable {
 }
 
 extension ChatLineHeight {
-    /// Read and written outside SwiftUI. `@AppStorage` keeps a raw-value enum as its raw string,
-    /// so this is the same slot the settings picker binds to, and every open window follows a
-    /// change to it at once.
-    ///
-    /// `ChatTextSize` has this because the View menu writes it. Nothing writes this one yet, on
-    /// purpose: see the note above about why the line height stayed out of that menu. It is here
-    /// because a setting with a `defaultsKey` and no way to read it from outside a view is half a
-    /// setting, and because the first thing anybody adds here (a Reset, a probe, an offscreen
-    /// render at a named step) would otherwise reach for `UserDefaults` by hand and spell the
-    /// fallback differently.
-    public static var current: ChatLineHeight {
-        get { read(from: .standard) }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
-    }
-
     public static func read(from defaults: UserDefaults) -> Self {
         defaults.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? defaultChoice
     }

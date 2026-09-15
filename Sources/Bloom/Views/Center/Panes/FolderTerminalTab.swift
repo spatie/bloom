@@ -5,7 +5,7 @@ import BloomCore
 ///
 /// `FileReview` next door is the same shape and exists for the same reason: two trees in the
 /// inspector offer this, and neither of them should have to know how a tab is made or where the
-/// centre column puts one. It goes through `NewPane.open`, which is the door the strip's `+`, the
+/// centre column puts one. It goes through `NewPane.open`, which is the door the title bar's `+`, the
 /// pane menus and `pane_open` all use, so a shell opened from a folder row is exactly the tab a
 /// terminal normally is.
 @MainActor

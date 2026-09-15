@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Ask conversation tabs", .scratchDirectory)
 struct AskTabsTests {
+    @Test func closingTheMiddleAskTabSelectsLeftOnlyWhenActive() {
+        let sessions = (0..<3).map { _ in AskConversation.newSession() }
+        let middle = sessions[1].id
+        #expect(AskTabs.selectionAfterClosing(middle, selected: middle, sessions: sessions) == sessions[0].id)
+        #expect(AskTabs.selectionAfterClosing(middle, selected: sessions[2].id, sessions: sessions) == sessions[2].id)
+    }
+
     @Test func creatingTabsPreservesConversationsAndDirectories() async throws {
         let store = try makeTestStore("ask-tabs")
         let first = try await store.createAskConversation(directory: "/first")
@@ -55,10 +62,12 @@ struct AskTabsTests {
 
     @Test func newTabCarriesControlsAndDraftAtomically() async throws {
         let store = try makeTestStore("ask-tab-controls")
-        let controls = ComposerControls(session: AskConversation.newSession(), isFastMode: true, outputStyle: "Concise")
+        let controls = ComposerControls(session: AskConversation.newSession(), isFastMode: true,
+                                        outputStyle: "Concise", codexFastMode: false)
         let chat = try await store.createAskConversation(directory: "/chosen", controls: controls, draft: "hello")
         #expect(try await store.draft(sessionID: chat.id) == "hello")
         #expect(try await store.setting(ComposerControls.fastModeKey(sessionID: chat.id)) == "1")
+        #expect(try await store.setting(CodexSpeed.key(sessionID: chat.id)) == "0")
         #expect(try await store.setting(ComposerControls.outputStyleKey(sessionID: chat.id)) == "Concise")
     }
 

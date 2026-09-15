@@ -127,6 +127,11 @@ actor RepoTemplate {
         try await Shell.check("git", ["init", "-q", "-b", defaultBranch], cwd: directory)
         // Written rather than set through three `git config` processes, which is exactly what
         // `git config` would have done to this file and 555 forks cheaper across the suite.
+        // `maintenance.auto` is off because git 2.50's commit starts `git maintenance run --auto
+        // --detach` and returns without waiting for it. That process creates and removes
+        // `.git/objects/maintenance.lock` while `TempRepo` copies the template, and the copy
+        // failed on CI with "maintenance.lock doesn't exist" when it listed the lock and then went
+        // to read it. Every repository cut from the template inherits the setting.
         let config = (directory as NSString).appendingPathComponent(".git/config")
         let identity = """
 
@@ -135,6 +140,8 @@ actor RepoTemplate {
             \tname = Bloom Test
             [commit]
             \tgpgsign = false
+            [maintenance]
+            \tauto = false
 
             """
         let existing = (try? String(contentsOfFile: config, encoding: .utf8)) ?? ""
@@ -167,6 +174,36 @@ struct ScratchDirectoryTrait: TestTrait, SuiteTrait, TestScoping {
             return
         }
 
+        // A trait inherited through nested suites must not consume the same budget twice.
+        guard !TestWorkloadLimit.isHeld else {
+            try await withDirectory(performing: function)
+            return
+        }
+        // A time limit starts counting before this scope runs, so a test queued here spent its
+        // deadline waiting for somebody else's slot. The suite's tail waits for most of the run,
+        // and once CI took 67 seconds "cancelling a setup run stops the script" failed its one
+        // minute having done five seconds of work, with every other limited test in a scratch
+        // suite finishing at 61. There are a handful of these, too few to starve the executor.
+        if test.timeLimit != nil {
+            try await TestWorkloadLimit.$isHeld.withValue(true) {
+                try await withDirectory(performing: function)
+            }
+            return
+        }
+        try await TestWorkloadLimit.shared.acquire()
+        do {
+            try Task.checkCancellation()
+            try await TestWorkloadLimit.$isHeld.withValue(true) {
+                try await withDirectory(performing: function)
+            }
+        } catch {
+            await TestWorkloadLimit.shared.release()
+            throw error
+        }
+        await TestWorkloadLimit.shared.release()
+    }
+
+    private func withDirectory(performing function: () async throws -> Void) async throws {
         let root = (TestProcessScratch.root as NSString)
             .appendingPathComponent("scratch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)

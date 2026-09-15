@@ -102,6 +102,7 @@ struct PullRequestBar: View {
                 mergeMethod: model.mergeMethod,
                 onChooseMergeMethod: chooseMergeMethod,
                 onMerge: merge,
+                onMarkReadyForReview: { markReadyForReview(pullRequest) },
                 onPush: push,
                 onFixConflicts: { fixConflicts(on: pullRequest) },
                 onContinue: { carryOn(after: pullRequest) },
@@ -123,17 +124,13 @@ struct PullRequestBar: View {
         }
     }
 
-    /// Whether the strip's buttons may touch this branch, decided once for the whole band.
-    ///
-    /// `AppModel.isRunning` rather than `model.isRunning`, though both answer the same question
-    /// with the same rule (`AgentTurns`, over every chat in the workspace, so a workspace with
-    /// four of them is busy if any one is mid turn). It is the one observable mirror every busy
-    /// reader in this window shares, rebuilt whole by `recomputeAgentTurns` from the session rows
-    /// and the live transcripts, so the strip greys out at the same moment the sidebar's row and
-    /// the menu bar say the agent started. A second route to the same fact is how this app came
-    /// to have three answers to it once already.
+    /// Message requests stay available during a turn. Continue and Archive still read the
+    /// workspace-wide busy signal, shared with the sidebar through `AppModel.isRunning`.
     private var branchActions: BranchActionAvailability {
-        .mayActOnBranch(isAgentBusy: app.isRunning(model.workspace))
+        .mayActOnBranch(
+            isAgentBusy: app.isRunning(model.workspace),
+            pullRequest: model.pullRequest
+        )
     }
 
     /// Whether the branch has anything on it. The inspector's own list first, because it is the
@@ -174,9 +171,7 @@ struct PullRequestBar: View {
     }
 
     /// Creation is the agent's job: it pushes, writes the description and calls `gh` with the
-    /// project's own conventions in context. Bloom only composes the turn. Reading the pull
-    /// request's status is the one thing left that still goes through `gh` from here, because it
-    /// is a question with one right answer rather than work that needs judgement.
+    /// project's own conventions in context. Bloom only composes the turn.
     private func createPullRequest() {
         isWorking = true
         report = nil
@@ -186,6 +181,24 @@ struct PullRequestBar: View {
             if let refusal = await model.requestPullRequest() {
                 report = PullRequestNotice(
                     tone: .info, title: "Nothing was sent", message: refusal
+                )
+            }
+        }
+    }
+
+    private func markReadyForReview(_ pullRequest: PullRequest) {
+        guard !isWorking, branchActions.isAllowed else { return }
+        isWorking = true
+        report = nil
+
+        Task {
+            defer { isWorking = false }
+            do {
+                try await model.markReadyForReview(pullRequest)
+            } catch {
+                report = PullRequestNotice(
+                    tone: .failure, title: "Could not mark ready for review",
+                    message: String(describing: error)
                 )
             }
         }

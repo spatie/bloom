@@ -26,12 +26,8 @@ struct PullRequestSummary: View {
     /// still running, which is not the same as "nothing", and is drawn as nothing extra.
     var localWork: LocalWork?
     var isWorking: Bool
-    /// Whether this strip may act on the branch at all, decided once for the whole band.
-    ///
-    /// Every button here works by composing a turn and sending it, and what the agent then does
-    /// is commit, push, merge, cut a branch or bring the base in. While a turn is already running
-    /// none of that may start: see `BranchActionAvailability`, which holds the reason and the
-    /// words. `PullRequestCreator` takes the same value for the same reason.
+    /// Message requests stay available during a turn. Continue and Archive act immediately
+    /// and still require an idle workspace. `PullRequestCreator` shares the same decision.
     var branchActions: BranchActionAvailability
     /// How this project merges, which the split button promises and its menu ticks. Per project
     /// and remembered: see `MergeMethodChoice`.
@@ -40,6 +36,7 @@ struct PullRequestSummary: View {
     /// and `onMerge`.
     var onChooseMergeMethod: (GitHub.MergeMethod) -> Void
     var onMerge: (GitHub.MergeMethod) -> Void
+    var onMarkReadyForReview: () -> Void
     /// Hands the outstanding work to the workspace's agent to commit and push.
     var onPush: () -> Void
     /// Asks the workspace's agent to bring the base branch in and resolve the conflicts with it.
@@ -89,11 +86,6 @@ struct PullRequestSummary: View {
                 ShareLink(item: url) { Text("Share") }
             }
         }
-        // The Workspace menu's copy of the merge, which had no item anywhere until now. It is
-        // published from here because here is the only place that can raise the confirmation
-        // above, so the menu item asks this view rather than growing a second path to a merge.
-        // See `MergeAction`.
-        .focusedSceneValue(\.mergeAction, mergeAction)
         .onChange(of: canConfirmMerge) { _, available in
             if !available { pendingMerge = nil }
         }
@@ -102,20 +94,6 @@ struct PullRequestSummary: View {
         }
         .onChange(of: worktree) { _, _ in dismissConfirmation() }
         .onChange(of: pullRequest.url) { _, _ in dismissConfirmation() }
-    }
-
-    /// What the menu bar's Merge item says and does, or nil when this strip has nothing to land:
-    /// a pull request that is closed or already merged has no merge to offer, and neither has one
-    /// whose band is mid request.
-    private var mergeAction: MergeAction? {
-        guard pullRequest.isOpen, !isWorking else { return nil }
-        return MergeAction(
-            title: mergeMethod.buttonLabel,
-            // The same two answers the button reads, in the same order: the cluster's, which is
-            // whether a turn may start at all, and then GitHub's.
-            isEnabled: branchActions.isAllowed && status.canMerge,
-            perform: { propose(mergeMethod) }
-        )
     }
 
     // MARK: - Parts
@@ -233,12 +211,8 @@ struct PullRequestSummary: View {
     /// the button now, on the trailing side where a split button carries it, and it is drawn
     /// nowhere else. See `mergeControl`.
     private var trailing: some View {
-        // Disabled here, for the cluster, rather than on each button in it. Everything in this
-        // slot ends in a turn that writes to the worktree or the branch, so it is one question,
-        // and a control added to the cluster later inherits the answer instead of having to
-        // remember to ask it. `BranchActionAvailability` carries what is held back and why.
-        // Nothing outside this slot is touched: the number, the arrow out to the browser and the
-        // strip's own context menu only ever read.
+        // Finished pull requests offer workspace actions, which remain disabled while any
+        // agent in the workspace is running.
         trailingControls
             .disabled(!branchActions.isAllowed)
             .popover(isPresented: Binding(
@@ -253,6 +227,7 @@ struct PullRequestSummary: View {
                         method: method,
                         deletesBranch: Self.deletesBranch,
                         canMerge: canConfirmMerge,
+                        tint: status.tone.fill,
                         onConfirm: {
                             pendingMerge = nil
                             onMerge(method)
@@ -291,7 +266,7 @@ struct PullRequestSummary: View {
         // agreed to throw away.
     }
 
-    /// Which of the three the open state's primary slot holds.
+    /// Which action the open state's primary slot holds.
     ///
     /// A switch rather than a chain of conditions, and the reason is the failure this project has
     /// had four times: the remedy is an enum in the core, and a case added to it has to stop
@@ -302,6 +277,7 @@ struct PullRequestSummary: View {
     private var primaryButton: some View {
         switch status.remedy {
         case .merge: mergeControl
+        case .markReadyForReview: markReadyForReviewButton
         case .fixConflicts: fixConflictsButton
         case .commitAndPush, .push: pushButton
         }
@@ -403,6 +379,7 @@ struct PullRequestSummary: View {
             .archiveConfirmation(
                 $archiveRequest,
                 canConfirm: branchActions.isAllowed && !isWorking,
+                tint: status.tone.fill,
                 onConfirm: onConfirmArchive
             )
             .buttonStyle(.borderedProminent)
@@ -441,8 +418,6 @@ struct PullRequestSummary: View {
             .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(status.tone.fill)
             .controlSize(.regular)
-            // Disabled with the rest of the cluster while a turn runs: pushing a worktree that
-            // is being written to as it is read publishes half of something.
             .help(
                 branchActions.reason
                     ?? "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
@@ -453,6 +428,19 @@ struct PullRequestSummary: View {
 
     private var pushLabel: String {
         status.remedy == .push ? "Push" : "Commit and push"
+    }
+
+    private var markReadyForReviewButton: some View {
+        Button("Mark ready for review", action: onMarkReadyForReview)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
+            .tint(status.tone.fill)
+            .controlSize(.regular)
+            .fixedSize()
+            .help(
+                branchActions.reason
+                    ?? "Mark #\(pullRequest.number) ready for review on GitHub."
+            )
     }
 
     /// What stands where Merge stands, when merging is the one thing this state cannot do.
@@ -499,8 +487,6 @@ struct PullRequestSummary: View {
             .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(status.tone.fill)
             .controlSize(.regular)
-            // Disabled with the rest of the cluster while a turn runs: merging the base into a
-            // worktree an agent is editing is the same collision as the button above it.
             .help(
                 branchActions.reason
                     ?? "Ask this workspace's agent to bring \(baseBranch) into this worktree and "
@@ -531,10 +517,8 @@ struct PullRequestSummary: View {
     /// **The tint measurement that used to live here has moved to `MergeSplitButton`,** because
     /// it is the reason that control is drawn the way it is. The short version is unchanged: the
     /// system will not tint a menu, prominent or otherwise, so the band's colour is painted behind
-    /// it. What no drawing survives is the window losing key, when AppKit draws every prominent
-    /// control as a neutral glass capsule. That is the platform being consistent rather than a bug
-    /// here, and it is worth knowing before reading a screenshot of this strip: a grey Merge
-    /// button means the screenshot was taken with another app in front.
+    /// it. When the window loses key, AppKit draws the menu as a neutral capsule that covers that
+    /// fill, so `MergeSplitButton` pins its control to the active state rather than going grey.
     ///
     /// Every path through it opens the confirmation. Nothing here performs a merge, and since
     /// merging moved onto the agent nothing anywhere in this target does either.
@@ -542,8 +526,7 @@ struct PullRequestSummary: View {
         MergeSplitButton(
             method: mergeMethod,
             fill: status.tone.fill,
-            // Only what GitHub says about the pull request. A running agent is the cluster's
-            // answer rather than this control's: see `trailing`.
+            // Queueing a request does not bypass GitHub's merge restrictions.
             canMerge: status.canMerge,
             help: blockedReason,
             choose: onChooseMergeMethod,
@@ -563,10 +546,6 @@ struct PullRequestSummary: View {
     // MARK: - Text
 
     /// What the Merge button has to say for itself, or nil when there is nothing.
-    ///
-    /// The running agent comes first. It is true of every button in this strip rather than of one
-    /// of them, and it is the reason that goes away on its own, so a reader hovering while their
-    /// agent is working is told what they are waiting for rather than told about a draft.
     private var blockedReason: String? {
         branchActions.reason ?? status.blockedReason
     }

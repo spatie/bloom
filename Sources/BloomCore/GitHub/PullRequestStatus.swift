@@ -48,8 +48,10 @@ public struct PullRequestStatus: Sendable, Hashable {
 
     /// What to do about this state, as far as one button can express it.
     public enum Remedy: Sendable, Hashable {
-        /// Land it. What every state GitHub reports on its own offers.
+        /// Land it once the pull request is ready.
         case merge
+        /// A draft must be ready for review before GitHub allows a merge.
+        case markReadyForReview
         /// Get the worktree onto the remote first. Committing is part of it or it is not,
         /// depending on whether anything is uncommitted, and the label follows.
         case commitAndPush
@@ -234,7 +236,8 @@ public extension PullRequest {
                 text: "Draft",
                 detail: checksDetail,
                 canMerge: false,
-                blockedReason: "This pull request is still a draft."
+                blockedReason: "This pull request is still a draft.",
+                remedy: .markReadyForReview
             )
         }
 
@@ -269,6 +272,9 @@ public extension PullRequest {
             )
         }
         if checks == .failing { warnings.append(checksSummary) }
+        if checks == .unavailable {
+            warnings.append("Bloom could not read this pull request's checks, so it cannot say whether they passed.")
+        }
         if hasConflicts { warnings.append("This branch conflicts with \(base).") }
         return warnings
     }
@@ -299,6 +305,9 @@ public extension PullRequest {
         // rollup nodes to ask again. `WorkspaceStatusTests` pins the two lines together, in both
         // vocabularies, so a change to one of them fails rather than drifting.
         case .pending: return checksSummary.hasSuffix("queued") ? "Checks queued" : "Checks running"
+        // Ahead of the review, because the review falls through to "Ready to merge", and that is
+        // the claim nobody can make about checks nobody could read.
+        case .unavailable: return GitHub.checksUnavailableSummary
         case .passing, .none: break
         }
         switch reviewDecision?.uppercased() {
@@ -311,6 +320,8 @@ public extension PullRequest {
     /// The numbers behind the headline. Nil when GitHub has reported no checks at all, because
     /// "No checks" under "Ready to merge" reads as something missing rather than as a fact.
     private var checksDetail: String? {
+        // The headline already says the summary, so the line under it says why.
+        if checks == .unavailable { return "GitHub did not let this token read check runs" }
         guard checks != .none, !checksSummary.isEmpty else { return nil }
         return checksSummary
     }
@@ -318,7 +329,7 @@ public extension PullRequest {
     private var openTone: PullRequestStatus.Tone {
         switch checks {
         case .failing: return .negative
-        case .pending: return .warning
+        case .pending, .unavailable: return .warning
         case .passing, .none: break
         }
         switch reviewDecision?.uppercased() {

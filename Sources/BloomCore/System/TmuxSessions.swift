@@ -314,7 +314,9 @@ public struct TmuxCommand: Sendable, Equatable {
         directory: String,
         environment: [String: String]
     ) -> [String] {
-        var tail = ["new-session", "-A", "-D", "-s", session, "-c", directory]
+        // Existing servers keep their original environment even after Bloom is rebuilt.
+        var tail = ["set-environment", "-gr", "NO_COLOR", ";",
+                    "new-session", "-A", "-D", "-s", session, "-c", directory]
         for key in environment.keys.sorted() {
             tail.append("-e")
             tail.append("\(key)=\(environment[key]!)")

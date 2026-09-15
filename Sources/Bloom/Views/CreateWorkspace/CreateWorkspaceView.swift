@@ -84,13 +84,9 @@ struct CreateWorkspaceView: View {
     /// pick up the previous draft's screenshots.
     @State private var draftID = PromptAttachments.newShortID()
 
-    /// Which of the three things this window is being used for, and the last answer, kept.
-    ///
-    /// Read through `WorkspaceStartMode.remembered` rather than by giving `@AppStorage` a default,
-    /// so the fresh-install answer and the reason for it live in the core beside the tests instead
-    /// of in a property wrapper's second argument. Global rather than per project, and why, is on
-    /// `WorkspaceStartMode.rememberedKey`.
-    @AppStorage(WorkspaceStartMode.rememberedKey) private var rememberedMode: String?
+    @State private var selectedMode: WorkspaceStartMode = .chat
+    @State private var usesCLIChat = false
+    @State private var loadedChatPreference = false
 
     /// What the name field holds in the two modes that run no agent. Separate from `prompt`
     /// rather than sharing it, which is what lets a draft survive a person changing their mind
@@ -155,9 +151,9 @@ struct CreateWorkspaceView: View {
         PromptAttachmentStore.shared.attachments(for: draftID).map(\.path)
     }
 
-    /// Which mode the window is in, and the one place the stored string is turned back into it.
     private var mode: WorkspaceStartMode {
-        WorkspaceStartMode.remembered(raw: rememberedMode)
+        selectedMode == .chat
+            ? WorkspaceStartMode.chat(usesCLI: usesCLIChat, agent: controls.agentKind) : selectedMode
     }
 
     /// What the create button is about to be given as the task.
@@ -348,25 +344,25 @@ struct CreateWorkspaceView: View {
                 // arrives as a bitmap of the same `RepoIcon` the chip and the sidebar draw. See
                 // `RepoIconImage`.
                 //
-                // No heading over them. The rows are project names wearing their own badges and
-                // the control that opened the menu is showing one of them, so "Project" written
-                // above would be a word to read past. `labelsHidden` takes the heading off the
-                // picker without taking its name away from VoiceOver.
+                // One picker keeps a single selection across both visibility groups.
                 Picker("Project", selection: Binding(
                     get: { repoID ?? RepoID("") },
                     set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
                 )) {
-                    ForEach(app.repos) { candidate in
-                        Label {
-                            Text(candidate.name)
-                        } icon: {
-                            if let mark = RepoIconImage.of(candidate) {
-                                // `.original`, because the tile is the project's colour and a
-                                // template image in a menu is painted flat in the label colour.
-                                Image(nsImage: mark).renderingMode(.original)
+                    ForEach(ProjectMenuGroup.grouped(app.repos)) { group in
+                        Section(group.title) {
+                            ForEach(group.repos) { candidate in
+                                Label {
+                                    Text(candidate.name)
+                                } icon: {
+                                    if let mark = RepoIconImage.of(candidate) {
+                                        // Keep the project's colours in the menu's image slot.
+                                        Image(nsImage: mark).renderingMode(.original)
+                                    }
+                                }
+                                .tag(candidate.id)
                             }
                         }
-                        .tag(candidate.id)
                     }
                 }
                 .pickerStyle(.inline)
@@ -470,6 +466,17 @@ struct CreateWorkspaceView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let carryOn {
+                HStack(spacing: Metrics.spacingSmall) {
+                    Text(carryOn.sentence)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                    Button(carryOn.action) { pick(carryOn.source) }
+                        .linkButton()
+                        .font(Typo.caption)
+                }
+            }
+
             // A rung below the title in the band, which is what makes the band the anchor. Both
             // were `Typo.heading` for one build and the sheet had two things the same size
             // competing to be read first, which is most of what "janky" was: "New workspace" and
@@ -481,7 +488,7 @@ struct CreateWorkspaceView: View {
                 .foregroundStyle(Palette.textPrimary)
 
             switch mode {
-            case .chat: chatBox
+            case .chat, .claudeCLI, .codexCLI: chatBox
             // One box for both, because they ask the same question. What differs between a
             // terminal and a browser start is which tab the workspace lands on, and that is
             // settled after the window is gone. See `WorkspaceStartMode.pane`.
@@ -493,57 +500,40 @@ struct CreateWorkspaceView: View {
         .padding(Metrics.gutter)
     }
 
-    /// Which of the three things this window is for.
-    ///
-    /// Above the question rather than beside Create, which is the whole of the change. A second
-    /// button next to Create was two ways to finish where one of them silently repurposed the
-    /// input, and it cost the footer's five labels to say so. A choice made before anything is
-    /// typed cannot discard what was typed, because in the modes with no agent the box is not
-    /// there.
-    ///
-    /// `Text` rather than `Label` in the rows. A segmented picker on macOS is an
-    /// `NSSegmentedControl`, whose cells carry a title and an `NSImage`, so a SwiftUI icon inside
-    /// one is silently dropped: the same trap `projectControl` documents for `NSPopUpButton`. The
-    /// words are what carries this control anyway.
     private var modePicker: some View {
-        // "Start with", not "Start workspace", which is what was asked for and would have said
-        // the title's word back to it eight points underneath. The title names the thing; this
-        // names the choice, and the segments finish the sentence: start with a chat with an
-        // agent, with a terminal, or with a browser.
-        //
-        // The label is drawn by the picker rather than by a `Text` beside it, so AppKit places it
-        // and VoiceOver gets the association for nothing. `labelsHidden` used to be here, which
-        // is what left the control floating with no introduction.
         Picker("Start with", selection: modeBinding) {
-            ForEach(WorkspaceStartMode.allCases) { candidate in
-                Text(candidate.pickerLabel).tag(candidate)
-            }
+            Text("Chat").tag(WorkspaceStartMode.chat)
+            Text("Terminal").tag(WorkspaceStartMode.terminal)
+            Text("Browser").tag(WorkspaceStartMode.browser)
         }
         .pickerStyle(.segmented)
         .fixedSize()
-        // Explicit so every interactive control reads from the shared semantic token.
         .tint(Palette.controlAccent)
-        .help("Start a chat with an agent, or cut a worktree and open a shell or a browser in it")
+        .help(defaultCLIMode == nil
+              ? "CLI chat supports Claude and Codex. Choose either as your default agent to use it."
+              : "Chat and CLI chat use your default agent configuration")
     }
 
-    /// Writing the choice down, and carrying the draft across with it.
-    ///
-    /// Both directions, because the window now opens on whichever was used last: somebody who was
-    /// last in a terminal opens in one, and a sentence typed there has to survive the trip to chat
-    /// exactly as a sentence typed in chat has to survive the trip the other way. Both rules are
-    /// `WorkspaceStartPlan`'s. See `carriedName`. Terminal to browser crosses nothing, because
-    /// both are showing the same field with the same name in it.
+    private var defaultCLIMode: WorkspaceStartMode? {
+        switch controls.agentKind {
+        case .claudeCode: .claudeCLI
+        case .codex: .codexCLI
+        case .grok, .cursor, .openCode: nil
+        }
+    }
+
+    // Preserve the draft when switching between agent and non-agent starts.
     private var modeBinding: Binding<WorkspaceStartMode> {
         Binding(
-            get: { mode },
+            get: { selectedMode },
             set: { chosen in
-                guard chosen != mode else { return }
+                guard chosen != selectedMode else { return }
                 switch chosen {
                 case .terminal, .browser:
                     typedName = WorkspaceStartPlan.carriedName(
                         prompt: spokenPrompt, currentName: typedName
                     )
-                case .chat:
+                case .chat, .claudeCLI, .codexCLI:
                     prompt = WorkspaceStartPlan.carriedPrompt(
                         name: typedName, currentPrompt: prompt
                     )
@@ -551,7 +541,7 @@ struct CreateWorkspaceView: View {
                 }
                 // Written before the focus is moved, because `focusTheBox` reads the mode back
                 // out of it and would otherwise put the keyboard in the box that is leaving.
-                rememberedMode = chosen.rawValue
+                selectedMode = chosen
                 focusTheBox()
             }
         )
@@ -589,7 +579,12 @@ struct CreateWorkspaceView: View {
                 // not going to cut a worktree because a row was arrowed onto. `QuickPromptDelivery`
                 // is the same fallback said once, for a surface that can do neither.
                 onQuickPrompt: actions.insert,
-                onSend: create
+                onSend: create,
+                usesCLIChat: Binding(
+                    get: { usesCLIChat && defaultCLIMode != nil },
+                    set: { usesCLIChat = $0 }
+                ),
+                supportsCLIChat: defaultCLIMode != nil
             )
         }
     }
@@ -727,7 +722,13 @@ struct CreateWorkspaceView: View {
     /// now.
     private var statusRow: some View {
         HStack(spacing: Metrics.spacingWide) {
-            hint
+            if mode.cliAgentKind != nil {
+                Text("Opens in a terminal using your default agent configuration")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            } else {
+                hint
+            }
 
             Spacer(minLength: 0)
         }
@@ -837,6 +838,13 @@ struct CreateWorkspaceView: View {
         )
     }
 
+    /// The other verb, offered when a new branch is about to be cut from a branch that could have
+    /// been opened. See `WorkspaceSourceOffering.carryOn`.
+    private var carryOn: WorkspaceCarryOnOffer? {
+        guard checkout == nil else { return nil }
+        return offering.carryOn(from: baseBranch, holders: checkoutOptions.holders)
+    }
+
     /// The same question `AppModel` will ask a moment from now, so the hint and what happens cannot
     /// disagree. See `WorkspaceNaming.shouldName` for what each condition rules out.
     ///
@@ -914,6 +922,10 @@ struct CreateWorkspaceView: View {
         // The gathering and both branch decisions live in the core, where the suite can reach
         // them, and where the subprocess rule wants them: this view was the last one on the
         // allow-list in `Tools/house-rules.sh` for calling `Git` itself.
+        if !loadedChatPreference {
+            usesCLIChat = appDefaults.terminalChat
+            loadedChatPreference = true
+        }
         let context = await WorkspaceStartContext.load(repoPath: path)
 
         // Cancelled means the project changed under this load, and these are the other
@@ -934,7 +946,7 @@ struct CreateWorkspaceView: View {
             defaults: ComposerDefaults.resolve(
                 repo: context.settings,
                 app: appDefaults,
-                codexModels: ComposerModelCatalog.shared.codexModels
+                models: ComposerModelCatalog.shared.models
             ),
             isFastMode: appDefaults.fastMode,
             outputStyle: appDefaults.outputStyle,

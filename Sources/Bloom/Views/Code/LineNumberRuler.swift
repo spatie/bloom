@@ -36,10 +36,15 @@ final class LineNumberRuler: NSRulerView {
         didSet { attributes[.foregroundColor] = numberColor }
     }
 
+    var numberFont: NSFont = CodeMetrics.numberFont {
+        didSet {
+            attributes[.font] = numberFont
+            refresh()
+        }
+    }
+
     private var attributes: [NSAttributedString.Key: Any] = [
-        .font: NSFont.monospacedDigitSystemFont(
-            ofSize: max(9, CodeMetrics.font.pointSize - 1), weight: .regular
-        ),
+        .font: CodeMetrics.numberFont,
         .foregroundColor: NSColor.tertiaryLabelColor,
     ]
 
@@ -246,7 +251,7 @@ final class LineNumberRuler: NSRulerView {
         // Where the clip view actually begins, in the scroll view's own coordinates. Its `frame`
         // does not answer this: it reads (0, 0) whether or not the scroll view moved it, and
         // trusting it left the code indented by the gutter twice.
-        let reserved = scrollView.map { $0.contentView.convert(NSPoint.zero, to: $0).x } ?? 0
+        let reserved = scrollView.map { $0.contentView.convert($0.contentView.bounds.origin, to: $0).x } ?? 0
         let remaining = max(0, ruleThickness - reserved)
         let inset = NSSize(
             width: remaining + CodeMetrics.textInset, height: textView.textContainerInset.height

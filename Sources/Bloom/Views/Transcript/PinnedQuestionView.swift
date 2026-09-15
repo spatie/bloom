@@ -33,6 +33,9 @@ struct PinnedQuestionIndex {
         scannedRows = rows.count
     }
 
+    /// Every user turn seen so far, oldest first.
+    var all: [PinnedQuestion] { questions }
+
     func latest(atOrBefore seq: Int) -> PinnedQuestion? {
         var low = 0
         var high = questions.count

@@ -7,12 +7,8 @@ import BloomCore
 /// split button and from Settings, neither of which is where anyone looks for it in an app whose
 /// empty state is "No projects yet".
 ///
-/// Three ranks now run down this column and they have to be told apart at a glance in 260 points:
-/// this group label at 11 medium in secondary ink, a project at 13 semibold in primary ink with
-/// its own coloured tile, and a workspace at 13 regular. The step from the group to the project
-/// is a size step, the step from the project to its workspaces is a weight and a colour step. A
-/// group label set larger than the projects under it would have inverted the whole thing, which
-/// is the mistake the per-project header was making before this change.
+/// Used as a real List section header so macOS supplies the heading's font and spacing.
+/// The add button keeps the same square target and hover treatment as the project rows below it.
 ///
 /// No filter here, though there is one in `SidebarStatusBar`. That control filters WORKSPACES by
 /// state, so hanging it off a heading that says Projects would label it as something it is not,
@@ -23,11 +19,14 @@ struct SidebarProjectsHeader: View {
 
     @State private var isHovered = false
 
+    /// Measured in an offscreen native List: the section header ends 14 points past row content.
+    /// Match their trailing edges so both square buttons share a centre line.
+    private static let buttonTrailingInset: CGFloat = 14
+
     var body: some View {
         HStack(spacing: Metrics.spacing) {
             Text("Projects")
-                .font(Typo.captionEmphasis)
-                .foregroundStyle(Palette.textSecondary)
+                .bold()
                 .accessibilityAddTraits(.isHeader)
 
             Spacer(minLength: Metrics.spacingSmall)
@@ -63,6 +62,7 @@ struct SidebarProjectsHeader: View {
             // live.
             .help("Start a project (⌥⌘N)")
         }
+        .padding(.trailing, Self.buttonTrailingInset)
         .contentShape(Rectangle())
         .onHoverChange { isHovered = $0 }
     }

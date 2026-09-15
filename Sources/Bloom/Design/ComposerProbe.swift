@@ -467,7 +467,7 @@ enum ComposerProbe {
             "cached": .integer(pane.coordinator?.heightCacheCount ?? -1),
             "cacheWidth": .number(pane.coordinator?.heightCacheWidth ?? 0),
             "scrollAlpha": .number(Double(pane.scroll.alphaValue)),
-            "held": .string(TranscriptStateDump.name(of: pane.hold.held)),
+            "held": .bool(pane.hold.isHolding),
         ])
     }
 

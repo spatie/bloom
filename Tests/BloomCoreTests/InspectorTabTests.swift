@@ -25,14 +25,14 @@ struct InspectorTabTests {
 
     @Test("no pull request means no Checks tab")
     func noPullRequest() {
-        #expect(InspectorTab.available(for: nil) == [.allFiles, .changes])
+        #expect(InspectorTab.available(for: nil) == [.allFiles, .changes, .history])
     }
 
     @Test("a pull request GitHub has reported no runs for still means no Checks tab")
     func pullRequestWithoutChecks() {
         let none = pullRequest(checks: .none, summary: "No checks")
         #expect(InspectorTab.hasChecks(none) == false)
-        #expect(InspectorTab.available(for: none) == [.allFiles, .changes])
+        #expect(InspectorTab.available(for: none) == [.allFiles, .changes, .history])
     }
 
     @Test("any reported run brings the tab back", arguments: [
@@ -41,7 +41,7 @@ struct InspectorTabTests {
     func pullRequestWithChecks(_ checks: PullRequest.Checks) {
         let open = pullRequest(checks: checks, summary: "12 checks passed")
         #expect(InspectorTab.hasChecks(open))
-        #expect(InspectorTab.available(for: open) == [.allFiles, .changes, .checks])
+        #expect(InspectorTab.available(for: open) == [.allFiles, .changes, .history, .checks])
     }
 
     @Test("a merged pull request keeps its checks, because they are still there to read")
@@ -51,13 +51,13 @@ struct InspectorTabTests {
         #expect(InspectorTab.available(for: merged).contains(.checks))
     }
 
-    /// The tab has to arrive at the end of the strip or its arrival moves the two segments before
+    /// The tab has to arrive at the end of the strip or its arrival moves the three segments before
     /// it, which is a click landing somewhere the reader did not aim it.
     @Test("Checks is always the last segment")
     func checksIsLast() {
         let open = pullRequest(checks: .passing, summary: "1 check passed")
         #expect(InspectorTab.available(for: open).last == .checks)
-        #expect(InspectorTab.available(for: open).prefix(2) == InspectorTab.available(for: nil).prefix(2))
+        #expect(InspectorTab.available(for: open).prefix(3) == InspectorTab.available(for: nil).prefix(3))
     }
 
     // MARK: - What happens to the selection

@@ -13,7 +13,7 @@ struct WorkspaceStatusTests {
 
     // MARK: - Sidebar mark
 
-    @Test("local state outranks anything GitHub says", arguments: [
+    @Test("local state outranks GitHub, apart from unread output", arguments: [
         (
             name: "a running setup script wins over a merged pull request",
             setup: SetupState.running, running: true, unread: true, expected: WorkspaceStatus.settingUp
@@ -27,8 +27,8 @@ struct WorkspaceStatusTests {
             setup: .failed, running: false, unread: true, expected: .setupFailed
         ),
         (
-            name: "unread output wins over the pull request",
-            setup: .succeeded, running: false, unread: true, expected: .unread
+            name: "the pull request wins over unread output",
+            setup: .succeeded, running: false, unread: true, expected: .merged
         ),
     ])
     func localStateWins(
@@ -40,6 +40,28 @@ struct WorkspaceStatusTests {
             pullRequest: try decode(json(state: "MERGED"))
         )
         #expect(status == expected, "\(name)")
+    }
+
+    /// The report: a turn that merged its own pull request ended unread, and the dot hid the merge
+    /// until the workspace was opened. Unread still marks a row GitHub has nothing to say about.
+    @Test("unread only decides the mark when there is no pull request")
+    func unreadYieldsToThePullRequest() throws {
+        let merged = try decode(json(state: "MERGED"))
+        #expect(
+            WorkspaceStatus.resolve(
+                workspace: workspace(unread: true, additions: 3), isRunning: false, pullRequest: merged
+            ) == .merged
+        )
+        #expect(
+            WorkspaceStatus.resolve(
+                workspace: workspace(unread: true, additions: 3), isRunning: false, pullRequest: nil
+            ) == .unread
+        )
+        #expect(
+            WorkspaceStatus.resolve(
+                workspace: workspace(unread: true), isRunning: false, pullRequest: nil
+            ) == .unread
+        )
     }
 
     @Test("a pull request decides the mark once the workspace is quiet", arguments: [
@@ -457,7 +479,7 @@ struct ConflictedStatusTests {
         #expect(
             WorkspaceStatus.resolve(
                 workspace: workspace(unread: true), isRunning: false, pullRequest: conflicting
-            ) == .unread
+            ) == .conflicted
         )
     }
 

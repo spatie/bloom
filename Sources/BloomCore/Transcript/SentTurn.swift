@@ -75,6 +75,32 @@ public enum SentTurn {
     public static let conflictTitle = "Conflict instructions"
     public static let projectTitle = "Project instructions"
 
+    /// The title a file Bloom named in its own turn is drawn under, or nil for any other file.
+    ///
+    /// The same four titles, because the same four kinds arrive by two roads: a pull request's
+    /// instructions are normally a file and a merge's never are, so a chip reading
+    /// `pr-instructions.md` with a markdown icon sat one turn above a chip reading "Merge
+    /// instructions" with a document symbol, and the owner's report was that the two were the same
+    /// thing drawn inconsistently. They were. What the reader pressed was a button, not a file, so
+    /// the button's name is what both say. The chip still stands for the path underneath it, so a
+    /// hover shows the file and a click opens it.
+    ///
+    /// Matched on the exact paths Bloom writes into a turn, and nothing looser, so a file somebody
+    /// attached themselves keeps its own name.
+    public static func title(forFile path: String) -> String? {
+        switch path {
+        case PullRequestInstructions.projectPath, PullRequestInstructions.scratchPath:
+            return pullRequestTitle
+        case ConflictInstructions.scratchPath:
+            return conflictTitle
+        default:
+            let projectPaths = ProjectInstructions.Subject.allCases.flatMap {
+                [ProjectInstructions.projectPath(for: $0), ProjectInstructions.scratchPath(for: $0)]
+            }
+            return projectPaths.contains(path) ? projectTitle : nil
+        }
+    }
+
     public static func segments(in text: String) -> [Segment] {
         var out: [Segment] = []
         var start = text.startIndex

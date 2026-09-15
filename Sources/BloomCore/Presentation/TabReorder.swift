@@ -19,7 +19,7 @@ import Foundation
 ///
 /// It takes a whole drawn order rather than "this tab, dropped on that one", because by the time a
 /// drag is let go the strip has already been showing the answer for as long as the user has been
-/// dragging. `TabDragOrder` is what works that out; this is only how it is written down. Committing
+/// dragging. `TabStripDrag` is what works that out; this is only how it is written down. Committing
 /// a rule about the drop target instead would risk landing somewhere other than where the strip had
 /// been saying it would land, which is the one thing a live preview must never do.
 ///

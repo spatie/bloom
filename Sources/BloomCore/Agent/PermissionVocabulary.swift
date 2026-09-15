@@ -25,6 +25,7 @@ public extension PermissionMode {
     func label(on kind: AgentKind) -> String {
         switch kind {
         case .codex: codexLabel
+        case .grok: grokLabel
         case .claudeCode, .cursor, .openCode: claudeCodeLabel
         }
     }
@@ -43,6 +44,7 @@ public extension PermissionMode {
     func summary(on kind: AgentKind) -> String {
         switch kind {
         case .codex: codexSummary
+        case .grok: grokSummary
         case .claudeCode, .cursor, .openCode: claudeCodeSummary
         }
     }
@@ -120,6 +122,28 @@ public extension PermissionMode {
         case .autoReview: "Only ask for actions detected as potentially unsafe."
         case .bypassPermissions:
             "Codex can edit files outside the workspace and reach the internet without asking."
+        case .plan: "Research and propose changes without making them."
+        }
+    }
+
+    /// Grok 1.0.24's own names, from `--permission-mode` and the permissions guide: `default`
+    /// is ask, `bypassPermissions` is the product name "always-approve".
+    private var grokLabel: String {
+        switch self {
+        case .auto: "Auto"
+        case .acceptEdits: "Accept edits"
+        case .autoReview: "Auto"
+        case .bypassPermissions: "Always approve"
+        case .plan: "Plan"
+        }
+    }
+
+    private var grokSummary: String {
+        switch self {
+        case .auto, .autoReview:
+            "Grok runs the calls the safety check allows, and asks about or blocks the rest."
+        case .acceptEdits: "File edits run without a prompt. Other calls still ask."
+        case .bypassPermissions: "No further prompts. Everything runs."
         case .plan: "Research and propose changes without making them."
         }
     }

@@ -28,11 +28,14 @@ struct StreamingThinkingView: View {
     /// over 600 bytes and under 600 characters, so the byte test alone sent complete text down the
     /// else branch, where `suffix` returned all of it and an ellipsis was prefixed to text nothing
     /// had been taken from. Comparing the indices says whether the cut moved, in constant time.
+    ///
+    /// Trimmed the way the stored row is, so the blank lines a block ends in do not open under
+    /// the tail and then close the moment `ThinkingRowView` replaces it. See `ThinkingText`.
     private var tail: String {
-        guard text.utf8.count > Self.tailLimit else { return text }
+        guard text.utf8.count > Self.tailLimit else { return ThinkingText.displayed(text) }
         let kept = text.suffix(Self.tailLimit)
-        guard kept.startIndex != text.startIndex else { return text }
-        return "\u{2026}" + String(kept)
+        guard kept.startIndex != text.startIndex else { return ThinkingText.displayed(text) }
+        return "\u{2026}" + ThinkingText.displayed(String(kept))
     }
 
     var body: some View {

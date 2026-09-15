@@ -5,10 +5,20 @@ import BloomCore
 /// The one place the app layer touches `GitHub`. Keeping it behind a single adapter means a
 /// change to the gh wrapper's signature is a one-file fix rather than a sweep through views.
 ///
-/// It asks GitHub questions and nothing else. Opening a pull request, pushing a branch and merging
-/// are all turns sent to the workspace's agent now, so the only `gh` this app runs is the reading
-/// half.
+/// Opening a pull request, pushing a branch and merging are turns sent to the workspace's agent.
+/// Marking a draft ready for review needs no interpretation, so it runs directly through gh.
 enum GitHubBridge {
+    static func readPullRequest(for workspace: Workspace, maxAge: Duration = .zero) async -> PullRequestRead {
+        let availability = await GitHubAvailability.shared.check()
+        if availability == .notInstalled {
+            return .unavailable(GitHubReadFailure(reason: .unavailable, message: "Install the GitHub CLI to refresh pull requests."))
+        }
+        guard availability == .ready else {
+            return .unavailable(GitHubReadFailure(reason: .authentication, message: "Connect GitHub to refresh pull requests."))
+        }
+        return await GitHub.readPullRequest(for: workspace, maxAge: maxAge)
+    }
+
     /// - Parameter maxAge: how old an answer from the last `gh pr view` may be and still be used.
     ///   Zero always asks GitHub.
     ///
@@ -24,12 +34,22 @@ enum GitHubBridge {
     static func pullRequest(
         for workspace: Workspace, maxAge: Duration = .zero
     ) async -> PullRequest? {
-        guard await GitHubAvailability.shared.isReady() else { return nil }
-        return try? await GitHub.pullRequest(for: workspace, maxAge: maxAge)
+        guard case .current(let pullRequest) = await readPullRequest(for: workspace, maxAge: maxAge) else { return nil }
+        return pullRequest
     }
 
-    static func checks(for workspace: Workspace) async -> [CheckRun] {
-        (try? await GitHub.checks(for: workspace)) ?? []
+    static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
+        try await GitHub.markReadyForReview(pullRequest, worktree: worktree)
+    }
+
+    /// Nil when GitHub refused this token the check runs. A failed read is still an empty list,
+    /// as it always was, because `try?` would flatten it into that nil.
+    static func checks(for workspace: Workspace) async -> [CheckRun]? {
+        do {
+            return try await GitHub.checks(for: workspace)
+        } catch {
+            return []
+        }
     }
 
     static func open(_ url: String) {
@@ -43,21 +63,6 @@ enum GitHubBridge {
 enum Reveal {
     static func inFinder(_ path: String) {
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: (path as NSString).deletingLastPathComponent)
-    }
-
-    /// Returns a launch error rather than silently leaving the user looking at an empty shell.
-    static func inTerminal(directory: String, executable: String, arguments: [String]) -> String? {
-        let script = TerminalLaunchScript.appleScript(
-            directory: directory, executable: executable, arguments: arguments
-        )
-        guard let apple = NSAppleScript(source: script) else {
-            return "The sign-in command could not be prepared. Try again."
-        }
-        var error: NSDictionary?
-        apple.executeAndReturnError(&error)
-        guard let error else { return nil }
-        return error[NSAppleScript.errorMessage] as? String
-            ?? "Terminal could not run the sign-in command. Try again."
     }
 
     /// Opens a path in the editor this project was last opened in.

@@ -53,6 +53,18 @@ public enum SidebarSelection: Hashable, Sendable {
     /// `rememberSelection` therefore stores the parent, which is what should reopen: the subagent
     /// is gone by the next launch by construction. See `SubagentRoster`.
     case subagent(WorkspaceID, SubagentID)
+    /// A subagent opened from the Agent call row in the chat, named by that call's `tool_use_id`.
+    ///
+    /// **Its own case rather than `.subagent`, because `.subagent` is named in the roster and the
+    /// roster is exactly what has forgotten this one.** A finished subagent leaves the sidebar
+    /// seconds after it ends and leaves the roster when the next turn starts, and the chat stands
+    /// its call row in for its work, so the call row has to open the run after both have let go.
+    /// The call's id is on the stored row for as long as the conversation is, and so are the rows
+    /// the subagent produced under it. See `SubagentRunLink`.
+    ///
+    /// `workspaceID` returns the parent, for `.subagent`'s reason, and `subagentID` returns nil,
+    /// because there is no roster id to return and the sidebar has no row to mark as opened.
+    case subagentCall(WorkspaceID, toolUseID: String)
     /// One crew member of a workspace, open for reading and for talking to.
     ///
     /// **Not the case above, and the two must never be merged.** A `.subagent` is a child of one
@@ -84,7 +96,7 @@ public enum SidebarSelection: Hashable, Sendable {
     /// case, and it now says so here too instead of falling through with `.home` and `.ask`.
     public var workspaceID: WorkspaceID? {
         switch self {
-        case .workspace(let id), .subagent(let id, _), .crew(let id, _): id
+        case .workspace(let id), .subagent(let id, _), .subagentCall(let id, _), .crew(let id, _): id
         case .home, .ask, .archived: nil
         }
     }

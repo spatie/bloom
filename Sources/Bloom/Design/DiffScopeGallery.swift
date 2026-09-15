@@ -29,9 +29,9 @@ struct DiffScopeGallery: View {
                 DiffScopeBand(scope: .uncommitted, fileCount: 7) {}
             }
 
-            case_("Since a commit", "Measured from a commit on this branch. The band names it by sha.") {
-                strip(.since(Self.commit), files: 12)
-                DiffScopeBand(scope: .since(Self.commit), fileCount: 12) {}
+            case_("A single commit", "Only the patch introduced by this commit. The band names it by sha.") {
+                strip(.commit(Self.commit), files: 12)
+                DiffScopeBand(scope: .commit(Self.commit), fileCount: 12) {}
             }
 
             case_("With comments the scope leaves out", "Nothing is at risk, so the band says so rather than warning.") {

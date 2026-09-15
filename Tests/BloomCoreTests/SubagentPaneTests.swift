@@ -92,12 +92,20 @@ import Foundation
     /// which a background command never has, so every background command said it.
     @Test func aBackgroundCommandNoLongerCallsItselfASubagent() {
         let subtitle = SubagentPane.subtitle(command(seconds: 12))
-        #expect(subtitle == "background command . 12s")
+        #expect(subtitle == "background command · 12s")
         #expect(!subtitle.contains("subagent"))
     }
 
     @Test func anAgentLeadsWithItsType() {
-        #expect(SubagentPane.subtitle(agent(seconds: 5)) == "Explore . 5s")
+        #expect(SubagentPane.subtitle(agent(seconds: 5)) == "Explore · 5s")
+    }
+
+    /// The owner's screenshot read "general-purpose . 5m 38s". Every other meta line in the window
+    /// is joined with a middle dot.
+    @Test func theMetaLineIsJoinedWithAMiddleDot() {
+        let subtitle = SubagentPane.subtitle(agent(type: "general-purpose", seconds: 338))
+        #expect(subtitle.contains(" · "))
+        #expect(!subtitle.contains(" . "))
     }
 
     /// Depth is the one thing the pane can say that the sidebar cannot, since every depth is drawn
@@ -160,13 +168,22 @@ import Foundation
         #expect(SubagentPane.briefCollapses(long))
     }
 
-    /// The line that opens it says what is behind it. A shut brief draws no text at all, so "Show
-    /// all" would be offering to show the rest of nothing.
-    @Test func theLineThatOpensABriefNamesWhatItHides() {
-        #expect(SubagentPane.briefToggle(isExpanded: false, kind: .agent) == "Show the prompt")
-        #expect(SubagentPane.briefToggle(isExpanded: true, kind: .agent) == "Hide the prompt")
-        #expect(SubagentPane.briefToggle(isExpanded: false, kind: .command) == "Show the command")
-        #expect(SubagentPane.briefToggle(isExpanded: true, kind: .command) == "Hide the command")
+    @Test func aShortBriefHasNoPreviewBecauseItIsShownWhole() {
+        #expect(SubagentPane.briefPreview("Read a.txt and report its line count.") == nil)
+    }
+
+    /// Shut, a long brief is still a bubble with words in it: a few lines, cut between words, on
+    /// one line so a heading and a blank line do not spend the preview on nothing.
+    @Test func aLongBriefIsPreviewedBetweenWords() throws {
+        let long = "# Task\n\n" + String(repeating: "implement the thing ", count: 60)
+        let preview = try #require(SubagentPane.briefPreview(long))
+        #expect(preview.count <= SubagentPane.briefPreviewLimit + 1)
+        #expect(preview.hasPrefix("# Task implement"))
+        #expect(preview.hasSuffix("…"))
+        #expect(!preview.contains("\n"))
+        // Between words: what comes before the ellipsis is a whole word of the brief.
+        let lastWord = preview.dropLast().split(separator: " ").last.map(String.init)
+        #expect(["implement", "the", "thing"].contains(lastWord ?? ""))
     }
 
     // MARK: Finding what a command ran

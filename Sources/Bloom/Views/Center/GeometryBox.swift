@@ -4,9 +4,9 @@ import Foundation
 ///
 /// **A geometry probe writes once a frame, and `@State` turns every one of those writes into a
 /// rebuild.** That is the right trade when the body actually draws the number, and it is pure
-/// waste when it does not: `CenterPaneView` measures its own size so a drop closure can say which
-/// quarter a tab was let go in, and `SessionTabsView` measures where each tab is centred so a drag
-/// can take a snapshot when it begins. Neither number is drawn by anything. Kept in `@State` they
+/// waste when it does not: `CenterColumnView` measures where its panes sit so a carried tab can
+/// say which quarter of which pane it is over, and `SessionTabsView` measures where each tab sits
+/// so a drag can take a snapshot when it begins. Neither number is drawn by anything. Kept in `@State` they
 /// invalidated a pane, and a strip, on every frame of every window resize, for a value nobody was
 /// going to look at until the pointer went down.
 ///

@@ -28,7 +28,10 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
     public var deletions: Int
     public var isBinary: Bool
 
-    public var id: String { path }
+    public var layer: ChangeLayer?
+    public var stagingRevision: String?
+
+    public var id: String { layer.map { "\($0.rawValue):\(path)" } ?? path }
 
     public var filename: String { (path as NSString).lastPathComponent }
     public var directory: String { (path as NSString).deletingLastPathComponent }
@@ -39,7 +42,8 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
         change: Change,
         additions: Int = 0,
         deletions: Int = 0,
-        isBinary: Bool = false
+        isBinary: Bool = false,
+        layer: ChangeLayer? = nil
     ) {
         self.path = path
         self.oldPath = oldPath
@@ -47,6 +51,7 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
         self.additions = additions
         self.deletions = deletions
         self.isBinary = isBinary
+        self.layer = layer
     }
 }
 
@@ -104,24 +109,19 @@ public struct LocalWork: Sendable, Hashable {
 }
 
 extension Git {
-    /// Files changed on this worktree relative to whatever the scope measures from, including
-    /// uncommitted work and untracked files.
-    ///
-    /// The default scope is the whole of this workspace's work, measured from where the branch
-    /// diverged from `base`, which is what every caller but the Changes tab wants. Untracked files
-    /// belong to every scope: a file git has never seen is uncommitted whichever commit you are
-    /// measuring from.
-    ///
-    /// Everything here runs with `-z` and is parsed from bytes. Git's default output C-quotes any
-    /// path that is not plain ASCII and separates fields with tab and newline, both of which a
-    /// path is allowed to contain. Splitting that text gave `"caf\303\251.txt"` for `café.txt`
-    /// and cut a path containing a tab in half.
-    ///
-    /// Throws if any of the git calls fail, because an empty list has to mean "nothing changed"
-    /// and never "we could not find out".
+    /// The selected comparison's file list. The cumulative view includes local and untracked
+    /// work, uncommitted review separates staging layers, and a commit reads only its two trees.
+    /// NUL-delimited output preserves paths containing tabs, newlines and quoted characters.
+    /// A failed command throws rather than being reported as an empty comparison.
     public static func changedFiles(
         worktree: String, base: String, scope: DiffScope = .all
     ) async throws -> [ChangedFile] {
+        if scope == .uncommitted { return try await uncommittedFiles(worktree: worktree) }
+        if case .commit(let commit) = scope {
+            return try await diffFiles(
+                arguments: try await commitComparison(commit, in: worktree), worktree: worktree
+            )
+        }
         let mergeBase = try await revision(for: scope, base: base, in: worktree)
 
         // Three walks of the same worktree, none of which reads another's output, all three taking
@@ -129,10 +129,10 @@ extension Git {
         // 50.7ms serial to 18.8ms together on a fresh worktree, 99.4ms to 47.6ms on a real one.
         // `GIT_OPTIONAL_LOCKS=0` is set on every one of them, so nothing here wants `index.lock`.
         async let nameStatusRead = checkRaw(
-            ["diff", "--name-status", "-M", "-z", mergeBase, "--"], in: worktree
+            ["diff", "--no-ext-diff", "--no-textconv", "--name-status", "-M", "-z", mergeBase, "--"], in: worktree
         )
         async let numstatRead = checkRaw(
-            ["diff", "--numstat", "-M", "-z", mergeBase, "--"], in: worktree
+            ["diff", "--no-ext-diff", "--no-textconv", "--numstat", "-M", "-z", mergeBase, "--"], in: worktree
         )
         async let untrackedRead = checkRaw(
             ["ls-files", "--others", "--exclude-standard", "-z"], in: worktree
@@ -241,18 +241,38 @@ extension Git {
     public static func patch(
         worktree: String, base: String, file: ChangedFile, scope: DiffScope = .all
     ) async throws -> String {
-        if file.change == .untracked {
-            let result = try await run(
-                ["diff", "--no-index", "--no-color", "--", "/dev/null", file.path], in: worktree
-            )
-            // --no-index exits 1 whenever there is a difference, which is the normal case here.
+        if file.change == .untracked, !scope.isHistorical {
+            let arguments = ["diff", "--no-index"] + patchOptions + ["--", "/dev/null", file.path]
+            let result = try await run(arguments, in: worktree)
+            // Some Git versions use exit 1 for both a difference and an unreadable input.
+            guard result.status == 0 || result.status == 1,
+                  !(result.status == 1 && result.stdout.isEmpty && !result.stderr.isEmpty) else {
+                throw error(arguments, result.status, result.stderr, result.stdout)
+            }
             return result.stdout
         }
-        let mergeBase = try await revision(for: scope, base: base, in: worktree)
+        let comparison: [String]
+        if case .commit(let commit) = scope {
+            comparison = try await commitComparison(commit, in: worktree)
+        } else if scope == .uncommitted, let layer = file.layer {
+            comparison = layer == .staged ? ["--cached"] : []
+        } else {
+            comparison = [try await revision(for: scope, base: base, in: worktree)]
+        }
+        // Both paths preserve rename detection when opening only this file. Literal pathspecs
+        // prevent a filename containing brackets or an asterisk from selecting its neighbours.
+        let paths = [file.oldPath, file.path].compactMap { $0 }
         return try await check(
-            ["diff", "--no-color", "-M", mergeBase, "--", file.path], in: worktree
+            literalPaths(["diff"] + patchOptions + ["-M"] + comparison + ["--"] + paths),
+            in: worktree
         ).stdout
     }
+
+    /// A patch is a data format here. Personal diff tools and text converters can replace it
+    /// with arbitrary output, while mnemonic prefixes change the paths the parser reads.
+    private static let patchOptions = [
+        "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
+    ]
 
     /// What a scope diffs against, resolved against this worktree.
     ///
@@ -266,64 +286,6 @@ extension Git {
         let revision = scope.revision(baseline: "")
         try validate(ref: revision, label: "revision")
         return revision
-    }
-
-    /// The commits this workspace put on its own branch, newest first.
-    ///
-    /// Bounded by `BranchCommitList.limit` and asked for one more than that, so the caller can say
-    /// the list is short without a second `rev-list --count`.
-    ///
-    /// **Merges are left out.** A merge commit on a workspace branch is almost always the base
-    /// branch being pulled in, which is the one thing on the branch the reader did not write; its
-    /// subject is `Merge remote-tracking branch 'origin/main'`, and measuring a diff from it is
-    /// measuring from somebody else's work. Nothing is hidden by this: a merge's own changes are
-    /// still in every scope that spans it, because a scope is a revision the worktree is compared
-    /// against and not a list of commits to add up.
-    ///
-    /// Everything is parsed from bytes with `-z`, for the reason `changedFiles` documents: a
-    /// commit subject and an author name may both contain anything at all, newlines included.
-    public static func branchCommits(
-        worktree: String, base: String, limit: Int = BranchCommitList.limit
-    ) async throws -> BranchCommitList {
-        let mergeBase = try await baseline(base, in: worktree)
-        // A unit separator between the fields. It is the one byte in this format that a subject,
-        // an author name and an ISO date can all be relied on not to contain.
-        let format = "--pretty=format:%H\u{1f}%s\u{1f}%an\u{1f}%aI"
-        let output = try await checkRaw(
-            [
-                "log", "--no-merges", "-z", "--max-count=\(limit + 1)", format,
-                "\(mergeBase)..HEAD", "--",
-            ],
-            in: worktree
-        )
-        let parsed = parseBranchCommits(output.stdout)
-        return BranchCommitList(
-            commits: Array(parsed.prefix(limit)), isTruncated: parsed.count > limit
-        )
-    }
-
-    /// The records of `log -z --pretty=format:%H<US>%s<US>%an<US>%aI`.
-    ///
-    /// A record with the wrong number of fields is dropped rather than guessed at. There is no
-    /// such thing as a commit worth listing that we could not read, and a menu row naming the
-    /// wrong sha would scope a diff to the wrong place.
-    static func parseBranchCommits(_ data: Data) -> [BranchCommit] {
-        nulRecords(data).compactMap { record in
-            let fields = record.split(separator: 0x1f, omittingEmptySubsequences: false)
-            guard fields.count == 4 else { return nil }
-            let sha = String(decoding: fields[0], as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !sha.isEmpty else { return nil }
-            guard let date = try? Date.ISO8601FormatStyle().parse(
-                String(decoding: fields[3], as: UTF8.self)
-            ) else { return nil }
-            return BranchCommit(
-                sha: sha,
-                subject: String(decoding: fields[1], as: UTF8.self),
-                author: String(decoding: fields[2], as: UTF8.self),
-                date: date
-            )
-        }
     }
 
     /// What this worktree is holding that the remote has not got, in one `git` call.

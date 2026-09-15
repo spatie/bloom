@@ -55,6 +55,31 @@ struct SlashCommandTests {
 
     // MARK: - The sources
 
+    @Test("Codex and shared user skills appear in the slash menu", arguments: [
+        ".codex/skills", ".codex/skills/.system", ".agents/skills",
+    ])
+    func additionalUserSkills(directory: String) throws {
+        let tree = try Tree()
+        try tree.skill("\(directory)/extra", name: "extra", description: "An additional skill")
+        let found = try #require(tree.discover().first { $0.name == "extra" })
+        #expect(found.scope == .user)
+        #expect(found.kind == .skill)
+        #expect(found.detail == "An additional skill")
+    }
+
+    @Test("shared and Codex workspace skills override user copies", arguments: [
+        ".codex/skills", ".agents/skills",
+    ])
+    func additionalProjectSkills(directory: String) throws {
+        let tree = try Tree()
+        try tree.skill(".claude/skills/extra", name: "extra", description: "User")
+        try tree.skill("\(directory)/extra", name: "extra", description: "Workspace", under: tree.project)
+        let matches = tree.discover().filter { $0.name == "extra" }
+        #expect(matches.count == 1)
+        #expect(matches.first?.scope == .project)
+        #expect(matches.first?.detail == "Workspace")
+    }
+
     @Test("a user command file becomes a command")
     func userCommands() throws {
         let tree = try Tree()
