@@ -26,24 +26,27 @@ enum ReviewNavigationProbe {
         // Cold jumps, backward jumps, repeated destinations and previously prepared files.
         for index in [6, 2, 7, 0, 6, 6, 3] {
             let path = String(format: "File%02d.swift", index)
+            ReviewRunProbe.clearTrace()
             model.selectedFilePath = path
             FileReview.setShowsAllFiles(true, in: model)
             await settle(window)
             check(model.selectedFilePath == path,
                   "requested \(path), but the inspector selected \(model.selectedFilePath ?? "nil")")
-            checkLanding(index: index, host: host, check: check)
+            checkLanding(index: index, host: host, model: model, context: "after jumping to \(path)", check: check)
         }
         // Rewrapping changes the heights above a destination which already finished loading.
         for width: CGFloat in [420, 1100, 600] {
+            ReviewRunProbe.clearTrace()
             window.setContentSize(NSSize(width: width, height: 600))
             await settle(window)
-            checkLanding(index: 3, host: host, check: check)
+            checkLanding(index: 3, host: host, model: model, context: "after resizing to \(Int(width)) wide", check: check)
         }
         await checkKeyboardScrolling(host: host, window: window, check: check)
+        ReviewRunProbe.clearTrace()
         model.selectedFilePath = "File03.swift"
         FileReview.setShowsAllFiles(true, in: model)
         await settle(window)
-        checkLanding(index: 3, host: host, check: check)
+        checkLanding(index: 3, host: host, model: model, context: "after asking for File03.swift again", check: check)
         await checkDefinitionNavigation(model: model, host: host, window: window, check: check)
         await checkFileTreeRestoration(model: model, check: check)
         check(!window.isVisible && !window.isKeyWindow, "navigation probe activated its window")
@@ -129,18 +132,53 @@ enum ReviewNavigationProbe {
         } catch { check(false, "could not create the outside-diff fixture: \(error)") }
     }
 
-    private static func checkLanding(index: Int, host: NSView, check: (Bool, String) -> Void) {
+    private static func checkLanding(index: Int, host: NSView, model: WorkspaceModel, context: String,
+                                     check: (Bool, String) -> Void) {
         guard let scroll = scrollView(in: host),
               let text = firstLine(index: index, in: host) else {
-            let details = textViews(in: host).map { String($0.string.prefix(24)) }
-            let offset = scrollView(in: host)?.contentView.bounds.origin.y ?? -1
-            check(false, "file \(index) did not render its first line at offset \(offset): \(details), prepared \(ReviewRunProbe.preparedLayouts)")
+            check(false, "file \(index) did not render its first line \(context): \(landingReport(index: index, host: host, model: model))")
             return
         }
         let top = text.convert(text.bounds, to: scroll.contentView).minY - scroll.contentView.bounds.minY
         let header = InspectorLayout.reviewHeaderHeight
-        check(top >= header - 1 && top <= header + 2 * CodeMetrics.rowHeight,
-              "file \(index) landed with its first line at \(top), expected just below header \(header)")
+        let landed = top >= header - 1 && top <= header + 2 * CodeMetrics.rowHeight
+        check(landed, landed ? "" : "file \(index) landed with its first line at \(top), expected just below header \(header), "
+            + "\(context): \(landingReport(index: index, host: host, model: model))")
+    }
+
+    /// Enough to tell the three ways a landing goes wrong apart from one CI log: the scroller clamped
+    /// at an end, a scroll that was requested and landed on a lazy stack's estimate (the target
+    /// estimate and the realised positions disagree, and the trace shows the request), and a
+    /// destination that was released or never asked for (the trace shows no request).
+    ///
+    /// The estimate adds each earlier file's prepared height and its header. A file never prepared
+    /// counts as nothing and one prepared at another width is marked stale, so the estimate is only
+    /// a lower bound when either appears.
+    private static func landingReport(index: Int, host: NSView, model: WorkspaceModel) -> String {
+        guard let scroll = scrollView(in: host) else { return "no scroll view" }
+        let offset = scroll.contentView.bounds.origin.y
+        let viewport = scroll.contentView.bounds.height
+        let document = scroll.documentView?.bounds.height ?? 0
+        let limit = max(0, document - viewport)
+        let clamped = offset >= limit - 1 ? "at the end" : offset <= 1 ? "at the top" : "no"
+        let width = host.bounds.width
+        let header = InspectorLayout.reviewHeaderHeight
+        var estimate: CGFloat = 0
+        var files: [String] = []
+        for (position, file) in model.reviewFiles.enumerated() {
+            let geometry = ReviewRunProbe.preparedGeometry[file.path]
+            if position < index { estimate += header + (geometry?.height ?? 0) }
+            let identity = file.id == file.path ? file.path : "\(file.path) id \(file.id)"
+            let layout = geometry.map { "height \(Int($0.height)) at width \(Int($0.width))\(abs($0.width - width) > 0.5 ? " stale" : "")" }
+            files.append("\(position) \(identity) \(layout ?? "never prepared")")
+        }
+        let realised = textViews(in: host).map { text in
+            let name = text.string.dropFirst(4).prefix { $0 != " " }
+            return "\(name) at \(Int(text.convert(text.bounds, to: scroll.contentView).minY))"
+        }
+        return "offset \(Int(offset)) of \(Int(limit)) (document \(Int(document)), viewport \(Int(viewport)), width \(Int(width)), "
+            + "clamped \(clamped)); target estimate \(Int(estimate)); files [\(files.joined(separator: "; "))]; "
+            + "realised [\(realised.joined(separator: ", "))]; trace [\(ReviewRunProbe.navigationTrace.joined(separator: " | "))]"
     }
 
     private static func firstLine(index: Int, in view: NSView) -> WrappedCodeText.TextView? {
@@ -156,13 +194,15 @@ enum ReviewNavigationProbe {
     }
 
     private static func checkKeyboardScrolling(host: NSView, window: NSWindow, check: (Bool, String) -> Void) async {
-        guard let input = inputView(in: host), let scroll = scrollView(in: host),
-              let text = firstLine(index: 3, in: host),
+        let input = inputView(in: host), scroll = scrollView(in: host), text = firstLine(index: 3, in: host)
+        guard let input, let scroll, let text,
               let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
                                           timestamp: 0, windowNumber: window.windowNumber, context: nil,
                                           characters: "", charactersIgnoringModifiers: "", isARepeat: false,
                                           keyCode: 125) else {
-            check(false, "keyboard navigation fixture is missing its views")
+            let missing = [input == nil ? "input observer" : nil, scroll == nil ? "scroll view" : nil,
+                           text == nil ? "file 3's first line" : nil].compactMap { $0 }
+            check(false, "keyboard navigation fixture is missing its views: \(missing.isEmpty ? "key event" : missing.joined(separator: ", "))")
             return
         }
         check(input.enclosingScrollView === scroll, "input observer is outside the review scroll view")
@@ -186,9 +226,17 @@ enum ReviewNavigationProbe {
         return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
     }
 
+    /// Records each offset the scroller moves to between the review's own trace entries, so a
+    /// failure shows where each scroll request actually put the document.
     private static func settle(_ window: NSWindow) async {
+        var last: CGFloat?
         for _ in 0..<30 {
             window.contentView?.layoutSubtreeIfNeeded()
+            if let view = window.contentView, let scroll = scrollView(in: view) {
+                let offset = scroll.contentView.bounds.origin.y
+                if last.map({ abs($0 - offset) > 0.5 }) ?? true { ReviewRunProbe.trace("offset \(Int(offset))") }
+                last = offset
+            }
             try? await Task.sleep(for: .milliseconds(30))
         }
     }

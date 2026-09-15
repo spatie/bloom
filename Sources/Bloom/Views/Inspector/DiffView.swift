@@ -1050,6 +1050,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
         onPrepared?()
         #if DEBUG
         if CommandLine.arguments.contains("--review-run-probe") {
+            ReviewRunProbe.preparedGeometry[file.path] = CGSize(width: width, height: heights.values.flatMap { $0 }.reduce(0, +))
             ReviewRunProbe.preparedLayouts[file.path] = "rows=\(currentRows.count), blocks=\(heights.count), height=\(heights.values.flatMap { $0 }.reduce(0, +)), width=\(width), viewport=\(embeddedViewportHeight ?? -1)"
         }
         #endif
