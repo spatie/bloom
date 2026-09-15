@@ -102,8 +102,12 @@ final class CreationComposerSource {
     let styles = ComposerOutputStyleCatalog()
     var files: [String] = []
     var authentication: [AgentAuthenticationStatus] = []
+    private(set) var codexSpeeds: [String: CodexSpeed]?
+    private(set) var hasReceived = false
 
     func receive(_ context: ServerWorkspaceContext) {
+        codexSpeeds = context.composer.codexSpeeds
+        hasReceived = true
         models.receive(context.composer.models, availableAgents: context.composer.availableAgents)
         commands.receive(context.composer.commands.map { var value = $0; value.path = nil; return value })
         styles.receive(context.composer.styles)

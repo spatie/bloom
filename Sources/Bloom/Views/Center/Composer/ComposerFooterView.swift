@@ -80,8 +80,18 @@ struct ComposerFooterView: View {
         [project ?? "", controls.agentKind.rawValue, controls.model, String(showsAgentControls)]
     }
 
-    private var codexSpeed: CodexSpeed? {
-        loadedSpeedRequest == speedRequest ? loadedSpeed : nil
+    /// A workspace on a server takes the speed its server reported, because the reading below is
+    /// this Mac's Codex configuration and says nothing about the Codex that would run the turn.
+    private var codexSpeedReading: CodexSpeedReading {
+        if let remote {
+            return .reported(remote.codexSpeeds, model: controls.model, isLoaded: remote.prepared)
+        }
+        if let creationSource {
+            return .reported(creationSource.codexSpeeds, model: controls.model, isLoaded: creationSource.hasReceived)
+        }
+        guard loadedSpeedRequest == speedRequest else { return .loading }
+        if let loadedSpeed { return .read(loadedSpeed) }
+        return speedFailed ? .unavailable : .loading
     }
 
     /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
@@ -189,10 +199,8 @@ struct ComposerFooterView: View {
             loadedSpeedRequest = request
             speedFailed = false
             guard showsAgentControls, controls.agentKind == .codex else { return }
-            // The reading is this Mac's Codex configuration, and it says nothing about what a
-            // server would run the turn at. Reported as unavailable rather than left loading for
-            // ever, until the speed comes over the wire with the rest of the composer's state.
-            guard remote == nil, creationSource == nil else { speedFailed = true; return }
+            // A server's speed arrives with its composer state. See `codexSpeedReading`.
+            guard remote == nil, creationSource == nil else { return }
             do {
                 let speed = try await CodexSpeed.read(
                     cwd: project ?? AgentScratchDirectory.current(), modelID: controls.model
@@ -280,8 +288,8 @@ struct ComposerFooterView: View {
                         }
                     },
                     onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
-                    codexSpeed: codexSpeed,
-                    codexSpeedFailed: loadedSpeedRequest == speedRequest && speedFailed,
+                    codexSpeed: codexSpeedReading.speed,
+                    codexSpeedFailed: codexSpeedReading == .unavailable,
                     onInteractionMode: { mode in edit { $0.interactionMode = mode } }
                 )
             }

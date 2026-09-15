@@ -17,7 +17,10 @@ final class RemoteSessionConnection {
     private(set) var isPreparing = false
     private(set) var isApplying = false
     private(set) var isUploading = false
-    private var prepared = false
+    private(set) var prepared = false
+    /// The server's Codex speeds, kept apart from `controls` because they describe the server's
+    /// configuration rather than a choice this conversation made.
+    private(set) var codexSpeeds: [String: CodexSpeed]?
     private(set) var supportsAuthenticationChecks = false
     private(set) var authentication: AgentAuthenticationStatus?
     var isCurrentServer: Bool { server?.endpoint == endpoint }
@@ -71,6 +74,7 @@ final class RemoteSessionConnection {
             // component that reads the Mac filesystem.
             commands.receive(state.commands.map { var command = $0; command.path = nil; return command })
             styles.receive(state.styles)
+            codexSpeeds = state.codexSpeeds
             prepared = true
         } catch { if !Task.isCancelled { server?.error = error.localizedDescription } }
     }

@@ -774,6 +774,48 @@
     }
   },
   {
+    "name" : "reply-composerCodexSpeeds",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "composer" : {
+          "_0" : {
+            "availableAgents" : [
+              "codex"
+            ],
+            "codexSpeeds" : {
+              "example-model" : {
+                "isFast" : true,
+                "supportsFast" : true
+              }
+            },
+            "commands" : [
+
+            ],
+            "controls" : {
+              "agentKind" : "codex",
+              "codexContextWindow" : 0,
+              "effort" : "medium",
+              "hasWorktree" : true,
+              "interactionMode" : "build",
+              "isFastMode" : false,
+              "model" : "example-model",
+              "outputStyle" : "default",
+              "permissionMode" : "auto"
+            },
+            "models" : [
+
+            ],
+            "styles" : [
+
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
     "name" : "reply-archivePreview",
     "value" : {
       "id" : "00000000-0000-4000-8000-000000000001",

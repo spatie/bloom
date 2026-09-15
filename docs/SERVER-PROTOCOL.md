@@ -200,7 +200,15 @@ Workspace records expose `id`, `repoID`, `name`, server `path`, `branch`, `baseB
 Use `workspaceID`/`repoID` relationships to build navigation; do not join by display names.
 These records contain additional fields, including ordering, activity and usage statistics.
 
-A composer state contains `controls`, `models`, `commands`, `styles` and optional `availableAgents`.
+A composer state contains `controls`, `models`, `commands`, `styles` and optional `availableAgents`,
+`authentication` and `codexSpeeds`. `codexSpeeds` maps each Codex catalogue model id to
+`{"isFast": bool, "supportsFast": bool}`, read from the server's own Codex configuration for that
+checkout: `isFast` is the speed a turn inherits when the conversation has no override, and
+`supportsFast` is whether the switch can be offered at all. It is absent from servers that predate
+it, when Codex is not installed or could not be read, and for checkouts that run agents through an
+execution command. Treat absence as unavailable rather than reading the client's own Codex. The
+optional `codexFastMode` control carries the conversation's override (`true`, `false`, or absent to
+inherit) and is preserved by `setComposer` like every other field.
 The complete `controls` object has these required fields:
 
 | Field | JSON type | Meaning |

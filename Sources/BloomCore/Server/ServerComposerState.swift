@@ -4,11 +4,24 @@ import BloomClient
 public typealias ServerComposerState = BloomClient.RemoteComposerState
 
 enum ServerComposer {
+    /// Reads back every key `save` writes. Codex's speed override was written and never read, so
+    /// the next `setComposer` or `configure` carried nil into `save`, which deletes the row: a
+    /// model change from any client quietly turned fast mode back to the server's default.
     static func controls(session: Session, store: Store) async throws -> ComposerControls {
         ComposerControls(session: session,
             isFastMode: try await store.setting(ComposerControls.fastModeKey(sessionID: session.id)) == "1",
             outputStyle: try await store.setting(ComposerControls.outputStyleKey(sessionID: session.id)) ?? OutputStyle.defaultName,
-            codexContextWindow: CodexContextWindow.normalised(try await store.setting(ComposerControls.contextWindowKey(sessionID: session.id))))
+            codexContextWindow: CodexContextWindow.normalised(try await store.setting(ComposerControls.contextWindowKey(sessionID: session.id))),
+            codexFastMode: CodexSpeed.override(stored: try await store.setting(CodexSpeed.key(sessionID: session.id))))
+    }
+
+    /// The server's own Codex speeds for a checkout, or nil when there is nothing true to report:
+    /// Codex is not installed here, it could not be read, or the checkout wraps its agents in an
+    /// execution command, where the Codex that runs the turn is not the one this process can ask.
+    static func codexSpeeds(cwd: String, available: [AgentKind], wrapped: Bool,
+                            read: @Sendable (String) async throws -> [String: CodexSpeed] = CodexSpeed.readAll) async -> [String: CodexSpeed]? {
+        guard available.contains(.codex), !wrapped else { return nil }
+        return try? await read(cwd)
     }
 
     static func save(_ controls: ComposerControls, session: Session, store: Store) async throws {

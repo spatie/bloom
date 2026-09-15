@@ -228,6 +228,8 @@ public actor ServerRuntime {
                let repo = try await store.repo(id: id) {
                 let wrapped = !(SettingsLoader.load(workspace: repo.path, repo: repo.path).executionCommand ?? []).isEmpty
                 if !wrapped { context.composer.authentication = await authenticationStatuses(context.composer.availableAgents ?? []) }
+                context.composer.codexSpeeds = await ServerComposer.codexSpeeds(cwd: repo.path,
+                    available: context.composer.availableAgents ?? [], wrapped: wrapped)
                 result = .workspaceContext(context)
             }
             return .creation(result)
@@ -254,14 +256,19 @@ public actor ServerRuntime {
         case .composer(let id):
             let session = try await storedSession(id)
             guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
-            let path = try await workspace(workspaceID, readingDuringSetup: true).path
+            let selected = try await workspace(workspaceID, readingDuringSetup: true)
+            let path = selected.path
             let controls = try await ServerComposer.controls(session: session, store: store)
             let models = (try? await modelCatalogue.pickerModels()) ?? []
             let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let available = await installedAgents(store)
+            let repoPath = try await store.repo(id: selected.repoID)?.path ?? path
+            let wrapped = !(SettingsLoader.load(workspace: path, repo: repoPath).executionCommand ?? []).isEmpty
             return .composer(ServerComposerState(controls: controls, models: models,
                 commands: SlashCommandIndex.discover(home: home, project: path),
-                styles: OutputStyleIndex.discover(home: home, project: path), availableAgents: await installedAgents(store),
-                authentication: await authenticationStatuses([controls.agentKind], workspace: try await workspace(workspaceID, readingDuringSetup: true))))
+                styles: OutputStyleIndex.discover(home: home, project: path), availableAgents: available,
+                authentication: await authenticationStatuses([controls.agentKind], workspace: selected),
+                codexSpeeds: await ServerComposer.codexSpeeds(cwd: path, available: available, wrapped: wrapped)))
         case .markRead(let id, let seq):
             _ = try await storedSession(id)
             try await store.updateLastReadSeq(sessionID: id, seq: seq)
