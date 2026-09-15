@@ -101,7 +101,7 @@ def package(binary, output):
             # cover indirect Foundation/ICU dependencies. Avoid LD_LIBRARY_PATH, which would
             # also change library resolution in the agent processes the server launches.
             run("patchelf", "--set-rpath", "$ORIGIN", str(destination))
-            manifest["libraries"][name] = hashlib.sha256(source.read_bytes()).hexdigest()
+            manifest["libraries"][name] = hashlib.sha256(destination.read_bytes()).hexdigest()
             if not any(source.is_relative_to(path) for path in runtime_paths):
                 owner = run("dpkg-query", "-S", str(source)).splitlines()[0].split(": ", 1)[0].split(":")[0]
                 copy_notice(pathlib.Path("/usr/share/doc") / owner / "copyright", notices / (owner + ".txt"))

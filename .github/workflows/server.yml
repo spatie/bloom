@@ -37,7 +37,7 @@ jobs:
       - name: Check sustained subprocess descriptor usage
         run: runuser -u bloom-ci -- env BLOOM_FD_STRESS=1 swift test --skip-build --filter processDescriptorsStayBounded
       - name: Verify skill management refuses root
-        run: swift test --skip-build --filter ServerSkillsRootRefusalTests
+        run: .build/debug/BloomPackageTests.xctest --testing-library swift-testing --filter ServerSkillsRootRefusalTests
       - name: Exercise the server executable
         run: runuser -u bloom-ci -- python3 Tools/server-smoke.py .build/debug/bloom-server
       - name: Check script and installer regressions as Linux root

@@ -102,6 +102,11 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         updateConnectButton()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setToolbarHidden(toolbarItems?.isEmpty != false, animated: animated)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if connectionObserver == nil {

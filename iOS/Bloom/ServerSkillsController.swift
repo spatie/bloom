@@ -45,7 +45,10 @@ final class ServerSkillsController: UITableViewController {
 
     private func startRefresh() {
         refreshing?.cancel()
-        refreshing = Task { [weak self] in await self?.refresh() }
+        refreshing = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            await self?.refresh()
+        }
     }
 
     @discardableResult private func refresh() async -> Bool {
@@ -79,9 +82,11 @@ final class ServerSkillsController: UITableViewController {
     override func numberOfSections(in tableView: UITableView) -> Int { 3 }
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch section {
-        case 0: 2
-        case 1: (connectionFailure ?? session?.error) == nil && session?.pendingMutationID == nil ? 0 : 1
-        default: max(1, session?.skills.count ?? 0)
+        case 0: return 2
+        case 1:
+            if session?.unsupported == true, connectionFailure == nil { return 0 }
+            return (connectionFailure ?? session?.error) == nil && session?.pendingMutationID == nil ? 0 : 1
+        default: return max(1, session?.skills.count ?? 0)
         }
     }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
@@ -131,7 +136,6 @@ final class ServerSkillsController: UITableViewController {
                 guard let self, session.activity == .idle, session.pendingMutationID == nil else { return }
                 if let observation { session.removeObserver(observation) }; observation = nil
                 selectedWorkspaceID = id; self.session = nil; generation = nil
-                startRefresh()
             }
             navigationController?.pushViewController(picker, animated: true)
         } else if indexPath.section == 1 {

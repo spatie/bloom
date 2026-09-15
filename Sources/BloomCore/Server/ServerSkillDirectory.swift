@@ -33,9 +33,10 @@ final class ServerSkillDirectory {
     deinit { close(descriptor) }
 
     func directory(_ path: String, create: Bool = false) throws -> ServerSkillDirectory {
-        var current = dup(descriptor)
+        let components = try Self.components(path)
+        var current = fcntl(descriptor, F_DUPFD_CLOEXEC, 0)
         guard current >= 0 else { throw Self.failure }
-        for name in try Self.components(path) {
+        for name in components {
             if create, mkdirat(current, name, 0o700) != 0, errno != EEXIST { close(current); throw Self.failure }
             let next = openat(current, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
             close(current)
@@ -76,7 +77,7 @@ final class ServerSkillDirectory {
     }
 
     func names() throws -> [String] {
-        let duplicate = dup(descriptor)
+        let duplicate = fcntl(descriptor, F_DUPFD_CLOEXEC, 0)
         guard duplicate >= 0 else { throw Self.failure }
         guard let stream = fdopendir(duplicate) else { close(duplicate); throw Self.failure }
         defer { closedir(stream) }
