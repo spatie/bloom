@@ -154,9 +154,13 @@ public struct ComposerControls: Equatable, Sendable, Codable {
             + "next starts, and then it is back to that."
     }
 
-    /// Claude Code's thinking switch and Codex's service tier. Codex keeps its own optional flag,
-    /// `codexFastMode`, because an absent value inherits the user's Codex configuration.
-    public var offersFastMode: Bool { agentKind == .claudeCode || agentKind == .codex }
+    /// Claude Code's thinking switch, which every client can set through `isFastMode`.
+    ///
+    /// Codex's service tier is not in here even though the Mac offers it. It lives in its own
+    /// optional flag, `codexFastMode`, because an absent value inherits the user's Codex
+    /// configuration, and only a client that reads that configuration can draw the switch
+    /// truthfully. A client going by this rule sets `isFastMode`, which Codex ignores.
+    public var offersFastMode: Bool { agentKind == .claudeCode }
 
     /// Whether this backend has output styles at all.
     ///

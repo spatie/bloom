@@ -152,7 +152,10 @@ private struct ComposerSettingsPanel: View {
             }
             .padding(Metrics.gutter)
 
-            if controls.offersFastMode {
+            // Codex as well as the shared rule. This footer reads Codex's own speed configuration,
+            // which `offersFastMode` cannot assume of every client, and marks it unavailable for a
+            // workspace on a server rather than guessing. See `ComposerFooterView.codexSpeed`.
+            if controls.offersFastMode || controls.agentKind == .codex {
                 Hairline()
 
                 HStack(spacing: Metrics.spacing) {
