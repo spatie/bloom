@@ -50,6 +50,25 @@ struct TabCycleTests {
         #expect(TabCycle.next(from: nil, in: tabs, offset: -1) == "chat")
     }
 
+    // MARK: - Option+Tab
+
+    @Test("Option+Tab moves forwards and Shift+Option+Tab back")
+    func optionTab() {
+        #expect(TabCycle.offset(forTabWith: [.option]) == 1)
+        #expect(TabCycle.offset(forTabWith: [.option, .shift]) == -1)
+    }
+
+    /// A bare Tab and Shift+Tab move focus, and anything with Command or Control is somebody
+    /// else's key, so none of them may be taken for the strip.
+    @Test("every other Tab is left alone")
+    func otherTabsAreLeftAlone() {
+        #expect(TabCycle.offset(forTabWith: []) == nil)
+        #expect(TabCycle.offset(forTabWith: [.shift]) == nil)
+        #expect(TabCycle.offset(forTabWith: [.command, .option]) == nil)
+        #expect(TabCycle.offset(forTabWith: [.control, .option]) == nil)
+        #expect(TabCycle.offset(forTabWith: [.control]) == nil)
+    }
+
     // MARK: - Cmd+1 to Cmd+9
 
     /// Safari, Terminal and Xcode all give 9 to the LAST tab rather than to the ninth, which is
