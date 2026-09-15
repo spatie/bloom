@@ -862,13 +862,17 @@ struct DiffView: View {
         VStack(spacing: 0) {
             diffFindBar
             GeometryReader { proxy in
-                let width = max(proxy.size.width, intrinsicWidth(document))
+                // Wrapped to the pane, as the all files review is. Sized from the widest line, one
+                // long line of prose pushed the side by side halves so far apart that scrolling
+                // to the end of it put the other half off screen.
+                let width = proxy.size.width
                 let selectedIndex = selectedFind?.index
                 ScrollViewReader { reader in
-                    ScrollView([.vertical, .horizontal]) {
+                    ScrollView(.vertical) {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(rows) { row in
-                                rowView(row, document: document, width: width)
+                                rowView(row, document: document, width: width,
+                                        wrappedHeights: wrappedHeights(for: row, width: width))
                                     .background(row.sourceLines.contains { $0.index == selectedIndex }
                                         ? Color.accentColor.opacity(0.16) : .clear)
                                     .contextMenu {
@@ -916,17 +920,6 @@ struct DiffView: View {
                 }
             }
         }
-    }
-
-    /// One sheet of text, sized from the widest line, so the whole file scrolls sideways together
-    /// instead of every row carrying its own scroller.
-    private func intrinsicWidth(_ document: DiffDocument) -> CGFloat {
-        let gutter = CodeMetrics.numberWidth + CodeMetrics.gutterPadding
-        let code = CGFloat(document.maxColumns) * CodeMetrics.advance
-            + CodeMetrics.markerWidth
-            + CodeMetrics.textInset
-            + CodeMetrics.gutterPadding
-        return isSideBySide ? 2 * (gutter + code) : 2 * gutter + code
     }
 
     @ViewBuilder
