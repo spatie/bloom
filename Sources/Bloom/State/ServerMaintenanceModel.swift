@@ -10,8 +10,13 @@ import BloomAuthentication
 final class ServerMaintenanceModel {
     let server: ServerWindowModel
     private(set) var access: ServerMaintenanceAccess?
-    private var generation: Int?
-    enum AdministrationIntent { case start, update }
+    private(set) var generation: Int?
+    enum AdministrationIntent { case start, update, replaceKey }
+    /// Background update checks. See `ServerMaintenanceModel+UpdateChecks`.
+    var updateChecks = ServerUpdateCheckSchedule()
+    @ObservationIgnored var isMonitoringUpdates = false
+    /// Set by the sidebar's update indicator so Server Settings opens on Updates.
+    var revealsUpdates = false
     private(set) var administration: ServerSetupModel?
     private(set) var administrationIntent = AdministrationIntent.start
     private var administrationProfile: String?
@@ -73,16 +78,23 @@ final class ServerMaintenanceModel {
         guard !server.isMaintainingServer, !administrationIsRunning, let administration, server.connectionProfile?.id == administrationProfile else { return }
         administrationIsRunning = true
         administrationOutcome = nil
-        server.isMaintainingServer = true
+        // Issuing a key leaves the service and this connection alone, so the window must not say
+        // the server is being updated or hold back reconnection while it runs.
+        server.isMaintainingServer = administrationIntent != .replaceKey
         switch administrationIntent {
         case .start: await administration.startExistingServer()
         case .update: await administration.updateExistingServer()
+        case .replaceKey: await administration.replaceMaintenanceKey(serverID: administrationProfile ?? "")
         }
         administrationIsRunning = false
         server.isMaintainingServer = false
-        administrationOutcome = .resolve(updating: administrationIntent == .update,
-            installed: administration.maintenanceInstallationCompleted, running: administration.maintenanceServerRunning,
-            connected: administration.phase == .complete, failed: administration.failure != nil)
+        if administrationIntent == .replaceKey {
+            administrationOutcome = .resolveKeyReplacement(issued: administration.maintenanceKeyIssued && administration.failure == nil)
+        } else {
+            administrationOutcome = .resolve(updating: administrationIntent == .update,
+                installed: administration.maintenanceInstallationCompleted, running: administration.maintenanceServerRunning,
+                connected: administration.phase == .complete, failed: administration.failure != nil)
+        }
         if server.isConnected { await refresh() }
     }
 

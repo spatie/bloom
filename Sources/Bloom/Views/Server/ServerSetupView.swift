@@ -168,6 +168,9 @@ struct ServerSetupView: View {
             Label("Your projects and conversations live on this server.", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(Palette.controlAccent)
             Text("Agents can keep working when you close Bloom.").foregroundStyle(.secondary)
+            if let serverID = model.maintenanceKeyServerID {
+                ServerSetupMaintenanceKeyNote { try ServerMaintenanceKeyClipboard.copy(serverID: serverID) }
+            }
             Button("Start a Project…") {
                 StartProjectOpening.shared.isRemote = true
                 openWindow(id: StartProjectWindow.id)

@@ -10,6 +10,13 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
     /// A prepared file can still move when neighbouring diffs load or the lazy stack lays out.
     /// Hold the clicked destination until the reader scrolls or collapses a section.
     @State private var pendingDestination: String?
+    /// The anchor used to hold until the reader scrolled, however long that took. A reader who
+    /// clicked a file and sat reading it while an agent kept editing had every changes poll
+    /// resize the stack and call `scrollTo` again, and the lazy stack's height estimates then
+    /// bounced the view between the destination and its neighbour for seconds. Once nothing has
+    /// moved the destination for a second it is settled, and only a new width re-arms it.
+    @State private var destinationSettled = false
+    @State private var settleTask: Task<Void, Never>?
     @State private var layoutRevision = 0
     @State private var destinationPrepared = false
     @State private var collapsedPaths: Set<String> = []
@@ -44,7 +51,7 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                                     navigationTarget: pendingDestination == file.id,
                                     onNavigationLayout: {
                                         guard pendingDestination == file.id else { return }
-                                        scroll(to: file.id, using: reader, because: "destination moved")
+                                        follow(file.id, using: reader, because: "destination moved")
                                     },
                                     onPrepared: {
                                         if pendingDestination == file.id { destinationPrepared = true }
@@ -91,20 +98,29 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                         let path = file.id
                         collapsedPaths.remove(path)
                         destinationPrepared = false
+                        destinationSettled = false
                         pendingDestination = path
                         model.selectedFilePath = file.path
                         model.selectedChangeLayer = file.layer
                         trace("navigate to \(path), revision \(navigationRevision), width \(Int(geometry.size.width))")
                         reader.scrollTo(path, anchor: .top)
+                        restartSettleTimer()
                     }
                     .onScrollGeometryChange(for: CGSize.self) { geometry in
                         geometry.contentSize
                     } action: { _, size in
                         trace("content height \(Int(size.height))")
-                        if let path = pendingDestination { scroll(to: path, using: reader, because: "content resized") }
+                        if let path = pendingDestination { follow(path, using: reader, because: "content resized") }
                     }
                     .onChange(of: layoutRevision) { _, _ in
-                        if let path = pendingDestination { scroll(to: path, using: reader, because: "a file was prepared") }
+                        if let path = pendingDestination { follow(path, using: reader, because: "a file was prepared") }
+                    }
+                    .onChange(of: geometry.size.width) { _, width in
+                        // Rewrapping moves every line above the destination, which the reader did not ask for.
+                        guard let path = pendingDestination else { return }
+                        trace("width \(Int(width)) re-armed \(path)")
+                        destinationSettled = false
+                        follow(path, using: reader, because: "width changed")
                     }
                     .onChange(of: model.reviewFiles.map(\.id)) { _, paths in
                         collapsedPaths.formIntersection(paths)
@@ -115,6 +131,25 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                     }
                 }
             }
+        }
+    }
+
+    private func follow(_ path: String, using reader: ScrollViewProxy, because reason: String) {
+        guard !destinationSettled else {
+            trace("settled, not following \(path), \(reason)")
+            return
+        }
+        scroll(to: path, using: reader, because: reason)
+        restartSettleTimer()
+    }
+
+    private func restartSettleTimer() {
+        settleTask?.cancel()
+        settleTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            trace("destination \(pendingDestination ?? "nothing") settled")
+            destinationSettled = true
         }
     }
 

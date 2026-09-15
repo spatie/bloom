@@ -161,6 +161,23 @@ public struct ServerSetupConnection: Sendable {
                                 step: "server-start", progress: progress)
     }
 
+    /// Replace the maintenance key's digest on an installed supervisor. Nothing restarts, and the
+    /// key itself never leaves the Mac: the digest is the only argument, validated before quoting.
+    public func replaceMaintenanceKey(script: String, digest: String,
+                                      progress: @escaping @Sendable (ServerInstallEvent) async -> Void = { _ in }) async throws -> ServerInstallEvent {
+        let command = try Self.replaceMaintenanceKeyCommand(digest: digest)
+        try Task.checkCancellation()
+        return try await stream(command, script: script, commandLabel: "Issue maintenance key", step: "maintenance-key", progress: progress)
+    }
+
+    static func replaceMaintenanceKeyCommand(digest: String) throws -> String {
+        guard digest.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil else {
+            throw ServerFailure("Invalid maintenance credential digest.")
+        }
+        let python = "python3 - --replace-maintenance-key --maintenance-key-sha256 " + ServerSetupSSH.shellQuote(digest)
+        return #"if [ "$(id -u)" = 0 ]; then "# + python + "; elif sudo -n true; then sudo -n " + python + "; else " + python + "; fi"
+    }
+
     /// Remove the managed installation over the same administrator connection that installed it.
     /// The installer refuses active work unless `force` is set, and reports what it removed and kept.
     /// A refusal is returned as its error event rather than thrown, because `ServerSetupFailure`

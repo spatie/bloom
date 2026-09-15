@@ -1,4 +1,4 @@
-# Standalone server preview
+# Bloom Server
 
 Client implementers: see [the wire protocol guide](SERVER-PROTOCOL.md) and [schemas and Python example](../Protocol/README.md).
 
@@ -13,8 +13,8 @@ The server owns its agent processes, worktrees and SQLite database. Closing the 
 quitting the Mac client or disconnecting SSH leaves those agents running.
 
 The Mac app requires macOS 26. The server has macOS and Linux build paths, sharing the same
-runtime and agent backends. Linux validation runs in the Server workflow using Swift 6.3.3 on
-Ubuntu 24.04. Existing local sessions still run inside the desktop app; they are not automatically
+runtime and agent backends. The Linux package is built with Swift 6.3.3 on Ubuntu 24.04 and
+supported on Ubuntu 24.04 and 26.04 x86_64, which the Server workflow runs it on. Existing local sessions still run inside the desktop app; they are not automatically
 moved into this server. New server workspaces can run locally or on another machine.
 
 ## Add Server assistant
@@ -329,7 +329,7 @@ CryptoKit operations and system SQLite. Inline setup scripts use `/bin/sh` on Li
 `/bin/zsh` on macOS; executable script files retain their own shebangs.
 
 These are source-build instructions. Swift is not installed by default on Ubuntu, and copying
-only the executable from a source build is insufficient. The Linux preview package includes
+only the executable from a source build is insufficient. The Linux package includes
 Swift, SQLite and its other required libraries. No separate Swift installation is needed to run
 that package. Its glibc and loader come from the host, so this is an Ubuntu package rather than
 a fully static executable for every Linux distribution. ARM64 is not yet verified.
@@ -360,11 +360,17 @@ Its sandbox probe succeeds and an outside-workspace write fails with a read-only
 
 ## Linux package
 
-The Server workflow builds a `bloom-server-linux-x86_64` artifact and exercises it in fresh Ubuntu
-24.04 and 26.04 containers without Swift installed. Download the artifact from a successful run,
-extract its tarball and keep the `bin` and `lib` directories together:
+Every Bloom release attaches `bloom-server-linux-x86_64.tar.gz` to its GitHub release, built in
+release configuration, with a `.sha256` and a `.json` description beside it. The Mac app bundles
+the same file, and the maintenance supervisor updates servers to it. [RELEASING.md](../RELEASING.md#bloom-server)
+describes how it is built and checked. The Server workflow builds the same package for every pull
+request and exercises it in fresh Ubuntu 24.04 and 26.04 containers without Swift installed.
+
+Download it, check it, extract it and keep the `bin` and `lib` directories together:
 
 ```sh
+gh release download --repo spatie/bloom --pattern 'bloom-server-linux-x86_64.tar.gz*'
+sha256sum -c bloom-server-linux-x86_64.tar.gz.sha256
 tar -xzf bloom-server-linux-x86_64.tar.gz
 mkdir -m 700 "$HOME/.bloom-server"
 ./bloom-server-linux-x86_64/bin/bloom-server serve --data-dir "$HOME/.bloom-server"
@@ -374,16 +380,20 @@ Install Git and authenticate the desired agent CLI under the service account. Ru
 are resolved relative to the executable; the package does not change `LD_LIBRARY_PATH` for the
 agent processes it launches. Library updates require rebuilding the package.
 
-To produce the same preview package in the Ubuntu 24.04 Swift build environment:
+To produce the same package in the Ubuntu 24.04 Swift build environment:
 
 ```sh
 sudo apt-get install libsqlite3-dev pkg-config git python3 patchelf
-swift build --product bloom-server
-python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
+swift build -c release --product bloom-server
+swift build -c release --product bloom-bridge
+BLOOM_SERVER_VERSION=v1.4.0 python3 Tools/package-linux-server.py \
+  "$(swift build -c release --show-bin-path)/bloom-server" .build/bloom-server-linux-x86_64.tar.gz
 ```
 
-The package carries licence notices and a manifest of the included libraries. It is a development
-artifact, not an automatically published release or installer.
+Without `BLOOM_SERVER_VERSION` the version is `0.0.0-dev.<commit>`. The package carries licence
+notices and a manifest of its version, protocol version and included libraries. For a server that
+stays up, use the Add Server assistant, which installs the package as a service with supervised
+updates.
 
 ## Keep a standalone server running
 
@@ -556,8 +566,8 @@ server starts, even without a connected Mac.
 
 1. Move the existing desktop execution path onto the standalone runtime. Preserve workspace data,
    startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
-2. Publish stable release downloads and broaden Linux coverage across agent backends and ARM64.
-   The bundled x86_64 package and guided SSH installer are implemented.
+2. Broaden Linux coverage across agent backends and ARM64. Every release publishes the x86_64
+   package, and the bundled package and guided SSH installer are implemented.
 3. Close the remaining interaction gaps across Mac, iPhone and iPad. Remote mid-turn messages
    queue rather than steering the running agent, and global owner-only UI actions are not exposed
    through a workspace lease. Shared creation, crew management, tool cards, native terminals and
@@ -710,10 +720,32 @@ Supported installations are deliberately specific:
   The plan discloses container and Docker service restarts. This is not a blanket APT upgrade or
   support for every Docker installation. Package changes do not have automatic package rollback.
 
+The Mac checks for updates in the background while it is connected: once shortly after each
+connection, then every six hours, or twenty minutes after a request that failed. It sends the same
+`inspect` the Updates screen does, so the supervisor (whose GitHub lookup is cached for fifteen
+minutes) remains the only thing that talks to GitHub. When an update exists, the sidebar's server
+heading shows a small download arrow and Server Settings badges Updates and lists the new versions
+with **Review Update…**. Nothing is ever installed without that review. Checks need maintenance
+access, so a Mac without the key shows nothing. `ServerUpdateCheckSchedule` and
+`ServerUpdateNotice` in BloomClient hold these decisions, for iPhone and iPad to share.
+
+Releases publish `bloom-server-linux-x86_64.json` beside the package. When a release has one, the
+supervisor reads it before offering the release: a different client protocol, a different
+maintenance protocol, another architecture or a newer glibc than the server has marks the release
+`incompatible` with the reason, instead of offering an update that would be refused after its
+download. A release with a newer protocol names the way forward: update Bloom on the Mac, then use
+**Update Server…**, which installs the server that app includes. Older releases without the
+description are offered as before, and every rule is still checked on the downloaded manifest.
+
 Maintenance requires `diagnostics.maintenanceManagement: true` and a separate administrator key.
 The wizard retains the key in this Mac's Keychain and installs only its SHA-256 digest on the
-server. Other clients enter the maintenance key in Updates; normal workspace authentication alone
-cannot authorise maintenance. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
+server, and its Finish step says so and offers **Copy Key for Another Device…**. Other clients
+enter the maintenance key in Updates; normal workspace authentication alone cannot authorise
+maintenance. A client without the key but with administrator SSH access can choose **Issue New
+Key…** in Updates instead. After a confirmation that other devices will need the new key, it
+generates a key, sends only its digest over SSH (`install-bloom-server.py
+--replace-maintenance-key`), saves the key in its Keychain, and the running supervisor adopts the
+new digest without restarting. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
 plans, phases, idempotency, logs and shared client behaviour.
 
 On older SSH servers, **Set Up Server Updates…** keeps the administrator checks and installation
@@ -749,10 +781,17 @@ actual outcomes and recovery details. **Recover Update** resumes an interrupted 
 checkpoint without rerunning npm or APT installation. Clients poll first after a lost response;
 an explicit retry reuses the original request UUID. They never automatically resubmit an install.
 
-No compatible tagged release asset has been published yet for this implementation. Runtime
-self-updates become available when the tagged release workflow publishes the matching Linux
-asset. Development bootstrap uses a matching packaged server payload; client builds alone do not
-install or enable the supervisor on an existing server.
+Runtime updates come from the Bloom releases themselves: each one attaches the server package, built
+and checked as [RELEASING.md](../RELEASING.md#bloom-server) describes. The supervisor reads the latest
+stable release of `spatie/bloom` and offers it when its tag is newer than the installed version.
+Prereleases are never offered, and neither is an older version. A server may take up to fifteen
+minutes to notice a new release; reviewing an update always checks again, and the plan pins the
+exact asset and its GitHub SHA-256 digest. The package manifest must name that version, `x86_64`,
+maintenance protocol 1 and the wire protocol the supervisor was installed for. A release with a
+different protocol version fails before anything is replaced, and such a server moves through
+**Update Server…** instead, which reinstalls the supervisor with it. Development bootstrap uses a
+matching packaged server payload; client builds alone do not install or enable the supervisor on an
+existing server.
 
 On servers without the maintenance capability, the Mac app also offers **Use Legacy SSH Updates…**
 for AI tools. This older path requires the SSH connection to remain open and supports its existing

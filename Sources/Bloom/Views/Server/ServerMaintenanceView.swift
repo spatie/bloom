@@ -38,16 +38,13 @@ struct ServerMaintenanceView: View {
         .onChange(of: model.server.connectionGeneration) {
             review = nil; cancellation = nil; showsAccess = false; showsLegacy = false
         }
-        .confirmationDialog(model.administrationIntent == .start ? "Start Bloom Server?" : "Update Bloom Server and reconnect?",
-                            isPresented: $confirmsAdministration, titleVisibility: .visible) {
-            Button(model.administrationIntent == .start ? "Start Server" : "Update and Reconnect") {
+        .confirmationDialog(administrationConfirmation.title, isPresented: $confirmsAdministration, titleVisibility: .visible) {
+            Button(administrationConfirmation.action) {
                 Task { await model.performAdministration() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(model.administrationIntent == .start
-                 ? "Start the existing installation on this server and reconnect this Mac. No packages or project data will be replaced."
-                 : "Bloom checks for active work, stops the service if needed, installs the server package included with this app, starts the service and reconnects. Projects and sign-ins stay on the server. If installation fails, Bloom attempts to restart the existing service; it does not retry installation automatically.")
+            Text(administrationConfirmation.message)
         }
         .sheet(isPresented: $showsAccess) {
             if let access = model.access { ServerMaintenanceAccessView(access: access, serverName: model.server.displayName) }
@@ -114,6 +111,7 @@ struct ServerMaintenanceView: View {
                             }
                         }
                     } else {
+                        if let notice = model.updateNotice { updateAvailableSection(notice, session: session) }
                         if let job = session.jobs.filter({ !$0.isActive }).max(by: { $0.updatedAt < $1.updatedAt }) {
                             Section("Latest result") {
                                 Label(job.component.title + ": " + job.phase.title,
@@ -132,6 +130,8 @@ struct ServerMaintenanceView: View {
                                     Label("This Mac can install updates", systemImage: "checkmark.shield")
                                         .font(Typo.caption).foregroundStyle(.secondary)
                                     Spacer()
+                                    Button("Issue New Key…") { model.beginAdministration(.replaceKey) }
+                                        .disabled(session.activity != .idle || session.pendingMutationID != nil)
                                     Button("Update Permissions…") { showsAccess = true }
                                 }
                             }
@@ -175,13 +175,79 @@ struct ServerMaintenanceView: View {
         }
     }
 
+    private var administrationConfirmation: (title: String, action: String, message: String) {
+        switch model.administrationIntent {
+        case .start:
+            ("Start Bloom Server?", "Start Server",
+             "Start the existing installation on this server and reconnect this Mac. No packages or project data will be replaced.")
+        case .update:
+            ("Update Bloom Server and reconnect?", "Update and Reconnect",
+             "Bloom checks for active work, stops the service if needed, installs the server package included with this app, starts the service and reconnects. Projects and sign-ins stay on the server. If installation fails, Bloom attempts to restart the existing service; it does not retry installation automatically.")
+        case .replaceKey:
+            ("Issue a new maintenance key for \(model.server.displayName)?", "Issue New Key",
+             "The new key replaces the current one on the server and is saved in this Mac’s Keychain. Other devices, including iPhone and iPad, can no longer install updates until you give them the new key. Updates already running continue, and nothing restarts.")
+        }
+    }
+
+    private func updateAvailableSection(_ notice: ServerUpdateNotice, session: ServerMaintenanceSession) -> some View {
+        Section("Update available") {
+            ForEach(notice.updates) { component in
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(component.title + " " + (component.availableVersion ?? ""), systemImage: "arrow.down.circle.fill")
+                            .font(Typo.labelEmphasis).foregroundStyle(Palette.controlAccent)
+                        Text("Installed: " + (component.installedVersion ?? "Not available")).settingsFootnote().textSelection(.enabled)
+                    }
+                    Spacer()
+                    Button("Review Update…") { reviewUpdate(component, session: session) }
+                        .disabled(!canReview(session))
+                }
+            }
+            ForEach(notice.incompatible) { component in
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(component.title + " " + (component.availableVersion ?? ""), systemImage: "exclamationmark.arrow.circlepath")
+                        .font(Typo.labelEmphasis)
+                    Text(component.detail).settingsFootnote().textSelection(.enabled)
+                    if component.id == .server {
+                        Button("Update Server…") { model.beginAdministration(.update) }
+                            .disabled(model.administrationIsRunning || session.hasActiveJobs)
+                    }
+                }
+            }
+            if let checked = model.updateChecks.lastAttempt {
+                Text("Checked " + checked.formatted(.relative(presentation: .named)) + ". Bloom checks again every few hours; nothing installs without your review.")
+                    .settingsFootnote()
+            }
+        }
+    }
+
+    private func canReview(_ session: ServerMaintenanceSession) -> Bool {
+        session.authorized && session.activity == .idle && session.pendingMutationID == nil && !session.hasActiveJobs
+    }
+
+    private func reviewUpdate(_ component: ServerMaintenanceComponent, session: ServerMaintenanceSession) {
+        Task {
+            guard session.activity == .idle, session.pendingMutationID == nil else { return }
+            await session.prepare(component: component.id)
+            if model.session === session, session.plan?.component == component.id { review = session.plan }
+        }
+    }
+
     private func administrationSection(_ setup: ServerSetupModel) -> some View {
-        Section(model.administrationOutcome != nil ? "Result" : model.administrationIntent == .start ? "Start Bloom Server" : "Set up managed server updates") {
-            ServerMaintenanceAdministrationView(setup: setup, isStarting: model.administrationIntent == .start,
+        Section(model.administrationOutcome != nil ? "Result" : administrationTitle) {
+            ServerMaintenanceAdministrationView(setup: setup, intent: model.administrationIntent,
                 isRunning: model.administrationIsRunning, outcome: model.administrationOutcome,
                 reconnect: { Task { await model.reconnect() } },
                 review: { confirmsAdministration = true }, recover: { model.recoverAdministration() },
                 finish: { model.finishAdministration() })
+        }
+    }
+
+    private var administrationTitle: String {
+        switch model.administrationIntent {
+        case .start: "Start Bloom Server"
+        case .update: "Set up managed server updates"
+        case .replaceKey: "Issue a new maintenance key"
         }
     }
 
@@ -197,6 +263,15 @@ struct ServerMaintenanceView: View {
                 Spacer()
                 Button(session.authorized ? "Manage…" : "Add Access…") { showsAccess = true }
                     .disabled(session.isSubmitting || model.access?.isPairing == true)
+            }
+            if !session.authorized {
+                HStack {
+                    Text("No key to paste? With administrator SSH access, issue a new one. Other devices will need the new key.")
+                        .settingsFootnote()
+                    Spacer()
+                    Button("Issue New Key…") { model.beginAdministration(.replaceKey) }
+                        .disabled(session.isSubmitting || model.access?.isPairing == true || model.administrationIsRunning)
+                }
             }
             if let failure = model.access?.credentialFailure { Text(failure).foregroundStyle(Palette.warning).textSelection(.enabled) }
             if let failure = session.failure, failure.isAuthorizationFailure {
@@ -227,14 +302,11 @@ struct ServerMaintenanceView: View {
                     }
                     Spacer()
                     if component.canUpdate, component.availableVersion != component.installedVersion {
-                        Button("Review Update…") {
-                            Task {
-                                guard session.activity == .idle, session.pendingMutationID == nil else { return }
-                                await session.prepare(component: component.id)
-                                if model.session === session, session.plan?.component == component.id { review = session.plan }
-                            }
-                        }
-                        .disabled(!session.authorized || session.activity != .idle || session.pendingMutationID != nil || session.jobs.contains(where: \.isActive))
+                        Button("Review Update…") { reviewUpdate(component, session: session) }
+                            .disabled(!canReview(session))
+                    } else if component.isIncompatible, component.id == .server {
+                        Button("Update Server…") { model.beginAdministration(.update) }
+                            .disabled(model.administrationIsRunning || session.hasActiveJobs)
                     }
                 }
             }

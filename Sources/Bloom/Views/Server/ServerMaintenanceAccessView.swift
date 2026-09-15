@@ -62,17 +62,8 @@ struct ServerMaintenanceAccessView: View {
 
     private func copyKey() {
         do {
-            guard let token = try ServerMaintenanceCredentials.load(serverID: access.serverID) else { return }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(token, forType: .string)
-            pasteboard.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-            let change = pasteboard.changeCount
+            guard try ServerMaintenanceKeyClipboard.copy(serverID: access.serverID) else { return }
             feedback = "Key copied. Paste it into Maintenance Access on your other device."
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(60))
-                if pasteboard.changeCount == change { pasteboard.clearContents() }
-            }
         } catch { feedback = error.localizedDescription }
     }
 }

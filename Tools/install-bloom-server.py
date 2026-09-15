@@ -143,6 +143,7 @@ def parser():
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--stop-server", action="store_true")
     mode.add_argument("--start-server", action="store_true")
+    mode.add_argument("--replace-maintenance-key", action="store_true")
     mode.add_argument("--uninstall", action="store_true",
                       help="Remove Bloom Server and its services. The bloom account and its data are kept unless --delete-data is given.")
     result.add_argument("--delete-data", action="store_true",
@@ -1093,6 +1094,20 @@ def install(args):
     emit("complete", unchanged=False, **({"maintenanceKeyAccepted": supervised.key_accepted} if supervised is not None and getattr(args, "maintenance_key_sha256", None) else {}), **metadata(args))
 
 
+def replace_maintenance_key(args):
+    if os.geteuid() != 0:
+        fail("administrator_required", "Issuing a maintenance key needs administrator access.", "Connect as root or use passwordless sudo.")
+    existing = marker(args)
+    if not existing or existing.get("phase") != "installed":
+        fail("unmanaged_server", "There is no completed managed Bloom installation.", "Inspect the original installation before changing its maintenance key.")
+    check_ownership(args, existing)
+    if not getattr(args, "maintenance_key_sha256", None):
+        fail("maintenance_key_required", "A new maintenance key digest is required.", "Issue the key again from Bloom on your Mac.")
+    installation = MaintenanceInstallation(args, protected_system_path)
+    maintenance_call(installation.replace_key)
+    return {"maintenanceKeyAccepted": installation.key_accepted, **metadata(args)}
+
+
 # System paths written by the optional installers. They are fixed there too; the table exists so
 # the uninstall tests can point every one of them at a temporary directory.
 UNINSTALL_PATHS = {
@@ -1438,6 +1453,8 @@ def main():
                 emit("check", **stop_server(args))
             elif args.start_server:
                 emit("complete", **start_server(args))
+            elif args.replace_maintenance_key:
+                emit("complete", **replace_maintenance_key(args))
             elif args.uninstall:
                 emit("complete", **uninstall(args))
             else:
