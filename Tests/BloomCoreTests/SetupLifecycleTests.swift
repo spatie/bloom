@@ -214,7 +214,11 @@ struct RefusedTransitionsTests {
             setupState: .succeeded
         )
         for _ in 0..<250 { subject.apply(.runInterrupted) }
-        #expect(RefusedTransitions.count == 250)
+        // At least, not exactly. The register is one per process and `.serialized` only orders this
+        // suite: any other suite driving a lifecycle in parallel can refuse something between
+        // `forget()` and here, which failed CI once at 251. What this proves is that the count
+        // outruns the list, and the list's own bound is exact whatever else lands in it.
+        #expect(RefusedTransitions.count >= 250)
         #expect(RefusedTransitions.recent.count == 200)
         RefusedTransitions.forget()
     }
