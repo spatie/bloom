@@ -175,6 +175,11 @@ extension SidebarReorder {
         /// The sentence a project draws where its rows would be when it has none. It takes an
         /// offset in the run like anything else, and it is never something to move.
         case notice(projectID: RepoID)
+        /// One of the section headings the pane draws when it is grouped by status rather than by
+        /// project. It belongs to no project, which is the whole of why it carries nothing: with
+        /// the rows sorted by what each agent is doing there is no hand-chosen order to drop into,
+        /// and `SidebarGrouping.allowsReordering` refuses the drag before it reaches this type.
+        case heading
         /// A subagent drawn under the workspace that spawned it. Like the notice it takes an
         /// offset and never moves, but unlike the notice it appears BETWEEN workspace rows, which
         /// is why `destination` counts ranks rather than subtracting a lower bound.
@@ -204,7 +209,7 @@ extension SidebarReorder {
         func trails(_ projectID: RepoID) -> Bool {
             switch self {
             case .subagent(let owner), .crew(let owner), .pending(let owner): owner == projectID
-            case .project, .workspace, .notice: false
+            case .project, .workspace, .notice, .heading: false
             }
         }
     }
@@ -259,7 +264,7 @@ extension SidebarReorder {
         guard let grabbed = from.min() else { return .nothing }
 
         switch rows[grabbed] {
-        case .notice, .subagent, .crew, .pending:
+        case .notice, .subagent, .crew, .pending, .heading:
             return .nothing
 
         case .project(let id):

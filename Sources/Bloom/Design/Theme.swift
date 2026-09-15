@@ -1214,6 +1214,13 @@ struct DiffStatLabel: View {
     var additions: Int
     var deletions: Int
     var compact: Bool = false
+    /// Drawn in one quiet ink rather than in green and red.
+    ///
+    /// For the sidebar, where the figures sit on every row of a list whose job is to say which
+    /// agent wants something: two colours down a column of a dozen made the least urgent thing in
+    /// the pane the most visible. Everywhere the diff is what you are actually reading, which is
+    /// the hover card, Home and the inspector, it keeps its colours.
+    var quiet: Bool = false
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1223,16 +1230,12 @@ struct DiffStatLabel: View {
             if additions > 0 {
                 Text("+\(Self.abbreviate(additions))")
                     .contentTransition(.numericText(value: Double(additions)))
-                    .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.positive)
+                    .foregroundStyle(additionsInk)
             }
             if deletions > 0 {
                 Text("-\(Self.abbreviate(deletions))")
                     .contentTransition(.numericText(value: Double(deletions)))
-                    .foregroundStyle(
-                        isOnSelection
-                            ? Palette.selectedEmphasizedText.opacity(0.75)
-                            : Palette.negative
-                    )
+                    .foregroundStyle(deletionsInk)
             }
         }
         // The digits roll rather than jump when the six second refresh moves them, which is how
@@ -1245,6 +1248,19 @@ struct DiffStatLabel: View {
         // written as a size step and never was one, because both styles resolved to 10.
         .font(compact ? Typo.codeSmall : Typo.caption)
         .monospacedDigit()
+    }
+
+    /// One ink for the additions: inverted on a loud selection, quiet where the caller asked for
+    /// quiet, green otherwise. Named rather than written inline because the deletions need the same
+    /// three-way answer and two copies of it drift.
+    private var additionsInk: Color {
+        if isOnSelection { return Palette.selectedEmphasizedText }
+        return quiet ? Palette.textTertiary : Palette.positive
+    }
+
+    private var deletionsInk: Color {
+        if isOnSelection { return Palette.selectedEmphasizedText.opacity(0.75) }
+        return quiet ? Palette.textTertiary : Palette.negative
     }
 
     /// The three styles the counts are set in, composed once rather than per call.

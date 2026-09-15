@@ -10,6 +10,10 @@ struct SidebarStatusBar: View {
     @Environment(AppModel.self) private var app
 
     @Binding var filter: SidebarFilter
+    /// Raised to the sidebar so the projects popover's `+` posts for the create window through the
+    /// same door every other entry point uses. See `SidebarView.presentCreate`.
+    var onCreateWorkspace: (Repo) -> Void = { _ in }
+    var onStartProject: () -> Void = {}
     /// Whether the projects the owner has hidden are in the list. A preference rather than this
     /// window's state, which is why it is `@AppStorage` here and in `SidebarView` rather than a
     /// second `@State` passed down. See `ProjectVisibility.showsHiddenKey`.
@@ -18,18 +22,31 @@ struct SidebarStatusBar: View {
     /// The sidebar owns both the sentence and how long it lasts. See `SidebarView.move(from:to:)`.
     var note: String?
 
+    /// Which shape the pane is in. The same key `SidebarView` binds, rather than a value passed
+    /// down, for the reason `showsHiddenProjects` is: two views reading one preference cannot
+    /// disagree about it. See `SidebarGrouping`.
+    @AppStorage(SidebarGrouping.storageKey) private var storedGrouping = SidebarGrouping.status.rawValue
+
     @State private var isShowingLegend = false
+    @State private var isShowingProjects = false
     @State private var isFilterHovered = false
     @State private var isLegendHovered = false
+    @State private var isProjectsHovered = false
 
     var body: some View {
         VStack(spacing: 0) {
             Hairline()
 
             HStack(spacing: Metrics.spacingSmall) {
-                status
-
-                Spacer(minLength: Metrics.spacingSmall)
+                if let note {
+                    // The note borrows the strip for a moment, and it borrows the whole of it: a
+                    // sentence about a drag squeezed beside a segmented control reads as neither.
+                    noteLabel(note)
+                    Spacer(minLength: Metrics.spacingSmall)
+                } else {
+                    projectsButton
+                    grouping
+                }
 
                 Menu {
                     SidebarFilterMenuItems(
@@ -127,16 +144,57 @@ struct SidebarStatusBar: View {
     /// the one place in the pane that talks about the pane, and an alert for a drop that went one
     /// row too far would be an answer several sizes too big for the question. With nothing to say
     /// the strip is now the controls alone.
-    @ViewBuilder
-    private var status: some View {
-        if let note {
-            Label(note, systemImage: "arrow.uturn.backward")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
-                .padding(.leading, Metrics.spacing)
-                .lineLimit(1)
-                .accessibilityLabel(note)
-        }
+    private func noteLabel(_ note: String) -> some View {
+        Label(note, systemImage: "arrow.uturn.backward")
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.leading, Metrics.spacing)
+            .lineLimit(1)
+            .accessibilityLabel(note)
     }
 
+    /// The switch between the pane's two shapes.
+    ///
+    /// A segmented picker rather than an item on the filter menu next to it, and the difference is
+    /// what the two controls are. The filter narrows what the pane is showing and is a question you
+    /// ask for a moment; this changes what the pane IS, it is the first thing to reach for when the
+    /// list stops matching how you are working, and a control you have to open a menu to find is a
+    /// control most people never find. It sits here rather than in a header because this strip is
+    /// already where the pane's own controls live.
+    private var grouping: some View {
+        Picker("Group the sidebar by", selection: $storedGrouping) {
+            ForEach(SidebarGrouping.allCases, id: \.rawValue) { option in
+                Text(option.title).tag(option.rawValue)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .help("Group the sidebar by status or by project")
+    }
+
+    /// Every project, including the empty ones the pane no longer draws and the hidden ones it
+    /// never did. See `SidebarProjectsPopover` for why this button exists at all.
+    private var projectsButton: some View {
+        Button {
+            isShowingProjects.toggle()
+        } label: {
+            controlLabel(
+                "Projects",
+                systemImage: "square.grid.2x2",
+                isHovered: isProjectsHovered || isShowingProjects
+            )
+            .foregroundStyle(Palette.textSecondary)
+        }
+        .buttonStyle(.plain)
+        .onHoverChange { isProjectsHovered = $0 }
+        .help("Projects")
+        .popover(isPresented: $isShowingProjects, arrowEdge: .top) {
+            SidebarProjectsPopover(
+                onCreateWorkspace: onCreateWorkspace,
+                onStartProject: onStartProject,
+                onDismiss: { isShowingProjects = false }
+            )
+        }
+    }
 }

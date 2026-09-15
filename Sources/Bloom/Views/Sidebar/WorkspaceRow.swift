@@ -36,6 +36,19 @@ struct WorkspaceRow: View {
     /// stays a pure function of its inputs.
     var isRunning: Bool
     var isAwaitingPermission = false
+    /// The project this row belongs to, drawn as a tile at the trailing edge, and only in the
+    /// status view: there the rows of six projects are interleaved by what each agent is doing, so
+    /// nothing else on the row says where the work lives. Nil in the project view, where the header
+    /// above the row already says it and a tile on every row would repeat it a dozen times.
+    var trailingRepo: Repo?
+    /// How many subagents the running turn has, and whether their rows are open.
+    ///
+    /// The count is on the row rather than the rows being always drawn: a fan-out of six puts six
+    /// rows in the middle of the pane, each gone a minute later, pushing the work below them down
+    /// and back. Pressing the count opens them.
+    var subagentCount: Int = 0
+    var isShowingSubagents: Bool = false
+    var onToggleSubagents: (() -> Void)?
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open.
     @Binding var renaming: WorkspaceID?
@@ -167,16 +180,33 @@ struct WorkspaceRow: View {
                                 : "\(subagentFailures) subagents failed this turn")
                     }
 
+                    if subagentCount > 0 {
+                        subagentCountButton
+                            .opacity(isHovered ? 0 : 1)
+                    }
+
                     // In the layout, not overlaid, so a name shares the row with real counts
                     // rather than running underneath them. Hidden while the pointer is here,
                     // which is when the controls draw in their place.
+                    //
+                    // **Quiet, where it used to be green and red.** Two coloured numbers on every
+                    // row of a dozen made the diff the loudest thing in a pane whose job is to say
+                    // which agent wants something, and it is the number people read last. The same
+                    // figures in full colour are in the hover card, on Home and in the inspector.
                     if workspace.hasDiff {
                         DiffStatLabel(
                             additions: workspace.additions,
                             deletions: workspace.deletions,
-                            compact: true
+                            compact: true,
+                            quiet: true
                         )
                         .opacity(isHovered ? 0 : 1)
+                    }
+
+                    if let trailingRepo {
+                        RepoIcon(repo: trailingRepo, size: Metrics.repoIconSmall)
+                            .opacity(isHovered ? 0 : 1)
+                            .accessibilityHidden(true)
                     }
                 }
             }
@@ -184,7 +214,14 @@ struct WorkspaceRow: View {
             .overlay(alignment: .trailing) { hoverControls }
             .animation(reduceMotion ? nil : Motion.hover, value: isHovered)
         } icon: {
-            WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized)
+            // **A mark only when something is happening or something is wanted.** Which states
+            // those are is `SidebarMarkPolicy`, in the core, with the argument for the ones that
+            // lost theirs. The box is kept either way, so the names still line up in one column.
+            if SidebarMarkPolicy.drawsMark(status) {
+                WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized)
+            } else {
+                Color.clear.frame(width: Metrics.glyph, height: Metrics.glyph)
+            }
         }
         // See `SidebarRowLabelStyle`. The mark has to be laid out by this row rather than by the
         // list, or it does not travel with the row when a project folds.
@@ -223,6 +260,47 @@ struct WorkspaceRow: View {
             guard was, !now else { return }
             end(.dismissed)
         }
+    }
+
+    // MARK: - Subagents
+
+    /// How many subagents this turn has, as the control that opens their rows.
+    ///
+    /// A count rather than the rows themselves, because the rows are the loudest thing a turn does
+    /// to this pane: they arrive several at a time in the middle of the list, push everything below
+    /// them down, and leave a minute later. The one thing a reader needs at a glance is that a
+    /// fan-out is happening and how wide it is, which is this.
+    ///
+    /// Set in the pane's smallest figure, in the accent, so it reads as a live count rather than as
+    /// a badge. It yields to the hover controls like the diff stat beside it.
+    private var subagentCountButton: some View {
+        Button {
+            onToggleSubagents?()
+        } label: {
+            HStack(spacing: Metrics.spacingHair) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: SidebarMetrics.caretSize - 2, weight: .semibold))
+                    .rotationEffect(.degrees(isShowingSubagents ? 90 : 0))
+                Text(subagentCount.formatted(Figures.count))
+                    .font(Typo.micro)
+                    .monospacedDigit()
+            }
+            .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.accent)
+            .padding(.horizontal, Metrics.spacingSmall)
+            .frame(height: SidebarMetrics.rowButton)
+            .background(
+                isEmphasized ? Color.clear : Palette.accent.opacity(0.12),
+                in: Capsule()
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .animation(reduceMotion ? nil : Motion.hover, value: isShowingSubagents)
+        .help(isShowingSubagents ? "Hide subagents" : "Show subagents")
+        .accessibilityLabel(subagentCount == 1
+            ? "1 subagent in this turn"
+            : "\(subagentCount) subagents in this turn")
+        .accessibilityValue(isShowingSubagents ? "Showing" : "Hidden")
     }
 
     // MARK: - Trailing
