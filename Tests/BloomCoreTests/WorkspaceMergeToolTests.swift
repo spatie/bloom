@@ -97,17 +97,16 @@ struct WorkspaceMergeToolTests {
 
     // MARK: Who may call it, and what it may be told
 
-    /// Owner only. A parent merging its own child's work is an agent publishing an agent's work
-    /// with the review nobody performed, and a parent is scoped to its own worktree besides.
+    /// Owner only. A workspace agent merging the work of a workspace it started is an agent
+    /// publishing an agent's work with the review nobody performed, and a workspace agent is
+    /// scoped to its own worktree besides.
     @Test("only the owner sees it")
     func roleGate() {
         let toolbox = BridgeToolbox(handlers: [tool()])
 
-        #expect(toolbox.tools(for: .parent).isEmpty)
-        #expect(toolbox.tools(for: .child).isEmpty)
+        #expect(toolbox.tools(for: .workspace).isEmpty)
         #expect(toolbox.tools(for: .owner).map(\.name) == ["workspace_merge"])
-        #expect(toolbox.handler(named: "workspace_merge", for: .parent) == nil)
-        #expect(toolbox.handler(named: "workspace_merge", for: .child) == nil)
+        #expect(toolbox.handler(named: "workspace_merge", for: .workspace) == nil)
     }
 
     /// It needs the app, so a `BridgeServer` built without one must not offer it. The alternative

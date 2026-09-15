@@ -5,7 +5,7 @@ import Testing
 @Suite("Controlling a terminal pane", .scratchDirectory)
 struct TerminalPaneToolTests {
     private var identity: BridgeIdentity {
-        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .parent)
+        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .workspace)
     }
 
     private func report(_ number: Int, name: String = "Vite") -> TerminalPaneReport {

@@ -34,8 +34,7 @@ public struct RevealTool: BridgeToolHandling {
     }
 
     /// The owner and nobody else. A workspace agent moving the sidebar underneath somebody reading
-    /// a different workspace is the interruption the whole pane family is scoped away from, and a
-    /// child may not reach out of its worktree at all.
+    /// a different workspace is the interruption the whole pane family is scoped away from.
     public let roles: Set<BridgeRole> = [.owner]
 
     public let tool = BridgeTool(

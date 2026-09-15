@@ -1,40 +1,48 @@
 import Foundation
 
-/// Which side of the family a caller is on, and therefore which tools it can even see.
+/// Whether a caller is standing in a workspace, and therefore which tools it can even see.
 ///
-/// Read from the database at mint time, never from the shim's environment: `whoami` is harmless
-/// either way, but the tools that follow are not, and a role a caller could state is a role a
-/// caller could raise. A workspace with a parent is a child, and that is the whole test. There is
-/// no depth counter because the limit on nesting is one, so "has a parent" IS the depth, and a
-/// number kept beside it is a number that can drift out of step with the parent it describes.
+/// Read from the token at mint time, never from the shim's environment: a role a caller could
+/// state is a role a caller could raise.
+///
+/// ## Why there are two and not three
+///
+/// There used to be a third, `child`, for a workspace another agent had started, and it could call
+/// `whoami` and `workspace_say` and nothing else. The reasoning was that nobody had weighed that
+/// agent, so it should report and do no more. In use it cost more than it protected. A child could
+/// not archive or rename itself when its starter asked it to, could not read the chat it was
+/// answering, and could not open a terminal in its own worktree, while the owner's own
+/// registration of the bridge, which Claude Code applies to every session on the machine, handed
+/// it the owner's tools regardless. The pen was not holding and the work was paying for it.
+///
+/// What actually stops a runaway agent is still here, and none of it needed a role. A workspace an
+/// agent started may not start more (`WorkspaceStartTool`, off `WorkspaceOrigin.isAgentSpawned`).
+/// Anything that destroys work is asked about (`BridgeToolApproval`). Archiving runs the safety
+/// check with nothing forced (`WorkspaceArchiveSafety`). Messages are throttled
+/// (`WorkspaceSayThrottle`). And the owner's token is refused to a shim running inside a
+/// worktree, so the owner's tools do not leak into a workspace (`BridgeOwnerPlacement`).
 public enum BridgeRole: String, Sendable, Hashable, Codable, CaseIterable {
-    /// A workspace the owner created. It may spawn children.
-    case parent
-    /// A workspace an agent created. It reports and nothing else.
-    case child
+    /// An agent running in a workspace, however that workspace came to exist.
+    ///
+    /// Everything it calls is scoped to its own workspace unless the tool says otherwise, and the
+    /// few that reach further (`workspace_say`, the reads, and archiving or renaming a workspace it
+    /// started) say so in their own heads.
+    case workspace
     /// The owner, through a client of their own, sitting in no workspace at all.
     ///
-    /// The third role, and the odd one, because the other two are derived from a workspace row and
-    /// this one is derived from nothing: there is no session, no worktree and no project behind
-    /// it. It is the person, reaching Bloom from a `claude` they started themselves in a terminal
-    /// anywhere on the machine, with Bloom registered in their own MCP configuration.
+    /// Derived from nothing, where the other role is derived from a workspace row: there is no
+    /// session, no worktree and no project behind it. It is the person, reaching Bloom from a
+    /// `claude` they started themselves in a terminal, with Bloom registered in their own MCP
+    /// configuration, or Ask Bloom inside the app.
     ///
-    /// **It is not a child.** A child is deliberately penned in, because a child is an agent that
-    /// another agent asked for and nobody weighed. **It is not a parent either**, because a parent
-    /// is a workspace: every tool a parent has is implicitly scoped to the worktree it is sitting
-    /// in, and this caller is sitting in none, so nothing can be implied on its behalf and every
-    /// project has to be named out loud.
+    /// **It is not a workspace**, because every tool a workspace agent has is implicitly scoped to
+    /// the worktree it is sitting in, and this caller is sitting in none, so nothing can be implied
+    /// on its behalf and every project and workspace has to be named out loud.
     ///
-    /// What it may do is what the owner may do from the sidebar and no more: see the projects,
-    /// register an existing repository as one, and start a workspace in one of them. What it may
-    /// not do is anything scoped to a workspace, because it has none to be scoped to, and anything
-    /// that discards unprotected work. `workspace_archive` retains the branch and refuses anything
-    /// the normal archive lifecycle would need the owner to confirm.
+    /// What it may not do is anything scoped to a workspace, because it has none to be scoped to,
+    /// and anything that discards unprotected work. `workspace_archive` retains the branch and
+    /// refuses anything the normal archive lifecycle would need the owner to confirm.
     case owner
-
-    public init(origin: WorkspaceOrigin) {
-        self = origin.isAgentSpawned ? .child : .parent
-    }
 }
 
 /// What a token stands for.

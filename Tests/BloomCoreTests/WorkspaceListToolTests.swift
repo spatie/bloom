@@ -28,17 +28,15 @@ struct WorkspaceListToolTests {
 
     // MARK: Who may call it
 
-    /// A child reports and does nothing else, and a parent is deliberately left out for now: a
-    /// cheap status call is a polling loop, and `workspace_start` tells a parent in as many words
-    /// not to sit and wait.
+    /// A workspace agent is deliberately left out for now: a cheap status call is a polling loop,
+    /// and `workspace_start` tells a workspace agent in as many words not to sit and wait.
     @Test("only the owner sees it")
     func roleGate() {
         let toolbox = BridgeToolbox(handlers: [WorkspaceListTool()])
 
-        #expect(toolbox.tools(for: .parent).isEmpty)
-        #expect(toolbox.tools(for: .child).isEmpty)
+        #expect(toolbox.tools(for: .workspace).isEmpty)
         #expect(toolbox.tools(for: .owner).map(\.name) == ["workspace_list"])
-        #expect(toolbox.handler(named: "workspace_list", for: .parent) == nil)
+        #expect(toolbox.handler(named: "workspace_list", for: .workspace) == nil)
     }
 
     @Test("it is served by a Bloom with no app behind it, because it needs no seam into one")

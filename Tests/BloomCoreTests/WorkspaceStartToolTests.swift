@@ -72,7 +72,7 @@ struct WorkspaceStartToolTests {
             identity: BridgeIdentity(
                 sessionID: session.id,
                 workspaceID: workspace.id,
-                role: BridgeRole(origin: origin)
+                role: .workspace
             ),
             workspace: workspace
         )
@@ -84,19 +84,19 @@ struct WorkspaceStartToolTests {
 
     // MARK: Who may call it
 
-    @Test("a child never sees it, and the two roles that do are both there")
+    @Test("every workspace agent and the owner see it")
     func roleGate() {
         let tool = Recorder().tool()
 
-        #expect(tool.roles == [.parent, .owner])
-        #expect(BridgeToolbox(handlers: [tool]).tools(for: .child).isEmpty)
-        #expect(BridgeToolbox(handlers: [tool]).tools(for: .parent).map(\.name) == ["workspace_start"])
+        #expect(tool.roles == [.workspace, .owner])
+        #expect(BridgeToolbox(handlers: [tool]).tools(for: .workspace).map(\.name) == ["workspace_start"])
         #expect(BridgeToolbox(handlers: [tool]).tools(for: .owner).map(\.name) == ["workspace_start"])
     }
 
-    /// The role gate already hides it. This is the second lock, for something speaking raw MCP at
-    /// the socket with a child's token: one level of nesting is the limit.
-    @Test("a workspace started by an agent is refused even when it calls directly")
+    /// No role hides the tool from a workspace an agent started any more, so this refusal is the
+    /// only lock on nesting, and it is the one that stops a runaway agent cutting worktrees
+    /// without end. One level is the limit.
+    @Test("a workspace started by an agent sees the tool and is refused when it calls")
     func noGrandchildren() async throws {
         let fixture = try await self.fixture(
             origin: .agent(parentWorkspaceID: WorkspaceID(rawValue: "w-parent"), spawnToolUseID: "t1"),
@@ -201,7 +201,7 @@ struct WorkspaceStartToolTests {
             Fixture(
                 store: store,
                 identity: BridgeIdentity(
-                    sessionID: session.id, workspaceID: workspace.id, role: .parent
+                    sessionID: session.id, workspaceID: workspace.id, role: .workspace
                 ),
                 workspace: workspace
             ),
@@ -395,7 +395,7 @@ struct WorkspaceStartToolTests {
             as: BridgeIdentity(
                 sessionID: fixture.identity.sessionID ?? SessionID(rawValue: "s-gone"),
                 workspaceID: WorkspaceID(rawValue: "w-vanished"),
-                role: .parent
+                role: .workspace
             ),
             store: fixture.store
         )
@@ -563,7 +563,7 @@ struct WorkspaceStartToolTests {
 
         let result = await recorder.tool().call(
             request(["prompt": .string("do a thing")]),
-            as: BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .parent),
+            as: BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .workspace),
             store: store
         )
 
@@ -648,7 +648,7 @@ struct WorkspaceStartDedupTests {
             baseBranch: "main", origin: .user
         ))
         let session = try await store.upsert(Session(workspaceID: caller.id, title: "chat"))
-        let identity = BridgeIdentity(sessionID: session.id, workspaceID: caller.id, role: .parent)
+        let identity = BridgeIdentity(sessionID: session.id, workspaceID: caller.id, role: .workspace)
 
         let starts = Counter()
         let tool = WorkspaceStartTool { _, _, _, origin in

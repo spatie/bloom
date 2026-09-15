@@ -2,7 +2,7 @@ import Foundation
 
 /// Which workspace a read names: the caller's own, or one it named out loud.
 ///
-/// ## Why reading crosses the edge of a worktree when nothing else a parent has does
+/// ## Why reading crosses the edge of a worktree
 ///
 /// `chat_list` and `chat_read` began scoped to the caller's own workspace, on the same gate as the
 /// pane tools. That gate exists because those tools act on the window the caller is standing in,
@@ -10,25 +10,21 @@ import Foundation
 /// what the other workspace decided about the index" had no way to find out, and an agent asked to
 /// review another workspace's branch had to be handed a worktree path and told to run git in it
 /// with `Bash`, which is further out than this and goes through no gate of Bloom's at all. Every
-/// agent here works for the same owner, and `workspace_say` already lets a parent put a turn in
+/// agent here works for the same owner, and `workspace_say` already lets an agent put a turn in
 /// another workspace's chat, which is a far heavier thing than reading one.
 ///
 /// ## Who may name one
 ///
-/// `.parent` may leave it out, and gets its own workspace, exactly as before the widening. `.owner`
-/// must name one, because that client is sitting in no workspace and nothing can be implied on its
-/// behalf. `.child` gets nothing: a child reports and that is all, and the role gate on every tool
-/// using this already hides them from it. It is refused here as well, so a handler reached some
-/// other way cannot be the one place the rule is missing.
+/// `.workspace` may leave it out, and gets its own workspace, exactly as before the widening.
+/// `.owner` must name one, because that client is sitting in no workspace and nothing can be
+/// implied on its behalf.
 ///
-/// ## Why this is not `WorkspaceSayTool.target(named:within:store:)`
+/// ## Why this is not `WorkspaceSayTool.target(named:store:)`
 ///
-/// It is the same resolution, over the same `BridgeWorkspaceLookup`, and one function would have
-/// been better. That function sits inside `WorkspaceSayTool` and answers in
-/// `WorkspaceSayTrouble`, whose sentences name `workspace_say`, and moving it out means editing
-/// that tool while another piece of work is changing it. So the lookup is written a second time
-/// here, in its smallest form, and the two are the place to fold together once that work has
-/// landed.
+/// It is the same resolution, over the same `BridgeWorkspaceLookup`, and one function would be
+/// better. That function answers in `WorkspaceSayTrouble`, whose sentences name `workspace_say`,
+/// so the lookup is written a second time here in its smallest form. Now that the child narrowing
+/// is gone from that side, the two are the same function and the obvious place to fold together.
 public enum BridgeReadTarget: Sendable, Equatable {
     /// The workspace the caller's token speaks for. Only the id, because the chat tools need
     /// nothing else and did not read the row before this existed.
@@ -60,8 +56,6 @@ public enum BridgeReadTarget: Sendable, Equatable {
     static func resolve(
         _ request: MCPRequest, as identity: BridgeIdentity, store: Store
     ) async throws -> Result<BridgeReadTarget, BridgeReadTrouble> {
-        guard identity.role != .child else { return .failure(.child) }
-
         var given: String?
         // A null is a model spelling "leave it out", and is read as that.
         if let raw = request.param(argument), raw != .null {
@@ -94,7 +88,6 @@ public enum BridgeReadTarget: Sendable, Equatable {
 
 /// Why a read would not say which workspace it means, in terms a model can act on.
 public enum BridgeReadTrouble: Error, Sendable, Equatable {
-    case child
     case notText
     case noWorkspaceNamed
     case unknown(given: String, known: [String])
@@ -104,12 +97,6 @@ public enum BridgeReadTrouble: Error, Sendable, Equatable {
     /// `tool` is the tool's own name, so the sentence says which call it is about.
     public func sentence(tool: String) -> String {
         switch self {
-        case .child:
-            return """
-                Another agent started this workspace, so it reports to the workspace that started \
-                it and does not read other workspaces. Say what you need with workspace_say.
-                """
-
         case .notText:
             return "\(tool) takes 'workspace' as a string: a workspace id or name. Leave it out to read your own."
 

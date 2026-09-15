@@ -51,8 +51,7 @@ public enum WorkspaceOrigin: Sendable, Equatable, Hashable, Codable {
 
     /// The owner, through `workspace_start` on a client of their own, sitting in no workspace.
     ///
-    /// The owner asked for it, so it is not `.agent`: nothing about it is penned in, it may start
-    /// children of its own, and `isAgentSpawned` is false exactly as it is for `.user`. What makes
+    /// The owner asked for it, so it is not `.agent`: it may start children of its own, and `isAgentSpawned` is false exactly as it is for `.user`. What makes
     /// it its own case is that a tool asked rather than a hand, and two facts follow from that
     /// which the sheet never has to answer.
     ///

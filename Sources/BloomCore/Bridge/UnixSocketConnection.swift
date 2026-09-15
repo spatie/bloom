@@ -72,6 +72,20 @@ public final class UnixSocketConnection: Sendable {
         return UnixSocketConnection(descriptor: descriptor)
     }
 
+    /// The process at the far end, as the kernel recorded it when the connection was made, or nil
+    /// when it cannot say. The shim for a connection Bloom accepted. See `BridgeOwnerPlacement`.
+    public var peerProcessID: pid_t? {
+        closed.withLock { closed -> pid_t? in
+            guard !closed else { return nil }
+            var pid: pid_t = 0
+            var length = socklen_t(MemoryLayout<pid_t>.size)
+            guard getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0, pid > 0 else {
+                return nil
+            }
+            return pid
+        }
+    }
+
     private func deliver(_ data: Data) {
         for line in buffer.take(data) { continuation.yield(line) }
     }

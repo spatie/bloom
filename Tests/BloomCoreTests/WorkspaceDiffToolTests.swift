@@ -41,7 +41,7 @@ struct WorkspaceDiffToolTests {
             repoID: project.id, name: "Feature", branch: "feature", path: repo.path, baseBranch: "main"
         ))
         let session = try await store.upsert(Session(workspaceID: workspace.id, title: "Chat"))
-        let identity = BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .parent)
+        let identity = BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .workspace)
         return Fixture(store: store, repo: repo, workspace: workspace, identity: identity)
     }
 
@@ -57,12 +57,11 @@ struct WorkspaceDiffToolTests {
         return try #require(JSONValue.parse(result.text))
     }
 
-    @Test("served to parents and the owner, never to a child, and self-approved")
+    @Test("served to workspace agents and the owner, and self-approved")
     func gates() {
         let name = WorkspaceDiffTool.name
-        #expect(BridgeToolbox.standard.handler(named: name, for: .parent) != nil)
+        #expect(BridgeToolbox.standard.handler(named: name, for: .workspace) != nil)
         #expect(BridgeToolbox.standard.handler(named: name, for: .owner) != nil)
-        #expect(BridgeToolbox.standard.handler(named: name, for: .child) == nil)
         #expect(BridgeToolApproval.isSelfApproved(toolName: BridgeToolApproval.toolPrefix + name))
     }
 
@@ -119,7 +118,7 @@ struct WorkspaceDiffToolTests {
         #expect(missing.text.contains("not among the files changed"))
     }
 
-    @Test("the owner must name a workspace, and reads it by name; a parent reads another by id")
+    @Test("the owner must name a workspace, and reads it by name; any workspace agent reads another by id")
     func naming() async throws {
         let f = try await fixture("diff-owner")
         defer { f.repo.cleanUp() }
@@ -135,15 +134,19 @@ struct WorkspaceDiffToolTests {
             repoID: f.workspace.repoID, name: "Neighbour", branch: "n", path: TestScratch.unique("neighbour"), baseBranch: "main"
         ))
         let neighbourChat = try await f.store.upsert(Session(workspaceID: neighbour.id, title: "Chat"))
-        let parent = BridgeIdentity(sessionID: neighbourChat.id, workspaceID: neighbour.id, role: .parent)
-        let byID = try await diff(f, as: parent, ["workspace": .string(f.workspace.id.rawValue)])
+        let neighbourAgent = BridgeIdentity(sessionID: neighbourChat.id, workspaceID: neighbour.id, role: .workspace)
+        let byID = try await diff(f, as: neighbourAgent, ["workspace": .string(f.workspace.id.rawValue)])
         #expect(byID["branch"] == .string("feature"))
 
-        let child = BridgeIdentity(sessionID: neighbourChat.id, workspaceID: neighbour.id, role: .child)
-        let refused = await WorkspaceDiffTool().call(
-            request(["workspace": .string(f.workspace.id.rawValue)]), as: child, store: f.store
-        )
-        #expect(refused.isError)
+        // One another agent started reads it the same way. It used to be refused as a child.
+        let started = try await f.store.upsert(Workspace(
+            repoID: f.workspace.repoID, name: "Started", branch: "s", path: TestScratch.unique("started"),
+            baseBranch: "main", origin: .agent(parentWorkspaceID: neighbour.id, spawnToolUseID: "toolu_diff")
+        ))
+        let startedChat = try await f.store.upsert(Session(workspaceID: started.id, title: "Chat"))
+        let startedAgent = BridgeIdentity(sessionID: startedChat.id, workspaceID: started.id, role: .workspace)
+        let fromStarted = try await diff(f, as: startedAgent, ["workspace": .string(f.workspace.id.rawValue)])
+        #expect(fromStarted["branch"] == .string("feature"))
     }
 
     @Test("a workspace whose worktree has gone, and an archived one, are refused in sentences")

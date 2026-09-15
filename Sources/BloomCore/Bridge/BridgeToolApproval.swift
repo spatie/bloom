@@ -13,9 +13,8 @@ import Foundation
 /// ## Why answering it is not a shortcut round consent
 ///
 /// Bloom is on both ends of this question. It wrote the tool, it minted the token the caller is
-/// using, it knows which workspace is asking, and it enforces every limit itself: the role gate
-/// hides `workspace_start` from a child, the handler refuses a caller that was itself
-/// agent-started, and eight running children is the ceiling. There is nothing for a person to
+/// using, it knows which workspace is asking, and it enforces every limit itself: the handler refuses
+/// a caller whose workspace was itself agent-started, and eight running children is the ceiling. There is nothing for a person to
 /// weigh that Bloom has not already decided, and the ask carries no information a person could
 /// act on beyond "an agent would like to use Bloom".
 ///
@@ -172,7 +171,7 @@ public enum BridgeToolApproval {
         // a turn in another workspace's chat without an ask, and a read is lighter than that by
         // the whole of the turn. What another workspace's chat can do to this one is be believed,
         // so the answer says it is quoted history and not instructions, in `BridgeUntrustedText`'s
-        // words. A child reads nothing, and `BridgeReadTarget` refuses it as well as the gate.
+        // words.
         "chat_list",
         "chat_read",
         // What a workspace has changed, read the way the review pane reads it. It is `chat_read`

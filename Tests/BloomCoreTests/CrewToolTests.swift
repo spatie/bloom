@@ -19,11 +19,11 @@ struct CrewToolTests {
         let orchestrator: Session
 
         var identity: BridgeIdentity {
-            BridgeIdentity(sessionID: orchestrator.id, workspaceID: workspace.id, role: .parent)
+            BridgeIdentity(sessionID: orchestrator.id, workspaceID: workspace.id, role: .workspace)
         }
 
         func identity(of session: Session) -> BridgeIdentity {
-            BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .parent)
+            BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .workspace)
         }
     }
 
@@ -126,29 +126,27 @@ struct CrewToolTests {
 
     // MARK: - Who may call them
 
-    /// `.parent` and nothing else, four times. A crew member's chat lives in an ordinary
-    /// workspace, so its token already carries `.parent` and it comes through the same gate its
+    /// `.workspace` and nothing else, four times. A crew member's chat lives in an ordinary
+    /// workspace, so its token already carries `.workspace` and it comes through the same gate its
     /// orchestrator does: the split between the two is made off the caller's own row, inside each
-    /// handler, rather than by a fourth role. Not `.owner`, which is sitting in no workspace and
-    /// so has no crew to be talking about, and not `.child`, which reports and that is all.
-    @Test("only a workspace agent sees them, and there is no fourth role")
+    /// handler, rather than by a third role. Not `.owner`, which is sitting in no workspace and
+    /// so has no crew to be talking about.
+    @Test("only a workspace agent sees them, and there is no third role")
     func roleGate() {
         let toolbox = BridgeToolbox(handlers: [
             Starts().tool(), Says().tool(), AgentListTool(), Stops().tool(),
         ])
 
-        #expect(Starts().tool().roles == [.parent])
-        #expect(Says().tool().roles == [.parent])
-        #expect(AgentListTool().roles == [.parent])
-        #expect(Stops().tool().roles == [.parent])
+        #expect(Starts().tool().roles == [.workspace])
+        #expect(Says().tool().roles == [.workspace])
+        #expect(AgentListTool().roles == [.workspace])
+        #expect(Stops().tool().roles == [.workspace])
 
-        #expect(toolbox.tools(for: .parent).map(\.name)
+        #expect(toolbox.tools(for: .workspace).map(\.name)
             == ["agent_list", "agent_say", "agent_start", "agent_stop"])
-        #expect(toolbox.tools(for: .child).isEmpty)
         #expect(toolbox.tools(for: .owner).isEmpty)
-        #expect(toolbox.handler(named: "agent_start", for: .child) == nil)
         #expect(toolbox.handler(named: "agent_say", for: .owner) == nil)
-        #expect(BridgeRole.allCases.count == 3)
+        #expect(BridgeRole.allCases.count == 2)
     }
 
     /// `agent_list` reads rows and reaches nothing else, so a Bloom with no app behind it serves
@@ -157,7 +155,7 @@ struct CrewToolTests {
     /// that drifts, which is why the app adds to `.standard` rather than restating it.
     @Test("only the listing is in the standard toolbox")
     func toolboxMembership() {
-        let names = BridgeToolbox.standard.tools(for: .parent).map(\.name)
+        let names = BridgeToolbox.standard.tools(for: .workspace).map(\.name)
 
         #expect(names.contains("agent_list"))
         #expect(!names.contains("agent_start"))
@@ -165,7 +163,6 @@ struct CrewToolTests {
         #expect(!names.contains("agent_stop"))
         // It is scoped to the caller's own workspace, so it is no use to a client sitting in none.
         #expect(!BridgeToolbox.standard.tools(for: .owner).map(\.name).contains("agent_list"))
-        #expect(BridgeToolbox.standard.tools(for: .child).map(\.name) == ["whoami"])
     }
 
     /// All four, and they stand or fall together: a crew that can be assembled and not spoken to
@@ -213,7 +210,7 @@ struct CrewToolTests {
     }
 
     /// The description is the only documentation the model gets, and the one thing it must not be
-    /// wrong about is which tool cuts a branch. A crew shares this worktree; a child does not.
+    /// wrong about is which tool cuts a branch. A crew shares this worktree; a started workspace does not.
     @Test("the descriptions say the crew shares this branch and point at workspace_start")
     func theDescriptionsDrawTheLine() {
         let start = Starts().tool().tool.description
@@ -499,7 +496,7 @@ struct CrewToolTests {
         let result = await Starts().tool().call(
             request("agent_start", ["name": .string("tests"), "task": .string("Go.")]),
             as: BridgeIdentity(
-                sessionID: SessionID("gone"), workspaceID: fixture.workspace.id, role: .parent
+                sessionID: SessionID("gone"), workspaceID: fixture.workspace.id, role: .workspace
             ),
             store: fixture.store
         )

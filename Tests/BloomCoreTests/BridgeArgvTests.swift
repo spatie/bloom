@@ -36,7 +36,7 @@ struct BridgeArgvTests {
             shimPath: "/tmp/bloom-bridge",
             socketPath: "/tmp/s.sock",
             token: "t",
-            role: .parent
+            role: .workspace
         )
         let launch = CodexClient.launch(CodexClient.Configuration(
             cwd: "/tmp/w",
@@ -63,7 +63,7 @@ struct BridgeArgvTests {
             shimPath: "/tmp/bloom-bridge",
             socketPath: "/tmp/s.sock",
             token: "t",
-            role: .parent
+            role: .workspace
         )
         let launch = GrokClient.launch(GrokClient.Configuration(
             cwd: "/tmp/w",
