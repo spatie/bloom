@@ -451,7 +451,7 @@ struct ServerRuntimeTests {
         #expect(try await runtime.maintenanceControl("status").busy)
         if let runner = captured.withLock({ $0 }) { #expect(await runner.sends.isEmpty) }
 
-        FileManager.default.createFile(atPath: workspace.path + "/setup-release", contents: nil)
+        _ = FileManager.default.createFile(atPath: workspace.path + "/setup-release", contents: nil)
         await waitUntil("the prompt goes once setup ends", within: .seconds(10)) {
             guard let runner = captured.withLock({ $0 }) else { return false }
             return await runner.sends == ["Keep this task"]
