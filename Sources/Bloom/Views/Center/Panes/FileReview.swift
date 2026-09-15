@@ -21,9 +21,11 @@ enum FileReview {
         SourceNavigation.shared.visit(location, in: model)
         if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
         show(path: path, in: model, focusing: focusing)
-        // A new shared review defaults to all changes, but unchanged files open on their own.
-        if !model.changedFiles.contains(where: { $0.path == path }),
-           let tab = CenterTabStore.shared.review(for: model.workspace.id) {
+        // A file somebody named opens on its own, changed or not. It used to be only the unchanged
+        // ones: a changed file clicked in the inspector scrolled the all-files review to it and left
+        // every other diff around it, which a reader reported as the click not doing what it says.
+        // All files is still one segment away in the review toolbar, and `step` keeps the mode.
+        if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
             CenterTabStore.shared.setShowsAllFiles(false, for: tab)
         }
     }
@@ -190,6 +192,12 @@ enum FileReview {
 
         model.selectedChangeLayer = files[next].layer
         model.selectedFilePath = files[next].path
-        open(path: files[next].path, in: model)
+        // Walking is not naming a file, so it keeps the mode on screen: in All files it scrolls to
+        // the next section rather than closing the others, which `open(path:)` would.
+        if CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true {
+            setShowsAllFiles(true, in: model)
+        } else {
+            open(path: files[next].path, in: model)
+        }
     }
 }
