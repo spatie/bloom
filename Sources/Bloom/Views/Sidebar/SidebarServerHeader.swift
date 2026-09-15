@@ -75,7 +75,7 @@ struct SidebarServerHeader: View {
             }
             .disabled(!server.canRemoveServer || server.connectionProfile?.id != profile.id)
         } message: { profile in
-            Text("\(profile.displayName) will be removed from Bloom on this Mac. Projects and processes on the server will keep running. Local drafts and SSH keys will be kept.")
+            Text("\(profile.displayName) will be removed from Bloom on this Mac. Bloom Server keeps running on the server, with its projects and agents. To remove it from the server as well, choose Uninstall Bloom Server… first. Local drafts and SSH keys stay on this Mac.")
         }
     }
 
@@ -171,6 +171,11 @@ struct SidebarServerHeader: View {
         Button("Archived Workspaces…") { server.showsArchivedWorkspaces = true }
             .disabled(!server.isConnected || server.isConnecting)
         Divider()
+        Button("Uninstall Bloom Server…") {
+            ServerSettingsOpening.shared.requestsUninstall = true
+            openWindow(id: ServerWindow.id)
+        }
+        .disabled(server.isMaintainingServer || server.isRemovingServer)
         Button("Remove Server…", role: .destructive) {
             removalProfile = server.connectionProfile
             showsRemoval = removalProfile != nil

@@ -26,6 +26,9 @@ private struct ServerConnectionContent: View {
     @State private var skills: ServerSkillsModel
     @State private var editorID = UUID()
     @State private var section: ServerSettingsSection? = .connection
+    @State private var uninstall: ServerSetupModel?
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismissWindow) private var dismissWindow
 
     init(server: ServerWindowModel) {
         self.server = server
@@ -46,13 +49,39 @@ private struct ServerConnectionContent: View {
                     setup.cancel()
                     setup = ServerSetupModel(server: server, resumeExisting: server.isConnected)
                     showsSetup = true
-                })
+                }, uninstall: $uninstall, removeFromThisMac: removeFromThisMac)
             }
         }
-        .onAppear { server.setConnectionEditing(true, id: editorID) }
+        .onAppear {
+            server.setConnectionEditing(true, id: editorID)
+            consumeOpeningRequest()
+        }
         .onDisappear { server.setConnectionEditing(false, id: editorID) }
+        .onChange(of: ServerSettingsOpening.shared.requestsUninstall) { consumeOpeningRequest() }
+        .onChange(of: server.connectionProfile?.id) {
+            guard uninstall?.isBusy != true else { return }
+            uninstall?.cancel()
+            uninstall = nil
+        }
     }
 
+    private func consumeOpeningRequest() {
+        guard ServerSettingsOpening.shared.requestsUninstall else { return }
+        ServerSettingsOpening.shared.requestsUninstall = false
+        showsSetup = false
+        section = .about
+        if uninstall == nil { uninstall = ServerSetupModel.administrator(for: server) }
+    }
+
+    /// Settings counts as editing the connection, which blocks removal, so it lets go and closes first.
+    private func removeFromThisMac() {
+        guard let profile = server.connectionProfile else { return }
+        server.setConnectionEditing(false, id: editorID)
+        uninstall?.cancel()
+        uninstall = nil
+        dismissWindow(id: ServerWindow.id)
+        Task { await server.removeServer(profile) { app.clearRemoteSelection() } }
+    }
 }
 
 private struct ServerConnectionView: View {
@@ -63,6 +92,8 @@ private struct ServerConnectionView: View {
     let skills: ServerSkillsModel
     @Binding var section: ServerSettingsSection?
     let showSetup: () -> Void
+    @Binding var uninstall: ServerSetupModel?
+    let removeFromThisMac: () -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
@@ -105,6 +136,9 @@ private struct ServerConnectionView: View {
                     ServerMaintenanceView(model: maintenance, legacy: updates, showConnection: { section = .connection },
                                           showAccounts: { section = .accounts })
                         .disabled(storage.isCleaning)
+                case .about:
+                    ServerAboutView(server: model, maintenance: maintenance, uninstall: $uninstall, removeFromThisMac: removeFromThisMac)
+                        .disabled(storage.isCleaning || updates.updating != nil)
                 }
             }
         }
@@ -196,7 +230,7 @@ private struct ServerConnectionView: View {
 }
 
 private enum ServerSettingsSection: Hashable, CaseIterable {
-    case connection, accounts, skills, updates, storage
+    case connection, accounts, skills, updates, storage, about
 
     var title: String {
         switch self {
@@ -205,6 +239,7 @@ private enum ServerSettingsSection: Hashable, CaseIterable {
         case .skills: "Skills"
         case .storage: "Storage & Cleanup"
         case .updates: "Updates"
+        case .about: "About This Server"
         }
     }
 
@@ -215,6 +250,7 @@ private enum ServerSettingsSection: Hashable, CaseIterable {
         case .skills: "books.vertical"
         case .storage: "externaldrive"
         case .updates: "arrow.down.circle"
+        case .about: "info.circle"
         }
     }
 }
