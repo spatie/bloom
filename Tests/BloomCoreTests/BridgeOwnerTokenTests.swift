@@ -132,11 +132,11 @@ struct BridgeOwnerAdmissionTests {
         let token = registry.mint(
             sessionID: SessionID(rawValue: "s1"),
             workspaceID: WorkspaceID(rawValue: "w1"),
-            role: .parent
+            role: .workspace
         )
         registry.admit(ownerToken: "abc")
 
-        #expect(registry.identity(forToken: token)?.role == .parent)
+        #expect(registry.identity(forToken: token)?.role == .workspace)
         #expect(registry.identity(forToken: token)?.workspaceID == WorkspaceID(rawValue: "w1"))
     }
 }

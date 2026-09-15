@@ -139,9 +139,9 @@ public struct BridgeToolImage: Sendable, Hashable {
 ///
 /// The role gate is on the handler rather than in the dispatch, so a tool arrives with the answer
 /// to "who can call this" attached. It is enforced twice on purpose: `tools/list` hides what the
-/// caller may not use, so a child never sees a spawn tool to be tempted by, and `tools/call`
-/// refuses it again, so a process speaking raw MCP at the socket with a child's token gets
-/// nowhere either.
+/// caller may not use, so the owner's client never sees a pane tool it could only be refused by,
+/// and `tools/call` refuses it again, so a process speaking raw MCP at the socket with a token
+/// that role is not on gets nowhere either.
 public protocol BridgeToolHandling: Sendable {
     var tool: BridgeTool { get }
     var roles: Set<BridgeRole> { get }

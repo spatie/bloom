@@ -3157,18 +3157,6 @@ public actor Store {
         ).first.map(Self.workspaceMessage(from:))
     }
 
-    /// Every workspace whose message has reached this one's agent, which is who a workspace an
-    /// agent started may answer. See `WorkspaceMessageReach`.
-    public func workspacesThatWrote(to target: WorkspaceID) throws -> Set<WorkspaceID> {
-        Set(try db.query(
-            """
-            SELECT DISTINCT source_workspace_id FROM workspace_messages
-            WHERE target_workspace_id = ? AND state = 'delivered' AND source_workspace_id IS NOT NULL
-            """,
-            [.text(target)]
-        ).compactMap { $0.string("source_workspace_id").map(WorkspaceID.init) })
-    }
-
     /// Takes a queued message back out, from the chat that sent it. Nil when it had already gone,
     /// or is going.
     ///

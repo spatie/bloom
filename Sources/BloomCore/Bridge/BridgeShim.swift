@@ -33,7 +33,7 @@ public enum BridgeShim {
         }
         let socketPath = environment[BridgeProtocol.socketVariable] ?? ""
         let token = environment[BridgeProtocol.tokenVariable] ?? ""
-        let role = environment[BridgeProtocol.roleVariable] ?? BridgeRole.parent.rawValue
+        let role = environment[BridgeProtocol.roleVariable] ?? BridgeRole.workspace.rawValue
 
         let connection: UnixSocketConnection
         do {

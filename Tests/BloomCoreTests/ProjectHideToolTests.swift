@@ -25,8 +25,7 @@ struct ProjectHideToolTests {
     func roleGate() {
         let toolbox = BridgeToolbox(handlers: [ProjectHideTool(), ProjectUnhideTool()])
 
-        #expect(toolbox.tools(for: .parent).isEmpty)
-        #expect(toolbox.tools(for: .child).isEmpty)
+        #expect(toolbox.tools(for: .workspace).isEmpty)
         #expect(toolbox.tools(for: .owner).map(\.name) == ["project_hide", "project_unhide"])
         #expect(BridgeToolbox.standard.tools(for: .owner).map(\.name)
             .contains(["project_hide", "project_unhide"].first!))

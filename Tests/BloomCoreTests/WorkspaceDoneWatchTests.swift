@@ -238,7 +238,7 @@ struct WorkspaceDoneWatchTests {
             _ = try await store.upsert(Session(workspaceID: made.id, title: "First"))
             return StartedWorkspaceSummary(workspaceID: made.id, name: made.name, branch: made.branch, path: made.path)
         }
-        let identity = BridgeIdentity(sessionID: f.fixerChat.id, workspaceID: f.fixer.id, role: .parent)
+        let identity = BridgeIdentity(sessionID: f.fixerChat.id, workspaceID: f.fixer.id, role: .workspace)
 
         let result = await tool.call(
             MCPRequest(id: .number(1), method: "workspace_start", params: .object([

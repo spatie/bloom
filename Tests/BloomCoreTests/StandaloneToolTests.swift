@@ -86,8 +86,7 @@ struct ProjectAddToolTests {
     func roleGate() {
         let toolbox = BridgeToolbox(handlers: [ProjectAddTool()])
 
-        #expect(toolbox.tools(for: .parent).isEmpty)
-        #expect(toolbox.tools(for: .child).isEmpty)
+        #expect(toolbox.tools(for: .workspace).isEmpty)
         #expect(toolbox.tools(for: .owner).map(\.name) == ["project_add"])
     }
 
@@ -209,8 +208,7 @@ struct ProjectListToolTests {
     func roleGate() {
         let toolbox = BridgeToolbox(handlers: [ProjectListTool()])
 
-        #expect(toolbox.tools(for: .parent).isEmpty)
-        #expect(toolbox.tools(for: .child).isEmpty)
+        #expect(toolbox.tools(for: .workspace).isEmpty)
         #expect(toolbox.tools(for: .owner).map(\.name) == ["project_list"])
     }
 
@@ -419,7 +417,7 @@ struct OwnerWorkspaceStartTests {
 
         let result = await recorder.tool().call(
             request(["prompt": .string("do a thing"), "project": .string("flare")]),
-            as: BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .parent),
+            as: BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .workspace),
             store: store
         )
 
@@ -703,6 +701,7 @@ struct OwnerWhoamiTests {
 
     @Test("every role can ask it, which is what makes it the way to confirm a new connection")
     func everyRole() {
-        #expect(WhoamiTool().roles == [.parent, .child, .owner])
+        #expect(WhoamiTool().roles == [.workspace, .owner])
+        #expect(Set(BridgeRole.allCases) == WhoamiTool().roles)
     }
 }

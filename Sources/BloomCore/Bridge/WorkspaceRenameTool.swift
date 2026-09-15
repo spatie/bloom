@@ -9,7 +9,7 @@ import Foundation
 public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
     /// No `name`, or nothing but whitespace in it.
     case noName
-    /// A workspace agent named a workspace. Its own is the only one it may act in.
+    /// A workspace agent named a workspace that is neither its own nor one it started.
     case namedAnother(String)
     /// The owner's own client named none, and it is sitting in none either.
     case noWorkspaceNamed
@@ -19,7 +19,7 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
     /// Two workspaces answer to that name. Carries their ids, because that is the argument that
     /// cannot be ambiguous.
     case ambiguous(given: String, ids: [String])
-    /// A caller with no workspace on its token reached the parent arm, which the role gate is
+    /// A caller with no workspace on its token reached the workspace arm, which the role gate is
     /// supposed to make impossible. Answered rather than trusted, the way `pane_rename` answers it.
     case notInAWorkspace
     /// The row went away between being found and being written.
@@ -39,9 +39,10 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
 
         case .namedAnother(let given):
             return """
-                workspace_rename renames the workspace you are in, which is the only one you may \
-                act in, so it takes no 'workspace' argument. '\(given)' is not something this call \
-                can change. Ask again without it.
+                workspace_rename renames the workspace you are in, or one you started with \
+                workspace_start, and '\(given)' is neither. Leave 'workspace' out to rename your \
+                own, or pass the id workspace_start reported. Retrying with the same value will \
+                fail the same way.
                 """
 
         case .noWorkspaceNamed:
@@ -104,21 +105,21 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
 ///
 /// ## Who may call it
 ///
-/// `.parent` and `.owner`, and they are shaped differently on purpose.
+/// `.workspace` and `.owner`, and they are shaped differently on purpose.
 ///
-/// A parent renames **its own** workspace and takes no argument saying which, exactly as the pane
-/// family does: the token says which workspace is asking, so there is nothing to forge, mistype or
-/// hold on to after it has gone stale. A `workspace` argument from a parent is refused rather than
-/// ignored, which is the rule `workspace_start` already applies to `project`: a call that named
-/// another workspace and quietly got this one would look like it worked.
+/// A workspace agent renames **its own** workspace when it names none, exactly as the pane family
+/// does: the token says which workspace is asking. It may also name a workspace **it started**
+/// with `workspace_start`, by name or id, and no other, which is the same reach
+/// `workspace_archive` has and for the same reason: the agent that handed out a job is the one
+/// that knows what the job turned out to be. A name that matches nothing it started is refused,
+/// never quietly read as its own: a call that named another workspace and got this one would look
+/// like it worked. Only the workspaces it started are searched, so the refusal does not confirm
+/// which other names exist.
 ///
 /// The owner's client must name one, because it is sitting in no workspace and nothing else says
 /// which. That is not a widening of `BridgeRole.owner`'s "nothing scoped to a workspace": that
 /// clause is about what can be implied on its behalf, and `reveal` and `workspace_merge` are both
 /// already tools that owner calls by naming a workspace out loud.
-///
-/// Not `.child`. A child reports and that is all, here as everywhere, and a child is a workspace
-/// an agent asked for with a name that agent chose in the same breath.
 ///
 /// ## Why it is self-approved
 ///
@@ -134,7 +135,7 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
 /// difference is what is being overwritten: a quick prompt is a paragraph the owner wrote by hand,
 /// and a workspace name is a label Bloom itself proposed most of the time.
 ///
-/// The cost of asking, on the other hand, is the whole of the reported bug. A parent runs
+/// The cost of asking, on the other hand, is the whole of the reported bug. A workspace agent runs
 /// unattended, an unanswered ask hangs the turn, and a turn hung on a label is the failure
 /// `BridgeToolApproval`'s own head describes: a feature whose first use hangs unless somebody
 /// happens to be looking is a feature that does not work.
@@ -151,7 +152,7 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
 public struct WorkspaceRenameTool: BridgeToolHandling {
     public init() {}
 
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: "workspace_rename",
@@ -163,10 +164,10 @@ public struct WorkspaceRenameTool: BridgeToolHandling {
 
             'name' is what to call it and is required. It cannot be blank.
 
-            If you are working in a workspace, this renames yours and there is nothing else to \
-            pass: do not name a workspace, it will be refused. From a client of the owner's own, \
-            pass 'workspace' with the name or the id workspace_list prints, and a name two \
-            workspaces share is refused rather than guessed at.
+            If you are working in a workspace, leave 'workspace' out to rename yours, or pass the \
+            name or id of a workspace you started with workspace_start. Any other workspace is \
+            refused. From a client of the owner's own, pass 'workspace' with the name or the id \
+            workspace_list prints. A name two workspaces share is refused rather than guessed at.
 
             It renames and nothing else. The branch, the worktree and the pull request keep the \
             names they have, and nothing on disk moves. It is not destructive: the answer carries \
@@ -183,9 +184,9 @@ public struct WorkspaceRenameTool: BridgeToolHandling {
                 "workspace": .object([
                     "type": .string("string"),
                     "description": .string(
-                        "Which workspace to rename, by name or by the id workspace_list prints. "
-                            + "Only from the owner's own client. An agent working in a workspace "
-                            + "renames its own and must leave this out."
+                        "Which workspace to rename, by name or id. From an agent working in a "
+                            + "workspace, only one it started with workspace_start; leave it out to "
+                            + "rename your own. From the owner's own client, any workspace."
                     ),
                 ]),
             ]),
@@ -230,24 +231,35 @@ public struct WorkspaceRenameTool: BridgeToolHandling {
 
     /// Which workspace this call is about, or why there is not one.
     ///
-    /// The two arms are the two roles and they do not overlap: a parent may not name one and the
-    /// owner's client must. Archived workspaces are included in what the owner may name, because
-    /// the archive lists them by name too and a workspace somebody finished and mislabelled is
-    /// exactly the one worth correcting; being told "there is no such workspace" about a row that
-    /// is plainly on the screen is the worse answer.
+    /// The two arms are the two roles: a workspace agent may name only a workspace it started, and
+    /// the owner's client must name one. Archived workspaces are included in what either may name,
+    /// because the archive lists them by name too and a workspace somebody finished and mislabelled
+    /// is exactly the one worth correcting; being told "there is no such workspace" about a row
+    /// that is plainly on the screen is the worse answer.
     private func find(
         named: String?,
         as identity: BridgeIdentity,
         store: Store
     ) async -> Result<Workspace, WorkspaceRenameTrouble> {
         guard identity.role == .owner else {
-            if let named { return .failure(.namedAnother(named)) }
             guard let workspaceID = identity.workspaceID else { return .failure(.notInAWorkspace) }
             do {
-                guard let own = try await store.workspace(id: workspaceID) else {
-                    return .failure(.gone)
+                guard let named else {
+                    guard let own = try await store.workspace(id: workspaceID) else {
+                        return .failure(.gone)
+                    }
+                    return .success(own)
                 }
-                return .success(own)
+                let started = try await store.workspaces(includeArchived: true)
+                    .filter { $0.origin.parentWorkspaceID == workspaceID }
+                switch BridgeWorkspaceLookup.find(named, among: started) {
+                case .found(let workspace):
+                    return .success(workspace)
+                case .unknown:
+                    return .failure(.namedAnother(named))
+                case .ambiguous(let matches):
+                    return .failure(.ambiguous(given: named, ids: matches.map(\.id.rawValue)))
+                }
             } catch {
                 return .failure(.unexplained(error.readableMessage))
             }

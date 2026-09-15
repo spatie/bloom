@@ -24,15 +24,14 @@ import Foundation
 ///
 /// ## Owner only, for now
 ///
-/// A parent could reasonably be shown the workspaces it started, and `store.workspaces(startedBy:)`
-/// makes that one query. It is still owner only, and the reason is `workspace_start`'s own
-/// closing instruction: "There is no way to wait for it from here, so do not ask for one and then
-/// sit idle." Handing a parent a cheap status call is handing it a polling loop, and the answer
-/// the parked design gives to that question is a report the child files rather than a status the
-/// parent watches. There is no reason of cost or of secrecy, so the parent case is a thing to add
-/// once the report half exists, not a thing that was refused.
-///
-/// A child sees nothing here for the reason it sees nothing anywhere: it reports and that is all.
+/// A workspace agent could reasonably be shown the workspaces it started, and
+/// `store.workspaces(startedBy:)` makes that one query. It is still owner only, and the reason is
+/// `workspace_start`'s own closing instruction: "There is no way to wait for it from here, so do
+/// not ask for one and then sit idle." Handing an agent a cheap status call is handing it a polling
+/// loop, and the answer Bloom gives to that question is `notify_when_done`, a fact put in the
+/// calling chat when the other turn comes to rest, rather than a status the starter watches. There
+/// is no reason of cost or of secrecy, so the workspace case is a thing to add if that proves
+/// short, not a thing that was refused.
 public struct WorkspaceListTool: BridgeToolHandling {
     public init() {}
 

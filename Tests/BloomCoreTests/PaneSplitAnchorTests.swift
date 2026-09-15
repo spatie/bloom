@@ -72,7 +72,7 @@ struct PaneSplitAnchorTests {
 
 @Suite("MCP split defaults", .tags(.persistence), .scratchDirectory)
 struct PaneSplitDefaultsTests {
-    private let identity = BridgeIdentity(sessionID: SessionID("caller"), workspaceID: WorkspaceID("workspace"), role: .parent)
+    private let identity = BridgeIdentity(sessionID: SessionID("caller"), workspaceID: WorkspaceID("workspace"), role: .workspace)
 
     @Test("add a pane needs no arguments and opens a new chat to the caller's right")
     func defaults() async throws {

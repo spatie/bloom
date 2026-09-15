@@ -218,24 +218,17 @@ struct QuickPromptToolRoleTests {
     /// in and that role stands in none. A quick prompt belongs to no workspace, so the opposite
     /// holds and there is nothing for the owner's client to be missing.
     ///
-    /// `.parent` keeps the two that cannot lose anything, because the owner mostly talks to Bloom
+    /// `.workspace` keeps the two that cannot lose anything, because the owner mostly talks to Bloom
     /// from inside Bloom and "save that as a quick prompt" is typed into a workspace chat. It does
-    /// not get the two that overwrite and delete: a parent runs for ten minutes with nobody
-    /// looking, and this library is global, so a change decided in the middle of one of those
-    /// turns up weeks later in a project that workspace had nothing to do with.
-    @Test("a parent may read and write, and only the owner may change or delete")
+    /// not get the two that overwrite and delete: a workspace agent runs for ten minutes with
+    /// nobody looking, and this library is global, so a change decided in the middle of one of
+    /// those turns up weeks later in a project that workspace had nothing to do with.
+    @Test("a workspace agent may read and write, and only the owner may change or delete")
     func roles() {
-        #expect(QuickPromptListTool().roles == [.parent, .owner])
-        #expect(QuickPromptCreateTool().roles == [.parent, .owner])
+        #expect(QuickPromptListTool().roles == [.workspace, .owner])
+        #expect(QuickPromptCreateTool().roles == [.workspace, .owner])
         #expect(QuickPromptUpdateTool().roles == [.owner])
         #expect(QuickPromptDeleteTool().roles == [.owner])
-    }
-
-    /// The rule that has held since the bridge existed: a child is a workspace an agent asked for
-    /// and nobody weighed, so it reports and that is all.
-    @Test("a child sees whoami and nothing else, quick prompts included")
-    func aChildSeesNothing() {
-        #expect(BridgeToolbox.standard.tools(for: .child).map(\.name) == ["whoami"])
     }
 
     /// All four are in the toolbox a `BridgeServer` serves without the app, which is the statement
@@ -248,7 +241,7 @@ struct QuickPromptToolRoleTests {
             "quick_prompt_list", "quick_prompt_create", "quick_prompt_update", "quick_prompt_delete",
         ]))
         #expect(
-            Set(BridgeToolbox.standard.tools(for: .parent).map(\.name))
+            Set(BridgeToolbox.standard.tools(for: .workspace).map(\.name))
                 .isDisjoint(with: ["quick_prompt_update", "quick_prompt_delete"])
         )
     }
@@ -363,18 +356,18 @@ struct QuickPromptToolCallTests {
         #expect(fields(result)["id"] == .string(written?.id.rawValue ?? ""))
     }
 
-    /// A parent is the caller this exists for: the owner asks for it in the chat they are typing
-    /// in, and a tool they cannot reach from there is a tool that does not exist.
+    /// A workspace agent is the caller this exists for: the owner asks for it in the chat they are
+    /// typing in, and a tool they cannot reach from there is a tool that does not exist.
     @Test("a workspace agent may write one and may read the list")
-    func aParentMayWrite() async throws {
+    func aWorkspaceAgentMayWrite() async throws {
         let store = try makeTestStore("quick-prompt-tools")
         let written = await call(
             QuickPromptCreateTool(), ["text": .string("Explain this diff.")],
-            as: .parent, store: store
+            as: .workspace, store: store
         )
         #expect(!written.isError)
 
-        let listed = await call(QuickPromptListTool(), as: .parent, store: store)
+        let listed = await call(QuickPromptListTool(), as: .workspace, store: store)
         #expect(!listed.isError)
         #expect(listed.text.contains("Explain this diff."))
     }

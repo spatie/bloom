@@ -471,12 +471,12 @@ struct WorkspaceTabToolTests {
 
     // MARK: - The tools themselves
 
-    @Test("both are a parent's tools and nobody else's")
-    func bothArePartOfTheParentFamily() {
+    @Test("both are a workspace agent's tools and nobody else's")
+    func bothArePartOfTheWorkspaceFamily() {
         let listing = WorkspaceTabsTool { _ in nil }
         let selecting = WorkspaceTabSelectTool { _, _ in .refused("no") }
-        #expect(listing.roles == [.parent])
-        #expect(selecting.roles == [.parent])
+        #expect(listing.roles == [.workspace])
+        #expect(selecting.roles == [.workspace])
     }
 
     /// A connection standing in no workspace is refused by name rather than being advertised a
@@ -613,7 +613,7 @@ struct WorkspaceTabToolTests {
     // MARK: - Support
 
     private var identity: BridgeIdentity {
-        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .parent)
+        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .workspace)
     }
 
     /// What the window was asked for, so a test can assert on the choice rather than on the

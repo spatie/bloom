@@ -48,7 +48,7 @@ import Foundation
 /// is logged in there as him.
 ///
 /// If it is ever wanted, the shape it has to take is a setting the owner turns on per project,
-/// off by default, with the tool refused to every role but `.parent`, never self-approved, and the
+/// off by default, with the tool refused to every role but `.workspace`, never self-approved, and the
 /// script shown in full in the prompt. That is a change to make deliberately and with him asked
 /// first, and it is not this one.
 public enum BrowserPaneCommand: Sendable, Equatable {

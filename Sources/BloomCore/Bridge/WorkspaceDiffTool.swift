@@ -13,8 +13,8 @@ import Foundation
 ///
 /// ## Who may call it
 ///
-/// The same as the chat tools, through the same `BridgeReadTarget`: a parent reads its own unless
-/// it names another, the owner's own client names one, and a child reads nothing. A parent reading
+/// The same as the chat tools, through the same `BridgeReadTarget`: a workspace agent reads its own
+/// unless it names another, and the owner's own client names one. A workspace agent reading
 /// its own worktree gains nothing it could not get from `git diff`, and that is fine: the point of
 /// the default is that one tool answers both questions in the same shape.
 ///
@@ -33,7 +33,7 @@ public struct WorkspaceDiffTool: BridgeToolHandling {
 
     public init() {}
 
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: WorkspaceDiffTool.name,
