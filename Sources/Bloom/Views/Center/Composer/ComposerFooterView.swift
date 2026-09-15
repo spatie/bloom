@@ -364,11 +364,22 @@ struct ComposerFooterView: View {
             }
 
             if let usesCLIChat {
-                Toggle(isOn: usesCLIChat) {
-                    Image(systemName: "terminal")
+                // Drawn like the paperclip beside it, not with `.toggleStyle(.button)`: that style
+                // puts a grey bezel under the glyph even while the toggle is off, so the last
+                // control in the row read as pressed. The fill now means "on" and nothing else.
+                Button {
+                    usesCLIChat.wrappedValue.toggle()
+                } label: {
+                    ComposerControlLabel(
+                        systemImage: "terminal",
+                        text: nil,
+                        isActive: usesCLIChat.wrappedValue
+                    )
                 }
-                .toggleStyle(.button)
+                .buttonStyle(.plain)
                 .disabled(!supportsCLIChat)
+                .accessibilityAddTraits(.isToggle)
+                .accessibilityValue(usesCLIChat.wrappedValue ? "On" : "Off")
                 .help(supportsCLIChat
                       ? "Open this chat in the CLI"
                       : "CLI chat supports Claude Code and Codex")
