@@ -22,6 +22,13 @@ struct MenuBarCatalogueTests {
         #expect(MenuBarCatalogue[.fileForward].key == MenuShortcut("]", .command))
     }
 
+    @Test("Command-Backspace belongs to text editing, even without a published focus value")
+    func commandBackspaceDoesNotArchive() {
+        let editingKey = MenuShortcut(.delete, .command)
+        #expect(!MenuBarCatalogue.commands.contains { $0.key == editingKey })
+        #expect(MenuBarCatalogue[.archive].key == MenuShortcut(.delete, .command, .shift))
+    }
+
     @Test("every action has exactly one row, so a lookup cannot trap")
     func everyActionHasARow() {
         for action in MenuBarAction.allCases {
@@ -193,7 +200,10 @@ struct MenuBarCatalogueTests {
             // same action arriving by a shorter route.
             MenuShortcut("f", .command): .find,
             MenuShortcut("g", .command): .findNext,
-            MenuShortcut("g", .command, .shift): .findPrevious
+            MenuShortcut("g", .command, .shift): .findPrevious,
+            // A shell attaches its own selection with this, which is what the bar's item does
+            // with it too.
+            MenuShortcut("l", .command): .addSelectionToChat
         ]
 
         let inTheBar = Dictionary(uniqueKeysWithValues: keyed.map { ($0.0, $0.1.action) })

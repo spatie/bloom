@@ -243,57 +243,8 @@ struct GitReliabilityTests {
         #expect(restored == .pending)
     }
 
-    @Test("an unresolved rewind blocks forced archive and parent deletion before side effects")
-    func rewindBlocksRemoval() async throws {
-        let repo = try await TempRepo()
-        defer { repo.cleanUp() }
-        try repo.write(".conductor/settings.toml", """
-        [scripts]
-        archive = 'touch archive-ran'
-        setup = 'touch setup-ran'
-        """)
-        let store = try makeTestStore("rewind-archive")
-        let manager = WorkspaceManager(store: store)
-        let registered = try await manager.addRepository(at: repo.path)
-        let workspace = try await manager.createWorkspace(repo: registered, prompt: "Recovery")
-        var session = Session(workspaceID: workspace.id)
-        session.archivedAt = Date()
-        session = try await store.upsert(session)
-        let snapshot = try await Git.captureSnapshot(in: workspace.path, sessionID: session.id)
-        let checkpoint = TurnCheckpoint(sessionID: session.id, startSeq: 0, before: snapshot)
-        let journal = CheckpointRewind(checkpoint: checkpoint, recovery: snapshot, restoringFiles: true)
-        try await store.saveCheckpointRewind(journal)
-
-        let output = LineCollector()
-        for _ in 0..<2 {
-            let ran = await manager.runSetup(
-                workspace: workspace, repo: registered, port: 0,
-                onExit: { output.append("exit: \($0)") }, onOutput: { output.append($0) }
-            )
-            #expect(!ran)
-        }
-        let refused = try #require(try await store.workspace(id: workspace.id))
-        #expect(refused.setupState == workspace.setupState)
-        #expect(refused.setupLog == workspace.setupLog)
-        #expect(output.joined.contains("interrupted rewind"))
-        #expect(!output.joined.contains("exit:"))
-        #expect(!FileManager.default.fileExists(atPath: workspace.path + "/setup-ran"))
-
-        await #expect(throws: WorkspaceError.self) {
-            try await manager.archive(workspace: workspace, repo: registered, force: true)
-        }
-        await #expect(throws: WorkspaceError.self) { try await store.deleteWorkspace(id: workspace.id) }
-        await #expect(throws: WorkspaceError.self) { try await store.deleteRepo(id: registered.id) }
-        let objection = await WorkspaceArchiveSafety.objection(to: workspace, excusing: nil, store: store)
-        #expect(objection?.contains("rewind") == true)
-        #expect(FileManager.default.fileExists(atPath: workspace.path))
-        #expect(!FileManager.default.fileExists(atPath: workspace.path + "/archive-ran"))
-        #expect(await Git.revision(of: snapshot.worktreeRef, in: workspace.path) != nil)
-        #expect(try await store.workspace(id: workspace.id)?.state == .active)
-    }
-
-    @Test("setup and rewind reservations exclude each other before any awaited state check")
-    func setupAndRewindReservation() async throws {
+    @Test("a held setup reservation stops a second run before it touches the worktree")
+    func setupReservation() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
         try repo.write(".conductor/settings.toml", """
@@ -304,23 +255,9 @@ struct GitReliabilityTests {
         let manager = WorkspaceManager(store: store)
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Reserve setup")
-        let session = try await store.upsert(Session(workspaceID: workspace.id))
-        let checkpoint = TurnCheckpoint(sessionID: session.id, startSeq: 0, before: GitSnapshot(sessionID: session.id))
-        let setup = try #require(WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup))
-        defer { setup.release() }
-        #expect(WorkspaceOperationLease.acquire(in: workspace.path + "/.", operation: .rewind) == nil)
-        await #expect(throws: SnapshotFailure.self) {
-            try await TurnCheckpointStore(store: store).prepareRewind(
-                checkpoint: checkpoint, cwd: workspace.path, restoringFiles: false
-            )
-        }
-        await #expect(throws: SnapshotFailure.self) {
-            try await store.saveCheckpointRewind(CheckpointRewind(checkpoint: checkpoint, recovery: nil, restoringFiles: false))
-        }
-        setup.release()
-
-        let rewind = try #require(WorkspaceOperationLease.acquire(in: workspace.path, operation: .rewind))
-        defer { rewind.release() }
+        let held = try #require(WorkspaceOperationLease.acquire(in: workspace.path))
+        defer { held.release() }
+        #expect(WorkspaceOperationLease.acquire(in: workspace.path + "/.") == nil)
         let ran = await manager.runSetup(workspace: workspace, repo: registered, port: 0) { _ in }
         #expect(!ran)
         #expect(!FileManager.default.fileExists(atPath: workspace.path + "/setup-ran"))

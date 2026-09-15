@@ -47,6 +47,13 @@ struct MenuBarSettingsView: View {
                         ForEach(UsageMeterStyle.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    // The strip only. The menu under the item lists both whatever these say.
+                    Toggle(isOn: $model.showsWaitingCount) {
+                        Label("Count agents waiting on you", systemImage: MenuBarSummary.waitingSymbol)
+                    }
+                    Toggle(isOn: $model.showsUnreadCount) {
+                        Label("Count finished tasks", systemImage: MenuBarSummary.unreadSymbol)
+                    }
                 }
                 .disabled(!showsItem)
             }
@@ -125,6 +132,15 @@ struct MenuBarSettingsView: View {
                         Image(systemName: KeepAwake.menuBarSymbol)
                             .foregroundStyle(.white.opacity(keepAwake.isActive ? 1 : 0.35))
                     }
+                    // Faded at zero, like the cup when nothing is keeping the Mac awake, so the
+                    // switches below visibly do something on a quiet afternoon. The real strip
+                    // leaves a zero out.
+                    if model.showsWaitingCount {
+                        previewCount(MenuBarSummary.waitingSymbol, count: app.waitingCount)
+                    }
+                    if model.showsUnreadCount {
+                        previewCount(MenuBarSummary.unreadSymbol, count: unreadCount)
+                    }
                 } else {
                     Text("No menu bar item")
                         .font(.caption)
@@ -157,8 +173,25 @@ struct MenuBarSettingsView: View {
             model.iconStyle.rawValue,
             model.showsCup ? "cup" : "nocup",
             keepAwake.isActive ? "awake" : "asleep",
+            model.showsWaitingCount ? "waiting \(app.waitingCount)" : "nowaiting",
+            model.showsUnreadCount ? "unread \(unreadCount)" : "nounread",
             strip.spoken,
         ].joined(separator: "|")
+    }
+
+    /// The Dock badge's figure, which is the one the status item is handed.
+    private var unreadCount: Int {
+        DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
+    }
+
+    private func previewCount(_ symbol: String, count: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+            Text(String(count))
+                .monospacedDigit()
+        }
+        .foregroundStyle(.white.opacity(count > 0 ? 1 : 0.35))
     }
 
     private var stripImage: NSImage? {

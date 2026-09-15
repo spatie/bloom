@@ -379,6 +379,16 @@ public actor CodexClient {
         )
     }
 
+    public func readConfiguration(cwd: String) async throws -> JSONValue {
+        let result = try await send("config/read", params: .object([
+            "cwd": .string(cwd), "includeLayers": .bool(false),
+        ]))
+        guard let config = result["config"], config != .null else {
+            throw CodexClientError.unexpectedResult(method: "config/read")
+        }
+        return config
+    }
+
     /// Sends one turn and returns as soon as the server has accepted it.
     ///
     /// The reply is the turn in `inProgress`, not the finished one: waiting for the answer means
@@ -398,7 +408,8 @@ public actor CodexClient {
         approvalPolicy: CodexApprovalPolicy? = nil,
         sandboxPolicy: JSONValue? = nil,
         approvalsReviewer: CodexApprovalsReviewer? = nil,
-        interactionMode: InteractionMode? = nil
+        interactionMode: InteractionMode? = nil,
+        serviceTier: String? = nil
     ) async throws -> CodexTurn {
         if interactionMode == .plan, collaborationModeSupported == false {
             throw InteractionModeFailure.unsupported
@@ -407,6 +418,7 @@ public actor CodexClient {
         var params = JSONValue.object(omittingNil: [
             "threadId": .string(threadID),
             "input": .array(input.map(\.json)),
+            "serviceTier": serviceTier.map(JSONValue.string),
             "model": model.map(JSONValue.string),
             "effort": effort.flatMap { $0.isEmpty ? nil : .string($0) },
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
@@ -462,85 +474,6 @@ public actor CodexClient {
             "threadId": .string(threadID),
             "turnId": .string(turnID),
         ]), timeout: timeout)
-    }
-
-    /// Both history contracts occur in installed codex-cli 0.153.4. A provider turn ID is an
-    /// exact boundary; counting Bloom rows would also count steering messages and retries.
-    public func rewindThread(threadID: String, beforeTurnID: String) async throws {
-        let metadata = try await send("thread/read", params: .object([
-            "threadId": .string(threadID), "includeTurns": .bool(false),
-        ]))
-        guard metadata["thread"]?["id"]?.stringValue == threadID else {
-            throw ConversationRewindError.invalidHistory
-        }
-        let historyMode = metadata["thread"]?["historyMode"]?.stringValue
-        guard historyMode == nil || historyMode == "legacy" || historyMode == "paginated" else {
-            throw ConversationRewindError.invalidHistory
-        }
-        if historyMode == "paginated" {
-            _ = try await send("thread/revert", params: .object([
-                "threadId": .string(threadID), "beforeTurnId": .string(beforeTurnID),
-            ]))
-            return
-        }
-        let history = try await send("thread/read", params: .object([
-            "threadId": .string(threadID), "includeTurns": .bool(true),
-        ]))
-        guard history["thread"]?["id"]?.stringValue == threadID,
-              let turns = history["thread"]?["turns"]?.arrayValue,
-              turns.allSatisfy({ $0["id"]?.stringValue != nil }) else {
-            throw ConversationRewindError.invalidHistory
-        }
-        guard let index = turns.firstIndex(where: { $0["id"]?.stringValue == beforeTurnID }) else {
-            throw ConversationRewindError.missingTurn
-        }
-        _ = try await send("thread/rollback", params: .object([
-            "threadId": .string(threadID), "numTurns": .integer(turns.count - index),
-        ]))
-    }
-
-    public func threadContainsTurn(threadID: String, turnID: String) async throws -> Bool {
-        let metadata = try await send("thread/read", params: .object([
-            "threadId": .string(threadID), "includeTurns": .bool(false),
-        ]))
-        guard metadata["thread"]?["id"]?.stringValue == threadID else {
-            throw ConversationRewindError.invalidHistory
-        }
-        let historyMode = metadata["thread"]?["historyMode"]?.stringValue
-        guard historyMode == nil || historyMode == "legacy" || historyMode == "paginated" else {
-            throw ConversationRewindError.invalidHistory
-        }
-        if historyMode != "paginated" {
-            let history = try await send("thread/read", params: .object([
-                "threadId": .string(threadID), "includeTurns": .bool(true),
-            ]))
-            guard history["thread"]?["id"]?.stringValue == threadID,
-                  let turns = history["thread"]?["turns"]?.arrayValue,
-                  turns.allSatisfy({ $0["id"]?.stringValue != nil }) else {
-                throw ConversationRewindError.invalidHistory
-            }
-            return turns.contains { $0["id"]?.stringValue == turnID }
-        }
-        var cursor: String?
-        var seen = Set<String>()
-        for _ in 0..<1_000 {
-            let page = try await send("thread/turns/list", params: .object([
-                "threadId": .string(threadID), "limit": .integer(100),
-                "sortDirection": .string("asc"), "itemsView": .string("summary"),
-                "cursor": cursor.map(JSONValue.string) ?? .null,
-            ]))
-            guard let turns = page["data"]?.arrayValue,
-                  turns.allSatisfy({ $0["id"]?.stringValue != nil }), let next = page.objectValue?["nextCursor"] else {
-                throw ConversationRewindError.invalidHistory
-            }
-            if turns.contains(where: { $0["id"]?.stringValue == turnID }) { return true }
-            if next == .null { return false }
-            guard let value = next.stringValue, seen.insert(value).inserted else {
-                throw ConversationRewindError.invalidHistory
-            }
-            cursor = value
-        }
-        throw ConversationRewindError.invalidHistory
     }
 
     /// The models this account may use, with each one's own reasoning efforts.

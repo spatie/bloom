@@ -35,6 +35,9 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
     /// draws live buttons, and a row that offers buttons for a question already answered would
     /// write into a pipe nobody is reading.
     var permissionDecision: String?
+    /// Questions and their answers are conversation content, even after their controls settle.
+    /// Decoded when the row arrives so folding never reparses the question on a render pass.
+    var isQuestion = false
     /// What the transcript should say about how it was settled, when that is not obvious. Only
     /// ever set for a question a rule answered rather than a person.
     var permissionNote = ""
@@ -47,6 +50,39 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
         createdAt = message.createdAt
         durationMS = message.durationMS
         refID = message.refID
+    }
+
+    /// This row in the only terms `TranscriptFold` cares about.
+    ///
+    /// Here rather than inside `TranscriptModel.presentationFolds`, where it was written, because
+    /// the subagent pane folds its rows too and a second copy of what counts as settled or featured
+    /// is a subagent pane that folds differently from the chat the day one of them changes.
+    ///
+    /// - Parameters:
+    ///   - seq: the identity the fold names a run by. The row's own `seq` for a stored row; the
+    ///     subagent pane passes its payload derived id, because its positions move on a re-read.
+    ///   - isFresh: a tool call made moments ago. Only the live chat knows, so it is handed in.
+    nonisolated func foldFact(seq: Int? = nil, isFresh: Bool = false) -> TranscriptFold.Fact {
+        let settled: Bool
+        switch kind {
+        case .toolUse: settled = resultPayload != nil
+        case .permissionAsk: settled = permissionDecision != nil
+        default: settled = true
+        }
+        return TranscriptFold.Fact(
+            seq: seq ?? self.seq,
+            kind: kind,
+            failed: isError || refusal != nil,
+            featured: isQuestion
+                || MediaShowRow.isCall(payload) || CodexImageViewRow.isCall(payload),
+            drawsNothing: TranscriptNoise.isHidden(self)
+                || TranscriptRowInk.drawsNothing(kind: kind, payload: payload),
+            settled: settled,
+            isFresh: isFresh,
+            toolUseID: kind == .toolUse ? refID : nil,
+            parentToolUseID: parentToolUseID,
+            opensTurn: BackgroundWake.isRow(kind: kind, payload: payload)
+        )
     }
 }
 
@@ -106,30 +142,26 @@ final class TranscriptModel {
     private(set) var presentationRevision = 0
     @ObservationIgnored private var foldCache = TranscriptFoldCache()
     @ObservationIgnored private var questionIndex = PinnedQuestionIndex()
+    /// Tool calls that arrived moments ago, by call id, which fold before their result is back.
+    /// See `TranscriptFold.freshCall`. Told through `presentationRevision`, like the cache above.
+    @ObservationIgnored private var freshCalls: Set<String> = []
 
     /// These caches write no observable state and are safe to consult during a render pass.
     /// Each belongs to this session, including when its pane is displaying another workspace.
     func presentationFolds() -> TranscriptFold.Folds {
-        foldCache.resolve(rows.lazy.map { row in
-            let settled: Bool
-            switch row.kind {
-            case .toolUse: settled = row.resultPayload != nil
-            case .permissionAsk: settled = row.permissionDecision != nil
-            default: settled = true
-            }
-            return TranscriptFold.Fact(
-                seq: row.seq,
-                kind: row.kind,
-                failed: row.isError || row.refusal != nil,
-                featured: MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
-                drawsNothing: TranscriptNoise.isHidden(row)
-                    || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
-                settled: settled,
-                toolUseID: row.kind == .toolUse ? row.refID : nil,
-                parentToolUseID: row.parentToolUseID,
-                opensTurn: BackgroundWake.isRow(kind: row.kind, payload: row.payload)
+        let freshCalls = freshCalls
+        return foldCache.resolve(rows.lazy.map { row in
+            row.foldFact(
+                isFresh: row.kind == .toolUse && row.refID.map(freshCalls.contains) == true
             )
         })
+    }
+
+    /// Every prompt in the session, for the turn minimap. The same incremental index the pinned
+    /// question reads, so a body asking for this on each pass pays only for rows that are new.
+    func turns() -> [PinnedQuestion] {
+        questionIndex.update(session: session.id, rows: rows)
+        return questionIndex.all
     }
 
     func pinnedQuestion(atOrBefore seq: Int) -> PinnedQuestion? {
@@ -219,6 +251,11 @@ final class TranscriptModel {
 
     var draft = ""
 
+    /// How far Up and Down have walked back through this session's sent prompts. On the session
+    /// rather than in the composer's state, because one composer is handed from session to session
+    /// as a pane changes what it shows. See `PromptRecall`.
+    @ObservationIgnored var promptRecall = PromptRecall()
+
     /// What has been asked for on this session and has not gone yet, oldest first.
     ///
     /// Read by the transcript to draw the pending bubbles and by the drain to decide what goes
@@ -301,13 +338,27 @@ final class TranscriptModel {
     /// meant to carry on writing. A counter for `liveEndRequests`'s reason: two requests in a row
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
+    /// Where the last of those requests wants the caret. See `focusComposer(caretAtEnd:)`.
+    @ObservationIgnored private(set) var composerFocusCaretAtEnd = false
+
+    /// A passage of an answer, quoted at the end of the draft with the caret left under it.
+    func appendQuote(_ selection: String) {
+        guard let quoted = ReplyQuote.appending(selection, to: draft) else { return }
+        draft = quoted
+        focusComposer(caretAtEnd: true)
+    }
 
     func appendSourceContext(_ context: String) {
         draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
         focusComposer()
     }
 
-    func focusComposer() { composerFocusRequests += 1 }
+    /// - Parameter caretAtEnd: whether the caret goes after what arrived rather than before it. A
+    ///   queued message brought back to edit wants the start, a quote wants the line under it.
+    func focusComposer(caretAtEnd: Bool = false) {
+        composerFocusCaretAtEnd = caretAtEnd
+        composerFocusRequests += 1
+    }
 
     private var isReconcilingPresentation = false
     private var isReplayingPastTurn = false
@@ -346,12 +397,18 @@ final class TranscriptModel {
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
 
+    /// An old result must not hide the live tail of a turn the agent has just started itself.
+    func isCurrentTurnResult(_ row: TranscriptRow) -> Bool {
+        row.kind == .result && (!isRunning || turnStartedAt.map { row.createdAt >= $0 } ?? true)
+    }
+
     init(session: Session, workspace: Workspace, app: AppModel, remote: RemoteSessionConnection? = nil) {
         self.session = session
         self.workspace = workspace
         self.cwd = workspace.path
         self.app = app
         self.remote = remote
+        history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
     /// The conversation that belongs to Bloom rather than to a workspace.
@@ -365,6 +422,7 @@ final class TranscriptModel {
         self.cwd = directory
         self.app = app
         self.remote = nil
+        history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
     private var store: Store? { remote == nil ? app.store : nil }
@@ -394,48 +452,6 @@ final class TranscriptModel {
         }
         remoteQueueError = snapshot.queueError
         isLoaded = true
-    }
-
-    private var historyWorkspaceHeld: Bool {
-        workspace.map { HistoryWorkspaceGate.shared.holds($0.id) } ?? false
-    }
-
-    private func historyBlocksSending() async -> Bool {
-        if historyWorkspaceHeld { return true }
-        guard let store, let workspace else { return false }
-        do {
-            guard let journal = try await store.pendingCheckpointRewind(workspaceID: workspace.id) else { return false }
-            HistoryWorkspaceGate.shared.mark(workspace.id, unresolved: true)
-            history.blockingSessionID = journal.checkpoint.sessionID
-            history.failure = "Resolve the interrupted rewind in its conversation before sending more messages."
-            if journal.checkpoint.sessionID == session.id { history.pendingRewind = journal }
-            return true
-        } catch {
-            history.failure = "Could not check the workspace's rewind state: \(error)"
-            return true
-        }
-    }
-
-    func providerContainsTurn(_ turnID: String) async throws -> Bool {
-        guard let runner = ensureRunner(), runner.supportsConversationRewind else { throw ConversationRewindError.unsupported }
-        return try await runner.containsTurn(turnID)
-    }
-
-    func rewindProvider(beforeTurnID: String) async throws {
-        guard let runner = ensureRunner(), runner.supportsConversationRewind else { throw ConversationRewindError.unsupported }
-        try await runner.rewind(beforeTurnID: beforeTurnID)
-    }
-
-    func reloadAfterRewind() async {
-        guard let store else { return }
-        wasStoppedByHand = true
-        sending = nil
-        steering = nil
-        clearStreaming()
-        await read(from: store)
-        await refreshSession()
-        PromptAttachmentStore.shared.restoreDraftAttachments(draft, sessionID: session.id.rawValue)
-        composerFocusRequests += 1
     }
 
     // MARK: - Loading
@@ -494,6 +510,7 @@ final class TranscriptModel {
         }.value
 
         foldCache.reset()
+        freshCalls = []
         questionIndex = PinnedQuestionIndex()
         rows = built.rows
         presentationRevision += 1
@@ -524,8 +541,7 @@ final class TranscriptModel {
         // start a paid turn on a Mac nobody is sitting at, so it is shown as pending and goes with
         // the owner's next message. See `DeliveryHold.none`.
         await refreshQueue()
-        await history.load(store: store, sessionID: session.id, workspaceID: workspace?.id)
-        if workspace != nil { await history.cleanupRetired(store: store, sessionID: session.id, cwd: cwd) }
+        await history.load(store: store, sessionID: session.id)
         isLoaded = true
     }
 
@@ -557,6 +573,7 @@ final class TranscriptModel {
         if message.kind == .permissionAsk,
            let ask = PermissionAsk.decode(payload: message.payload) {
             row.permissionDecision = decisions[ask.requestID]
+            row.isQuestion = ask.isQuestion
         }
         rows.append(row)
         TranscriptToolPairing.recordCall(kind: message.kind.rawValue, refID: message.refID, rowIndex: rows.count - 1, indexByRefID: &indexByRefID)
@@ -718,6 +735,13 @@ final class TranscriptModel {
             return submitted
         }
         guard !isWorkspaceArchiving else { return false }
+        if usesInteractiveTerminal {
+            app.alert = BloomAlert(
+                title: "This agent runs in a terminal",
+                message: "Open its agent tab and enter the prompt in the CLI."
+            )
+            return false
+        }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return false }
 
@@ -809,7 +833,7 @@ final class TranscriptModel {
     /// question the moment a running turn stopped holding the queue on two of the four backends:
     /// the tooltip went on offering to queue a message that was about to go straight out.
     var queuesNextMessage: Bool {
-        if history.isCapturing || history.isFinalisingTurn || (history.hasActiveTurn && !isRunning) || historyWorkspaceHeld { return true }
+        if history.isCapturing || history.isFinalisingTurn || (history.hasActiveTurn && !isRunning) { return true }
         if isRunning, session.interactionMode != activeInteractionMode { return true }
         return !Delivery.goesImmediately(
             behind: pendingDeliveries, hold: deliveryHold, on: session.agentKind
@@ -823,7 +847,6 @@ final class TranscriptModel {
     /// queue may not do: both read `DeliveryHold`. See `DeliveryHold.sentence(on:)`.
     var holdSentence: String? {
         if let remoteQueueError { return remoteQueueError }
-        if historyWorkspaceHeld { return "Resolve the interrupted rewind before sending more messages." }
         if history.isCapturing || history.isFinalisingTurn { return "Saving this turn's file changes." }
         if pendingDeliveries.first?.state == .uncertain {
             return "Bloom could not confirm delivery. Check the conversation before sending again."
@@ -852,8 +875,9 @@ final class TranscriptModel {
     /// for at that moment, and both are covered by the queue simply sitting there, visibly, until
     /// somebody says something.
     func drain() async {
+        guard !usesInteractiveTerminal else { return }
         guard !isReconcilingPresentation else { return }
-        guard !history.isCapturing, !history.isFinalisingTurn, !(history.hasActiveTurn && !isRunning), !(await historyBlocksSending()) else { return }
+        guard !history.isCapturing, !history.isFinalisingTurn, !(history.hasActiveTurn && !isRunning) else { return }
         guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
         guard drainState.begin() else { return }
         var allowRepeat = true
@@ -1170,10 +1194,6 @@ final class TranscriptModel {
             await abandon(delivery, saying: "Bloom could not open an agent for this chat.")
             return false
         }
-        guard !historyWorkspaceHeld else {
-            await abandon(delivery, saying: "Resolve the interrupted rewind before sending more messages.")
-            return false
-        }
         // The queue is moving, whether or not that begins a turn.
         wasStoppedByHand = false
 
@@ -1214,7 +1234,6 @@ final class TranscriptModel {
             // model is handed is the envelope, and what the transcript draws is the words. See
             // `Delivery.sent` and `SessionRunner.send(_:recording:)`.
             try await runner.sendDelivery(delivery)
-            if startsATurn, let store { await history.sent(delivery: delivery, store: store) }
             // The runner writes the user row as part of the send, and until this line nothing read
             // it back: the transcript only pulled rows on an agent event, so the owner's own
             // message did not appear until the answer did. Reading it here is what retires the
@@ -1451,6 +1470,7 @@ final class TranscriptModel {
     /// second caller of this would take the app down. There is no reason for the guarantee to be
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
+        guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
         let preferences = RunnerPreferences(session: session)
@@ -1486,6 +1506,12 @@ final class TranscriptModel {
         return runner
     }
 
+    private var usesInteractiveTerminal: Bool {
+        guard let workspaceID = session.workspaceID else { return false }
+        CenterTabStore.shared.load(workspaceID: workspaceID)
+        return CenterTabStore.shared.terminal(for: session.id, in: workspaceID) != nil
+    }
+
     /// The one place a backend becomes a process. Static and taking only values, so which runner a
     /// session gets can be asserted on without a workspace, a store or a view.
     ///
@@ -1516,7 +1542,7 @@ final class TranscriptModel {
 
     private func evictIdleProvider() async {
         guard let store, let current = runner, !isRunning, !isAwaitingPermission,
-              sending == nil, pendingDeliveries.isEmpty, !subagents.isWorking else { return }
+              sending == nil, pendingDeliveries.isEmpty, !subagents.isAnythingRunning else { return }
         let stored = try? await store.setting(ProviderIdlePolicy.settingKey)
         guard let duration = ProviderIdlePolicy.duration(stored: stored),
               let waiting = try? await store.pendingDeliveries(sessionID: session.id), waiting.isEmpty,
@@ -1720,10 +1746,18 @@ final class TranscriptModel {
             // through. That is the only signal there is: the CLI announces a retry and never
             // announces a recovery, so the recovery is the next event of any kind.
             settleRetryRun()
+            let runningTool = streamingToolName
+            let callsBefore = freshCalls
             await appendLatestMessages()
             // Keep the live drawing while the store is awaited. Clearing first leaves an empty
             // frame between the stream and its saved row, interrupting the shared arrival.
             clearStreaming()
+            // A call that just arrived is folded out of sight for a moment, so the tail goes on
+            // naming it rather than saying the model is being waited on while a tool runs. Its
+            // result clears this like any other arrival. See `TranscriptFold.freshCall`.
+            if case .toolUse = event, !freshCalls.isSubset(of: callsBefore) {
+                streamingToolName = runningTool
+            }
 
         case .error(let failure):
             history.isFinalisingTurn = true
@@ -1978,6 +2012,7 @@ final class TranscriptModel {
         ) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
+        var calls: [String] = []
         // **Filtered against the cursor again, having already been queried against it.** The read
         // above is a suspension point, so two calls can both ask for everything after `n` and both
         // come back with the same rows: the cursor only moves in the loop below, which neither of
@@ -1991,12 +2026,46 @@ final class TranscriptModel {
             // Before folding, because a tool result changes an old row rather than appending one.
             // The cursor belongs to stored messages, not to their presentation.
             highestSeenMessageSeq = max(highestSeenMessageSeq, message.seq)
+            if message.kind == .toolUse, let id = message.refID { calls.append(id) }
             absorb(message)
+        }
+        // A question stops the turn on a person, and a running call drawn in above it a moment
+        // later would move the buttons they are reaching for. So it is drawn now, with the question.
+        if fresh.contains(where: { $0.kind == .permissionAsk }) {
+            endFreshCalls(Array(freshCalls))
+        } else if !calls.isEmpty {
+            beginFreshCalls(calls)
         }
         // Over what actually arrived, not over the transcript. A tool result folds onto a row that
         // is already there rather than appending, so the slice can be empty, and an empty one
         // leaves the held reading exactly where it was.
         noteContextWindow(in: rows[min(appendedFrom, rows.count)...])
+    }
+
+    /// Lets calls that have just arrived fold straight away, and draws any still running once
+    /// `TranscriptFold.freshCall` has passed.
+    ///
+    /// **A timer rather than waiting for the result, because a call can run for minutes.** Held out
+    /// of sight until its result, a test run would be a count and a status line and nothing else.
+    private func beginFreshCalls(_ calls: [String]) {
+        freshCalls.formUnion(calls)
+        Task { [weak self] in
+            try? await Task.sleep(for: TranscriptFold.freshCall)
+            self?.endFreshCalls(calls)
+        }
+    }
+
+    private func endFreshCalls(_ calls: [String]) {
+        var revealed = false
+        for id in calls where freshCalls.remove(id) != nil {
+            // A call that settled while fresh folds either way, so only a running one changes what
+            // the fold says.
+            guard let index = indexByRefID[id], rows.indices.contains(index),
+                  rows[index].resultPayload == nil else { continue }
+            foldCache.invalidate(row: index)
+            revealed = true
+        }
+        if revealed { presentationRevision += 1 }
     }
 
     /// Folds what the newest rows say about the context window into the held reading.

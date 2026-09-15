@@ -28,6 +28,17 @@ struct MenuBarSummaryTests {
         #expect(segments.map(\.count) == [3, 1])
     }
 
+    @Test("leaves a count switched off in Settings out of the strip")
+    func hiddenCounts() {
+        let noWaiting = MenuBarSummary.segments(waiting: 3, unread: 1, showsWaiting: false)
+        #expect(noWaiting.map(\.symbolName) == [MenuBarSummary.unreadSymbol])
+
+        let noUnread = MenuBarSummary.segments(waiting: 3, unread: 1, showsUnread: false)
+        #expect(noUnread.map(\.symbolName) == [MenuBarSummary.waitingSymbol])
+
+        #expect(MenuBarSummary.segments(waiting: 3, unread: 1, showsWaiting: false, showsUnread: false).isEmpty)
+    }
+
     /// The strip is two glyphs at most, and neither of them is the dot. A filled circle beside a
     /// filled hand at menu bar size is two dark blobs the owner could not tell apart, and the one
     /// he could not read was the count that costs money. A hand and an envelope are shapes.

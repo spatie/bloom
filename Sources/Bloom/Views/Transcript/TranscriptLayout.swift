@@ -54,6 +54,18 @@ enum TranscriptLayout {
     /// as a row that failed to draw.
     static let turnGap: CGFloat = block * 2
 
+    /// How far the fade at the top of the transcript reaches into it. See `topSpace`, which is
+    /// built from this so the two cannot be tuned apart.
+    static let topFade: CGFloat = block * 2
+
+    /// The air above the first thing in a conversation: the whole fade, then a rung of clear
+    /// ground, so a first row at rest is drawn entirely below the band that washes content out.
+    ///
+    /// **Derived from the fade rather than written down beside it.** It was `Metrics.pane`, twenty
+    /// four points against a sixteen point fade, which only agreed by coincidence. Reaching for a
+    /// wider fade would have put every first bubble back under it, and nothing would have said so.
+    static let topSpace: CGFloat = topFade + block
+
     /// The pitch of a one line row, and the transcript's own rather than the window's.
     ///
     /// A source list row is 28 points because it holds a name the user chose and clicks on all

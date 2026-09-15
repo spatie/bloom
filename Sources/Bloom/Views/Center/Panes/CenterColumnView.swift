@@ -11,21 +11,123 @@ import BloomCore
 struct CenterColumnView<Model: WorkspacePaneModel>: View {
     @Bindable var model: Model
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The tab whose name field is open in the strip. Here rather than in `SessionTabsView`
+    /// because opening one is also a reason to draw the strip. See `TabStripVisibility`.
+    @State private var renamingID: String?
+    /// A tab being carried out of the strip. Here because two regions draw one drag: the strip
+    /// slides its tabs, and the column washes the pane the tab would land in. See `TabCarry`.
+    @State private var carry = TabCarry()
+    /// Where the panes sit in `space`, read only when a carried tab asks which pane it is over.
+    /// A box for the reason `GeometryBox` gives: nothing draws it.
+    @State private var panesFrame = GeometryBox(CGRect.zero)
+
+    /// The space a carried tab's pointer is reported in and its landing is washed in. The column
+    /// rather than the window, because the strip, the panes and the overlay that washes them are
+    /// all inside it, so the three can share one set of numbers.
+    nonisolated static var space: String { "bloom.centreColumn" }
+
+    private var store: WorkspaceTabsStore { model.paneStores.tabs }
+
+    /// Whether the strip is drawn, which is Safari's rule. The reasoning, including why a split
+    /// tab no longer keeps the strip up, is `TabStripVisibility`'s.
+    private func isStripShown(entries: [PaneContent]) -> Bool {
+        TabStripVisibility.isShown(tabCount: entries.count, isRenaming: renamingID != nil)
+    }
+
     var body: some View {
+        // Read out here rather than inside the geometry closure, which would otherwise capture this
+        // generic view's metatype and cross an isolation boundary with it.
+        let space = Self.space
+        let entries = store.entries(in: model)
+        let selected = store.selectedTab(in: model, entries: entries)
+        let isStripShown = isStripShown(entries: entries)
+        // One answer for the column's top edge and for every tab. See `BusySignalPlacement`.
+        let busy = store.busySignal(
+            in: model, entries: entries, selected: selected, isStripShown: isStripShown
+        )
         VStack(spacing: 0) {
-            SessionTabsView(model: model)
+            if isStripShown {
+                SessionTabsView(
+                    model: model,
+                    renamingID: $renamingID,
+                    carry: carry,
+                    busy: busy,
+                    landing: { landing(for: $0, at: $1) },
+                    drop: { place($0, at: $1) }
+                )
+                    // A fade rather than a slide. The strip sits hard under the title bar, and
+                    // sliding it in from the top edge draws it over the title bar for the length
+                    // of the animation; the panes below close or open the gap either way.
+                    .transition(.opacity)
+            }
             GeometryReader { geometry in
                 VStack(spacing: 0) {
                     WorkspaceSetupStatusView(model: model, paneHeight: geometry.size.height)
                         .id(model.workspace.id)
+                    // Run scripts and settings issues are read from this Mac's checkout, so a
+                    // workspace on a server has neither to offer yet.
+                    if let local = model.localWorkspaceModel { WorkspaceSettingsNotices(model: local) }
                     CenterPanesView(model: model)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(space)) } action: {
+                            panesFrame.value = $0
+                        }
                 }
             }
         }
         .id(model.paneStores.identity)
+        .coordinateSpace(.named(Self.space))
+        // With no strip, a short segment slides along the top of the column, directly under the
+        // title bar, with nothing drawn behind it. See `ColumnBusySignal`.
+        //
+        // `.identity` so it leaves at once when the strip arrives. The column animates the strip
+        // in, and a default transition would fade this out over the same fifth of a second the
+        // tab's own sweep fades in, which is both signals on screen at once.
+        .overlay(alignment: .top) {
+            if !isStripShown {
+                ColumnBusySignal(isActive: busy.showsColumnTop).transition(.identity)
+            }
+        }
+        // The title bar tells VoiceOver the one tab there is is running. The title is a toolbar
+        // item and cannot see this column's strip, so the answer is published for it, under this
+        // workspace's selection. Keyed on the id, so moving to another workspace clears this one's
+        // claim before the next is made.
+        .onChange(of: busy.showsColumnTop ? model.workspace.id : nil, initial: true) { was, now in
+            if let was { WindowTitleText.shared.setBusy(false, for: .workspace(was)) }
+            if let now { WindowTitleText.shared.setBusy(true, for: .workspace(now)) }
+        }
+        .onDisappear { WindowTitleText.shared.setBusy(false, for: .workspace(model.workspace.id)) }
+        // Over the strip and the panes alike, and hit testing nothing, so the carried tab's wash
+        // and ghost never take the release that lets it go.
+        .overlay { TabCarryOverlay(carry: carry) }
+        // On the column rather than on the strip, so the panes moving up into the space and the
+        // strip fading out are one movement. Keyed on the answer alone: a tab being renamed or a
+        // third tab arriving changes nothing here and must not animate the column. Only arriving
+        // is animated: closing the second tab drops the strip at once, as Safari does, because
+        // a strip fading out with a single tab left in it lingers on something already gone.
+        .animation(reduceMotion || !isStripShown ? nil : Motion.pane, value: isStripShown)
         .background(Palette.windowBackground)
         .onChange(of: model.paneStores.center.tabs(for: model.workspace.id).map(\.id)) {
             model.remoteServer?.prepareTabs(for: model.workspace)
+        }
+        // Rename Tab from the File menu. It renames the selected tab, which is the tab the menu
+        // item was greyed against, and on a workspace with one tab that is a strip not drawn yet:
+        // setting this is what draws it, with the field open.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomRenameTab)) { _ in
+            guard let selected = store.selectedTab(in: model) else { return }
+            // `PaneContent.id` is the same string the strip files an open field under, for both
+            // kinds, which is what lets one notification carry no id of its own.
+            renamingID = selected.id
+        }
+        // A field left open in one workspace is not one to carry into the next.
+        .onChange(of: model.workspace.id) { _, _ in renamingID = nil }
+        .task(id: model.paneStateID) {
+            // The icons this Mac has already seen, read back once per launch. Here rather than at
+            // startup because this is what needs them: a workspace reopening on a browser tab
+            // should draw its icon on the first frame instead of asking the page for something
+            // that is already on disk. Its own task, so it does not hold up the one below.
+            await BrowserFaviconStore.shared.warm()
         }
         .task(id: model.paneStateID) {
             model.remoteServer?.prepareTabs(for: model.workspace)
@@ -40,7 +142,68 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
             // relaunch. `TabReconciliation` refuses an unread list as well, because an ordering
             // that is only correct by inspection is one edit away from being incorrect.
             model.paneStores.tabs.reconcile(in: model)
+            // After the reconcile, because starting a run script may add a tab, and a tab added
+            // before the strip has been squared with what is stored is one the reconcile judges.
+            // Once per workspace per launch; see `RunScriptLauncher.considerAutostart`.
+            if let local = model.localWorkspaceModel {
+                await RunScriptLauncher.shared.considerAutostart(in: local)
+            }
         }
+        // A settings file that changes while the workspace is open is settled again. Without
+        // this, a file added to an open workspace never asked and never started anything until
+        // the next launch. Unchanged autostart commands settle to nothing; see
+        // `RunScriptAutostart.signature(of:)`.
+        .onChange(of: model.localWorkspaceModel?.settings.runScripts) { _, _ in
+            guard let local = model.localWorkspaceModel else { return }
+            Task { await RunScriptLauncher.shared.considerAutostart(in: local) }
+        }
+        // Settings are otherwise re-read only on a switch, so a file edited in another app, or
+        // pulled from a terminal outside Bloom, did not reach the `+` menu, the notices or the quick
+        // prompt panel of the workspace already on screen. Coming back to the window is the moment
+        // somebody who just changed it expects to see the change. The read is off the main actor
+        // and coalesced, so this costs a parse and nothing more.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.localWorkspaceModel?.refreshSettings()
+        }
+    }
+
+    /// Which part of which pane a tab carried to `point` would land in, with the frame in `space`.
+    ///
+    /// The panes are laid out again from the selected tab's tree rather than each pane measuring
+    /// itself, which is the same `SplitGeometry` `CenterPanesView` positions them with and so the
+    /// same rectangles. That is what replaced a `.dropDestination` on every pane: a system drag no
+    /// longer exists to be dropped, and one hit test in the column cannot disagree with itself
+    /// about which pane is under the pointer. Nil over anywhere that would not take the tab, which
+    /// is `canAbsorb`'s refusal of a tab with a split arrangement of its own, so no wash promises a
+    /// drop that would be refused.
+    private func landing(for content: PaneContent, at point: CGPoint) -> PaneLanding? {
+        let frame = panesFrame.value
+        guard frame.contains(point), let tab = store.selectedTab(in: model),
+              store.canAbsorb(content) else { return nil }
+        let geometry = store.layout(of: tab).geometry(
+            in: frame.size, dividerThickness: CenterPanesView<Model>.dividerThickness
+        )
+        let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        guard var landing = geometry.landing(at: local) else { return nil }
+        landing.frame = landing.frame.offsetBy(dx: frame.minX, dy: frame.minY)
+        return landing
+    }
+
+    /// A carried tab let go over a pane: the middle shows it there, an edge opens it beside that
+    /// pane on that side. The same two calls the pane's own drop made before the tab stopped being
+    /// a system drag.
+    private func place(_ content: PaneContent, at landing: PaneLanding) {
+        guard let tab = store.selectedTab(in: model), store.canAbsorb(content) else { return }
+        guard let placement = landing.region.placement else {
+            return store.replace(pane: landing.pane, of: tab, with: content, in: model)
+        }
+        // A split always opens the new pane after the old one, so landing on the leading side is
+        // the same split with the two contents the other way round. One call rather than a split
+        // followed by an overwrite, so a tool is never momentarily in two panes at once.
+        store.split(
+            tab: tab, pane: landing.pane,
+            axis: placement.axis, showing: content, before: placement.before
+        )
     }
 
     /// Opens the tab a workspace created with "Start with: Terminal" or "Start with: Browser" was
@@ -54,7 +217,7 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
     /// exactly once, on the first open, and never forced in front of an arrangement the user has
     /// since made for themselves.
     ///
-    /// Through `NewPane`, which is the door the strip's `+` and every split menu already use, so
+    /// Through `NewPane`, which is the door the title bar's `+` and every split menu already use, so
     /// a tab a workspace is born on and a tab somebody opens a second later are the same tab.
     private func openStartingPane() {
         let workspaceID = model.workspace.id
@@ -64,6 +227,11 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
         guard let opening = WorkspaceStartMode.consumeOpeningTab(workspaceID: workspaceID, defaults: model.paneStores.defaults) else {
             return
         }
+        // No address for a browser, where the title bar's `+` passes the workspace's own dev server.
+        // The worktree was cut seconds ago and its setup script may still be running, so the port
+        // is answering nothing: an opening tab on a refused connection would be an error page as
+        // the first thing a new workspace shows. The address field is where somebody says.
+        guard opening.cliAgentKind == nil else { return }
         NewPane.open(opening.pane, in: model) { content in
             if opening == .browser, case .tool(let id) = content,
                let tab = model.paneStores.center.tabs(for: workspaceID).first(where: { $0.id == id }) {

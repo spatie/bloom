@@ -1,6 +1,6 @@
 import Foundation
 
-/// Opening a pane in the window, as the tab strip's `+` menu does it.
+/// Opening a pane in the window, as the title bar's `+` menu does it.
 ///
 /// Injected for the reason `WorkspaceStarting` and `WorkspaceMergeRequesting` are: a bridge
 /// handler runs off the main actor on a background task per connection, and everything that puts

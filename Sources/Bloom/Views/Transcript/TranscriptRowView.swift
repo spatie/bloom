@@ -42,6 +42,8 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isNested == rhs.isNested
+            && lhs.subagentActions == rhs.subagentActions
+            && lhs.subagentHasRun == rhs.subagentHasRun
             && lhs.home == rhs.home
             // A question being answered has to redraw the row that asked it, and the decision is
             // the only thing about it that changes after it is stored.
@@ -57,6 +59,15 @@ struct TranscriptRowView: View, Equatable {
     var home: TranscriptHome
     var isExpanded = false
     var isNested = false
+    /// For a call that started a subagent, how many actions that subagent has taken, which the
+    /// chat draws on this row instead of drawing the actions. See `TranscriptFold`.
+    var subagentActions: Int?
+    /// Whether any row is stored under this call, so its run can be opened after the roster has
+    /// forgotten it. See `SubagentRunLink`.
+    var subagentHasRun = false
+    /// What an Agent call row opens, or nil where nothing can be opened, such as a subagent's own
+    /// pane, whose rows are the run already.
+    var runActions: SubagentRunActions?
     /// What the project is called, so a permission row can name where a rule would apply, or nil
     /// when there is no project behind this conversation. Handed down for the same reason `home`
     /// is: it is constant for a whole transcript.
@@ -146,6 +157,7 @@ struct TranscriptRowView: View, Equatable {
                         source: .codexImageView
                     )
                 } else {
+                    let run = runLink(for: use)
                     ToolRowView(
                         use: use,
                         presentation: TranscriptPresentationCache.presentation(
@@ -159,6 +171,9 @@ struct TranscriptRowView: View, Equatable {
                         refusal: row.refusal,
                         refusalReason: row.refusalReason,
                         durationMS: row.durationMS,
+                        subagentActions: subagentActions,
+                        onOpenRun: run.open,
+                        runUnavailable: run.isUnavailable,
                         isExpanded: isExpanded,
                         onToggle: onToggle
                     )
@@ -213,6 +228,19 @@ struct TranscriptRowView: View, Equatable {
         case .result:
             EmptyView()
         }
+    }
+
+    /// For an Agent call, what its row offers: opening the run, or saying nothing of it was kept.
+    /// Nothing at all for every other call. The decision is `SubagentRunLink`'s; this only asks.
+    private func runLink(for use: AgentToolUse) -> (open: (() -> Void)?, isUnavailable: Bool) {
+        guard let runActions, SubagentRunLink.isAgentCall(toolName: use.name) else { return (nil, false) }
+        let isSettled = row.resultPayload != nil
+        let hasRun = subagentHasRun
+        let canOpen = SubagentRunLink.canOpen(
+            toolUseID: row.refID, hasRecordedRows: hasRun, isSettled: isSettled, isLive: runActions.isLive
+        )
+        guard canOpen, let toolUseID = row.refID else { return (nil, true) }
+        return ({ runActions.open(toolUseID, hasRun, isSettled) }, false)
     }
 
     // MARK: Decoding

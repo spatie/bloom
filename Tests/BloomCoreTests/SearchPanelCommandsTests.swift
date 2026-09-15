@@ -60,7 +60,7 @@ struct SearchPanelCommandsTests {
     /// which of the two a row is.
     @Test("a row prints its key, or the words no key")
     func everyRowPrintsAKey() {
-        #expect(MenuBarCatalogue[.archive].keyText == "\u{2318}\u{232B}")
+        #expect(MenuBarCatalogue[.archive].keyText == "\u{21E7}\u{2318}\u{232B}")
         #expect(MenuBarCatalogue[.pin].keyText == "no key")
         #expect(MenuBarCatalogue[.nextChangedFile].keyText == "\u{2325}\u{2318}J")
         #expect(MenuBarCatalogue[.projectSettings].keyText == "\u{21E7}\u{2318},")

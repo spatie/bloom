@@ -172,7 +172,7 @@ struct ServerSetupView: View {
                 StartProjectOpening.shared.isRemote = true
                 openWindow(id: StartProjectWindow.id)
                 dismissWindow(id: windowID)
-            }.buttonStyle(.link)
+            }.linkButton()
         }
     }
 
@@ -200,7 +200,7 @@ struct ServerSetupView: View {
                 if let keySelectionFailure { Text(keySelectionFailure).font(Typo.caption).foregroundStyle(Palette.warning) }
             }
             if !hasConnectionNotice {
-                Button("Connect to an existing Bloom server…", action: showAdvanced).buttonStyle(.link)
+                Button("Connect to an existing Bloom server…", action: showAdvanced).linkButton()
             }
         }
         .disabled(model.isBusy)

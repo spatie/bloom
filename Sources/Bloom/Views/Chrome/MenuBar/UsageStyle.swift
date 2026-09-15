@@ -20,7 +20,7 @@ enum UsageScale {
     static var supporting: Font { Font(NSFont.menuFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize - 1)) }
     /// A provider's name.
     static var header: Font { Font(NSFont.menuFont(ofSize: 0)).weight(.semibold) }
-    /// The plan beside it, and "Outdated": two points down.
+    /// The plan beside it: two points down.
     static var plan: Font { Font(NSFont.menuFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize - 2)) }
     /// Between one provider's block and the next.
     static let section: CGFloat = 12
@@ -32,8 +32,6 @@ enum MenuInk {
     static var primary: Color { Color(nsColor: .labelColor) }
     /// Anything read off the row beside it: a countdown, a plan, a note.
     static var secondary: Color { Color(nsColor: .secondaryLabelColor) }
-    /// "Outdated", which is a caveat rather than news.
-    static var tertiary: Color { Color(nsColor: .tertiaryLabelColor) }
     /// The empty part of a meter.
     static var track: Color { Color(nsColor: .tertiaryLabelColor) }
     /// The card a provider's rows sit on. Quiet enough to group them without drawing a box.

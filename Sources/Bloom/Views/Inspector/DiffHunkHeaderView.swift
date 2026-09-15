@@ -18,11 +18,11 @@ struct DiffHunkHeaderView: View {
         BloomDiffHunkHeader(
             spacing: InspectorLayout.gap, inset: CodeMetrics.textInset,
             width: width, height: CodeMetrics.rowHeight,
-            foreground: Palette.textTertiary, surface: Palette.surfaceSunken
+            foreground: Palette.codeGutter, surface: Palette.codeBackground
         ) {
             Image(systemName: "curlybraces").font(Typo.micro).imageScale(.small)
         } title: {
-            Text(text).font(Typo.codeTiny)
+            Text(text).font(Font(CodeMetrics.numberFont))
         }
     }
 }

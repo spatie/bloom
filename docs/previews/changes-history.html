@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloom · Reviewing work as it happens</title>
+<style>
+:root{color-scheme:dark;--bg:#0a1a25;--panel:#0e202d;--raised:#16303f;--rule:#244251;--ink:#e1ebee;--muted:#99aeba;--accent:#7bcbd0;--green:#95d4ad;--red:#f0aaa9;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,a,input{touch-action:manipulation}button{font:inherit;color:inherit;cursor:pointer}button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}button{border:0;background:none}a{color:var(--accent);text-underline-offset:3px}header{padding:30px 32px 0;max-width:1600px;margin:auto}.eyebrow{color:var(--accent);font-size:10px;letter-spacing:.15em;text-transform:uppercase;font-weight:700}h1{font-family:Georgia,serif;font-size:clamp(27px,3.5vw,42px);line-height:1.1;font-weight:400;letter-spacing:-.03em;margin:12px 0}header p{max-width:680px;color:var(--muted);margin:0 0 24px;font-size:14px}.page-tabs{display:flex;gap:22px;border-bottom:1px solid var(--rule)}.page-tabs button{padding:10px 0;border-bottom:2px solid transparent;color:var(--muted)}.page-tabs button[aria-selected=true]{color:var(--ink);border-color:var(--accent)}main{max-width:1600px;margin:auto;padding:22px 32px 36px}.intro-line{display:flex;gap:16px;justify-content:space-between;align-items:center;margin-bottom:12px;color:var(--muted);font-size:12px}.layout-toggle{border:1px solid var(--rule);border-radius:5px;padding:5px 10px;white-space:nowrap}.layout-toggle[aria-pressed=true]{color:var(--accent);background:var(--raised)}.app{border:1px solid var(--rule);border-radius:10px;overflow:hidden;background:var(--bg);box-shadow:0 20px 70px #0003;margin:auto}.appbar{height:47px;padding:0 16px;display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--rule)}.brand{font-weight:650}.branch{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.demo-tag{font-size:9px;letter-spacing:.09em;color:var(--muted);margin-left:auto;white-space:nowrap}.workspace{display:grid;grid-template-columns:250px 218px minmax(0,1fr);min-height:540px}.history,.files{min-width:0;border-right:1px solid var(--rule)}.history{background:var(--panel)}.pane-heading{padding:14px 15px 11px;display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:600;letter-spacing:.025em}.quiet{color:var(--muted);font-weight:400}.history-button{position:relative;width:100%;text-align:left;display:block;padding:11px 14px 11px 29px;border-left:2px solid transparent;line-height:1.4}.history-button:hover,.file:hover{background:#ffffff06}.history-button[aria-pressed=true],.file[aria-pressed=true]{background:var(--raised);border-left-color:var(--accent)}.history-button strong{font-size:12px;font-weight:550;display:block}.history-button small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.history-button .dot{position:absolute;top:16px;left:13px;width:6px;height:6px;border-radius:50%;background:var(--muted)}.history-button[aria-pressed=true] .dot{background:var(--accent)}.special{padding-left:14px}.special .badge{float:right;color:var(--muted);font-size:10px;font-weight:400;padding:1px 5px;background:#ffffff09;border-radius:4px}.divider-label{margin:12px 14px 3px;border-top:1px solid var(--rule);padding-top:14px;font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}.history-meta{padding:16px 14px;color:var(--muted);font-size:10px}.history-meta code{font-family:var(--mono);font-size:9px}.files{background:#0c1e2a}.file-groups{padding-bottom:12px}.group-name{display:flex;justify-content:space-between;padding:10px 13px 5px;color:var(--muted);font-size:9px;letter-spacing:.09em;text-transform:uppercase}.file{width:100%;display:flex;gap:9px;align-items:flex-start;text-align:left;padding:9px 12px;border-left:2px solid transparent}.file-icon{font:10px var(--mono);padding-top:3px;color:var(--muted)}.file-name{display:block;font-size:11px;overflow-wrap:anywhere}.file-dir{display:block;color:var(--muted);font-size:9px;margin-top:3px}.counts{font-family:var(--mono);font-size:9px;white-space:nowrap;display:flex;gap:5px}.file .counts{margin-left:auto;padding-top:2px}.plus{color:var(--green)}.minus{color:var(--red)}.detail{min-width:0}.detail-head{padding:17px 19px;border-bottom:1px solid var(--rule);min-height:135px}.detail-kicker{font-size:9px;text-transform:uppercase;letter-spacing:.12em;color:var(--accent)}h2{font-size:16px;font-weight:550;letter-spacing:-.015em;line-height:1.35;margin:8px 0}.detail-meta{color:var(--muted);font-size:10px;display:flex;flex-wrap:wrap;gap:5px 12px}.detail-meta code{color:var(--ink);font:10px var(--mono)}.comparison{margin-top:12px;display:inline-block;padding:3px 7px;background:var(--panel);border:1px solid var(--rule);border-radius:4px;color:var(--muted);font:9px var(--mono)}.diff-title{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:11px 16px;background:var(--panel);border-bottom:1px solid var(--rule);font-size:11px}.diff-title span:first-child{overflow-wrap:anywhere}.diff{overflow:auto;min-height:260px;padding-bottom:20px}.hunk{padding:8px 15px;background:#122b3a;color:#91b3c6;font:10px var(--mono)}.code-row{display:grid;grid-template-columns:32px 32px 20px minmax(max-content,1fr);font:11px/1.85 var(--mono);min-width:max-content}.line-no{color:#75909e;text-align:right;padding-right:7px;user-select:none}.sign{color:#a2b4bd;text-align:center}.code{padding-right:20px;white-space:pre}.code-row.add{background:#20463965}.code-row.add .code,.code-row.add .sign{color:#b1dfbb}.code-row.del{background:#68313c55}.code-row.del .code,.code-row.del .sign{color:#f0b8b8}.appfoot{padding:9px 14px;display:flex;gap:12px;justify-content:space-between;background:var(--panel);border-top:1px solid var(--rule);color:var(--muted);font-size:10px}.safe{color:var(--accent)}.explanation{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;padding:24px 0 5px}.explanation article{border-top:1px solid var(--rule);padding-top:12px}.explanation b{font-size:12px;font-weight:550}.explanation p{color:var(--muted);font-size:12px;margin:6px 0}.number{font:10px var(--mono);color:var(--accent);margin-right:6px}.notes{max-width:880px}.notes h2{font-family:Georgia,serif;font-size:25px;font-weight:400;margin:18px 0 10px}.notes p{color:var(--muted);font-size:14px;max-width:720px}.quote{border-left:2px solid var(--accent);padding:12px 20px;margin:24px 0;background:var(--panel);font:20px/1.5 Georgia,serif}.matrix{width:100%;border-collapse:collapse;margin:22px 0}.matrix th{text-align:left;color:var(--accent);font-size:10px;text-transform:uppercase;letter-spacing:.08em}.matrix td,.matrix th{padding:12px 12px 12px 0;border-bottom:1px solid var(--rule);vertical-align:top}.matrix td:first-child{width:31%;font-weight:600}.matrix td:last-child{color:var(--muted)}.notes li{margin:10px 0;color:var(--muted)}.references{display:grid;gap:24px}.references figure{margin:0;padding:18px;background:var(--panel);border:1px solid var(--rule);border-radius:8px}.references img{max-width:100%;height:auto;display:block;margin:12px 0 15px}.references figcaption{color:var(--muted);font-size:12px}.references h2{margin-top:0}.references .source{font-size:11px}.compact{max-width:650px}.compact .workspace{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.compact .detail{grid-column:1/-1;border-top:1px solid var(--rule)}.compact .files{border-right:0}.compact .history-meta{display:none}.compact .history,.compact .files{max-height:295px;overflow:auto}.compact .detail-head{min-height:0}.compact .diff{min-height:180px;max-height:340px}.compact .branch{max-width:200px}[hidden]{display:none!important}
+@media(min-width:1300px){.workspace{grid-template-columns:275px 250px minmax(0,1fr)}}
+@media(max-width:1100px){.workspace{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.detail{grid-column:1/-1;border-top:1px solid var(--rule)}.files{border-right:0}.history,.files{max-height:290px;overflow:auto}.history-meta{display:none}.detail-head{min-height:0}.diff{min-height:190px;max-height:360px}.explanation{gap:14px}.layout-toggle{display:none}}
+@media(max-width:600px){header{padding:22px 16px 0}main{padding:16px}.intro-line{font-size:11px}.page-tabs{gap:18px}.page-tabs button{font-size:12px}.explanation{grid-template-columns:1fr;gap:12px}.explanation article{padding-top:10px}.appbar{gap:8px;padding:0 11px}.branch{font-size:9px}.demo-tag{font-size:8px}.history-button{padding-right:8px}.history-button strong{font-size:11px}.history-button small{font-size:9px}.file{padding:9px 7px;gap:5px}.file-name{font-size:10px}.file .counts{display:none}.appfoot{font-size:9px;flex-wrap:wrap}.detail-head{padding:14px}.matrix td{font-size:12px}.references figure{padding:12px}}
+</style>
+</head>
+<body>
+<header>
+<div class="eyebrow">Bloom / Changes panel / Design exploration</div>
+<h1>Review the work as it happens.</h1>
+<p>The whole branch for a PR. Just the new edits during development. Each commit when you want to understand the steps.</p>
+<nav class="page-tabs" role="tablist" aria-label="Design exploration">
+<button role="tab" aria-selected="true" aria-controls="preview" id="tab-preview" data-page="preview">Interactive preview</button>
+<button role="tab" aria-selected="false" aria-controls="intent" id="tab-intent" data-page="intent">Request &amp; decisions</button>
+<button role="tab" aria-selected="false" aria-controls="references" id="tab-references" data-page="references">Sublime references</button>
+</nav>
+</header>
+<main>
+<section id="preview" role="tabpanel" aria-labelledby="tab-preview">
+<div class="intro-line"><span>Try selecting a commit, then a file. All content is illustrative.</span><button class="layout-toggle" aria-pressed="false" id="compact-toggle">Show narrow panel</button></div>
+<div class="app" id="app">
+<div class="appbar"><span class="brand">Bloom</span><span class="quiet">/</span><span class="branch">feature/commit-history</span><span class="demo-tag">INTERACTIVE CONCEPT</span></div>
+<div class="workspace">
+<aside class="history" aria-label="Review selection">
+<div class="pane-heading">Changes <span class="quiet">3 commits</span></div>
+<div id="history-list"></div>
+<div class="history-meta">Branch commits, newest first.<br>Base: <code>main · 12fa890</code></div>
+</aside>
+<aside class="files" aria-label="Changed files"><div class="pane-heading">Files <span class="quiet" id="file-count"></span></div><div class="file-groups" id="files"></div></aside>
+<section class="detail" aria-label="Selected diff"><div class="detail-head" id="detail-head"></div><div class="diff-title"><span id="diff-path"></span><span id="diff-counts" class="counts"></span></div><div class="diff" id="diff" tabindex="0" aria-label="Diff lines"></div></section>
+</div>
+<div class="appfoot"><span class="safe">Read-only review · no checkout</span><span id="status" aria-live="polite"></span></div>
+</div>
+<div class="explanation">
+<article><b><span class="number">01</span>Keep the big picture</b><p>All branch changes stays one click away and includes the current local edits.</p></article>
+<article><b><span class="number">02</span>Make the boundaries explicit</b><p>A file can appear under both Staged and Unstaged. Each entry opens its own diff.</p></article>
+<article><b><span class="number">03</span>Review one step at a time</b><p>A commit shows the changes it introduced, compared with its parent.</p></article>
+</div>
+</section>
+<section class="notes" id="intent" role="tabpanel" aria-labelledby="tab-intent" hidden>
+<div class="eyebrow">What the original request is solving</div>
+<h2>“What did the agent change since I last looked?”</h2>
+<p>The current cumulative branch diff helps with the final review before opening a PR. The requested addition is an incremental review workflow inside the same workspace.</p>
+<blockquote class="quote">An agent makes several commits, starts editing again, and you inspect those new edits before walking back through each earlier commit.</blockquote>
+<table class="matrix"><thead><tr><th>Requested view</th><th>What it should show</th></tr></thead><tbody>
+<tr><td>All branch changes</td><td>The existing cumulative comparison with the base branch, including local edits. Preserve this workflow.</td></tr>
+<tr><td>Uncommitted changes</td><td>Changes since HEAD, with separate staged, unstaged, and untracked groups. Selecting a group entry shows that particular comparison.</td></tr>
+<tr><td>Commit history</td><td>Messages, authors, timestamps, and short hashes. Selecting a commit shows its changed files and the patch introduced by that commit.</td></tr>
+<tr><td>Safe browsing</td><td>Reading a past commit leaves the working tree and the running agent untouched.</td></tr>
+</tbody></table>
+<h2>What to borrow from Sublime Merge</h2>
+<ul><li>A persistent, selectable history with pending work at the top.</li><li>A direct connection between the selected entry, its files, and its diff.</li><li>Visible staging boundaries, including a file that has both staged and unstaged edits.</li><li>Layouts that adapt to available space. This concept puts history and files above the diff in a narrow preview, and uses three columns when expanded.</li></ul>
+<h2>What this concept proposes for Bloom</h2>
+<p>Keep two fixed entries above the history: All branch changes and Uncommitted changes. Reuse Bloom's existing workspace selection instead of adding Sublime Merge's branches, remotes, and tags sidebar. Use plain commit rows rather than a repository-wide graph.</p>
+<p>Bloom already has a “Since commit” scope. That compares a selected commit with today's working tree. It is a different operation from viewing that commit's own patch, and should not be silently relabelled.</p>
+<h2>Implementation decisions</h2>
+<ul><li><strong>History scope:</strong> commits unique to this branch, newest first, with earlier branch commits loaded on demand.</li><li><strong>Existing “Since commit”:</strong> replace it with individual commit review. The owner confirmed that the existing comparison is not used.</li><li><strong>Merge commits:</strong> include them in history and explicitly compare against the first parent.</li><li><strong>Live updates:</strong> preserve the selected commit and file when an agent commits again. Explain when a rebase or amend removes the selected commit.</li></ul>
+<p>This is an interactive design example with invented commits and files. No Git operations run from this page. The native implementation is developed separately.</p>
+</section>
+<section class="references" id="references" role="tabpanel" aria-labelledby="tab-references" hidden>
+<figure><h2>The wide overview</h2><div class="source"><a href="https://www.sublimetext.com/blog/articles/sublime-merge-2-announcement" target="_blank" rel="noreferrer">Sublime HQ: Features and Flexibility (2020)</a></div><img src="https://www.sublimetext.com/screenshots/merge/Layout%20Large.png" alt="Sublime Merge with locations, commits, and files arranged in three columns" loading="lazy"><figcaption>Pending changes lead the commit list. Files reflect the selected entry. Bloom already supplies project and workspace navigation.</figcaption></figure>
+<figure><h2>A selected commit</h2><div class="source"><a href="https://www.sublimemerge.com/docs/getting_started#understanding-the-interface" target="_blank" rel="noreferrer">Sublime Merge: interface guide</a></div><img src="https://www.sublimemerge.com/images/commit_details.png" alt="Commit metadata and message above a code diff, with file tabs" loading="lazy"><figcaption>The commit identity and message stay with its patch. This is the distinction the existing Since commit comparison does not provide.</figcaption></figure>
+<figure><h2>A compact overview</h2><div class="source"><a href="https://www.sublimetext.com/blog/articles/sublime-merge-2-announcement" target="_blank" rel="noreferrer">Sublime HQ: flexible layouts</a></div><img src="https://www.sublimetext.com/screenshots/merge/Layout%20Small.png" alt="Compact Sublime Merge overview with tabs for locations, commits, and files" loading="lazy"><figcaption>Sublime Merge offers tabs when columns do not fit. The Bloom proposal instead stacks the diff below the two short navigation lists, so the selected entry and patch remain visible together.</figcaption></figure>
+</section>
+</main>
+<script>
+const scopePath='Sources/BloomCore/Git/ChangesScope.swift';
+const historyPath='Sources/BloomCore/Git/CommitHistory.swift';
+const testsPath='Tests/BloomCoreTests/CommitHistoryTests.swift';
+const docPath='docs/commit-review.md';
+const base={ [scopePath]:['enum ChangesScope {','    case all','}'] };
+const c1={...base,[scopePath]:['enum ChangesScope {','    case all','    case uncommitted','}']};
+const c2={...c1,[historyPath]:['struct CommitHistory {','    let hash: String','    let message: String','}']};
+const c3={...c2,[scopePath]:['enum ChangesScope {','    case all','    case uncommitted','    case commit(hash: String)','}'],[testsPath]:['@Test func selectedCommitUsesItsParent() {','    let comparison = comparisonForCommit("a91d4e2")','    #expect(comparison.before == "a91d4e2^")','    #expect(comparison.after == "a91d4e2")','}']};
+const staged={...c3,[historyPath]:['struct CommitHistory {','    let hash: String','    let message: String','    let author: String','}']};
+const disk={...staged,[historyPath]:['struct CommitHistory {','    let hash: String','    let message: String','    let author: String','    let timestamp: Date','}'],[docPath]:['# Reviewing a commit','','Select a commit to see the changes it introduced.','Browsing history leaves your working tree unchanged.']};
+const commits=[
+ {id:'a91d4e2',message:'Show the patch introduced by a commit',author:'Alex Morgan',time:'13 Sep 2026, 10:42',before:c2,after:c3,parent:'7bc320f'},
+ {id:'7bc320f',message:'Add the commit history model',author:'Alex Morgan',time:'13 Sep 2026, 10:18',before:c1,after:c2,parent:'e24af91'},
+ {id:'e24af91',message:'Add an uncommitted changes scope',author:'Freek Van der Herten',time:'13 Sep 2026, 09:56',before:base,after:c1,parent:'12fa890'}
+];
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function linesDiff(a=[],b=[]){
+ const matrix=Array.from({length:a.length+1},()=>Array(b.length+1).fill(0));
+ for(let i=a.length-1;i>=0;i--)for(let j=b.length-1;j>=0;j--)matrix[i][j]=a[i]===b[j]?1+matrix[i+1][j+1]:Math.max(matrix[i+1][j],matrix[i][j+1]);
+ const rows=[];let i=0,j=0;
+ while(i<a.length||j<b.length){
+  if(i<a.length&&j<b.length&&a[i]===b[j]){rows.push({kind:'context',old:++i,next:++j,text:a[i-1]});}
+  else if(i<a.length&&(j===b.length||matrix[i+1][j]>=matrix[i][j+1])){rows.push({kind:'del',old:++i,next:'',text:a[i-1]});}
+  else{rows.push({kind:'add',old:'',next:++j,text:b[j-1]});}
+ }return rows;
+}
+function filesBetween(before,after,group){return [...new Set([...Object.keys(before),...Object.keys(after)])].filter(path=>JSON.stringify(before[path])!==JSON.stringify(after[path])).map(path=>({path,group,before:before[path]||[],after:after[path]||[],change:!before[path]?'A':!after[path]?'D':'M'}));}
+function counts(file){const rows=linesDiff(file.before,file.after);return {added:rows.filter(r=>r.kind==='add').length,removed:rows.filter(r=>r.kind==='del').length};}
+function countHTML(file){const n=counts(file);return `<span class="plus">+${n.added}</span><span class="minus">-${n.removed}</span>`;}
+let selection='uncommitted',fileIndex=0,visibleFiles=[];
+function renderHistory(){
+ document.getElementById('history-list').innerHTML=`<button class="history-button special" data-selection="all" aria-pressed="${selection==='all'}"><strong>All branch changes <span class="badge">4</span></strong><small>Cumulative diff against main</small></button><button class="history-button special" data-selection="uncommitted" aria-pressed="${selection==='uncommitted'}"><strong>Uncommitted changes <span class="badge">2</span></strong><small>1 staged · 1 unstaged · 1 untracked</small></button><div class="divider-label">Commit history · newest first</div>`+commits.map(c=>`<button class="history-button" data-selection="${c.id}" aria-pressed="${selection===c.id}"><span class="dot" aria-hidden="true"></span><strong>${esc(c.message)}</strong><small>${esc(c.author)}</small><small><span style="font-family:var(--mono)">${c.id}</span> · ${c.time}</small></button>`).join('');
+ document.querySelectorAll('[data-selection]').forEach(button=>button.addEventListener('click',()=>{selection=button.dataset.selection;fileIndex=0;render();document.querySelector(`[data-selection="${selection}"]`).focus({preventScroll:true});}));
+}
+function render(){
+ renderHistory();let heading,kicker,meta,comparison;
+ if(selection==='uncommitted'){
+  const trackedDisk=Object.fromEntries(Object.entries(disk).filter(([path])=>path in staged));
+  visibleFiles=[...filesBetween(c3,staged,'Staged'),...filesBetween(staged,trackedDisk,'Unstaged'),...filesBetween({}, {[docPath]:disk[docPath]},'Untracked')];
+  heading='Uncommitted changes';kicker='Working tree';meta='Edits since the latest commit · a91d4e2';comparison='';
+ }else if(selection==='all'){
+  visibleFiles=filesBetween(base,disk,'All branch changes');heading='All branch changes';kicker='The complete branch';meta='3 commits and current local edits · compared with main';comparison='12fa890 (merge base) → working tree';
+ }else{
+  const c=commits.find(c=>c.id===selection);visibleFiles=filesBetween(c.before,c.after,'Changed in this commit');heading=c.message;kicker='Commit '+c.id;meta=`${c.author} · ${c.time}`;comparison=`${c.parent} (parent) → ${c.id}`;
+ }
+ const unique=new Set(visibleFiles.map(f=>f.path)).size;
+ document.getElementById('file-count').textContent=unique+' '+(unique===1?'file':'files');
+ let lastGroup='';document.getElementById('files').innerHTML=visibleFiles.map((f,i)=>{
+  const group=f.group!==lastGroup?`<div class="group-name"><span>${esc(f.group)}</span><span>${visibleFiles.filter(x=>x.group===f.group).length}</span></div>`:'';lastGroup=f.group;
+  const parts=f.path.split('/');return group+`<button class="file" data-file="${i}" aria-pressed="${i===fileIndex}" aria-label="${esc(f.group+': '+parts.at(-1))}"><span class="file-icon">${f.group==='Untracked'?'?':f.change}</span><span><span class="file-name">${esc(parts.at(-1))}</span><span class="file-dir">${esc(parts.slice(0,-1).join('/'))}</span></span><span class="counts">${countHTML(f)}</span></button>`;
+ }).join('');
+ document.querySelectorAll('[data-file]').forEach(button=>button.addEventListener('click',()=>{fileIndex=Number(button.dataset.file);render();document.querySelector(`[data-file="${fileIndex}"]`).focus({preventScroll:true});}));
+ const file=visibleFiles[fileIndex];
+ if(selection==='uncommitted'){comparison={Staged:'HEAD → index',Unstaged:'index → working tree',Untracked:'new file · not tracked by Git'}[file.group];kicker=file.group+' changes';}
+ document.getElementById('detail-head').innerHTML=`<div class="detail-kicker">${esc(kicker)}</div><h2>${esc(heading)}</h2><div class="detail-meta">${esc(meta)}</div><div class="comparison">${esc(comparison)}</div>`;
+ document.getElementById('diff-path').textContent=file.path;
+ document.getElementById('diff-counts').innerHTML=countHTML(file);
+ document.getElementById('diff').innerHTML=`<div class="hunk">@@ -${file.before.length?1:0},${file.before.length} +${file.after.length?1:0},${file.after.length} @@</div>`+linesDiff(file.before,file.after).map(r=>`<div class="code-row ${r.kind}"><span class="line-no">${r.old}</span><span class="line-no">${r.next}</span><span class="sign">${r.kind==='add'?'+':r.kind==='del'?'-':' '}</span><span class="code">${esc(r.text)}</span></div>`).join('');
+ document.getElementById('status').textContent=selection==='uncommitted'?'2 files · 3 entries across staging groups':selection==='all'?'Entire branch, including local edits':'Viewing '+selection+' · working tree unchanged';
+}
+document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener('click',()=>{
+ document.querySelectorAll('[data-page]').forEach(b=>b.setAttribute('aria-selected',b===button));
+ ['preview','intent','references'].forEach(id=>document.getElementById(id).hidden=id!==button.dataset.page);
+}));
+document.getElementById('compact-toggle').addEventListener('click',function(){const on=document.getElementById('app').classList.toggle('compact');this.setAttribute('aria-pressed',on);this.textContent=on?'Show expanded panel':'Show narrow panel';});
+document.querySelector('.page-tabs').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;const buttons=[...document.querySelectorAll('[data-page]')];const current=buttons.indexOf(document.activeElement);if(current<0)return;event.preventDefault();const next=buttons[(current+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length];next.focus();next.click();});
+render();
+</script>
+</body>
+</html>

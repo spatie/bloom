@@ -9,7 +9,8 @@ extension ComposerControls {
         session: Session,
         isFastMode: Bool,
         outputStyle: String,
-        codexContextWindow: Int = CodexContextWindow.modelDefault
+        codexContextWindow: Int = CodexContextWindow.modelDefault,
+        codexFastMode: Bool? = nil
     ) {
         self.init(
             model: session.model,
@@ -22,6 +23,7 @@ extension ComposerControls {
             // Read off the row rather than passed in, so the one caller that has a chat with no
             // worktree cannot forget to say so.
             hasWorktree: session.workspaceID != nil,
+            codexFastMode: codexFastMode,
             interactionMode: session.interactionMode
         )
     }
@@ -32,7 +34,8 @@ extension ComposerControls {
         defaults: ComposerDefaults,
         isFastMode: Bool,
         outputStyle: String,
-        codexContextWindow: Int = CodexContextWindow.modelDefault
+        codexContextWindow: Int = CodexContextWindow.modelDefault,
+        codexFastMode: Bool? = nil
     ) {
         self.init(
             model: defaults.model,
@@ -45,6 +48,7 @@ extension ComposerControls {
             isFastMode: isFastMode,
             outputStyle: outputStyle,
             codexContextWindow: codexContextWindow,
+            codexFastMode: codexFastMode,
             interactionMode: defaults.interactionMode
         )
     }
@@ -52,9 +56,7 @@ extension ComposerControls {
     /// Writes the parts of these choices that a `Session` row cannot hold, and marks the session
     /// settled. The other four go on the row itself, wherever it is being written.
     ///
-    /// All three store nil for their off state rather than a word for it, so a session that was
-    /// never asked and one that was asked and said no read back the same. `AgentRunner` and
-    /// `CodexRunner` treat them the same too, which is what keeps the two ends from disagreeing.
+    /// Codex speed preserves an explicit off value because absence inherits external settings.
     public func store(sessionID: SessionID, in store: Store) async {
         try? await store.saveComposerControls(self, sessionID: sessionID)
     }
@@ -62,6 +64,7 @@ extension ComposerControls {
     func settings(sessionID: SessionID) -> [(String, String?)] {
         [
             (Self.fastModeKey(sessionID: sessionID), isFastMode ? "1" : nil),
+            (CodexSpeed.key(sessionID: sessionID), codexFastMode.map { $0 ? "1" : "0" }),
             (Self.outputStyleKey(sessionID: sessionID), OutputStyle.isDefault(outputStyle) ? nil : outputStyle),
             (Self.contextWindowKey(sessionID: sessionID), CodexContextWindow.stored(codexContextWindow)),
             (Self.defaultsAppliedKey(sessionID: sessionID), "1"),

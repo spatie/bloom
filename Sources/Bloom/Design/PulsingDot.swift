@@ -4,7 +4,8 @@ import BloomCore
 
 /// The dot that says an agent is working, wherever the window says it.
 ///
-/// One implementation for all three: `ActivityDot` in the transcript and on a tab, and
+/// One implementation for both: `ActivityDot` in the transcript (a tab wore it too, until a sweep
+/// through the tab took over saying so; see `BusySweep`), and
 /// `WorkspaceRunningGlyph` at the head of a sidebar row. The sidebar used to draw a pair of
 /// breathing rings instead, and a window that says the same thing in two shapes is a window that
 /// has to be learned twice. `BusyDot` holds the envelope, and this turns it into a layer.

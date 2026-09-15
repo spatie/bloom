@@ -23,6 +23,16 @@ struct SidebarSelectionTests {
         #expect(SidebarSelection.workspace(workspace).subagentID == nil)
     }
 
+    /// A run opened from its call row in the chat is a workspace selection for the same reason,
+    /// and names no roster subagent, because the roster is what has forgotten it.
+    @Test("a run opened from its call carries its workspace and no roster id")
+    func aSubagentCallIsAWorkspaceSelection() {
+        let call = SidebarSelection.subagentCall(workspace, toolUseID: "toolu_1")
+        #expect(call.workspaceID == workspace)
+        #expect(call.subagentID == nil)
+        #expect(call != .subagentCall(workspace, toolUseID: "toolu_2"))
+    }
+
     /// An archived workspace is not a workspace the window can act on, so it is deliberately not
     /// reachable through `workspaceID`. That absence is what makes the inspector hide itself, the
     /// menu items grey and the background refresh skip it, with no extra code anywhere.

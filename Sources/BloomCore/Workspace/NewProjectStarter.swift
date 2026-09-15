@@ -123,6 +123,22 @@ public enum NewProjectStarter {
         return current.isEmpty ? "/" : current
     }
 
+    /// Whether git can actually work in a folder `inspect` found a `.git` in.
+    ///
+    /// `inspect` cannot ask, because it runs on every settled keystroke, so the sheet used to say
+    /// "is a git repository" on the strength of a `.git` alone and Add then refused the same
+    /// folder when `git rev-parse` failed. Asked once per target instead, and folded back in as
+    /// `NewProjectFacts.gitProblem`. A `.git` that git does not recognise, a worktree whose
+    /// parent has gone, is a problem here too: the sheet has already promised a repository.
+    public static func repositoryProblem(at path: String) async -> GitRepositoryProblem? {
+        switch await Git.repositoryAnswer(path) {
+        case .repository: nil
+        case .notARepository:
+            .failed(detail: "there is a .git here, but git does not recognise it as a repository")
+        case .problem(let problem): problem
+        }
+    }
+
     /// The branch the first commit will be on, asked of git rather than asserted.
     ///
     /// The sheet says the branch out loud, because a brand new repository's branch is a choice

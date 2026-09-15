@@ -50,10 +50,10 @@ public enum TerminalCommandMemory {
     /// pane being idle is not what it says. So is an editor or a pager, which is deliberate too:
     /// the strip reports what was there rather than judging what deserves to come back, and the
     /// person reading it is the one who decides.
-    public static func offerable(_ command: String?) -> String? {
+    public static func offerable(_ command: String?, maximumLength: Int = lengthLimit) -> String? {
         guard let command else { return nil }
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.count <= lengthLimit else { return nil }
+        guard !trimmed.isEmpty, trimmed.count <= maximumLength else { return nil }
         guard !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
         else { return nil }
 

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import BloomCore
+import BloomClient
 
 /// The `/command` the draft leads with, drawn as a chip beside the text.
 ///

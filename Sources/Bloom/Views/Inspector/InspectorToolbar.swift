@@ -13,14 +13,19 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
     @Binding var selection: InspectorTab
     var tabs: [InspectorTab]
     var fileCount: Int
+    /// Whether folder grouping means anything for what the list is showing. Off for uncommitted
+    /// changes, where a path can appear twice in two layers and a tree would draw it twice.
+    var allowsGrouping: Bool
     var scopeMenu: ScopeMenu
     var worktreeMenu: WorktreeMenu
 
     init(selection: Binding<InspectorTab>, tabs: [InspectorTab], fileCount: Int,
+         allowsGrouping: Bool = true,
          @ViewBuilder scopeMenu: () -> ScopeMenu, @ViewBuilder worktreeMenu: () -> WorktreeMenu) {
         _selection = selection
         self.tabs = tabs
         self.fileCount = fileCount
+        self.allowsGrouping = allowsGrouping
         self.scopeMenu = scopeMenu()
         self.worktreeMenu = worktreeMenu()
     }
@@ -60,7 +65,7 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
     /// the pane's default width instead of dropping to its pop-up form.
     private var trailing: some View {
         HStack(spacing: Metrics.spacingTight) {
-            if selection == .changes {
+            if selection == .changes || selection == .history {
                 Button {
                     isTree.toggle()
                 } label: {
@@ -76,7 +81,7 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled((fileCount == 0))
+                .disabled(fileCount == 0 || !allowsGrouping)
                 .accessibilityLabel("Group changes by folder")
                 .accessibilityAddTraits(isTree ? .isSelected : [])
                 .help(
@@ -85,32 +90,27 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
                         : "Group the changed files by folder"
                 )
 
-                // What the list is measured from. On this tab only, because it is the only pane
-                // the scope means anything for: the file tree is the whole worktree and the checks
-                // list is GitHub's. Which scope is in force is said by the band under this row
-                // rather than in it, for the width reason `DiffScopeBand` spells out.
-                Menu {
-                    scopeMenu
-                } label: {
-                    Label(
-                        "What the changes are measured from",
-                        systemImage: "line.3.horizontal.decrease.circle"
-                    )
+                // What the list is measured from, for a pane that has nowhere else to say it.
+                // A local workspace carries its scope menu in `ChangesHistoryList` under this row
+                // instead, and hands `EmptyView` over, which is what this asks about: a `Menu`
+                // wrapping nothing still draws a button, so the control has to be left out rather
+                // than left empty.
+                if ScopeMenu.self != EmptyView.self {
+                    Menu {
+                        scopeMenu
+                    } label: {
+                        Label(
+                            "What the changes are measured from",
+                            systemImage: "line.3.horizontal.decrease.circle"
+                        )
+                    }
+                    .labelStyle(.iconOnly)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("What the changes are measured from")
                 }
-                .labelStyle(.iconOnly)
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .controlSize(.small)
-                .fixedSize()
-                .help("What the changes are measured from")
-                // One glyph, in one colour, whichever scope is in force. It carried
-                // `.foregroundStyle(Palette.accent)` while narrowed for a while; photographed in
-                // both states the two glyphs came out at exactly the same grey, because a
-                // borderless `Menu` is an `NSPopUpButton` and a foreground style set out here does
-                // not reach the image it draws. `.symbolVariant(.fill)` does reach it, and a
-                // filled disc in a row of outlines is louder than this control has any business
-                // being. The band under this row is what says the list is narrowed, and it says it
-                // in a sentence rather than by a shade of a glyph nobody would notice.
             }
 
             // No Refresh. The list keeps itself current: `AppModel`'s poll re-reads the selected
@@ -155,7 +155,7 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
                     selection = tab
                 } label: {
                     Text(title(for: tab))
-                        .font(Typo.label)
+                        .font(isSelected ? Typo.labelEmphasis : Typo.label)
                         .foregroundStyle(
                             isSelected ? Palette.textPrimary : Palette.textSecondary
                         )
@@ -177,6 +177,11 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
                                         )
                                 }
                                 .padding(.bottom, Metrics.outline)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle()
+                                        .fill(Palette.controlAccent)
+                                        .frame(height: Metrics.spacingTight)
+                                }
                                 .matchedGeometryEffect(
                                     id: "inspector.tab.selection",
                                     in: tabSelection
@@ -206,6 +211,7 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(tab == .history ? "Commit history" : title(for: tab))
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
@@ -220,17 +226,21 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
     /// one file inside it, and the field holding a word is what says the list below is showing
     /// fewer.
     private func title(for tab: InspectorTab) -> String {
-        guard tab == .changes, !(fileCount == 0) else { return tab.rawValue }
+        guard tab == .changes, selection != .history, fileCount > 0 else { return tab.rawValue }
         return "\(tab.rawValue) (\(fileCount))"
     }
 
 }
 
-extension InspectorToolbar where ScopeMenu == DiffScopeMenuItems, WorktreeMenu == WorktreeMenuItems {
+extension InspectorToolbar where ScopeMenu == EmptyView, WorktreeMenu == WorktreeMenuItems {
     init(model: WorkspaceModel) {
+        // Counted by path rather than by row: uncommitted changes list a file once per layer, and
+        // the tab would say four for two files staged and edited again.
         self.init(selection: Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0 }),
-            tabs: model.availableInspectorTabs, fileCount: model.changedFiles.count) {
-            DiffScopeMenuItems(model: model)
+            tabs: model.availableInspectorTabs,
+            fileCount: Set(model.changedFiles.map(\.path)).count,
+            allowsGrouping: model.diffScope != .uncommitted) {
+            EmptyView()
         } worktreeMenu: {
             WorktreeMenuItems(workspace: model.workspace, pullRequest: model.pullRequest)
         }

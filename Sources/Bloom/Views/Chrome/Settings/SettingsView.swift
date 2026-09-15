@@ -152,6 +152,8 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            OpenInSettingsSection()
+
             UpdateSettingsSection()
             InstallPingSettingsSection()
             CrashReportingSettingsSection()

@@ -48,7 +48,6 @@ struct ScriptEditor: View {
             language: language,
             colorScheme: colorScheme,
             isEditable: isEditable,
-            ground: Palette.surfaceSunken,
             placeholder: placeholder
         )
         .frame(height: height)

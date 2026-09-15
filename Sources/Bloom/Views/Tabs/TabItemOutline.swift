@@ -2,16 +2,14 @@ import SwiftUI
 
 /// The line around a selected tab.
 ///
-/// It closes the selected tab on all four sides. The bottom edge is deliberate: it keeps the tab
-/// visually attached to the strip instead of letting its white fill bleed into the pane below.
+/// The bottom stays open so the selected tab joins the pane it represents.
 ///
 /// Insettable so it can be drawn with `strokeBorder`. A centred `stroke` puts half its width
 /// outside the tab, and the strip sits directly under a unified toolbar, so that half would be
 /// painted into the toolbar's inset rather than onto the tab.
 struct TabItemOutline: InsettableShape {
     var radius: CGFloat
-    /// Whether the leading side is left undrawn, for a tab whose leading edge IS the edge of the
-    /// pane. See `TabItemView.isAtPaneEdge`, which is where the measurement is written down.
+    /// Leave the leading side undrawn when the surrounding pane already supplies that edge.
     var skipsLeadingEdge = false
     var inset: CGFloat = 0
 
@@ -39,10 +37,6 @@ struct TabItemOutline: InsettableShape {
             radius: radius
         )
         path.addLine(to: CGPoint(x: box.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: box.minX, y: rect.maxY))
-        if !skipsLeadingEdge {
-            path.closeSubpath()
-        }
         return path
     }
 

@@ -21,17 +21,24 @@ struct TranscriptView: View {
     /// back to. See `TranscriptPaneMemory`.
     private let memory: TranscriptPaneMemory?
 
+    /// False where the transcript sits on glass, which is the side conversation card: an opaque
+    /// surface there turned the card into glass only at its header and footer, with a flat grey
+    /// slab between them.
+    private let drawsBackground: Bool
+
     init(
         transcript: TranscriptModel,
         isRunningSetup: Bool = false,
         emptyState: TranscriptEmptyState? = nil,
         memory: TranscriptPaneMemory? = nil,
+        drawsBackground: Bool = true,
         onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         self.transcript = transcript
         self.isRunningSetup = isRunningSetup
         self.emptyState = emptyState
         self.memory = memory
+        self.drawsBackground = drawsBackground
         self.onScrolledUpChange = onScrolledUpChange
     }
 
@@ -42,12 +49,14 @@ struct TranscriptView: View {
         isRunningSetup: Bool = false,
         emptyState: TranscriptEmptyState? = nil,
         memory: TranscriptPaneMemory? = nil,
+        drawsBackground: Bool = true,
         onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         self.transcript = transcript
         self.isRunningSetup = isRunningSetup
         self.emptyState = emptyState
         self.memory = memory
+        self.drawsBackground = drawsBackground
         self.onScrolledUpChange = onScrolledUpChange
     }
 
@@ -65,6 +74,6 @@ struct TranscriptView: View {
                 EmptyTranscriptView()
             }
         }
-        .background(Palette.surface)
+        .background(drawsBackground ? Palette.surface : .clear)
     }
 }

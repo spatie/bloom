@@ -64,7 +64,7 @@ struct ServerSetupAccountsView: View {
                     guard let connection = model.accountConnection else { return }
                     credentialImport = ServerCredentialImportModel(connection: connection)
                 }
-                .buttonStyle(.link).font(Typo.caption)
+                .linkButton().font(Typo.caption)
                 .disabled(model.isBusy || model.accountConnection == nil)
             }
             if let loginProblem { Text(loginProblem).font(Typo.caption).foregroundStyle(Palette.warning).textSelection(.enabled) }

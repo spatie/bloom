@@ -319,6 +319,9 @@ id_type_allowed_names=(
 # The remaining stored `String` ids, each one a deliberate decision. This list
 # should only ever get shorter.
 id_type_allowed_lines=(
+  'Sources/BloomCore/Presentation/CodeScheme.swift'              # a portable colour scheme key
+  'Sources/BloomCore/Presentation/TerminalScheme.swift'          # a portable colour scheme key
+  'Sources/BloomCore/Presentation/ColourTheme.swift'             # a theme definition key, not a database row
   'Sources/BloomCore/Presentation/HomeList.swift'                  # a date bucket key, not a row
   'Sources/BloomCore/Presentation/ChatFontCatalogue.swift'          # a font family, which macOS names
   'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings
@@ -338,7 +341,6 @@ id_type_allowed_lines=(
 # property so adding another bare internal id in the same file still fails.
 id_type_allowed_properties=(
   'Sources/BloomCore/Agent/Delivery.swift:providerTurnID'             # the provider's accepted turn, used for recovery
-  'Sources/BloomCore/Transcript/TurnCheckpoint.swift:providerTurnID' # the same provider turn correlated with a snapshot
   'Sources/BloomCore/Agent/PlanArtefact.swift:sourceID'               # the provider's plan item or tool-use token
 )
 # A stored property whose name ends in ID or Ids and whose type is a bare
@@ -400,6 +402,22 @@ while IFS= read -r hit; do
   fi
 done <<EOF
 $(git grep --untracked -n -I -E 'await (Git|Shell)\.' -- 'Sources/Bloom/Views/*' || true)
+EOF
+
+echo "==> a link button goes through linkButton"
+# `.buttonStyle(.link)` draws the system link blue and ignores `.tint`, which was
+# measured rather than assumed: "Show output" shipped tinted and was reported blue.
+# `.linkButton()` in Theme.swift applies the ink the one way that works, so it is
+# the only door. Its own comment said the next call site would be the one missed,
+# and two were: "Show output" and the brief toggle in a subagent pane.
+while IFS= read -r hit; do
+  [ -n "$hit" ] || continue
+  file="${hit%%:*}"
+  [ "$file" = 'Sources/Bloom/Design/Theme.swift' ] && continue
+  echo "$hit" | show
+  report "$file uses .buttonStyle(.link), which draws system blue however it is tinted. Use .linkButton(), or .linkButton(ink) for another colour."
+done <<EOF
+$(git grep --untracked -n -I -F '.buttonStyle(.link)' -- 'Sources/Bloom/*' || true)
 EOF
 
 echo "==> a catch says something"

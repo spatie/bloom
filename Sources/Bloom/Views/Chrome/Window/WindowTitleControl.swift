@@ -105,8 +105,10 @@ struct WindowTitleControl: View {
             } else if let workspace = app.selectedWorkspace {
                 label(workspace)
             } else {
-                // Home. There is nothing to rename, so it is text and only text.
-                titleText.frame(maxWidth: Self.maximumWidth, alignment: .leading)
+                // Home, or Ask Bloom. There is nothing to rename, so it is text and only text.
+                titleText
+                    .accessibilityValue(isBusy ? "Running" : "")
+                    .frame(maxWidth: Self.maximumWidth, alignment: .leading)
             }
         }
         // Moving the selection closes the field from underneath, which is an ending like any
@@ -124,10 +126,19 @@ struct WindowTitleControl: View {
     private var titleText: some View {
         // `WindowTitleText` rather than the workspace's name, so a labelled build keeps its mark.
         Text(WindowTitleText.shared.text)
-            .font(Typo.title)
+            .font(Typo.heading)
             .foregroundStyle(Palette.textPrimary)
             .lineLimit(1)
             .truncationMode(.tail)
+    }
+
+    /// Whether the column showing this selection has a turn running and no strip to say so.
+    ///
+    /// Drawn along the column's top edge (`ColumnBusySignal`), which is decoration and hidden, so
+    /// the title is where VoiceOver hears it: a busy tab says "Running" itself, and with no strip
+    /// the title is the name of the one tab there is.
+    private var isBusy: Bool {
+        WindowTitleText.shared.busySelection == app.selection
     }
 
     private func label(_ workspace: Workspace) -> some View {
@@ -141,7 +152,7 @@ struct WindowTitleControl: View {
             }
             .help("Double-click to rename")
             .accessibilityLabel("Workspace name")
-            .accessibilityValue(workspace.name)
+            .accessibilityValue(isBusy ? "\(workspace.name), running" : workspace.name)
             // Outside all of the above, so the run past a short name is bar rather than name.
             .frame(maxWidth: Self.maximumWidth, alignment: .leading)
     }
@@ -154,12 +165,12 @@ struct WindowTitleControl: View {
             // moving when the label becomes a field, and it is what lets the field grow as you
             // type: a plain `TextField` has no width of its own and would take everything offered.
             Text(draft)
-                .font(Typo.title)
+                .font(Typo.heading)
                 .hidden()
 
             TextField("Workspace name", text: $draft)
                 .textFieldStyle(.plain)
-                .font(Typo.title)
+                .font(Typo.heading)
                 // Said rather than inherited, for the reason the sidebar's field says it: an
                 // editing field paints its own light background while focused.
                 .foregroundStyle(Palette.textPrimary)

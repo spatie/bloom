@@ -28,7 +28,11 @@ enum TerminalPaneMenu {
         let menu = OwningMenu(target: target)
         menu.autoenablesItems = false
 
-        let addToChat = NSMenuItem(title: "Add to Chat", action: #selector(ActionTarget.addToChat), keyEquivalent: "")
+        // Cmd+L is drawn here as a label, as the split keys are below: the keystroke is read in
+        // `BloomTerminalView.performKeyEquivalent`, and it is the key the menu bar's Add to Chat
+        // carries everywhere else in the window.
+        let addToChat = NSMenuItem(title: "Add to Chat", action: #selector(ActionTarget.addToChat), keyEquivalent: "l")
+        addToChat.keyEquivalentModifierMask = .command
         addToChat.target = target
         addToChat.isEnabled = onAddToChat != nil
         menu.addItem(addToChat)

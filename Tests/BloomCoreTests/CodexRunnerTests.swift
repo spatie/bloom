@@ -71,14 +71,10 @@ private func scriptedBox(onWrite: @escaping @Sendable (String) -> Void = { _ in 
 private func eventually(
     _ description: String,
     within seconds: Double = 2,
+    sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @Sendable () async -> Bool
 ) async {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
-    while ContinuousClock.now < deadline {
-        if await condition() { return }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    Issue.record("timed out waiting for \(description)")
+    await waitUntil(Comment(rawValue: description), within: .seconds(seconds), sourceLocation: sourceLocation, condition)
 }
 
 // MARK: - Tests
@@ -417,6 +413,41 @@ private func eventually(
         let json = try #require(JSONValue.parse(row.payload))
         #expect(json["type"]?.stringValue == "user")
         #expect(json["message"]?["content"]?[0]?["text"]?.stringValue == "write the tests first")
+    }
+
+    @Test(arguments: ["0", "1"], [InteractionMode.build, .plan])
+    func sendsExplicitCodexSpeedChoice(value: String, mode: InteractionMode) async throws {
+        let store = try Store(path: ":memory:")
+        let (original, _) = try await makeCodexSession(store)
+        var session = original
+        session.interactionMode = mode
+        try await store.setSetting("session.\(session.id).codexFastMode", value)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("hello")
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        #expect(turn["params"]?["serviceTier"]?.stringValue == (value == "1" ? "priority" : "default"))
+        #expect(turn["params"]?["collaborationMode"]?["mode"]?.stringValue == (mode == .plan ? "plan" : "default"))
+        runner.cancelNow()
+        try await store.setSetting("session.\(session.id).codexFastMode", value == "1" ? "0" : "1")
+        try await runner.send("next turn")
+        let turns = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/start" }
+        #expect(turns.count == 2)
+        #expect(turns.last?["params"]?["serviceTier"]?.stringValue == (value == "1" ? "default" : "priority"))
+        #expect(turns.last?["params"]?["collaborationMode"]?["mode"]?.stringValue == (mode == .plan ? "plan" : "default"))
+        await runner.shutdown()
+    }
+
+    @Test func oldClaudeSpeedPreferenceDoesNotOverrideCodexConfiguration() async throws {
+        let store = try Store(path: ":memory:")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(ComposerControls.fastModeKey(sessionID: session.id), "1")
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("hello")
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        #expect(turn["params"]?["serviceTier"] == nil)
+        await runner.shutdown()
     }
 
     /// Model, effort, approval policy and sandbox all travel with the turn, which is what lets a

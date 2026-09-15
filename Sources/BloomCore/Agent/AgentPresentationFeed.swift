@@ -242,7 +242,9 @@ public final class AgentPresentationFeed: Sendable {
     public var lastActivity: ContinuousClock.Instant { state.withLock { $0.lastActivity } }
     public func noteActivity() { state.withLock { $0.lastActivity = .now } }
 
-    public var hasBackgroundWork: Bool { state.withLock { $0.subagents.isWorking } }
+    /// Commands included, because this is what keeps a provider from being evicted, and eviction
+    /// stops a dev server along with the process. See `SubagentRoster.isAnythingRunning`.
+    public var hasBackgroundWork: Bool { state.withLock { $0.subagents.isAnythingRunning } }
 
     public func finish() {
         let targets = state.withLock { value in

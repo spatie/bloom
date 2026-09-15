@@ -56,6 +56,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// Absolute, and read at fork time rather than trusted: a tab outlives the folder under it.
     /// See `FolderTerminal.launchDirectory`.
     var directory: String = ""
+    var agentSessionID: SessionID?
     /// Review only: whether this tab stays on the file it was opened with.
     ///
     /// **The workspace's review tab is one tab that walks over many files, and that is still what
@@ -78,6 +79,18 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     var showsAllFiles: Bool
     /// A repeated click on the same file still asks the continuous review to scroll back to it.
     var reviewNavigationRevision: Int = 0
+    /// Terminal only: the run script this tab was opened for, by its table name under
+    /// `scripts.run`, or nil for an ordinary shell.
+    ///
+    /// The id and never the command. The command is read out of the settings file each time the
+    /// script is run, so a tab restored after somebody changed `yarn dev` runs what the file says
+    /// now rather than what it said when the tab was made. What choosing the script again does
+    /// with this is `RunScriptPick`.
+    ///
+    /// Here, in user defaults, rather than in a column on `terminal_tabs`: that table is the
+    /// bottom panel's, the migration in `CenterTabStore.adoptTerminalTabs` drains it, and nothing
+    /// has written a row to it since. Decoded as nil for every tab written before this existed.
+    var runScriptID: String?
 
     /// The glyph that tells the kinds apart in the strip. Chats carry one too now, and the whole
     /// vocabulary is `PaneGlyph`.
@@ -117,10 +130,12 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
         pageTitle = try container.decodeIfPresent(String.self, forKey: .pageTitle) ?? ""
         isNamed = try container.decodeIfPresent(Bool.self, forKey: .isNamed) ?? false
+        agentSessionID = try container.decodeIfPresent(SessionID.self, forKey: .agentSessionID)
         directory = try container.decodeIfPresent(String.self, forKey: .directory) ?? ""
         // False for every tab written before this existed, which is what all of them are: the one
         // shared review. See `isPinnedToPath`.
         isPinnedToPath = try container.decodeIfPresent(Bool.self, forKey: .isPinnedToPath) ?? false
+        runScriptID = try container.decodeIfPresent(String.self, forKey: .runScriptID)
         showsAllFiles = try container.decodeIfPresent(Bool.self, forKey: .showsAllFiles)
             ?? (kind == .review && !isPinnedToPath)
     }
@@ -128,8 +143,10 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     init(
         id: String = newID(), workspaceID: WorkspaceID, kind: Kind, title: String,
         url: String = "", path: String = "", pageTitle: String = "", isNamed: Bool = false,
-        directory: String = "", isPinnedToPath: Bool = false
+        directory: String = "", isPinnedToPath: Bool = false, agentSessionID: SessionID? = nil,
+        runScriptID: String? = nil
     ) {
+        self.runScriptID = runScriptID
         self.isPinnedToPath = isPinnedToPath
         self.showsAllFiles = kind == .review && !isPinnedToPath
         self.id = id
@@ -141,5 +158,6 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         self.pageTitle = pageTitle
         self.isNamed = isNamed
         self.directory = directory
+        self.agentSessionID = agentSessionID
     }
 }

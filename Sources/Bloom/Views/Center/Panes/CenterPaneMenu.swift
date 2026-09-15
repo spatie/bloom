@@ -53,7 +53,7 @@ struct CenterPaneMenu: View {
 /// submenu's contents can be got at: AppKit shows one menu at a time, so a submenu cannot be
 /// opened beside the item it hangs off from inside the process. See `MenuProbe`.
 ///
-/// The nouns and the glyphs come from `PaneKind`, which is where the strip's `+` menu takes its
+/// The nouns and the glyphs come from `PaneKind`, which is where the title bar's `+` menu takes its
 /// own from, so the two lists cannot end up calling the same thing by two names.
 struct PaneKindItems: View {
     var pick: @MainActor (PaneKind) -> Void

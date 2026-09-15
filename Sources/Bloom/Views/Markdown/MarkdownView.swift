@@ -95,6 +95,7 @@ enum MarkdownPrime {
 public struct MarkdownView: View {
     private let text: String
     private let isStreaming: Bool
+    @State private var selection = TranscriptTextSelection()
 
     /// - Parameter isStreaming: whether this text is still being written. It changes nothing about
     ///   what is drawn, only which cache the parse goes through. See
@@ -117,6 +118,9 @@ public struct MarkdownView: View {
             ? MarkdownParseCache.streamingParsed(for: text)
             : MarkdownParseCache.parsed(for: text)
         MarkdownBlocksView(blocks: parsed.blocks)
+            .environment(\.transcriptTextSelection, selection)
+            .onAppear { selection.source = text }
+            .onChange(of: text) { _, value in selection.source = value }
             .environment(\.markdownIsStreaming, isStreaming)
             .opensTranscriptLinks()
             .transcriptLinkMenu(parsed.addresses)
@@ -186,12 +190,14 @@ private struct MarkdownBlocksView: View {
     }
 
     var body: some View {
-        BloomMarkdownBlocks(blocks: blocks, style: sharedStyle, spacing: lineSpacingOverride) { text, role, colour, spacing in
+        BloomMarkdownBlocks(
+            blocks: blocks, style: sharedStyle, spacing: lineSpacingOverride
+        ) { text, role, colour, spacing, copy in
             if let spacing {
-                inlineText(text, rung: Self.font(for: role), color: colour, spacing: spacing)
+                inlineText(text, rung: Self.font(for: role), color: colour, spacing: spacing, copy: copy)
                     .lineSpacing(spacing)
             } else {
-                inlineText(text, rung: Self.font(for: role), color: colour)
+                inlineText(text, rung: Self.font(for: role), color: colour, copy: copy)
             }
         } code: { code, language in
             CodeBlockView(code: code, language: language)
@@ -227,60 +233,31 @@ private struct MarkdownBlocksView: View {
         }
     }
 
-    /// An attributed string needs a real `Font`, so the rung is resolved here rather than left to
-    /// the `.font(ScaledFont)` modifier the rest of the app leans on. The rung is carried this far
-    /// rather than a `Font`, because the code face has to be derived from the same rung: a span of
-    /// code takes its size from the run it sits in, not from a rung of its own.
-    /// One run of inline markdown, drawn by whichever of the two renderers this run needs.
-    ///
-    /// **`Text` unless there is a link in it.** An `NSTextView` is what makes a link behave like
-    /// one, and it is also the more expensive of the two: it holds a layout manager and a text
-    /// storage, and handing it a new string relays the whole run out. Most paragraphs in most
-    /// answers hold no address at all, and those keep the renderer they have always had, with the
-    /// attributed string cache in front of it.
-    ///
-    /// **And never while the answer is still arriving.** `4088ecd` established that a streamed
-    /// answer is re-rendered on every delta, and rebuilding an attributed string and relaying out
-    /// a text view per token is quadratic over the length of the answer. A link is not pressable
-    /// for the second or two its sentence is being written, and it becomes pressable the moment
-    /// the turn settles, which nobody will ever notice.
-    @ViewBuilder
+    /// Every run joins the answer's native selection scope, including prose without links.
     private func inlineText(
-        _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil
+        _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil,
+        copy: BloomMarkdownCopy
     ) -> some View {
-        let font = rung.resolved(scale: fontScale, face: chatFont)
-        if !isStreaming, InlineNSAttributes.hasLink(inline) {
-            TranscriptTextView(
-                text: InlineNSAttributes.make(
-                    inline,
-                    font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
-                    code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
-                    color: NSColor(color),
-                    // The block's leading, not this rung's. A paragraph is led once, by the
-                    // caller's `.proseLeading()`, and the `Text` branch below inherits that
-                    // number through the environment; asking for a heading's own here would set
-                    // a heading with a link in it differently from the heading beside it and
-                    // change what the row measures at.
-                    lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
-                        Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
-                    )
-                ),
-                linkColor: Palette.linkNSColor,
-                selectionColor: .selectedTextBackgroundColor,
-                actions: linkActions
-            )
-        } else {
-            Text(InlineAttributes.make(
-                inline,
-                font: font,
-                code: rung.monospacedCompanion(scale: fontScale, face: chatFont),
-                color: color
-            ))
-            .font(font)
-            .foregroundStyle(color)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-        }
+        let text = InlineNSTextCache.make(
+            inline,
+            font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
+            code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
+            color: NSColor(color),
+            lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
+                Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
+            ),
+            isStreaming: isStreaming
+        )
+        let baseline = TranscriptTextView.firstBaseline(of: text)
+        return TranscriptTextView(
+            text: text,
+            linkColor: Palette.linkNSColor,
+            copyPrefix: copy.prefix,
+            copySeparatorBefore: copy.separatorBefore,
+            actions: linkActions
+        )
+        // Native text views do not supply a SwiftUI baseline for the list marker beside them.
+        .alignmentGuide(.firstTextBaseline) { _ in baseline }
     }
 
 }

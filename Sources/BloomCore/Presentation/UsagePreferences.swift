@@ -15,6 +15,10 @@ public enum UsagePreferenceKey {
     public static let showsUsage = "menuBar.usage.showsFigures"
     /// Whether a cup is drawn while the Mac is being kept awake.
     public static let showsCup = "menuBar.usage.showsCup"
+    /// Whether the strip draws the raised hand and how many agents are waiting on a person.
+    public static let showsWaitingCount = "menuBar.showsWaitingCount"
+    /// Whether the strip draws the envelope and how many finished results are unread.
+    public static let showsUnreadCount = "menuBar.showsUnreadCount"
 }
 
 /// Whether a meter reads as what is left or as what has gone.
