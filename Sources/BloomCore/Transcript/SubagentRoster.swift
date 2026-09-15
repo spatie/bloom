@@ -213,9 +213,28 @@ public struct SubagentRoster: Sendable, Hashable {
         return self[id]
     }
 
-    /// Whether any subagent is still working, which is what a workspace row would ask if it wanted
-    /// to summarise the children it is drawing.
-    public var isWorking: Bool { subagents.contains { $0.state == .running } }
+    /// Whether an agent under this chat is still working, which is what every "is the agent busy"
+    /// mark reads: the sidebar, the tab strip, the archive's hazards and the quit confirmation.
+    ///
+    /// **Agents only, and a backgrounded shell command is not one.** This used to count every
+    /// running row, and an agent that started two `serve` processes and ended its turn left the
+    /// workspace pulsing for as long as the servers ran, which is for ever, and made archiving it
+    /// ask whether to interrupt an agent that had nothing left to interrupt. A command is still
+    /// named under the last turn's footer, see `BackgroundWork`, and it is still stopped with the
+    /// agent's process group; it just is not the agent working. An unknown `task_type` reads as
+    /// an agent, see `SubagentKind`, so the mistake this can make is the busy one.
+    public var isWorking: Bool { subagents.contains { $0.kind == .agent && $0.state == .running } }
+
+    /// Whether anything is still running, commands included. What idle eviction asks, and not
+    /// `isWorking`: evicting a provider signals its process group, so an idle agent with a dev
+    /// server in the background would take the server with it.
+    public var isAnythingRunning: Bool { subagents.contains { $0.state == .running } }
+
+    /// The backgrounded shell commands still running, in spawn order. What an archive stops
+    /// without asking, and says it stopped once it has.
+    public var runningCommands: [Subagent] {
+        subagents.filter { $0.kind == .command && $0.state == .running }
+    }
 
     /// The next turn has started, so the last turn's FINISHED children go, rows and all. The
     /// backstop under `SubagentRetention`, and the only thing that clears a failure.
