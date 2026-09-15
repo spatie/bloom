@@ -194,6 +194,27 @@ import Foundation
         #expect(!roster.isWorking)
         #expect(roster.refusals == 0)
     }
+
+    /// Two `serve` processes left running kept a finished workspace pulsing and unarchivable.
+    @Test func aBackgroundCommandIsNotTheAgentWorking() {
+        var roster = SubagentRoster()
+        roster.apply(.started(SubagentStart(id: SubagentID("serve"), description: "Serve the app", taskType: "local_bash")))
+        #expect(!roster.isWorking)
+        // Still running for idle eviction, which would otherwise kill the server with the process.
+        #expect(roster.isAnythingRunning)
+        #expect(roster.runningCommands.map(\.id) == [SubagentID("serve")])
+
+        roster.apply(.started(SubagentStart(id: SubagentID("audit"), description: "Audit", taskType: "local_agent")))
+        #expect(roster.isWorking)
+        #expect(roster.runningCommands.map(\.id) == [SubagentID("serve")])
+    }
+
+    @Test func anUnknownTaskTypeStillCountsAsWorking() {
+        var roster = SubagentRoster()
+        roster.apply(.started(SubagentStart(id: SubagentID("new"), taskType: "remote_something")))
+        #expect(roster.isWorking)
+        #expect(roster.runningCommands.isEmpty)
+    }
 }
 
 // MARK: - The clearing rule

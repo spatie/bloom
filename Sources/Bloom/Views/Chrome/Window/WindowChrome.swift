@@ -24,8 +24,9 @@ struct WindowChrome: ViewModifier {
 
     private func apply() {
         guard let window else { return }
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
-        window.backgroundColor = Palette.sidebarNSColor
         // AppKit's own title text, off. `WindowTitleControl` draws it as a toolbar item instead,
         // so that a double click on the NAME can start a rename without taking the double click on
         // the BAR that Desktop & Dock has already spent on Zoom or Minimise.

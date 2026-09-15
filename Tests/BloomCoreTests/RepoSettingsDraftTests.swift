@@ -15,6 +15,24 @@ struct RepoSettingsDraftTests {
         #expect(RepoSettingsDraft(settings).edits(comparedTo: settings).isEmpty)
     }
 
+    /// The window has no field for either, so a draft that dropped them would differ from the file
+    /// the moment it opened and take them out on the next Save.
+    @Test("a run script's icon and autostart are carried through the draft untouched")
+    func runScriptExtrasAreCarried() {
+        var settings = RepoSettings()
+        settings.runScripts = [
+            RunScript(id: "vite", name: "Vite", command: "yarn dev", icon: "bolt", autostart: true),
+        ]
+
+        var draft = RepoSettingsDraft(settings)
+        #expect(draft.edits(comparedTo: settings).isEmpty)
+
+        draft.runScripts[0].command = "yarn dev --host"
+        #expect(draft.resolvedRunScripts == [
+            RunScript(id: "vite", name: "Vite", command: "yarn dev --host", icon: "bolt", autostart: true),
+        ])
+    }
+
     /// TOML's multi-line forms keep the newline before their closing delimiter, so a script comes
     /// back one newline longer than it went in. Without trimming, the window would claim unsaved
     /// changes the moment it reopened, forever.

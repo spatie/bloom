@@ -23,18 +23,15 @@ public enum TabSet {
     /// it. The nesting under a workspace row is what says an agent belongs to that worktree; a tab
     /// says nothing about who started what. See `Crew` and `SidebarSelection.crew`.
     ///
-    /// Taken here rather than left to each caller, because "a chat with a parent is not a tab" is
-    /// the same rule as "conversations first and tools after them" and both belong in one file.
+    /// Kept with the other rules that decide which content gets a tab.
     public static func tabbable(_ sessions: [Session]) -> [SessionID] {
         sessions.filter { $0.parentSessionID == nil && $0.sideConversationParentID == nil }.map(\.id)
     }
 
     /// The strip, left to right.
     ///
-    /// Two runs, conversations and then tools. Worth keeping exactly as it was: the conversations
-    /// are what the app is for, and the shells and pages a workspace collects sit after them
-    /// rather than shuffling through them. Each run keeps the order it was handed, so a dragged
-    /// tool tab and an archived session both read straight through, and filtering never reorders.
+    /// The legacy order used when seeding a missing strip record. `StripOrder` preserves the
+    /// opening order across both kinds once the workspace has a record.
     ///
     /// `claimed` is every content living as a pane of some **other** tab. Other is load bearing:
     /// one chat can sit in two panes of one tab, because a transcript renders twice happily, and a

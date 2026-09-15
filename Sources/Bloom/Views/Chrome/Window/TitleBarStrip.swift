@@ -30,9 +30,8 @@ import BloomCore
 /// travels rather than jumps.** The toolbar gets what the trailing accessory leaves it, and
 /// `.searchable`'s `NSSearchToolbarItem` was packed against the end of it by
 /// `BloomWindowToolbar`'s flexible spacer, so a frame set in one step moved the field 379 points
-/// on one frame. The field is a panel now and there is nothing left in the toolbar for the
-/// accessory to drag, but the travelling stays: what it is really for is the band, which has to
-/// end exactly where the pane under it ends on every frame of the slide. See
+/// on one frame. Search is a button now, beside the inspector toggle in the native toolbar.
+/// Both follow the accessory as it keeps the band above its pane throughout the slide. See
 /// `TitleBarStripController.resize` and `InspectorSlide`.
 @MainActor
 @Observable
@@ -63,12 +62,6 @@ final class InspectorGeometry {
     /// nobody can see.
     private(set) var isVisible = false
 
-    /// Whether the title bar needs to reserve the inspector toggle's slot.
-    ///
-    /// A closed inspector has a width of zero, but its button must remain available to open it.
-    /// Home and Search have no workspace inspector, so they reserve no empty slot.
-    private(set) var hasWorkspace = false
-
     /// Called when the pane's width moves, and told whether the move is the column opening or
     /// collapsing rather than a divider drag, a window resize or a launch.
     ///
@@ -87,12 +80,6 @@ final class InspectorGeometry {
         width = value
         if value > 1 { bandWidth = value }
         onChange?(sliding)
-    }
-
-    func setWorkspaceAvailable(_ available: Bool) {
-        guard hasWorkspace != available else { return }
-        hasWorkspace = available
-        onChange?(false)
     }
 
     /// Said by the accessory as it starts to open and again once it has finished closing. See
@@ -154,57 +141,8 @@ struct TitleBarStrip: View {
 
     private var inspector: InspectorGeometry { .shared }
 
-    /// What the inspector's toggle keeps on its trailing side, which is the window's own edge
-    /// whenever the inspector is closed.
-    ///
-    /// The owner's report was that the button "staat ook precies te dicht tegen de window border",
-    /// and it was: a title bar accessory laid out `.trailing` is flush with the window, measured
-    /// rather than assumed. In an offscreen 1440 point window an accessory asked for 32 points and
-    /// one asked for 412 both came back at `maxX` 1440, a gap of zero. The toggle is a 32 point
-    /// slot with its glyph centred and its hover plate inset by `Metrics.spacingTight`, so the
-    /// plate stopped two points short of the window border and the glyph about eight, hard against
-    /// the rounded corner.
-    ///
-    /// Ten, because that is what the platform gives the last item in a toolbar. Same window, same
-    /// pass, a trailing `NSToolbarItem` holding a 32 point view came back at x=1398: `maxX` 1430
-    /// in a 1440 point window. So the toggle now stops where the sidebar toggle at the other end
-    /// of the bar would stop, rather than at a number chosen for looking about right.
-    ///
-    /// It is on the controls rather than on the strip, and it is constant rather than
-    /// conditional, for the same reason: `PullRequestBar` is the heading of the pane below it and
-    /// has to end exactly where that pane ends, so the gap goes between the two and the accessory
-    /// is asked for these ten points on top of the pane's width in every state. Conditional on the
-    /// band being there, it would arrive as a ten point jump halfway through the inspector's
-    /// slide.
-    static let trailingInset: CGFloat = 10
-
     var body: some View {
         HStack(spacing: 0) {
-            // The window's controls: the search, which used to be 206 points of glass at the
-            // other end of the toolbar, and the inspector's toggle. On one 32 point rhythm, so
-            // the trailing end of the bar is two small controls rather than a capsule and a
-            // glyph. See `SearchToolbarButton`.
-            //
-            // See `trailingInset` for the clearance. It is on the pair rather than on either of
-            // them, because which one ends up last depends on whether there is a workspace, and
-            // on the pair rather than on the strip, because the band beside them has to keep the
-            // window's edge.
-            HStack(spacing: 0) {
-                SearchToolbarButton {
-                    SearchPanelModel.shared.open(app: app)
-                }
-
-                if inspector.hasWorkspace {
-                    WindowPaneToggle(
-                        edge: .trailing,
-                        isVisible: app.isInspectorVisible
-                    ) {
-                        app.isInspectorVisible.toggle()
-                    }
-                }
-            }
-            .padding(.trailing, Self.trailingInset)
-
             if let model = shown, inspector.isVisible {
                 PullRequestBar(model: model)
                     // As wide as the pane below it, so the band ends where the pane does and the
@@ -435,16 +373,7 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
     /// slide.
     private func resize(sliding: Bool) {
         let geometry = InspectorGeometry.shared
-        // The slot the toggle is drawn in plus the clearance it keeps on its trailing side, which
-        // the accessory has to be asked for or the band would give it up. See
-        // `TitleBarStrip.trailingInset`.
-        // The magnifying glass is always drawn and the inspector's toggle only when there is a
-        // workspace to toggle one for, and the clearance on the trailing side is kept in both
-        // states, because there is always a control on that edge now.
-        let controls = Metrics.barHeight
-            + (geometry.hasWorkspace ? Metrics.barHeight : 0)
-            + TitleBarStrip.trailingInset
-        let target = max(geometry.width + controls, 1)
+        let target = max(geometry.width, 1)
         // A view with no window has no display to take a link from, and a slide whose clock never
         // ticks is an accessory stuck at the width it set off from. Nothing can be watching such a
         // window anyway, so it lands rather than travels. This is also the first call, from `init`.
@@ -506,12 +435,7 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
     /// The end of a slide, however it got there: the last frame of one, or the backstop above.
     /// `apply` is a no-op the second time, so both arriving costs nothing.
     ///
-    /// **The band is asked about the inspector's width, not about the width handed in**, and the
-    /// difference is the whole of a bug this merge nearly introduced. What arrives here is the
-    /// ACCESSORY's target, which is the inspector's width plus the toggle's slot and the clearance
-    /// beside it, so it is never zero while a workspace is open. Testing it would raise the pull
-    /// request band every time the inspector was closed. `resize` reads the same value for the
-    /// same reason.
+    /// Read the pane's width because the accessory keeps one point even when the pane is closed.
     private func land(on width: CGFloat) {
         InspectorGeometry.shared.setBandVisible(InspectorGeometry.shared.width > 1)
         apply(width)

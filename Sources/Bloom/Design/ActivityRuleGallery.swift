@@ -9,6 +9,12 @@ import BloomCore
 /// thrown away, which is why the second round started from nothing: the reasoning survived in
 /// `BusyRule`'s header and the pictures did not. This page is the pictures, kept.
 ///
+/// **The window does not draw any of them now.** The busy signal is Safari's loading sweep through a
+/// busy tab or along the column's top edge (`BusySweep`), after the owner's reports that a crest
+/// under a tab and along the column's edge both looked bad, and that a shimmer through the name was
+/// too subtle. The page stays as the record of what was measured; `RunningColourGallery` draws the
+/// sweep.
+///
 /// **Photograph it with `Bloom --snapshot-gallery <dir> --gallery activity-rule`.** No `--running`
 /// is needed, unlike `running-glyph`: this page draws `ActivityRuleFigure` directly, which has no
 /// opinion about whether a turn is under way, so the moving rows move whether or not the heartbeat
@@ -33,7 +39,7 @@ struct ActivityRuleGallery: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Activity rule")
                     .font(Typo.title)
-                Text("What the line under the tab strip says while an agent is working.")
+                Text("What the line under the tab strip said while an agent was working.")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
             }

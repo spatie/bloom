@@ -8,6 +8,42 @@ struct StripOrderTests {
     private let one = SessionID("s1")
     private let two = SessionID("s2")
 
+    @Test("alternating chats and tools append without requiring a drag")
+    func openingOrder() {
+        var order = StripOrder.updated(sessions: [one], tools: [], stored: [])
+        order = StripOrder.updated(tools: ["t1"], stored: order)
+        order = StripOrder.updated(sessions: [one, two], stored: order)
+        order = StripOrder.updated(tools: ["t1", "t2"], stored: order)
+        #expect(order == [.chat(one), .tool("t1"), .chat(two), .tool("t2")])
+        #expect(StripOrder.entries(sessions: [one, two], tools: ["t1", "t2"], stored: order) == order)
+    }
+
+    @Test("partial loading preserves saved positions for the unread store")
+    func partialLoading() {
+        let saved: [PaneContent] = [.tool("t1"), .chat(two), .tool("t2"), .chat(one)]
+        #expect(StripOrder.updated(sessions: [one, two], stored: saved) == saved)
+        #expect(StripOrder.updated(tools: ["t1", "t2"], stored: saved) == saved)
+        #expect(StripOrder.updated(sessions: [one, two], tools: ["t1", "t2"], stored: saved) == saved)
+    }
+
+    @Test("closing and reopening appends the replacement without regrouping")
+    func closeAndReopen() {
+        let initial: [PaneContent] = [.chat(one), .tool("t1"), .chat(two)]
+        let closed = StripOrder.updated(tools: [], stored: initial)
+        let reopened = StripOrder.updated(tools: ["t2"], stored: closed)
+        #expect(closed == [.chat(one), .chat(two)])
+        #expect(reopened == [.chat(one), .chat(two), .tool("t2")])
+    }
+
+    @Test("refreshing after a drag retains the mixed order and hidden pane positions")
+    func refreshAfterDrag() {
+        let saved: [PaneContent] = [.tool("t1"), .chat(two), .chat(one)]
+        let updated = StripOrder.updated(sessions: [one, two], tools: ["t1", "t2"], stored: saved)
+        #expect(updated == saved + [.tool("t2")])
+        #expect(StripOrder.entries(sessions: [one, two], tools: ["t1", "t2"],
+                                  claimed: [.chat(two)], stored: updated) == [.tool("t1"), .chat(one), .tool("t2")])
+    }
+
     // MARK: - Reading
 
     /// The whole safety of this: a workspace nobody has dragged reads exactly as it did before any

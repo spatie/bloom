@@ -9,6 +9,7 @@ import Foundation
 public enum InspectorTab: String, Hashable, CaseIterable, Sendable {
     case allFiles = "All files"
     case changes = "Changes"
+    case history = "History"
     case checks = "Checks"
 
     /// The pane a selection falls back to when the tab it names is not on offer.
@@ -23,7 +24,7 @@ public enum InspectorTab: String, Hashable, CaseIterable, Sendable {
     ///
     /// Checks is the only conditional one, and it is deliberately **last**. A segmented control
     /// sizes each segment to its own label and lays them out from the leading edge, so a tab
-    /// appended at the end arrives without moving the two before it: a pull request landing
+    /// appended at the end arrives without moving the three before it: a pull request landing
     /// mid-session cannot shift a segment out from under a click already on its way to it, and
     /// neither can one going away.
     public static func available(for pullRequest: PullRequest?) -> [InspectorTab] {
@@ -36,7 +37,8 @@ public enum InspectorTab: String, Hashable, CaseIterable, Sendable {
     /// a pedantic one: a repository with no workflows at all has an open pull request and nothing
     /// whatever to put in this pane, and a tab that can only say "No checks" is a tab that can
     /// only disappoint. `GitHub.rollup` answers `.none` exactly when the rollup was empty, so this
-    /// reads as "GitHub reported at least one run".
+    /// reads as "GitHub reported at least one run". `.unavailable` keeps the tab, because there
+    /// may well be runs and the pane is the place that says why they cannot be shown.
     ///
     /// It happens to be true today that the runs can only arrive with a pull request, because
     /// every check Bloom knows about comes out of the `statusCheckRollup` of a single

@@ -374,6 +374,9 @@ extension AppModel {
         guard hideFromSidebar(workspace.id) else {
             return .refused("This workspace is already being archived. Check workspace_list shortly.")
         }
+        // Read before the stop, which marks every one of them stopped. A running command never
+        // asks for a confirmation, so the notice after is the only place it is mentioned.
+        let stoppedCommands = workspaceModels[workspace.id]?.runningCommands ?? []
         workspaceModels[workspace.id]?.stopEverything()
 
         // Out of the sidebar now, before a single byte moves.
@@ -441,6 +444,8 @@ extension AppModel {
                         + "The archive script was skipped.",
                     dismissal: .untilDismissed
                 )
+            } else if let stopped = BackgroundWork.archived(workspace.name, stopping: stoppedCommands) {
+                notice = BloomNotice(message: stopped)
             }
             Log.archive.info("archived \(workspace.name, privacy: .public)")
             return .archived

@@ -294,12 +294,17 @@ struct WorkspaceManagerTests {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
         // Ignores SIGTERM, which is what a Stop has to get past as well as the ordinary case.
+        // The loop is timed by `SECONDS`, a zsh builtin, and forks nothing whose death could end
+        // it early. It used to be `for _ in $(seq 1 6000)` after the echo, and the test cancels
+        // the moment it reads that line: the SIGTERM reached `seq` while it was still running,
+        // because `trap ''` does not carry into a command substitution, the loop came out empty
+        // and `touch` ran straight away. A stop that does not work still fails, on the time limit.
         try repo.write(".conductor/settings.toml", """
         [scripts]
         setup = '''
         trap '' TERM
         echo "seeding"
-        for _ in $(seq 1 600); do sleep 0.05; done
+        while (( SECONDS < 300 )); do sleep 0.05; done
         touch finished.txt
         '''
         """)
@@ -325,7 +330,7 @@ struct WorkspaceManagerTests {
         #expect(stored.setupState == .failed)
         #expect(stored.setupLog.contains("seeding"))
         #expect(stored.setupLog.contains(WorkspaceManager.setupStoppedNote))
-        #expect(!TempRepo(existing: workspace.path).exists("finished.txt"))
+        #expect(!TempRepo(existing: workspace.path).exists("finished.txt"), Comment(rawValue: stored.setupLog))
     }
 
     @Test(

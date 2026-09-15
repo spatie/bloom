@@ -50,6 +50,9 @@ struct AgentActivityReporter: ViewModifier {
             .onChange(of: preventsSleep, initial: true) { _, isOn in
                 AgentActivity.shared.setPreventsSleep(isOn)
             }
+            // A Keep Awake session saved before the last quit is put back here, at launch, rather
+            // than the first time somebody opens the panel.
+            .onAppear { KeepAwakeModel.shared.restore() }
             .onChange(of: isBadgeEnabled, initial: true) { _, enabled in
                 AgentActivity.shared.setBadgeEnabled(enabled)
                 AgentActivity.shared.setUnreadCount(

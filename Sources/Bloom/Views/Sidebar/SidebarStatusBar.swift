@@ -19,6 +19,8 @@ struct SidebarStatusBar: View {
     var note: String?
 
     @State private var isShowingLegend = false
+    @State private var isFilterHovered = false
+    @State private var isLegendHovered = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,11 +31,6 @@ struct SidebarStatusBar: View {
 
                 Spacer(minLength: Metrics.spacingSmall)
 
-                // All three are `.accessoryBar`, which is the system's own style for a strip of
-                // small controls along the edge of a pane. It brings one hit box, one hover fill
-                // and one pressed state to the set, where a `.borderless` button beside a
-                // `.borderlessButton` menu sized each control to its own glyph and left the gaps
-                // between them uneven.
                 Menu {
                     SidebarFilterMenuItems(
                         filter: $filter,
@@ -41,30 +38,38 @@ struct SidebarStatusBar: View {
                         hiddenCount: ProjectVisibility.hiddenCount(app.repos)
                     )
                 } label: {
-                    Label(
+                    controlLabel(
                         "Filter the sidebar",
-                        systemImage: filter == .all ? "line.3.horizontal.decrease" : filter.icon
+                        systemImage: filter == .all ? "line.3.horizontal.decrease" : filter.icon,
+                        isHovered: isFilterHovered
                     )
+                    .foregroundStyle(isDefaultView ? Palette.textSecondary : Palette.accent)
                 }
                 // Icon only visually, but the label is still there for VoiceOver and Voice
                 // Control, and the tint says whether the pane is showing something other than its
                 // default set. Showing hidden projects lights it as much as narrowing the
                 // workspaces does, because both answer the question somebody asks when the pane
                 // is not what they expected: is this control doing something.
-                .labelStyle(.iconOnly)
                 .menuStyle(.button)
-                .buttonStyle(.accessoryBar)
+                .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .tint(isDefaultView ? Palette.textSecondary : Palette.accent)
+                .onHoverChange { isFilterHovered = $0 }
                 .help("Filter the sidebar")
                 .accessibilityValue(filterValue)
 
-                Button("What the sidebar glyphs mean", systemImage: "questionmark.circle") {
+                Button {
                     isShowingLegend.toggle()
+                } label: {
+                    controlLabel(
+                        "What the sidebar glyphs mean",
+                        systemImage: "questionmark.circle",
+                        isHovered: isLegendHovered || isShowingLegend
+                    )
+                    .foregroundStyle(Palette.textSecondary)
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.accessoryBar)
+                .buttonStyle(.plain)
+                .onHoverChange { isLegendHovered = $0 }
                 .help("What the sidebar glyphs mean")
                 .popover(isPresented: $isShowingLegend, arrowEdge: .top) {
                     SidebarLegend()
@@ -80,6 +85,20 @@ struct SidebarStatusBar: View {
             .frame(height: Metrics.barHeight)
         }
         // Let the native sidebar ground continue behind these controls without a second material.
+    }
+
+    // The native accessory style did not show a hover fill here. Both labels own the square
+    // target so the menu and button draw and respond over the same area.
+    private func controlLabel(_ title: String, systemImage: String, isHovered: Bool) -> some View {
+        Label(title, systemImage: systemImage)
+            .labelStyle(.iconOnly)
+            .font(Typo.label)
+            .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
+            .contentShape(Rectangle())
+            .background(
+                isHovered ? Palette.hover : .clear,
+                in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+            )
     }
 
     /// Whether the pane is showing what it shows when nothing has been asked of it.

@@ -255,4 +255,62 @@ struct WorkspaceListReconciliationTests {
 
         #expect(result.map(\.id.rawValue) == ["alpha", "restored"])
     }
+
+    // MARK: - Which reload the figures roll on
+
+    /// The six second refresh landing on an untouched list: the one write the sidebar animates.
+    @Test("a reload that only moves diff stats is recognised")
+    func onlyDiffStatsMoved() {
+        let before = [workspace("alpha", additions: 3), workspace("beta")]
+        let after = [workspace("alpha", additions: 118), workspace("beta")]
+
+        #expect(WorkspaceListReconciliation.changesOnlyDiffStats(from: before, to: after))
+    }
+
+    /// Nothing moved, so there is nothing to roll, and an animated write of an identical list
+    /// would still be a transaction every row in the column is redrawn inside.
+    @Test("an identical reload is not a diff stat change")
+    func identicalIsNotDiffStatChange() {
+        let list = [workspace("alpha", additions: 3)]
+
+        #expect(!WorkspaceListReconciliation.changesOnlyDiffStats(from: list, to: list))
+    }
+
+    /// A figure arriving in the same write as a rename would play the rename at a figure's speed.
+    @Test("a diff stat that arrives with a rename is not animated")
+    func renameWithDiffStatIsNotOnlyDiffStats() {
+        let before = [workspace("alpha", name: "Old name", additions: 3)]
+        let after = [workspace("alpha", name: "New name", additions: 118)]
+
+        #expect(!WorkspaceListReconciliation.changesOnlyDiffStats(from: before, to: after))
+    }
+
+    /// A row arriving is `SidebarView`'s movement, on its own curve, and must not be this one.
+    @Test("a reload that adds a row is not a diff stat change")
+    func membershipIsNotOnlyDiffStats() {
+        let before = [workspace("alpha")]
+        let after = [workspace("alpha", additions: 118), workspace("beta")]
+
+        #expect(!WorkspaceListReconciliation.changesOnlyDiffStats(from: before, to: after))
+    }
+
+    /// A first change on a clean worktree inserts the label beside the name and, under the
+    /// "Changed" filter, inserts the row. Neither is a figure rolling.
+    @Test("a row gaining its first change is not a diff stat change")
+    func firstChangeIsNotOnlyDiffStats() {
+        let before = [workspace("alpha")]
+        let after = [workspace("alpha", additions: 4)]
+
+        #expect(!WorkspaceListReconciliation.changesOnlyDiffStats(from: before, to: after))
+        #expect(!WorkspaceListReconciliation.changesOnlyDiffStats(from: after, to: before))
+    }
+
+    /// The same rows and the same figures in another order is a reorder, whatever the figures did.
+    @Test("a reorder is not a diff stat change")
+    func reorderIsNotOnlyDiffStats() {
+        let alpha = workspace("alpha")
+        let beta = workspace("beta")
+
+        #expect(!WorkspaceListReconciliation.changesOnlyDiffStats(from: [alpha, beta], to: [beta, alpha]))
+    }
 }

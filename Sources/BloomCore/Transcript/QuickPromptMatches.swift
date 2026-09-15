@@ -35,21 +35,29 @@ public struct QuickPromptMatches: Sendable, Hashable {
         _ prompts: [QuickPrompt], query: String, limit: Int = 100
     ) -> QuickPromptMatches {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return QuickPromptMatches(query: trimmed, prompts: Array(prompts.prefix(limit)))
-        }
+        let rows = ranked(prompts, query: trimmed, limit: limit, name: \.resolvedName, text: \.text)
+        return QuickPromptMatches(query: trimmed, prompts: rows)
+    }
 
-        var scored: [(prompt: QuickPrompt, score: Int, position: Int)] = []
-        scored.reserveCapacity(prompts.count)
-        for (position, prompt) in prompts.enumerated() {
-            let name = FuzzyMatch.score(prompt.resolvedName, query: trimmed)
-            let body = prompt.text.range(of: trimmed, options: .caseInsensitive) != nil
+    /// The ranking itself, over anything with a name and a body, so the repository's own prompts
+    /// are ranked by exactly the rule the owner's are. See `QuickPromptPanelMatches`.
+    static func ranked<Row>(
+        _ rows: [Row], query trimmed: String, limit: Int,
+        name: (Row) -> String, text: (Row) -> String
+    ) -> [Row] {
+        guard !trimmed.isEmpty else { return Array(rows.prefix(limit)) }
+
+        var scored: [(row: Row, score: Int, position: Int)] = []
+        scored.reserveCapacity(rows.count)
+        for (position, row) in rows.enumerated() {
+            let nameScore = FuzzyMatch.score(name(row), query: trimmed)
+            let body = text(row).range(of: trimmed, options: .caseInsensitive) != nil
                 // Below any hit in the name, whatever the name scored: the row the query names is
                 // the one that was meant, and the body is how a badly named one is recovered.
                 ? bodyScore
                 : nil
-            guard name != nil || body != nil else { continue }
-            scored.append((prompt, (name ?? 0) + (body ?? 0), position))
+            guard nameScore != nil || body != nil else { continue }
+            scored.append((row, (nameScore ?? 0) + (body ?? 0), position))
         }
         // Ties keep the order they arrived in, so a list that is not being searched reads as a
         // list rather than as a shuffle.
@@ -57,7 +65,7 @@ public struct QuickPromptMatches: Sendable, Hashable {
             if lhs.score != rhs.score { return lhs.score > rhs.score }
             return lhs.position < rhs.position
         }
-        return QuickPromptMatches(query: trimmed, prompts: scored.prefix(limit).map(\.prompt))
+        return scored.prefix(limit).map(\.row)
     }
 
     /// What a hit in the body is worth. Small, so that any hit in the name outranks it: the

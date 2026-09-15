@@ -32,8 +32,8 @@ import Foundation
 /// - `isBlank` with the clip past `endOffset` is a viewport parked below the last row.
 /// - `isBlank` with rows present and the clip inside the document is rows drawn at heights that
 ///   show nothing, and the row table names them.
-/// - `scrollAlpha` at nought, or `scrollIsFrozen`, is `TranscriptHoldView` holding something it
-///   should have let go of.
+/// - `scrollAlpha` at nought with `held` false is `TranscriptHoldView` having let go without
+///   drawing the transcript again.
 /// - **`cacheWidth` against `viewportWidth` is the one to check first, and it accuses a change of
 ///   ours.** `TranscriptRowHeights.isEvidence` refuses a height reported at a width the cache is
 ///   not for. That is right when the cache's width is right. If the cache is ever for a width the
@@ -89,7 +89,7 @@ enum TranscriptStateDump {
     static func tripIfBlank(_ pane: Pane) {
         guard trips < mostTrips else { return }
         guard let table = pane.table, table.numberOfRows > 0 else { return }
-        guard pane.hold.held == nil else { return }
+        guard !pane.hold.isHolding else { return }
         let clip = pane.scroll.contentView
         guard clip.bounds.height > 1 else { return }
         guard table.rows(in: clip.documentVisibleRect).length == 0 else { return }
@@ -191,10 +191,7 @@ enum TranscriptStateDump {
             "scrollAlpha": .number(Double(pane.scroll.alphaValue)),
             "scrollFrame": rect(pane.scroll.frame),
             "holdBounds": rect(pane.hold.bounds),
-            "held": .string(name(of: pane.hold.held)),
-            // `frozen` is private to `TranscriptHoldView`, and this is the same question: a scroll
-            // view sitting at anything other than its host's bounds is a frozen one.
-            "scrollIsFrozen": .bool(pane.scroll.frame != pane.hold.bounds),
+            "held": .bool(pane.hold.isHolding),
             // **The width the cache is for against the width the pane is.** See the head of this
             // file: these two disagreeing is the one way a change of ours could have caused what
             // it was written to stop.
@@ -353,14 +350,6 @@ enum TranscriptStateDump {
             "viewportWidth": .number(silence.viewportWidth),
             "viewportHeight": .number(silence.viewportHeight),
         ])
-    }
-
-    static func name(of held: TranscriptHoldView.Held?) -> String {
-        guard let held else { return "none" }
-        switch held {
-        case .nothing: return "nothing"
-        case .whatIsDrawn: return "whatIsDrawn"
-        }
     }
 
     static func rect(_ rect: CGRect) -> JSONValue {

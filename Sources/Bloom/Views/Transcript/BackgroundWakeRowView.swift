@@ -44,7 +44,7 @@ struct BackgroundWakeRowView: View {
 
             if outputExists, let file = wake.outputFile {
                 Button("Show output") { Self.open(file) }
-                    .buttonStyle(.link)
+                    .linkButton(Palette.accentFill)
                     .font(Typo.caption)
                     .help(file)
                     .fixedSize()

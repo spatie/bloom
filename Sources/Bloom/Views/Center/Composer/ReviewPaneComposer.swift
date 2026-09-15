@@ -8,9 +8,9 @@ struct ReviewPaneComposer: View {
     var room: ComposerRoom
     var destinationID: SessionID?
 
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
-    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
+    private var textSize: ChatTextSize { ColourThemePreference.shared.chatTextSize }
+    private var chatFontID: String { ColourThemePreference.shared.chatFont }
+    private var lineHeight: ChatLineHeight { ColourThemePreference.shared.chatLineHeight }
 
     private var destination: Session? {
         if let destinationID { return model.sessions.first { $0.id == destinationID } }

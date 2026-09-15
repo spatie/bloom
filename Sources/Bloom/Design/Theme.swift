@@ -17,64 +17,56 @@ import BloomCore
 /// system reds are tuned to be the one saturated thing on a screen rather than one of a dozen
 /// small marks in a narrow column. Read those two before adding a third exception.
 ///
-/// **Ground is Bloom's own.** The five surfaces and the rule between them are named colours, not
-/// `windowBackgroundColor` and friends. On macOS 26 every one of those semantic grounds resolves
-/// to the same value: window, text and control backgrounds are all pure white in light and all
-/// `#1E1E1E` in dark. An app built on them has exactly one surface wearing five names, so nothing
-/// separates from anything and the only thing left to divide a pane from its neighbour is a
-/// separator at ten percent ink, which on white is very nearly nothing at all. That is the
-/// "everything is white and it feels heavy" complaint, stated in numbers.
+/// **Ground is Bloom's own, and it is what a theme changes.** The surfaces and the rule between
+/// them are named colours read off the chosen `ColourTheme`, not `windowBackgroundColor` and
+/// friends. On macOS 26 every one of those semantic grounds resolves to the same value: window,
+/// text and control backgrounds are all pure white in light and all `#1E1E1E` in dark. An app
+/// built on them has exactly one surface wearing five names, so nothing separates from anything
+/// and the only thing left to divide a pane from its neighbour is a separator at ten percent ink,
+/// which on white is very nearly nothing at all. That is the "everything is white and it feels
+/// heavy" complaint, stated in numbers.
 ///
-/// The ramp below is a small, deliberate set instead: a body, a panel one step off it, a sidebar
-/// one step the other way, and a raised control. In light they carry a slight cool cast so the
-/// greys read as one family rather than as camera noise. In dark they are a deep blue rather than
-/// a neutral charcoal, which is the appearance this app was designed in and the reason its dark
-/// mode does not read as an unlit light mode.
+/// A theme is a small, deliberate set instead: a body, a panel one step off it, a sidebar one
+/// step the other way, and a raised control. The Bloom theme's light members carry a slight cool
+/// cast so the greys read as one family rather than as camera noise, and its dark members are a
+/// deep blue rather than a neutral charcoal, which is the appearance this app was designed in and
+/// the reason its dark mode does not read as an unlit light mode.
 ///
-/// Every value is a step of a single ramp, so the relationships hold: body to panel is small,
-/// body to sidebar is small, and the rule carries the actual separation. Adding a sixth surface
-/// is how this gets heavy again, so do not.
+/// Every value in a theme is a step of a single ramp, so the relationships hold: body to panel is
+/// small, body to sidebar is small, and the rule carries the actual separation. Adding another
+/// surface to `ThemeSurfaces` is how this gets heavy again, so do not.
 enum Palette {
     // MARK: Surfaces
     //
-    // Four values and one rule. Measured light: FFFFFF / F7FAFA / F1F5F6 / FFFFFF, rule D6E0E4.
-    // Measured dark: 0A1A25 / 0C1E2A / 0E202D / 16303F, rule 1E3F53.
+    // Computed rather than stored, because they are read off `ColourThemePreference` and a theme
+    // can change while the window is open.
 
     /// The ground the centre column stands on: the transcript, Home, Search, Settings.
     ///
     /// Identical to `surface` on purpose. They are two names for the reading ground because the
     /// call sites mean different things by them, not because the colour differs; if they ever
     /// diverge the window has grown a surface it does not need.
-    static let windowBackground = dynamic(PaletteInk.windowBackground)
-
-    /// The chrome: the sidebar column, the title bar, and every strip of small controls.
-    ///
-    /// One value for all of them, which is what macOS itself does. A unified toolbar and a sidebar
-    /// are the same material on a real Mac window, and giving each strip a step of its own is how
-    /// a window ends up with seven grounds and no shape.
-    ///
-    /// A named colour rather than a translucent material. A material samples the desktop, so the
-    /// sidebar's colour is whatever wallpaper is behind the window: measured on this machine it
-    /// came out `#232833` in dark, a blue nobody chose, and it moves when the wallpaper does. A
-    /// themed ramp cannot survive that.
-    static let sidebar = Color(nsColor: sidebarNSColor)
-
-    /// The same colour as an `NSColor`, because the window's own background is set in AppKit and
-    /// has to keep tracking the appearance after it is set. See `WindowChrome`.
-    static let sidebarNSColor = dynamicNSColor(light: 0xF1F5F6, dark: 0x0E202D)
-
+    @MainActor static var windowBackground: Color { surface }
     /// Content areas: the transcript, the inspector, anything holding text.
-    static let surface = dynamic(PaletteInk.surface)
-
+    @MainActor static var surface: Color { themed(\.surface) }
     /// A raised control: a segmented control's selected cell, a bordered button, a browser chip.
-    static let surfaceRaised = dynamic(PaletteInk.surfaceRaised)
-
+    @MainActor static var surfaceRaised: Color { themed(\.raised) }
     /// A recessed strip: gutters, hunk headers, tool detail blocks, the composer box, the panel.
     ///
-    /// The step off `surface` is deliberately small, five units at most. It reads as recessed
-    /// because it has a rule under it, not because it is a different colour, which is what keeps
-    /// a window holding a dozen of these from looking like a stack of cards.
-    static let surfaceSunken = dynamic(PaletteInk.surfaceSunken)
+    /// The step off `surface` is meant to be small. It reads as recessed because it has a rule
+    /// under it, not because it is a different colour, which is what keeps a window holding a
+    /// dozen of these from looking like a stack of cards.
+    @MainActor static var surfaceSunken: Color { themed(\.sunken) }
+    /// The chrome: the title bar, and every strip of small controls.
+    ///
+    /// One value for all of them, which is what macOS itself does, and giving each strip a step
+    /// of its own is how a window ends up with seven grounds and no shape.
+    @MainActor static var sidebar: Color { Color(nsColor: sidebarNSColor) }
+    @MainActor static var sidebarNSColor: NSColor { themedNSColor(\.sidebar) }
+    @MainActor static var sidebarGlassTint: Color {
+        let surfaces = ColourThemePreference.shared.choice.surfaces
+        return cached(surfaces.glassTint ?? surfaces.sunken)
+    }
 
     // MARK: Overlays
     //
@@ -114,7 +106,8 @@ enum Palette {
     /// `#DCDCDC` on the light ramp and `#464646` on the dark one. On the deep blue ground that
     /// grey is the one thing in the window with no blue in it at all, so a resting selection read
     /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
-    static let selected = dynamic(PaletteInk.selected)
+    @MainActor static var selected: Color { themed(\.selected) }
+
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
     /// Selection and control emphasis supplied by macOS.
     ///
@@ -134,7 +127,7 @@ enum Palette {
     /// that the eye reads as nothing, drawn at half a point. That is why the window used to have
     /// no edges. This is a 40 unit step in light and a 30 unit step in dark, and `Metrics.hairline`
     /// draws it at a full point, which is what AppKit's own split view divider has always been.
-    static let border = dynamic(PaletteInk.border)
+    @MainActor static var border: Color { themed(\.border) }
 
     // MARK: Text
 
@@ -244,7 +237,7 @@ enum Palette {
 
     /// The same pair as an `NSColor`, for the layers that hold a `CGColor` and therefore have to be
     /// handed a colour already resolved against the window's appearance.
-    static let accentNSColor = dynamicNSColor(light: 0x0C7A6E, dark: 0x4FD8C4)
+    static let accentNSColor = dynamicNSColor(PaletteInk.accent)
 
     /// A brand fill capable of carrying light text, for identity surfaces such as the user's
     /// message bubble. Controls and selections use `controlAccent` instead.
@@ -291,17 +284,14 @@ enum Palette {
 
     /// Selected text inside that same filled bubble.
     ///
-    /// `textSelection` cannot do this job for the reason written out on `UserTurnRowView`: the
-    /// bubble names `colorScheme` dark whatever the page is doing, AppKit cannot read that, and
-    /// `selectedTextBackgroundColor` resolved on the light ramp is a pale blue that leaves white
-    /// text on it at 1.5 to 1, unreadable exactly while it is being dragged over. This is the
-    /// value the dark ramp resolves to, measured off a probe of the bubble: a muted slate that
-    /// sits clearly on Spatie Blue and carries the same white text at 6.2 to 1.
-    ///
-    /// Named here rather than left as a literal in that view, which is where it was, because it
-    /// is a colour and this is where colours live. It was the one `0xRRGGBB` in the app outside
-    /// the brand artwork.
+    /// `selectedTextBackgroundColor` cannot do this job for the reason written out on
+    /// `UserTurnRowView`: the bubble names `colorScheme` dark whatever the page is doing, AppKit
+    /// cannot read that, and the colour resolved on the light ramp is a pale blue that leaves white
+    /// text on it at 1.5 to 1, unreadable exactly while it is being dragged over. This is the value
+    /// the dark ramp resolves to, measured off a probe of the bubble: a muted slate that sits
+    /// clearly on Spatie Blue and carries the same white text at 6.2 to 1.
     static let bubbleTextSelection = NSColor(rgb: 0x466288)
+
     /// Healthy, done, passed. The accent, not a green of its own.
     ///
     /// The ramp says so in as many words, and the reference render of this window agrees: its
@@ -401,7 +391,8 @@ enum Palette {
     /// percent of value and invisible: it measured 4.39 to 1 on the sunken surface, and the sunken
     /// surface is where a strip sits.
     static let warning = dynamic(PaletteInk.warning)
-    /// An agent mid turn: the sidebar's dot, the tab's dot, and the rule under the tab strip.
+    /// An agent mid turn: the sidebar's dot and the transcript's "Working" dot. A busy tab and a
+    /// busy column's top edge sweep in `accentFill` instead; see `BusySweep`.
     ///
     /// **A hue of its own, and it must never equal `positive`.** It was `accent`, which is what
     /// `positive` is too, and the report was that "a green busy indicator is easily being confused
@@ -441,6 +432,19 @@ enum Palette {
     static let runningNSColor = dynamicNSColor(
         light: PaletteInk.running.light, dark: PaletteInk.running.dark
     )
+
+    /// The house fill as an `NSColor`, for `BusySweepView`'s layers. See `accentNSColor`.
+    static let accentFillNSColor = dynamicNSColor(PaletteInk.accentFill)
+
+    /// The faint capsule under a busy tab that is not selected, for the sweep to live in. The house
+    /// fill at `BusySweep.tabWash`, which is stronger in dark for the reason that type gives.
+    static let busyTabWash = dynamicTint(PaletteInk.accentFill, BusySweep.tabWash)
+
+    /// What Reduce Motion lays over a busy tab's selected capsule, which has no band to say it.
+    static let busyTabStill = dynamicTint(PaletteInk.accentFill, BusySweep.tabStill)
+
+    /// The top of the column's still wash under Reduce Motion. See `ColumnBusySignal`.
+    static let busyColumnStill = dynamicTint(PaletteInk.accentFill, BusySweep.columnStill)
 
     /// A pull request that has landed.
     ///
@@ -531,10 +535,10 @@ enum Palette {
     /// to universal across git tooling, and this is the diff the owner looked at and approved.
     static let diffPositive = dynamic(PaletteInk.diffPositive)
 
-    static let diffAddBackground = diffPositive.opacity(0.13)
-    static let diffAddEmphasis = diffPositive.opacity(0.28)
-    static let diffDeleteBackground = negative.opacity(0.14)
-    static let diffDeleteEmphasis = negative.opacity(0.30)
+    @MainActor static var diffAddBackground: Color { cached(ColourThemePreference.shared.codeScheme.diffAdd).opacity(0.13) }
+    @MainActor static var diffAddEmphasis: Color { cached(ColourThemePreference.shared.codeScheme.diffAdd).opacity(0.28) }
+    @MainActor static var diffDeleteBackground: Color { cached(ColourThemePreference.shared.codeScheme.diffDelete).opacity(0.14) }
+    @MainActor static var diffDeleteEmphasis: Color { cached(ColourThemePreference.shared.codeScheme.diffDelete).opacity(0.30) }
 
     /// A line under review, and the band holding its comment. The one amber wash in the window,
     /// on `warning`'s hue, because the diff's own washes have already spent green and red: a
@@ -545,20 +549,46 @@ enum Palette {
     static let reviewLine = warning.opacity(0.14)
     static let reviewBand = warning.opacity(0.07)
 
-    // MARK: Syntax
+    @MainActor static var codeBackground: Color { cached(ColourThemePreference.shared.codeScheme.background) }
+    @MainActor static var codeForeground: Color { codeColours[.plain]! }
+    @MainActor static var codeGutter: Color { cached(ColourThemePreference.shared.codeScheme.gutter) }
+    @MainActor static var codeCaret: Color { cached(ColourThemePreference.shared.codeScheme.caret) }
+    @MainActor static var codeSelection: Color { cached(ColourThemePreference.shared.codeScheme.selection) }
 
-    static let synKeyword = dynamic(PaletteInk.synKeyword)
-    static let synType = dynamic(PaletteInk.synType)
-    static let synString = dynamic(PaletteInk.synString)
-    static let synNumber = dynamic(PaletteInk.synNumber)
-    static let synComment = dynamic(PaletteInk.synComment)
-    static let synFunction = dynamic(PaletteInk.synFunction)
-    static let synVariable = dynamic(PaletteInk.synVariable)
-    static let synAttribute = dynamic(PaletteInk.synAttribute)
-    static let synOperator = dynamic(PaletteInk.synOperator)
-    /// A constant is a number as far as this ramp is concerned, and saying so is cheaper than
-    /// keeping two copies of one pair in step.
-    static let synConstant = synNumber
+    @MainActor static var codeColours: [TokenKind: Color] {
+        let scheme = ColourThemePreference.shared.codeScheme
+        if let colours = cachedCodeColours[scheme] { return colours }
+        let colours = Dictionary(uniqueKeysWithValues: TokenKind.allCases.map { ($0, cached(scheme.colour(for: $0))) })
+        cachedCodeColours[scheme] = colours
+        return colours
+    }
+    @MainActor private static var cachedCodeColours: [CodeScheme: [TokenKind: Color]] = [:]
+
+    @MainActor private static func themed(_ key: KeyPath<ThemeSurfaces, PaletteInk.Pair>) -> Color {
+        Color(nsColor: themedNSColor(key))
+    }
+
+    @MainActor private static func themedNSColor(_ key: KeyPath<ThemeSurfaces, PaletteInk.Pair>) -> NSColor {
+        cachedNSColor(ColourThemePreference.shared.choice.surfaces[keyPath: key])
+    }
+
+    @MainActor private static func cached(_ pair: PaletteInk.Pair) -> Color {
+        Color(nsColor: cachedNSColor(pair))
+    }
+
+    @MainActor private static func cachedNSColor(_ pair: PaletteInk.Pair) -> NSColor {
+        if let colour = surfaceColours[pair] { return colour }
+        let colour = dynamicNSColor(pair)
+        surfaceColours[pair] = colour
+        return colour
+    }
+
+    // Stable colour identities keep attributed-string caches useful across view updates.
+    @MainActor private static var surfaceColours: [PaletteInk.Pair: NSColor] = [:]
+
+    static func dynamicNSColor(_ ink: PaletteInk.Pair) -> NSColor {
+        dynamicNSColor(light: ink.light, dark: ink.dark)
+    }
 
     /// A colour that differs between appearances, for the few cases where no semantic colour
     /// means the right thing. Both arguments are plain 0xRRGGBB.
@@ -570,6 +600,15 @@ enum Palette {
     /// numbers are somewhere `Tests/BloomCoreTests` can walk them: see `PaletteInk`.
     static func dynamic(_ ink: PaletteInk.Pair) -> Color {
         dynamic(light: ink.light, dark: ink.dark)
+    }
+
+    /// A pair at an opacity that also differs between appearances, for a tint over chrome. Both
+    /// halves come from the core, so `PaletteContrastTests` measures the composite that is drawn.
+    static func dynamicTint(_ ink: PaletteInk.Pair, _ strength: BusySweep.Strength) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(rgb: ink.member(dark: isDark)).withAlphaComponent(strength.member(dark: isDark))
+        })
     }
 
     /// The same thing as an `NSColor`, for the handful of places that talk to AppKit directly.
@@ -702,33 +741,9 @@ enum Metrics {
 
     static let gutter: CGFloat = 12
 
-    /// The box a small button at the trailing edge of a header is drawn and hit in: the project's
-    /// `+`, the button that adds a project, the project settings window's own header control.
-    ///
-    /// Fifteen points tall, not the twenty four an icon in a sixteen point frame with four points
-    /// of padding comes to. A sidebar section header is drawn in a band of nineteen points, and it
-    /// clips: a list row holds its 32 point pitch until the header's content passes nineteen and
-    /// then sizes to the content, so a twenty four point button put five points of extra air above
-    /// every project header, which read as a gap in the column rather than as the top of the next
-    /// project.
-    ///
-    /// The last four of those nineteen points are what this number spends. The button is drawn and
-    /// hit in the same box, and that box is also its hover plate, so an eighteen point plate filled
-    /// the band to within half a point of the bottom of the row. The list's selection fill takes
-    /// the WHOLE of the row under it, top edge included, so a hovered header above a selected
-    /// workspace put a grey plate and a grey pill half a point apart and the two read as one smear.
-    /// Fifteen leaves two points of ground above and below the plate, which is the tight rung of
-    /// the spacing scale and enough to see daylight at both edges. Measured off a window capture:
-    /// plate 24 by 15 at two points clear, selection fill the full 32 point row beneath it.
-    ///
-    /// Three points smaller is three points of click target gone, out of a row that is only
-    /// nineteen tall to begin with. Wider than it is tall, which is the shape of every small button
-    /// in a Mac toolbar, and still enough to hit without hunting.
-    ///
-    /// Here rather than in `SidebarMetrics`, where it started, because the project settings window
-    /// reads it and that window is not the sidebar: a constant named after one pane and used from
-    /// another is how the two drift.
-    static let headerButton = CGSize(width: 24, height: 15)
+    /// Square drawing and click target for header controls, including the project's `+`.
+    /// Twenty points leaves space around the hover fill in both section headers and project rows.
+    static let headerButton = CGSize(width: 20, height: 20)
     /// One point, which on Retina is two physical pixels.
     ///
     /// It was one physical pixel, which is an iOS and web idea rather than a Mac one: AppKit's own
@@ -963,8 +978,8 @@ enum Motion {
     /// rest arriving.
     static let arrival: Animation = .easeOut(duration: 0.18)
 
-    /// A transcript being drawn again after it has been held back: at its new width when a divider
-    /// is let go, and at all when the conversation a pane was pointed at has landed in it.
+    /// A transcript being drawn again after it has been held back, when the conversation a pane was
+    /// pointed at has landed in it.
     ///
     /// A duration rather than an `Animation` because what plays it is a `CATransition` on a layer.
     /// The same length as `pane`, deliberately: both are a pane's own movement finishing rather
@@ -995,27 +1010,16 @@ enum Motion {
 /// Content strips stay opaque. The window title bar and navigation sidebar use their existing
 /// native materials, not per-view effect layers added to the scrolling surfaces here.
 extension View {
-    /// The strip a tab bar sits in: the chrome colour with the pane's top edge already on it.
+    /// The tab strip's background and lower divider.
     ///
-    /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the
-    /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip
-    /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
-    /// that break is what joins the tab to the content below.
-    ///
-    /// `busy` puts the activity signal on that rule, and it goes in this background rather than in
-    /// an overlay for exactly the reason the rule does: the lit rule has to be broken by the
-    /// selected tab on the same pixels the rule is broken on, or the tab reads as sitting on top of
-    /// a line rather than as part of it. See `ActivityRule`.
-    ///
-    /// `busy` and no longer `pulsing`, because the signal no longer pulses: it is a crest running
-    /// the rule, and a parameter named after a figure that has been replaced is the next reader's
-    /// wrong turn. The same rename took `RuleSweep` to `RulePulse` when the light stopped sweeping.
-    func tabStripMaterial(busy: Bool = false) -> some View {
+    /// The busy signal used to light this divider. It sweeps through each busy tab's capsule now,
+    /// because one line across every tab could not say which was working. See
+    /// `BusySignalPlacement`.
+    func tabStripMaterial() -> some View {
         background {
             ZStack(alignment: .bottom) {
                 Palette.sidebar
                 Hairline()
-                if busy { ActivityRule() }
             }
         }
     }
@@ -1165,6 +1169,8 @@ struct CountLabel: View {
     /// rather than sitting inside a selected row.
     var isOnSelection = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// What the number is always at least as wide as. Three digits, in figures that are all one
     /// width, so nothing under a thousand moves it. A thousand and over grows it by one digit and
     /// no more, because it is set without a thousands separator: see `Figures.count`.
@@ -1181,7 +1187,9 @@ struct CountLabel: View {
             Text(count, format: Figures.count)
                 .monospacedDigit()
                 .lineLimit(1)
+                .contentTransition(.numericText(value: Double(count)))
         }
+        .animation(reduceMotion ? nil : Motion.hover, value: count)
         .font(Typo.caption)
         // One step quieter than the label it follows, in both states, because it is the label's
         // subordinate rather than a second thing to read.
@@ -1199,15 +1207,18 @@ struct DiffStatLabel: View {
     var compact: Bool = false
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: Metrics.spacingSmall) {
             if additions > 0 {
                 Text("+\(Self.abbreviate(additions))")
+                    .contentTransition(.numericText(value: Double(additions)))
                     .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.positive)
             }
             if deletions > 0 {
                 Text("-\(Self.abbreviate(deletions))")
+                    .contentTransition(.numericText(value: Double(deletions)))
                     .foregroundStyle(
                         isOnSelection
                             ? Palette.selectedEmphasizedText.opacity(0.75)
@@ -1215,6 +1226,11 @@ struct DiffStatLabel: View {
                     )
             }
         }
+        // The digits roll rather than jump when the six second refresh moves them, which is how
+        // a changing figure is drawn everywhere else on this Mac. Keyed on the two values, so the
+        // refreshes that change nothing, which are most of them, animate nothing.
+        .animation(reduceMotion ? nil : Motion.hover, value: additions)
+        .animation(reduceMotion ? nil : Motion.hover, value: deletions)
         // One rung, two designs: `compact` is the monospaced form used inside a chip, where the
         // digits have to line up with a filename set in the same face, not a smaller form. It was
         // written as a size step and never was one, because both styles resolved to 10.
@@ -1332,15 +1348,21 @@ extension View {
 extension View {
     /// A `Button` that reads as a link, in Bloom's teal rather than the system accent.
     ///
-    /// `.linkButton()` alone draws system blue: measured `#2B66D3` on this machine, and
+    /// `.buttonStyle(.link)` alone draws system blue: measured `#2B66D3` on this machine, and
     /// whatever the user picked in Appearance on anyone else's. Several of these sit in the
     /// transcript inches from prose links that `Palette.linkNSColor` already paints teal, so the
     /// same word rendered two colours depending on whether it was markdown or a control.
     ///
-    /// A modifier rather than a note in a review, because there are eleven call sites and the
-    /// twelfth is the one that would be missed.
-    func linkButton() -> some View {
-        buttonStyle(.link).tint(Palette.link)
+    /// `foregroundStyle`, not `tint`. This was `.tint(Palette.link)` and every link button still
+    /// drew system blue: the link style ignores a tint entirely. Rendered offscreen side by side,
+    /// a red tint and a `#197593` tint both came out the same blue as no tint at all, and only a
+    /// foreground style changed the ink. "Show output" shipped in 1.16.0 with the tint and was
+    /// reported blue in the window.
+    ///
+    /// A modifier rather than a note in a review, because there are a dozen call sites and the
+    /// next one is the one that would be missed.
+    func linkButton(_ ink: Color = Palette.link) -> some View {
+        buttonStyle(.link).foregroundStyle(ink)
     }
 }
 

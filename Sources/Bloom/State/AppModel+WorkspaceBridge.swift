@@ -257,11 +257,13 @@ extension AppModel {
             let contextWindow = CodexContextWindow.normalised(try await store.setting(
                 ComposerControls.contextWindowKey(sessionID: sessionID)
             ))
+            let codexFastMode = CodexSpeed.override(stored: try await store.setting(CodexSpeed.key(sessionID: sessionID)))
             controls = ComposerControls(
                 session: session,
                 isFastMode: false,
                 outputStyle: OutputStyle.defaultName,
-                codexContextWindow: contextWindow
+                codexContextWindow: contextWindow,
+                codexFastMode: codexFastMode
             )
         }
         controls = try await workspaceControls(for: order, inheriting: controls)
@@ -413,7 +415,7 @@ extension AppModel {
     static let noWorkspaceForPane =
         "That workspace is not open in Bloom any more, so there is nowhere to put a pane."
 
-    /// `pane_open`, through the same door the tab strip's `+` menu uses.
+    /// `pane_open`, through the same door the title bar's `+` menu uses.
     ///
     /// `NewPane.open` and not a copy of it: a chat has to be made in the store before it can be a
     /// tab, and a terminal deliberately does not start its shell here. Reusing it is what keeps a

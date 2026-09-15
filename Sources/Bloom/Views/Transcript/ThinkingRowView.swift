@@ -20,8 +20,10 @@ struct ThinkingRowView: View {
                 header
             }
 
-            if isExpanded, !text.isEmpty {
-                Text(text)
+            // Trimmed, because a fifth of thinking blocks end in two newlines and `Text` drew
+            // them as two empty lines inside the hover fill. See `ThinkingText`.
+            if isExpanded, case let shown = ThinkingText.displayed(text), !shown.isEmpty {
+                Text(shown)
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                     .proseLeading(Typo.label)

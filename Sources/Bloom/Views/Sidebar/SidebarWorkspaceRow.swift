@@ -210,19 +210,20 @@ struct SidebarEmptyNoticeRow: View {
     var isFiltered: Bool
     var body: some View {
         Label {
-            // **The sentence and nothing else.** There was a button under it, first as a blue
-            // link and then as a proper control, on the argument that the `+` which does the same
-            // thing sits on the header above and only appears on hover. The owner has overruled
-            // that: the `+` is enough, and a second control for one action inside one project is
-            // the thing this window has spent a night removing.
+            // The project's `+` already creates a workspace, so this notice needs no second action.
             // No font of its own, which is what the rows around it do. It was `Typo.caption`,
             // a size smaller than every name above and below it, and in a pane where each project
             // can carry one of these the small type read as a second class of row rather than as
             // a quiet one. The tertiary ink is what makes it quiet.
             Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
+                .italic()
                 .foregroundStyle(Palette.textTertiary)
         } icon: {
-            Color.clear
+            Image(systemName: "arrow.turn.down.right")
+                .font(Typo.caption)
+                .imageScale(.small)
+                .foregroundStyle(Palette.textTertiary)
+                .accessibilityHidden(true)
         }
         // The same layout the rows it stands in for use, so the sentence starts on the name's
         // column rather than on a column of its own.

@@ -2,17 +2,15 @@ import Foundation
 
 /// A `/command` the composer can offer.
 ///
-/// Bloom ships almost no list of its own. What exists is whatever the Claude Code CLI would
-/// resolve for this checkout, and that is spread over six places on disk which change while the
-/// app is running without anything telling us. So this is read, never modelled.
+/// Bloom combines Claude commands with Codex and shared skills discovered for this checkout.
 public struct SlashCommand: Identifiable, Hashable, Sendable {
     /// Where the entry came from, which is what decides precedence and what the row badges.
     public enum Scope: Hashable, Sendable {
         /// Built into the CLI itself. Not discoverable on disk, so this is a short hand kept list.
         case builtIn
-        /// `~/.claude`, so it is available in every checkout.
+        /// A user skill or command, available in every checkout.
         case user
-        /// `<checkout>/.claude`, so it belongs to this repository.
+        /// A skill or command belonging to this repository.
         case project
         /// An enabled plugin, named by its own `plugin.json`.
         case plugin(String)

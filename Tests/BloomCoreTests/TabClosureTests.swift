@@ -10,6 +10,38 @@ struct TabClosureTests {
     private let chat = PaneContent.chat(SessionID("session-1"))
     private let terminal = PaneContent.tool("tool-1")
 
+    @Test("closing a background tab preserves selection on either side")
+    func backgroundSelection() {
+        let page = PaneContent.tool("page")
+        let tabs = [chat, terminal, page]
+        #expect(TabClosure.selectionAfterClosing(chat, selected: terminal, tabs: tabs) == terminal)
+        #expect(TabClosure.selectionAfterClosing(page, selected: terminal, tabs: tabs) == terminal)
+    }
+
+    @Test("closing the active tab selects its left neighbour across tab kinds")
+    func activeSelection() {
+        let secondChat = PaneContent.chat(SessionID("session-2"))
+        let tabs = [chat, terminal, secondChat]
+        #expect(TabClosure.selectionAfterClosing(terminal, selected: terminal, tabs: tabs) == chat)
+        #expect(TabClosure.selectionAfterClosing(secondChat, selected: secondChat, tabs: tabs) == terminal)
+    }
+
+    @Test("closing the first tab selects the tab to its right")
+    func firstTab() {
+        #expect(TabClosure.selectionAfterClosing(chat, selected: chat, tabs: [chat, terminal]) == terminal)
+    }
+
+    @Test("closing the only tab leaves no selection")
+    func lastTab() {
+        #expect(TabClosure.selectionAfterClosing(chat, selected: chat, tabs: [chat]) == nil)
+    }
+
+    @Test("a repeated close does not move the surviving selection")
+    func alreadyClosed() {
+        #expect(TabClosure.selectionAfterClosing(chat, selected: terminal, tabs: [terminal]) == terminal)
+        #expect(TabClosure.selectionAfterClosing(chat, selected: nil, tabs: []) == nil)
+    }
+
     @Test("a tab nobody has split closes itself")
     func unsplitTab() {
         #expect(TabClosure.target(selectedTab: terminal, focusedPaneContent: terminal) == terminal)

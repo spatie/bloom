@@ -26,7 +26,9 @@ struct DetailColumn: View {
             case .crew(let workspaceID, let sessionID):
                 crew(sessionID, in: workspaceID)
             case .subagent(let workspaceID, let subagentID):
-                subagent(subagentID, in: workspaceID)
+                subagent(.live(subagentID), in: workspaceID)
+            case .subagentCall(let workspaceID, let toolUseID):
+                subagent(.recorded(toolUseID: toolUseID), in: workspaceID)
             case .archived(let id):
                 archived(id)
             }
@@ -47,9 +49,9 @@ struct DetailColumn: View {
     /// far as every other pane is concerned, so falling back to Home would take the window
     /// somewhere nobody asked to go.
     @ViewBuilder
-    private func subagent(_ id: SubagentID, in workspaceID: WorkspaceID) -> some View {
+    private func subagent(_ target: SubagentRunLink.Target, in workspaceID: WorkspaceID) -> some View {
         if let model = app.existingModel(for: workspaceID) {
-            SubagentOutputView(model: model, subagentID: id)
+            SubagentOutputView(model: model, target: target)
         } else {
             workspace(workspaceID)
         }

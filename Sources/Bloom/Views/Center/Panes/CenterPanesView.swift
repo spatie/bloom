@@ -20,7 +20,11 @@ struct CenterPanesView: View {
 
     /// What a split takes out of the space its two panes share. One point, because the strip the
     /// pointer aims at is drawn over the panes rather than reserved between them.
-    private static let dividerThickness: Double = 1
+    ///
+    /// Not private, because `CenterColumnView` lays the same tree out again to say which pane a tab
+    /// carried out of the strip is over, and a different thickness there would put the wash a
+    /// point off the pane it is washing.
+    nonisolated static let dividerThickness: Double = 1
 
     /// The space a pane drag is measured in.
     ///

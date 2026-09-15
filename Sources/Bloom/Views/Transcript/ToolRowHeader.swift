@@ -14,6 +14,21 @@ struct ToolRowHeader: View {
     /// The sentence the CLI gave for the refusal, in one line.
     var refusalReason: String = ""
     var durationMS: Int?
+    /// How many actions the subagent this call started has taken, drawn after the description as
+    /// "· 42 actions". The chat takes a subagent's rows out of the list and this is what stands
+    /// for them, so it is the one place the reader sees the work is happening. See
+    /// `TranscriptFold`.
+    var subagentActions: Int?
+    /// Said in the count's place when an Agent call's run was not kept. See `SubagentRunLink`.
+    var runUnavailable = false
+    /// Set for an Agent call with a run to open. The glyph, title, description and count become
+    /// the button that opens it, and the chevron becomes a button of its own that calls
+    /// `onToggle`, so opening the run and reading the brief are two targets rather than one click
+    /// that has to guess.
+    var onOpenRun: (() -> Void)?
+    /// The chevron's action, used only beside `onOpenRun`. Everywhere else the whole row is the
+    /// toggle, through `ExpandableRowHeader`.
+    var onToggle: (() -> Void)?
     var isExpanded: Bool
     var isHovered: Bool
     /// Whether there is anything behind the chevron. False for the rows that cannot open: a merge
@@ -136,59 +151,25 @@ struct ToolRowHeader: View {
         let outcome = outcome
 
         return HStack(spacing: TranscriptLayout.glyphGap) {
-            TranscriptGlyph(
-                symbol: presentation.glyph,
-                // The outcome's colour wins where there is one, and the presentation's role
-                // becomes one here. See `ToolTint`: which role a tool row carries is a decision
-                // in the core, and this is where it stops being one.
-                tint: outcome?.tint ?? presentation.tint.colour
-            )
-
-            // A rung below the prose beside it, and in the secondary colour, because that is the
-            // whole hierarchy of this pane: what the agent wrote is the content, and what it ran
-            // is the receipt. Set in medium at reading size it was the loudest thing in the
-            // window, and forty of them in a row buried the answer underneath. Quieter, not
-            // smaller: it is still the label column of a row that has to be scannable, and the
-            // size it drops to is the one every other label in the window is set at.
-            Text(presentation.label)
-                .font(Typo.label)
-                .foregroundStyle(Palette.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .transcriptLabelColumn(presentation.label, font: Typo.label)
-                .reportsTruncation(
-                    of: presentation.label,
-                    font: Typo.label,
-                    isActive: wantsMeasuring,
-                    into: $titleIsCut
-                )
-
-            if showsDetail {
-                detailText
-                    .font(detailFont)
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
-                    .reportsTruncation(
-                        of: presentation.detailLine,
-                        font: detailFont,
-                        isActive: wantsMeasuring,
-                        into: $detailIsCut
-                    )
-            }
-
-            // Deliberately not `fixedSize`: a row is one line tall and clips, so a chip that
-            // refuses to give ground is cut in half at a narrow pane width rather than
-            // truncated. `Chip` already holds itself to one line, and the detail beside it
-            // carries the higher layout priority, so the chip only gives ground last.
-            ForEach(presentation.chips.indices, id: \.self) { index in
-                switch presentation.chips[index] {
-                case .code(let text):
-                    Chip(text: text, monospaced: true)
-                case .file(let path):
-                    fileChip(path)
+            if let onOpenRun {
+                // The title and the count are what open the run: they are the part of the row
+                // that names the agent and says how much it did. Return opens it as well as
+                // Space, for a reader who reached the row with the keyboard.
+                Button(action: onOpenRun) {
+                    HStack(spacing: TranscriptLayout.glyphGap) {
+                        summary(outcome: outcome)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help(SubagentRunLink.openHelp)
+                .accessibilityHint(SubagentRunLink.openHelp)
+                .onKeyPress(keys: [.return]) { _ in
+                    onOpenRun()
+                    return .handled
+                }
+            } else {
+                summary(outcome: outcome)
             }
 
             Spacer(minLength: TranscriptLayout.tight)
@@ -218,7 +199,18 @@ struct ToolRowHeader: View {
                     .fixedSize()
             }
 
-            if showsDisclosure {
+            if let onToggle, onOpenRun != nil {
+                // Its own target, because the rest of the row now opens the run. The label says
+                // what it shows, since "expand" on a row that also opens something is ambiguous.
+                let title = isExpanded ? "Hide the brief and result" : "Show the brief and result"
+                Button(action: onToggle) {
+                    TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(title)
+                .accessibilityLabel(title)
+            } else if showsDisclosure {
                 TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
             }
         }
@@ -244,6 +236,87 @@ struct ToolRowHeader: View {
             hoverTask?.cancel()
             withdraw()
         }
+    }
+
+    /// What the call was: the glyph, the label, the detail, the count and the chips. A builder of
+    /// its own so an Agent call can make exactly this the button that opens its run, leaving the
+    /// outcome, the duration and the chevron outside it.
+    @ViewBuilder
+    private func summary(outcome: (text: String, tint: Color, help: String)?) -> some View {
+        TranscriptGlyph(
+            symbol: presentation.glyph,
+            // The outcome's colour wins where there is one, and the presentation's role
+            // becomes one here. See `ToolTint`: which role a tool row carries is a decision
+            // in the core, and this is where it stops being one.
+            tint: outcome?.tint ?? presentation.tint.colour
+        )
+
+        // A rung below the prose beside it, and in the secondary colour, because that is the
+        // whole hierarchy of this pane: what the agent wrote is the content, and what it ran
+        // is the receipt. Set in medium at reading size it was the loudest thing in the
+        // window, and forty of them in a row buried the answer underneath. Quieter, not
+        // smaller: it is still the label column of a row that has to be scannable, and the
+        // size it drops to is the one every other label in the window is set at.
+        Text(presentation.label)
+            .font(Typo.label)
+            .foregroundStyle(Palette.textSecondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .transcriptLabelColumn(presentation.label, font: Typo.label)
+            .reportsTruncation(
+                of: presentation.label,
+                font: Typo.label,
+                isActive: wantsMeasuring,
+                into: $titleIsCut
+            )
+
+        if showsDetail {
+            detailText
+                .font(detailFont)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
+                .reportsTruncation(
+                    of: presentation.detailLine,
+                    font: detailFont,
+                    isActive: wantsMeasuring,
+                    into: $detailIsCut
+                )
+        }
+
+        // Fixed rather than truncating with the description: the description is the part a
+        // reader can do without at a narrow width, and the count is the part that moves.
+        if let subagentActions {
+            meta(Counted.of(subagentActions, "action"))
+        } else if runUnavailable {
+            // Said before anybody clicks, rather than opening a pane with nothing in it.
+            meta(SubagentRunLink.unavailableLabel)
+                .help(SubagentRunLink.unavailableHelp)
+        }
+
+        // Deliberately not `fixedSize`: a row is one line tall and clips, so a chip that
+        // refuses to give ground is cut in half at a narrow pane width rather than
+        // truncated. `Chip` already holds itself to one line, and the detail beside it
+        // carries the higher layout priority, so the chip only gives ground last.
+        ForEach(presentation.chips.indices, id: \.self) { index in
+            switch presentation.chips[index] {
+            case .code(let text):
+                Chip(text: text, monospaced: true)
+            case .file(let path):
+                fileChip(path)
+            }
+        }
+    }
+
+    /// A fact after the detail, joined to it with the window's meta separator.
+    private func meta(_ text: String) -> some View {
+        Text(showsDetail ? "· \(text)" : text)
+            .font(Typo.label)
+            .foregroundStyle(Palette.textTertiary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
     }
 
     // MARK: The row's own card

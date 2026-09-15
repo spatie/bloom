@@ -204,7 +204,8 @@ final class TranscriptLiveEndFollower {
 
     private func startLink() {
         guard link == nil, let scrollView else { return }
-        lastFrame = 0
+        lastFrame = CACurrentMediaTime()
+        lastHeight = scrollView.documentView?.frame.height ?? 0
         forgetTheView()
         // Before the first frame runs, so the very first take-back is not overwritten by the pin
         // it is trying to take back from. See `onStart`.
@@ -252,52 +253,54 @@ final class TranscriptLiveEndFollower {
     }
 
     @objc private func step(_ sender: CADisplayLink) {
-        MainActor.assumeIsolated {
-            guard wants, let scrollView, let document = scrollView.documentView else { return endLink() }
-            // Flipped is what every scroll view in this app is, SwiftUI's included, but it is
-            // asked rather than assumed: unflipped, the end of the document is at the origin and
-            // everything below would be aimed the wrong way. See `TranscriptLiveEndScroller`.
-            guard document.isFlipped else { return endLink() }
+        MainActor.assumeIsolated { advance(at: CACurrentMediaTime()) }
+    }
 
-            let clip = scrollView.contentView
-            // The same refusal `TranscriptTable.Coordinator.put` makes, because this is the other
-            // thing that writes the clip view and it runs at display rate for the whole of a turn,
-            // which is when a divider is most likely to be under a hand. See
-            // `TranscriptAnchor.canPlace`: `endOffset` against a pane of no height is the point
-            // below the last row.
-            guard TranscriptAnchor.canPlace(viewportHeight: Double(clip.bounds.height)) else {
-                return
-            }
-            let now = CACurrentMediaTime()
-            let frame = lastFrame > 0 ? now - lastFrame : 0
-            lastFrame = now
+    /// The display clock is explicit so an offscreen probe can exercise the real follower.
+    func advance(at now: CFTimeInterval) {
+        guard wants, let scrollView, let document = scrollView.documentView else { return endLink() }
+        // Flipped is what every scroll view in this app is, SwiftUI's included, but it is
+        // asked rather than assumed: unflipped, the end of the document is at the origin and
+        // everything below would be aimed the wrong way. See `TranscriptLiveEndScroller`.
+        guard document.isFlipped else { return endLink() }
 
-            let height = document.frame.height
-            let end = scrollView.endOffset
-            var offset = clip.bounds.origin.y
-
-            // Whose gap this is, decided before anything is done with it. Upwards only: see
-            // `lastPut`.
-            if let lastPut, offset < lastPut - CGFloat(TranscriptFollow.arrived) { ownsGap = false }
-
-            if lastHeight > 0, height > lastHeight {
-                offset = TranscriptFollow.start(
-                    offset: offset, end: end, grew: height - lastHeight, ownsGap: ownsGap
-                )
-            }
-            lastHeight = height
-
-            switch TranscriptFollow.step(offset: offset, end: end, frame: frame, ownsGap: ownsGap) {
-            case .rest:
-                // The take-back still has to land even on a frame with no travel left in it,
-                // which is the frame a row lands on when the display link is running late.
-                if offset != clip.bounds.origin.y { put(offset, in: clip, of: scrollView) }
-            case .settle(let next):
-                put(next, in: clip, of: scrollView)
-            }
-
-            if !isStreaming, now >= deadline { endLink() }
+        let clip = scrollView.contentView
+        // The same refusal `TranscriptTable.Coordinator.put` makes, because this is the other
+        // thing that writes the clip view and it runs at display rate for the whole of a turn,
+        // which is when a divider is most likely to be under a hand. See
+        // `TranscriptAnchor.canPlace`: `endOffset` against a pane of no height is the point
+        // below the last row.
+        guard TranscriptAnchor.canPlace(viewportHeight: Double(clip.bounds.height)) else {
+            return
         }
+        let frame = lastFrame > 0 ? now - lastFrame : 0
+        lastFrame = now
+
+        let height = document.frame.height
+        let end = scrollView.endOffset
+        var offset = clip.bounds.origin.y
+
+        // Whose gap this is, decided before anything is done with it. Upwards only: see
+        // `lastPut`.
+        if let lastPut, offset < lastPut - CGFloat(TranscriptFollow.arrived) { ownsGap = false }
+
+        if lastHeight > 0, height > lastHeight {
+            offset = TranscriptFollow.start(
+                offset: offset, end: end, grew: height - lastHeight, ownsGap: ownsGap
+            )
+        }
+        lastHeight = height
+
+        switch TranscriptFollow.step(offset: offset, end: end, frame: frame, ownsGap: ownsGap) {
+        case .rest:
+            // The take-back still has to land even on a frame with no travel left in it,
+            // which is the frame a row lands on when the display link is running late.
+            if offset != clip.bounds.origin.y { put(offset, in: clip, of: scrollView) }
+        case .settle(let next):
+            put(next, in: clip, of: scrollView)
+        }
+
+        if !isStreaming, now >= deadline { endLink() }
     }
 
     private func put(_ y: CGFloat, in clip: NSClipView, of scrollView: NSScrollView) {

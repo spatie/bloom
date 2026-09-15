@@ -132,7 +132,7 @@ struct BloomCommands: Commands {
                     return
                 }
                 guard let workspace = model.selectedModel else { return }
-                Task { await workspace.createSession() }
+                NewPane.open(.chat, in: workspace) { WorkspaceTabsStore.shared.select($0, in: workspace) }
             }
             .disabled(model.selectedModel == nil && model.selection != .ask)
 
@@ -254,6 +254,16 @@ struct BloomCommands: Commands {
             // The separator matters more than it looks. `.pasteboard` ends at Select All, so
             // without this the find item sits welded to it and the Edit menu reads as one
             // undivided run of eight items. Every Mac Edit menu keeps find in a group of its own.
+            Divider()
+
+            // Beside the pasteboard rather than in the find group, because it is the same kind of
+            // act as Copy: take what is selected and put it somewhere. Never disabled, for Find's
+            // reason: whether anything is selected is the responder chain's to say, and it says so
+            // at the moment the key is pressed rather than when this body was last built.
+            MenuCommand(.addSelectionToChat) {
+                if !SelectionToChat.perform() { NSSound.beep() }
+            }
+
             Divider()
 
             // The find group every Mac Edit menu has, which this one did not: Cmd+F opened a
@@ -499,12 +509,8 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // **Greyed while somebody is typing, and that is not tidiness.** Command-Backspace
-            // deletes to the start of the line in every text box on macOS, and AppKit checks a
-            // menu's key equivalents before the responder chain sees the key, so the text view
-            // never gets the chance to refuse it. A user reached for it mid-prompt and archived
-            // the workspace he was writing in. The item stands down instead; see
-            // `FocusedValues.isTypingProse`.
+            // Keep Archive disabled in prose editors. Its shortcut also requires Shift because
+            // fields without a published focus value must keep Command-Backspace for editing.
             MenuCommand(.archive) {
                 guard let workspace = workspace(for: .archive) else { return }
                 archive(workspace)
@@ -644,8 +650,7 @@ struct BloomCommands: Commands {
         }
     }
 
-    /// The repository's run scripts, each of which opens a terminal tab named after itself with
-    /// its command already running.
+    /// The repository's run scripts, each of which runs in a terminal tab named after itself.
     ///
     /// In the Workspace menu because a run script runs in one worktree, against one port, and the
     /// project settings window that defines them is not about any particular workspace. They used
@@ -669,17 +674,16 @@ struct BloomCommands: Commands {
         }
     }
 
-    /// A new tab every time, rather than one that is reused. Two copies of a dev server is a thing
-    /// somebody does on purpose, and a tab that silently restarted the one already running would
-    /// throw away the log they were reading.
+    /// A running script is shown rather than started twice, and a stopped one runs again in the
+    /// tab it ran in.
+    ///
+    /// This used to open a new tab every time, on the argument that two copies of a dev server is
+    /// a thing somebody does on purpose. In practice it was the thing nobody meant: the second copy
+    /// fights the first for its port, and the error it prints reads as a broken app. So the menu
+    /// goes through the same launcher as the title bar's `+`, which is `RunScriptPick`, and a stopped
+    /// script keeps its last output above the new run rather than in a tab of its own.
     private func run(_ script: RunScript, in workspace: WorkspaceModel) {
-        let tab = CenterTabStore.shared.add(
-            kind: .terminal, workspaceID: workspace.workspace.id, title: script.name
-        )
-        // Queued rather than sent: the shell is forked by `ToolPaneView`, once it has settled the
-        // port this script is about to bind. See `TerminalSessionStore.run(_:inPaneID:)`.
-        TerminalSessionStore.shared.run(script.command, inPaneID: tab.id)
-        WorkspaceTabsStore.shared.select(.tool(tab.id), in: workspace)
+        RunScriptLauncher.shared.pick(script, in: workspace)
     }
 
     // MARK: - Splitting the centre column
@@ -694,7 +698,7 @@ struct BloomCommands: Commands {
     /// never the point.
     ///
     /// So the direction and what goes in it are one gesture here too, drawn from the same
-    /// `PaneKind` the pane's menu and the strip's `+` draw theirs from, and doing the same thing:
+    /// `PaneKind` the pane's menu and the title bar's `+` draw theirs from, and doing the same thing:
     /// `NewPane` opens a new one of that kind and the half is filled with it.
     ///
     /// **What that changes about the keystroke, said out loud.** `Cmd+\` and `Shift+Cmd+\` now
@@ -799,7 +803,9 @@ struct BloomCommands: Commands {
         // Splitting and closing a shell pane are the tab's own, and the menu bar reaches neither
         // from here: Split Right opens in the CENTRE column and Close Pane closes a centre pane,
         // which are the two items directly above these in the same menu.
-        case .split, .close:
+        // Adding a selection is the shell's own too, and the menu bar's Add to Chat finds
+        // the shell through the responder chain rather than coming through here.
+        case .split, .close, .addSelectionToChat:
             return
         }
     }
@@ -924,7 +930,7 @@ struct BloomCommands: Commands {
         case .tool(let id):
             guard let tab = CenterTabStore.shared.tabs(for: workspace.workspace.id)
                 .first(where: { $0.id == id }) else { return }
-            Task { await CenterTabStore.shared.close(tab) }
+            Task { await CenterTabStore.shared.close(tab, in: workspace) }
         }
     }
 

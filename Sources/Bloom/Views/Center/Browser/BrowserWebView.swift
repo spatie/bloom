@@ -185,6 +185,7 @@ struct BrowserWebView: NSViewRepresentable {
     }
 
     private func wire() {
+        session.webView.underPageBackgroundColor = NSColor(Palette.surface)
         session.webView.paneMenu = paneMenu
         session.host = host
     }

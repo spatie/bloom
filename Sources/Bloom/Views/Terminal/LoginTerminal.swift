@@ -28,11 +28,7 @@ final class LoginTerminalSession {
     ) {
         guard let path = Shell.which(executable) else { return nil }
 
-        var variables = Shell.environment()
-        variables["TERM"] = "xterm-256color"
-        variables["COLORTERM"] = "truecolor"
-        variables["TERM_PROGRAM"] = "Bloom"
-        if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
+        let variables = Shell.terminalEnvironment(inheriting: Shell.environment())
 
         label = ([executable] + arguments).joined(separator: " ")
         launch = TerminalLaunch(
@@ -77,9 +73,6 @@ final class LoginTerminalSession {
 struct LoginTerminal: NSViewRepresentable {
     let session: LoginTerminalSession
 
-    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
-    @AppStorage(TerminalTextSize.defaultsKey) private var fontSize = 0.0
-
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
         host.attach(session.terminal)
@@ -98,7 +91,6 @@ struct LoginTerminal: NSViewRepresentable {
     }
 
     private func configure() {
-        session.terminal.usesGhosttyTheme = usesGhosttyTheme
-        session.terminal.fontSizeOverride = fontSize > 0 ? CGFloat(fontSize) : nil
+        session.terminal.updateTheme()
     }
 }

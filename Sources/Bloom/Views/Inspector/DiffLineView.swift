@@ -192,8 +192,8 @@ struct DiffLineView: View, Equatable {
                 HStack(spacing: 0) {
                     DiffMarker(line: line)
                     Text("No newline at end of file")
-                        .font(Typo.codeTiny)
-                        .foregroundStyle(Palette.textTertiary)
+                        .font(Font(CodeMetrics.numberFont))
+                        .foregroundStyle(Palette.codeGutter)
                         .italic()
                     Spacer(minLength: 0)
                 }
@@ -214,7 +214,7 @@ struct DiffLineView: View, Equatable {
             // Padding opposite a longer run on the other side. Sunken rather than empty, so the
             // eye reads it as "nothing here" instead of "unchanged".
             Rectangle()
-                .fill(Palette.surfaceSunken)
+                .fill(Palette.codeBackground)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -225,6 +225,7 @@ struct DiffLineView: View, Equatable {
 /// Two colours, asked for by the per line rows and by the run rows, which paint them in different
 /// places: `DiffLineView` as the row's own background, `DiffRunView` as a layer behind a column of
 /// lines. One answer, so a run and the lone line under it cannot come out different greens.
+@MainActor
 enum DiffWash {
     /// The wash that says the line changed.
     static func background(of line: DiffLine?) -> Color {

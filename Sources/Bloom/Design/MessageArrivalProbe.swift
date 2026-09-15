@@ -17,7 +17,7 @@ enum MessageArrivalProbe {
             contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
             styleMask: [], backing: .buffered, defer: false
         )
-        let arrival = MessageArrival(style: .sent)
+        let arrival = MessageArrival(style: .reply)
         func host(_ ticket: MessageArrival?) -> NSView {
             NSHostingView(rootView: Color.red.frame(width: 120, height: 40)
                 .messageArrival(ticket).padding(20).background(Color.white))

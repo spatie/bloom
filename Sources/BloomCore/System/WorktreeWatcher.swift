@@ -59,6 +59,7 @@ public final class WorktreeWatcher: Sendable {
         var matching: [String] = []
         /// Real path back to the spelling the caller uses.
         var origins: [String: String] = [:]
+        var metadata: [String: Set<String>] = [:]
     }
 
     private let watched = Mutex(Watched())
@@ -95,7 +96,8 @@ public final class WorktreeWatcher: Sendable {
             for root in wanted { origins[Self.resolve(root)] = root }
             state.origins = origins
             state.matching = Self.ordered(Array(origins.keys))
-            state.stream = wanted.isEmpty ? nil : makeStream(for: wanted)
+            state.metadata = Self.metadataRoots(for: wanted)
+            state.stream = wanted.isEmpty ? nil : makeStream(for: Array(Set(wanted + Array(state.metadata.keys))))
         }
     }
 
@@ -108,6 +110,7 @@ public final class WorktreeWatcher: Sendable {
             state.given = []
             state.matching = []
             state.origins = [:]
+            state.metadata = [:]
         }
     }
 
@@ -170,10 +173,16 @@ public final class WorktreeWatcher: Sendable {
     /// directory it watched when a root itself is moved or deleted, and a caller told about a
     /// worktree it does not have would ask git about a path that is not there.
     private func report(_ paths: [String]) {
-        let (matching, origins) = watched.withLock { ($0.matching, $0.origins) }
-        let changed = Self.roots(of: paths, in: matching).compactMap { origins[$0] }
+        let (matching, origins, metadata) = watched.withLock { ($0.matching, $0.origins, $0.metadata) }
+        // The main checkout's metadata is also inside a watched file root. Route those events
+        // only through the metadata filter, or ignored object writes would still wake it.
+        let files = paths.filter { path in
+            !metadata.keys.contains { path == $0 || path.hasPrefix($0 + "/") }
+        }
+        var changed = Set(Self.roots(of: files, in: matching).compactMap { origins[$0] })
+        changed.formUnion(Self.metadataWorktrees(changed: paths, metadata: metadata))
         guard !changed.isEmpty else { return }
-        onChange(Set(changed))
+        onChange(changed)
     }
 
     private func reportFiles(_ paths: [String], flags: [FSEventStreamEventFlags]) {
@@ -191,6 +200,54 @@ public final class WorktreeWatcher: Sendable {
     }
 
     // MARK: - The arithmetic, which is the part worth testing
+
+    static func metadataRoots(for roots: [String]) -> [String: Set<String>] {
+        var result: [String: Set<String>] = [:]
+        for root in roots {
+            guard let paths = Git.repositoryPaths(in: root) else { continue }
+            result[resolve(paths.gitDirectory), default: []].insert(root)
+            // A shared subscription covers packed refs and config as well as loose refs.
+            // The routing filter excludes object writes and hidden snapshot refs.
+            result[resolve(paths.commonDirectory), default: []].insert(root)
+        }
+        return result
+    }
+
+    static func metadataWorktrees(changed paths: [String], metadata: [String: Set<String>]) -> Set<String> {
+        var worktrees: Set<String> = []
+        let ordered = Self.ordered(Array(metadata.keys))
+        for path in paths {
+            // A per-worktree index is beneath the common directory. The most specific match
+            // belongs only to that worktree; common refs deliberately reach every sibling.
+            if let root = ordered.first(where: { path == $0 || path.hasPrefix($0 + "/") }) {
+                let relative = path == root ? "" : String(path.dropFirst(root.count + 1))
+                guard metadataAffectsWorktree(relative) else { continue }
+                worktrees.formUnion(metadata[root] ?? [])
+            }
+        }
+        return worktrees
+    }
+
+    private static func metadataAffectsWorktree(_ relative: String) -> Bool {
+        // Directory-level FSEvents can coalesce to an ancestor. An exact metadata root or
+        // refs parent cannot tell us which child changed, so invalidate conservatively.
+        let parts = relative.split(separator: "/").map(String.init)
+        guard let first = parts.first else { return true }
+        if first == "refs" {
+            guard parts.count > 1 else { return true }
+            return ["heads", "remotes", "tags"].contains(parts[1])
+        }
+        if first == "logs" {
+            guard parts.count > 1 else { return true }
+            return metadataAffectsWorktree(parts.dropFirst().joined(separator: "/"))
+        }
+        if first == "worktrees" { return parts.count == 1 }
+        return [
+            "HEAD", "index", "index.lock", "packed-refs", "packed-refs.lock", "config",
+            "config.worktree", "commondir", "gitdir", "shallow", "MERGE_HEAD", "REBASE_HEAD",
+            "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-apply", "rebase-merge", "sequencer",
+        ].contains(first)
+    }
 
     /// The roots a batch of changed paths belong to.
     ///

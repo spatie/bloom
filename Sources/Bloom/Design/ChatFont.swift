@@ -43,7 +43,6 @@ struct ChatFont: Hashable, Sendable {
     /// The `UserDefaults` slot and the value in it when nobody has chosen. Both forwarded rather
     /// than restated, so the views that read the setting keep naming the app-side type while the
     /// core stays the one place either can change.
-    static let defaultsKey = ChatFontCatalogue.defaultsKey
     static let standardID = ChatFontCatalogue.standardID
 
     /// San Francisco, and what every surface falls back to. See `ChatFontCatalogue.standardID`.

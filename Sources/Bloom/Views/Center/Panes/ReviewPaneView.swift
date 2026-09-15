@@ -22,7 +22,7 @@ struct ReviewPaneView: View {
     /// failure: the worktree tree opens files nobody changed, and a file can stop being changed
     /// underneath the reader when the agent reverts it.
     private var changed: ChangedFile? {
-        model.changedFiles.first { $0.path == tab.path }
+        model.selectedChangedFile(path: tab.path)
     }
 
     /// Whether the file is still on disk. Resolved when the path or the changes poll moves, and
@@ -56,7 +56,12 @@ struct ReviewPaneView: View {
                 reviewToolbar
                 Hairline()
             }
+            if case .commit(let commit) = model.diffScope {
+                CommitReviewHeader(commit: commit)
+                Hairline()
+            }
             content
+                .id(model.diffScope)
                 // Pinned to the top, not centred, which is what an unaligned fill means and what
                 // a reader reported on 0.20.0: a file with a handful of lines in it floated in
                 // the middle of a tall pane with a band of empty above it. Every one of the views
@@ -106,7 +111,11 @@ struct ReviewPaneView: View {
 
     @ViewBuilder
     private var content: some View {
-        if tab.showsAllFiles, !tab.isPinnedToPath {
+        if model.isLoadingChanges || !model.hasReadChanges {
+            LoadingView("Reading changes")
+        } else if let error = model.changesError {
+            EmptyStateView(glyph: "exclamationmark.triangle", title: "Could not read changes", message: error)
+        } else if tab.showsAllFiles, !tab.isPinnedToPath {
             AllFilesReviewView(
                 model: model, selectedPath: tab.path,
                 navigationRevision: tab.reviewNavigationRevision
@@ -116,7 +125,12 @@ struct ReviewPaneView: View {
             // A path can exist in several workspaces. Include the workspace so switching
             // checkouts cannot reuse another workspace's diff, selection or expanded context.
             DiffView(model: model, file: changed)
-                .id("\(model.workspace.id.rawValue):\(changed.path)")
+                .id("\(model.workspace.id.rawValue):\(changed.id)")
+        } else if model.diffScope.isHistorical {
+            EmptyStateView(glyph: "doc.text", title: "No file selected",
+                           message: model.changedFiles.isEmpty
+                            ? model.diffScope.emptyMessage(base: model.workspace.baseBranch)
+                            : "Pick a changed file in the inspector to read it here.")
         } else if tab.path.isEmpty {
             // Asked before the two branches below, because with no path there is nothing to look
             // for and `isPresent` answers optimistically until the first look comes back.
