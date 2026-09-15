@@ -9,6 +9,15 @@ struct CreationDestinationPicker: View {
     private var serverLabel: String { app.remoteServer.displayName }
 
     var body: some View {
+        // Absent rather than reduced to "This Mac" with the switch off, because a menu with one
+        // choice in it is a question nobody needs asked. The windows that hold it put `isRemote`
+        // back to false themselves, since a view that is not drawn runs no `onChange`.
+        if RemoteServerAvailability.shared.isEnabled {
+            menu
+        }
+    }
+
+    private var menu: some View {
         Menu {
             Picker("Create on", selection: $isRemote) {
                 Label("This Mac", systemImage: "laptopcomputer").tag(false)

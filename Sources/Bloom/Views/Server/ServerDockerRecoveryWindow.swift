@@ -31,6 +31,7 @@ struct ServerDockerRecoveryWindow: Scene {
             if let request {
                 ServerDockerRecoveryContent(request: request, server: model.remoteServer)
                     .environment(model).windowRole(.utility)
+                    .closesWhenRemoteServersAreOff()
             }
         }
         .windowResizability(.contentSize)

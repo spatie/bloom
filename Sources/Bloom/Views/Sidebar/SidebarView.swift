@@ -237,10 +237,13 @@ struct SidebarView: View {
             } header: {
                 SidebarProjectsHeader(onStartProject: { StartProjectOpening.shared.isRemote = false; startProject() })
             }
-            if let catalogue = app.remoteServer.catalogue {
-                remoteProjects(catalogue)
-            } else if app.remoteServer.isConfigured {
-                SidebarServerHeader(server: app.remoteServer).selectionDisabled()
+            // A catalogue can outlive the connection it came from, so the switch is asked first.
+            if RemoteServerAvailability.shared.isEnabled {
+                if let catalogue = app.remoteServer.catalogue {
+                    remoteProjects(catalogue)
+                } else if app.remoteServer.isConfigured {
+                    SidebarServerHeader(server: app.remoteServer).selectionDisabled()
+                }
             }
         }
         // The native list owns row height, keyboard navigation and which row is selected. How the
@@ -315,7 +318,7 @@ struct SidebarView: View {
             reorderNote = nil
         }
         .overlay {
-            if app.repos.isEmpty, !app.remoteServer.isConfigured, app.isLoaded {
+            if app.repos.isEmpty, !(RemoteServerAvailability.shared.isEnabled && app.remoteServer.isConfigured), app.isLoaded {
                 noProjects
             }
         }

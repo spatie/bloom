@@ -143,6 +143,13 @@ def parser():
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--stop-server", action="store_true")
     mode.add_argument("--start-server", action="store_true")
+    mode.add_argument("--replace-maintenance-key", action="store_true")
+    mode.add_argument("--uninstall", action="store_true",
+                      help="Remove Bloom Server and its services. The bloom account and its data are kept unless --delete-data is given.")
+    result.add_argument("--delete-data", action="store_true",
+                        help="With --uninstall, also delete the bloom account with its projects, repositories, database and sign-ins.")
+    result.add_argument("--force", action="store_true",
+                        help="With --uninstall, continue even while agents, workspace setup or an update are running.")
     result.add_argument("--package", type=pathlib.Path)
     result.add_argument("--sha256")
     result.add_argument("--maintenance-key-sha256")
@@ -829,6 +836,10 @@ def unit_contents(args):
     supervised = maintenance_installation(args)
     if supervised is not None:
         return supervised.unit_contents()
+    return legacy_unit_contents(args)
+
+
+def legacy_unit_contents(args):
     return f"""# Managed by Bloom Add Server.
 [Unit]
 Description=Bloom Server
@@ -1083,6 +1094,326 @@ def install(args):
     emit("complete", unchanged=False, **({"maintenanceKeyAccepted": supervised.key_accepted} if supervised is not None and getattr(args, "maintenance_key_sha256", None) else {}), **metadata(args))
 
 
+def replace_maintenance_key(args):
+    if os.geteuid() != 0:
+        fail("administrator_required", "Issuing a maintenance key needs administrator access.", "Connect as root or use passwordless sudo.")
+    existing = marker(args)
+    if not existing or existing.get("phase") != "installed":
+        fail("unmanaged_server", "There is no completed managed Bloom installation.", "Inspect the original installation before changing its maintenance key.")
+    check_ownership(args, existing)
+    if not getattr(args, "maintenance_key_sha256", None):
+        fail("maintenance_key_required", "A new maintenance key digest is required.", "Issue the key again from Bloom on your Mac.")
+    installation = MaintenanceInstallation(args, protected_system_path)
+    maintenance_call(installation.replace_key)
+    return {"maintenanceKeyAccepted": installation.key_accepted, **metadata(args)}
+
+
+# System paths written by the optional installers. They are fixed there too; the table exists so
+# the uninstall tests can point every one of them at a temporary directory.
+UNINSTALL_PATHS = {
+    "browser_root": pathlib.Path("/opt/bloom-browser"),
+    "apparmor_profile": pathlib.Path("/etc/apparmor.d/bloom-browser"),
+    "swap_root": pathlib.Path("/var/lib/bloom"),
+    "swap_unit": pathlib.Path("/etc/systemd/system/var-lib-bloom-swapfile.swap"),
+    "watch_configuration": pathlib.Path("/etc/sysctl.d/90-bloom-docker.conf"),
+    "linger": pathlib.Path("/var/lib/systemd/linger"),
+}
+
+# Other software may depend on these, and an uninstaller that removed git or Docker from a shared
+# machine would be the one people remember. They are named in the result so nobody has to guess.
+UNINSTALL_KEPT_PACKAGES = "Git, GitHub CLI, tmux, Node.js, npm, CA certificates and any Docker packages. Other software may use them."
+
+
+def uninstall(args):
+    """Remove what Bloom installed, in an order that can be re-run after any interruption.
+
+    The installation marker is removed or rewritten last, so a run that stops half way is still
+    recognised as Bloom's the next time. Every step checks whether its part is still present.
+    """
+    if os.geteuid() != 0:
+        fail("administrator_required", "Uninstalling needs administrator access.", "Connect as root or an account with sudo that does not ask for a password.")
+    delete_data, force = bool(args.delete_data), bool(args.force)
+    removed, kept = [], []
+    existing = marker(args)
+    unit = args.systemd_dir / (args.service_name + ".service")
+    protected_system_path(unit)
+    if existing is None:
+        if unit.exists() or unit.is_symlink():
+            fail("unmanaged_server", "A service with Bloom Server's name exists, but Bloom has no record of installing it.",
+                 "Bloom only removes software it installed. Inspect that service in an SSH terminal. Nothing was changed.")
+        return {"unchanged": True, "removed": [], "kept": [UNINSTALL_KEPT_PACKAGES], "deletedData": False,
+                "message": "Bloom Server is not installed on this server. Nothing was changed."}
+    try:
+        account = pwd.getpwnam(args.user)
+    except KeyError:
+        account = None
+    if account is not None and (account.pw_uid == 0 or account.pw_dir != str(args.service_home)):
+        fail("installation_conflict", f"The {args.user} account no longer matches this installation.",
+             "Bloom will not change an account it cannot identify. Inspect the account in an SSH terminal. Nothing was changed.")
+
+    emit("progress", step="uninstall-check", message="Checking for running agents, workspace setup and updates")
+    supervised = MaintenanceInstallation(args, protected_system_path)
+    busy_recovery = ("Wait for agents, workspace setup and updates to finish, then try again. "
+                     "Or choose Uninstall Anyway to stop them. Nothing was changed.")
+
+    def refuse(code, message):
+        if not force:
+            fail(code, message, busy_recovery)
+        emit("output", message="Continuing because uninstalling was forced: " + message, step="uninstall-check")
+
+    if account is not None:
+        try:
+            if account_operation(account, lambda: active_work(args.data_dir)):
+                refuse("server_busy", "Agents, queued messages or workspace setup are still running on this server.")
+        except InstallError as error:
+            if error.code == "cancelled":
+                raise
+            refuse(error.code, error.message)
+    if supervised.enabled:
+        try:
+            maintenance_call(supervised.ensure_idle)
+        except InstallError as error:
+            # A busy job may be interrupted on request. A configuration that does not match this
+            # installation may belong to something else, so no flag lets Bloom delete it.
+            if error.code != "maintenance_busy":
+                raise
+            refuse(error.code, error.message)
+    if unit.exists():
+        accepted = {legacy_unit_contents(args).strip(), supervised.unit_contents().strip()}
+        if unit.read_text().strip() not in accepted:
+            fail("unmanaged_server", "The Bloom Server service file was changed outside Bloom.",
+                 "Inspect " + str(unit) + " in an SSH terminal. Bloom will not remove a service it cannot identify. Nothing was changed.")
+
+    emit("progress", step="uninstall-service", message="Stopping Bloom Server and its background services")
+    service = args.service_name + ".service"
+    if unit.exists():
+        command(["systemctl", "disable", "--now", service], timeout=90)
+        state = command(["systemctl", "show", service, "--property=ActiveState", "--value"], required=False)
+        if state is None or state.returncode or (state.stdout or b"").strip() not in (b"inactive", b"failed", b""):
+            fail("stop_failed", "Bloom Server did not stop.", "Check the service in an SSH terminal, then try again. Its files were not removed.")
+        unit.unlink()
+        command(["systemctl", "daemon-reload"])
+        command(["systemctl", "reset-failed", service], required=False)
+        removed.append("Bloom Server service, which started Bloom when the server started")
+    if account is not None:
+        linger = UNINSTALL_PATHS["linger"] / args.user
+        lingering = linger.exists()
+        # Docker setup lets the account's services run without a login. Without Bloom nothing
+        # should keep running as that account, including containers from old workspaces.
+        command(["loginctl", "disable-linger", args.user], required=False)
+        command(["systemctl", "stop", f"user@{account.pw_uid}.service"], required=False, timeout=90)
+        if lingering:
+            removed.append(f"Background services of the {args.user} account, including its Docker containers")
+
+    emit("progress", step="uninstall-maintenance", message="Removing the maintenance service")
+    remove_maintenance(supervised, removed, kept)
+
+    emit("progress", step="uninstall-tools", message="Removing optional tools Bloom installed")
+    remove_browser_tools(account, removed, kept)
+    remove_swap(removed, kept)
+    remove_watch_configuration(removed)
+
+    if delete_data:
+        emit("progress", step="uninstall-account", message=f"Deleting the {args.user} account and all of its data")
+        remove_account(args, account, removed)
+        path = marker_path(args)
+        path.unlink(missing_ok=True)
+        try:
+            path.parent.rmdir()
+        except OSError:
+            pass
+    else:
+        emit("progress", step="uninstall-files", message="Removing Bloom Server program files")
+        if account is not None:
+            result = account_operation(account, lambda: remove_release_files(args))
+            if result["release"]:
+                removed.append("Bloom Server program files in " + str(args.install_root))
+            if result["keys"]:
+                removed.append("This Mac's SSH key for the " + args.user + " account")
+            kept.append(f"The {args.user} account, with its projects, repositories, conversations and sign-ins in {args.service_home}. "
+                        "Installing Bloom Server again uses them.")
+        # A prepared marker lets a later installation adopt the kept account and data, where no
+        # marker would make setup refuse the account as belonging to something else.
+        if existing.get("phase") != "prepared" or not existing.get("uninstalled"):
+            save_marker(args, {**configuration(args), "sha256": existing.get("sha256"), "phase": "prepared", "uninstalled": True})
+    kept.append(UNINSTALL_KEPT_PACKAGES)
+    unchanged = not removed
+    if unchanged:
+        message = "Bloom Server was already uninstalled. Nothing was changed."
+    elif delete_data:
+        message = "Bloom Server, the " + args.user + " account and all of its data were removed."
+    else:
+        message = "Bloom Server was removed. The " + args.user + " account and its data were kept."
+    return {"unchanged": unchanged, "removed": removed, "kept": kept, "deletedData": delete_data, "message": message}
+
+
+def remove_maintenance(supervised, removed, kept):
+    protected_system_path(supervised.state)
+    if supervised.state.exists() or supervised.state.is_symlink():
+        if supervised.state.is_symlink() or not supervised.state.is_dir():
+            fail("untrusted_maintenance", "The maintenance settings are not a protected directory.",
+                 "Inspect " + str(supervised.state) + " in an SSH terminal before retrying.")
+        shutil.rmtree(supervised.state)
+        removed.append("Maintenance service settings, update history and saved releases in " + str(supervised.state))
+    protected_system_path(supervised.socket_path)
+    if supervised.socket_path.exists() or supervised.socket_path.is_symlink():
+        supervised.socket_path.unlink()
+    for directory in (supervised.runtime, supervised.base):
+        protected_system_path(directory)
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+    # The programs in libexec are shared by every installation on the machine.
+    if supervised.base.is_dir():
+        if any(path.exists() for path in (supervised.launcher, supervised.docker_module, supervised.process_module)):
+            kept.append("Maintenance programs in " + str(supervised.launcher.parent) + ", still used by another Bloom Server installation")
+        return
+    programs = False
+    for path in (supervised.launcher, supervised.docker_module, supervised.process_module):
+        protected_system_path(path)
+        if path.exists() or path.is_symlink():
+            path.unlink()
+            programs = True
+    if programs:
+        removed.append("Maintenance service programs in " + str(supervised.launcher.parent))
+
+
+def remove_browser_tools(account, removed, kept):
+    root, profile = UNINSTALL_PATHS["browser_root"], UNINSTALL_PATHS["apparmor_profile"]
+    protected_system_path(root)
+    if not root.exists():
+        return
+    owner = root / ".bloom-managed"
+    protected_system_path(owner)
+    if not owner.is_file() or owner.read_text() != "Bloom optional browser installer v1\n":
+        kept.append("Files in " + str(root) + ", because Bloom could not confirm it installed them")
+        return
+    configuration_file = root / "configuration.json"
+    protected_system_path(configuration_file)
+    if configuration_file.exists():
+        try:
+            owner_uid = json.loads(configuration_file.read_text()).get("uid")
+        except (ValueError, AttributeError):
+            owner_uid = None
+        if account is None or owner_uid != account.pw_uid:
+            kept.append("Browser testing tools in " + str(root) + ", which belong to another account")
+            return
+    protected_system_path(profile)
+    if profile.exists() and profile.read_text().startswith("# Bloom managed browser user namespaces\n"):
+        command(["apparmor_parser", "-R", str(profile)], required=False)
+        profile.unlink()
+    shutil.rmtree(root)
+    removed.append("Browser testing tools and Chrome in " + str(root))
+
+
+def remove_swap(removed, kept):
+    root, unit = UNINSTALL_PATHS["swap_root"], UNINSTALL_PATHS["swap_unit"]
+    swap_marker, swap_file = root / ".swap-managed.json", root / "swapfile"
+    protected_system_path(swap_marker)
+    if not swap_marker.exists():
+        return
+    try:
+        value = json.loads(swap_marker.read_text())
+    except ValueError:
+        value = None
+    unit_text = unit.read_text() if unit.is_file() else None
+    if (not isinstance(value, dict) or value.get("path") != str(swap_file)
+            or unit_text is not None and not unit_text.startswith("# Managed by Bloom optional swap setup\n")):
+        kept.append("Swap in " + str(root) + ", because Bloom could not confirm it created it")
+        return
+    # Turning swap off moves its pages back into memory. On a full machine that can fail, and a
+    # half removed swap file is worse than one left in place and reported.
+    if unit_text is not None:
+        stopped = command(["systemctl", "disable", "--now", unit.name], required=False, timeout=120)
+        if stopped is None or stopped.returncode:
+            kept.append("The 2 GB swap file, because the server could not turn it off. Try again when less memory is in use.")
+            return
+        unit.unlink()
+        command(["systemctl", "daemon-reload"], required=False)
+    try:
+        active = str(swap_file) in read_swap_status()["activeSwapPaths"]
+    except (OSError, ValueError, KeyError):
+        active = True
+    if active:
+        stopped = command(["swapoff", str(swap_file)], required=False, timeout=120)
+        if stopped is None or stopped.returncode:
+            kept.append("The 2 GB swap file, because the server could not turn it off. Try again when less memory is in use.")
+            return
+    protected_system_path(swap_file)
+    swap_file.unlink(missing_ok=True)
+    swap_marker.unlink()
+    try:
+        root.rmdir()
+    except OSError:
+        pass
+    removed.append("The 2 GB swap file in " + str(root))
+
+
+def remove_watch_configuration(removed):
+    path = UNINSTALL_PATHS["watch_configuration"]
+    protected_system_path(path)
+    if path.is_file() and re.fullmatch(r"# Managed by Bloom optional Docker setup\nfs\.inotify\.max_user_watches = [0-9]+\n", path.read_text()):
+        path.unlink()
+        removed.append("The raised file watch limit for Docker, which returns to normal after a restart")
+
+
+def remove_release_files(args):
+    """Runs as the service account, so a link planted in its home cannot aim a deletion elsewhere."""
+    result = {"release": False, "keys": False}
+    if args.install_root.is_symlink():
+        args.install_root.unlink()
+        result["release"] = True
+    elif args.install_root.exists():
+        shutil.rmtree(args.install_root)
+        result["release"] = True
+    keys = args.service_home / ".ssh/authorized_keys"
+    if keys.is_file() and not keys.is_symlink():
+        lines = keys.read_text().splitlines(keepends=True)
+        remaining = [line for line in lines if not line.rstrip("\n").endswith(" bloom-client")]
+        if remaining != lines:
+            temporary = keys.with_name(".bloom-key-" + os.urandom(8).hex())
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w") as output:
+                output.write("".join(remaining))
+            os.replace(temporary, keys)
+            result["keys"] = True
+    return result
+
+
+def remove_account(args, account, removed):
+    protected_system_path(args.service_home.parent)
+    if account is not None:
+        command(["pkill", "--signal", "KILL", "--uid", str(account.pw_uid)], required=False)
+        time.sleep(0.5)
+        for path in (args.install_root, args.data_dir):
+            # Default paths live in the home, which userdel removes. Custom ones are deleted by
+            # the account itself, so they cannot be used to reach files it could not reach.
+            if args.service_home not in path.parents:
+                account_operation(account, lambda path=path: shutil.rmtree(path, ignore_errors=True))
+        result = command(["userdel", "--remove", args.user], required=False, timeout=300)
+        # 12 means the account was deleted but its home was not; that is finished below.
+        if result is None or result.returncode not in (0, 12):
+            fail("account_removal_failed", f"The {args.user} account could not be deleted.",
+                 "Check for processes still running as that account, then try again. Bloom Server itself was already removed.",
+                 command="userdel --remove " + args.user, exitStatus=None if result is None else result.returncode)
+        removed.append(f"The {args.user} account with all of its projects, repositories, conversations and sign-ins")
+    home = args.service_home
+    if home.is_dir() and not home.is_symlink():
+        # Only an orphaned home is removed as root: its owner no longer exists, so no account
+        # can have placed anything there since, and rmtree does not follow links.
+        try:
+            pwd.getpwuid(home.stat().st_uid)
+            return
+        except KeyError:
+            pass
+        if home.stat().st_uid == 0:
+            return
+        shutil.rmtree(home)
+        if account is None:
+            removed.append("The remaining files of the deleted " + args.user + " account in " + str(home))
+
+
 def open_installation_lock(service_name, directory=pathlib.Path("/run/bloom-installers")):
     protected_system_path(directory)
     directory.mkdir(mode=0o755, exist_ok=True)
@@ -1102,6 +1433,9 @@ def open_installation_lock(service_name, directory=pathlib.Path("/run/bloom-inst
 def main():
     args = parser().parse_args()
     try:
+        if (getattr(args, "delete_data", False) or getattr(args, "force", False)) and not getattr(args, "uninstall", False):
+            fail("invalid_configuration", "--delete-data and --force only apply to --uninstall.",
+                 "Add --uninstall, or leave out those options.")
         configuration(args)
         if args.check:
             result = probe(args)
@@ -1119,6 +1453,10 @@ def main():
                 emit("check", **stop_server(args))
             elif args.start_server:
                 emit("complete", **start_server(args))
+            elif args.replace_maintenance_key:
+                emit("complete", **replace_maintenance_key(args))
+            elif args.uninstall:
+                emit("complete", **uninstall(args))
             else:
                 install(args)
         return 0

@@ -24,6 +24,13 @@ struct ServerAdministrationOutcomeTests {
         #expect(ServerAdministrationOutcome.resolve(updating: true, installed: true, running: true, connected: true, failed: false) == .updated)
     }
 
+    @Test func onlyAConfirmedKeyReplacementIsSuccessful() {
+        #expect(ServerAdministrationOutcome.resolveKeyReplacement(issued: true) == .keyIssued)
+        #expect(ServerAdministrationOutcome.keyIssued.succeeded)
+        #expect(ServerAdministrationOutcome.keyIssued.detail.contains("Other devices"))
+        #expect(!ServerAdministrationOutcome.resolveKeyReplacement(issued: false).succeeded)
+    }
+
     @Test func startNeedsNoInstallation() {
         #expect(ServerAdministrationOutcome.resolve(updating: false, installed: false, running: true, connected: true, failed: false) == .started)
     }

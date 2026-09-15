@@ -10,6 +10,7 @@ struct ServerSetupWindow: Scene {
             ServerSetupContent(app: model)
                 .environment(model)
                 .windowRole(.utility)
+                .closesWhenRemoteServersAreOff()
         }
         .windowResizability(.contentSize)
     }

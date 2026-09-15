@@ -6,6 +6,16 @@ import BloomClient
 /// Maintenance credentials are independent of workspace and SSH access. Each app identity keeps
 /// its own non-synchronising, device-only credential for a verified server connection.
 public enum ServerMaintenanceCredentials {
+    /// 256 random bits. Setup and an administrator's replacement issue keys the same way.
+    public static func generateToken() -> String {
+        SymmetricKey(size: .bits256).withUnsafeBytes { Data($0).base64EncodedString() }
+    }
+
+    /// The only form of a key that leaves this device: the supervisor stores and compares this.
+    public static func digest(of token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
     public static func save(token: String, serverID: String) throws {
         let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (32...4_096).contains(token.utf8.count), !token.contains(where: \.isWhitespace) else {

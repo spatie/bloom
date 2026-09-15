@@ -12,6 +12,8 @@ public actor ServerRuntime {
     private let storage: ServerStorageService
     private let skills: ServerSkillsService
     private let makeRunner: RunnerFactory?
+    /// How long a session's shutdown waits for its terminated runner to exit. See `ServerSession.shutdown()`.
+    private let runnerExitGrace: Duration
     private var bridge: BridgeServer?
     private var bridgeArchives: [SessionID: Task<Void, Never>] = [:]
     let uiBroker = ServerUIBroker()
@@ -41,14 +43,14 @@ public actor ServerRuntime {
     private var maintenanceCommitState: MaintenanceCommitState = .pending
     private let maintenanceRestoration: (@Sendable () async throws -> Void)?
 
-    public init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil, maintenanceTrial: Bool = false) {
+    public init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil, maintenanceTrial: Bool = false, runnerExitGrace: Duration = .seconds(6)) {
         self.init(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner,
-                  workspaceAdmissions: ServerWorkspaceAdmissions(), maintenanceTrial: maintenanceTrial)
+                  workspaceAdmissions: ServerWorkspaceAdmissions(), maintenanceTrial: maintenanceTrial, runnerExitGrace: runnerExitGrace)
     }
 
     init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
          makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions, storageService: ServerStorageService? = nil, skillsService: ServerSkillsService? = nil, maintenanceTrial: Bool = false,
-         maintenanceRestoration: (@Sendable () async throws -> Void)? = nil) {
+         maintenanceRestoration: (@Sendable () async throws -> Void)? = nil, runnerExitGrace: Duration = .seconds(6)) {
         self.workspaceAdmissions = workspaceAdmissions
         self.store = store
         storage = storageService ?? ServerStorageService(directory: (store.path as NSString).deletingLastPathComponent)
@@ -58,6 +60,7 @@ public actor ServerRuntime {
         self.authentication = authentication
         terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
         self.makeRunner = makeRunner
+        self.runnerExitGrace = runnerExitGrace
         self.maintenanceTrial = maintenanceTrial
         self.maintenanceRestoration = maintenanceRestoration
     }
@@ -624,7 +627,7 @@ public actor ServerRuntime {
             }
             let runner = self.makeRunner?(session, workspace.path, self.store)
                 ?? SessionRunnerFactory.make(session: session, workspacePath: workspace.path, store: self.store, bridge: handle)
-            return ServerSession(runner: runner) { [weak self] ending in await self?.queue().turnEnded(session.id, ending: ending) }
+            return ServerSession(runner: runner, runnerExitGrace: self.runnerExitGrace) { [weak self] ending in await self?.queue().turnEnded(session.id, ending: ending) }
         }
         creating[id] = task
         do {

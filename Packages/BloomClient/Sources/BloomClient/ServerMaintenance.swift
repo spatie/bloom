@@ -47,11 +47,16 @@ public struct ServerMaintenanceComponent: Codable, Sendable, Equatable, Identifi
     public var availableVersion: String?
     public var canUpdate: Bool
     public var detail: String
+    /// A newer release this installation must not update to in place. `detail` says why and what
+    /// to do instead. Optional on the wire: supervisors before release descriptions omit it.
+    public var incompatible: Bool?
+    public var isIncompatible: Bool { incompatible == true }
 
     public init(id: ServerMaintenanceComponentID, title: String, installedVersion: String? = nil,
-                availableVersion: String? = nil, canUpdate: Bool, detail: String) {
+                availableVersion: String? = nil, canUpdate: Bool, detail: String, incompatible: Bool? = nil) {
         self.id = id; self.title = title; self.installedVersion = installedVersion
         self.availableVersion = availableVersion; self.canUpdate = canUpdate; self.detail = detail
+        self.incompatible = incompatible
     }
 }
 

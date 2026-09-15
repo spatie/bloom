@@ -154,6 +154,8 @@ struct GeneralSettingsView: View {
 
             OpenInSettingsSection()
 
+            RemoteServersSettingsSection()
+
             UpdateSettingsSection()
             InstallPingSettingsSection()
             CrashReportingSettingsSection()

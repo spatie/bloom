@@ -52,6 +52,10 @@ public struct ServerInstallEvent: Decodable, Sendable {
     public var command: String?
     public var exitStatus: Int?
     public var maintenanceKeyAccepted: Bool?
+    public var unchanged: Bool?
+    public var removed: [String]?
+    public var kept: [String]?
+    public var deletedData: Bool?
 
     public init(event: String, step: String? = nil, message: String? = nil, code: String? = nil,
                 recovery: String? = nil, details: String? = nil, command: String? = nil, exitStatus: Int? = nil,
@@ -155,6 +159,40 @@ public struct ServerSetupConnection: Sendable {
         try Task.checkCancellation()
         return try await stream(Self.startServerCommand, script: script, commandLabel: "Start Bloom Server",
                                 step: "server-start", progress: progress)
+    }
+
+    /// Replace the maintenance key's digest on an installed supervisor. Nothing restarts, and the
+    /// key itself never leaves the Mac: the digest is the only argument, validated before quoting.
+    public func replaceMaintenanceKey(script: String, digest: String,
+                                      progress: @escaping @Sendable (ServerInstallEvent) async -> Void = { _ in }) async throws -> ServerInstallEvent {
+        let command = try Self.replaceMaintenanceKeyCommand(digest: digest)
+        try Task.checkCancellation()
+        return try await stream(command, script: script, commandLabel: "Issue maintenance key", step: "maintenance-key", progress: progress)
+    }
+
+    static func replaceMaintenanceKeyCommand(digest: String) throws -> String {
+        guard digest.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil else {
+            throw ServerFailure("Invalid maintenance credential digest.")
+        }
+        let python = "python3 - --replace-maintenance-key --maintenance-key-sha256 " + ServerSetupSSH.shellQuote(digest)
+        return #"if [ "$(id -u)" = 0 ]; then "# + python + "; elif sudo -n true; then sudo -n " + python + "; else " + python + "; fi"
+    }
+
+    /// Remove the managed installation over the same administrator connection that installed it.
+    /// The installer refuses active work unless `force` is set, and reports what it removed and kept.
+    /// A refusal is returned as its error event rather than thrown, because `ServerSetupFailure`
+    /// folds installer codes together and the caller has to tell a busy server from an unknown one.
+    public func uninstall(script: String, deletesData: Bool, force: Bool,
+                          progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
+        try Task.checkCancellation()
+        return try await stream(Self.uninstallCommand(deletesData: deletesData, force: force), script: script, acceptsFailureEvent: true,
+                                commandLabel: "Uninstall Bloom Server", step: "uninstall-check", progress: progress)
+    }
+
+    static func uninstallCommand(deletesData: Bool, force: Bool) -> String {
+        let python = (["python3", "-"] + ServerUninstallPlan.installerArguments(deletesData: deletesData, force: force))
+            .map(ServerSetupSSH.shellQuote).joined(separator: " ")
+        return "if [ \"$(id -u)\" = 0 ]; then \(python); elif sudo -n true; then sudo -n \(python); else \(python); fi"
     }
 
     static let startServerCommand = "if [ \"$(id -u)\" = 0 ]; then python3 - --start-server; elif sudo -n true; then sudo -n python3 - --start-server; else python3 - --start-server; fi"

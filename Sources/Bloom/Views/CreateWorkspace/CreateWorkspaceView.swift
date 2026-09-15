@@ -307,6 +307,10 @@ struct CreateWorkspaceView: View {
             repoID = nil; checkout = nil; baseBranch = ""; checkoutOptions = WorkspaceCheckoutOptions()
             creationSource = CreationComposerSource(); creationProblem = nil
         }
+        // Remote servers switched off while this window is open. See `CreationDestinationPicker`.
+        .onChange(of: RemoteServerAvailability.shared.isEnabled, initial: true) { _, isEnabled in
+            if !isEnabled, isRemote { isRemote = false }
+        }
         .sheet(isPresented: $showsGitHub) {
             GitHubProjectPicker(isRemote: isRemote) { selected in repoID = selected.id }
                 .environment(app)

@@ -2,6 +2,12 @@
 
 Client implementers: see [the wire protocol guide](SERVER-PROTOCOL.md) and [schemas and Python example](../Protocol/README.md).
 
+Remote servers are off by default in the Mac app. Turn on **Settings > General > Remote servers**
+to show them: the server section of the sidebar, **Add Server…** and **Server Settings…** in the
+File menu and the sidebar footer, and the machine picker in the create windows. With the switch off
+Bloom shows none of these, does not connect or poll, and closes any open server windows. Saved
+servers are kept, and turning the switch back on reconnects as before.
+
 Bloom can connect to a standalone server while its existing local workspaces remain available.
 The server owns its agent processes, worktrees and SQLite database. Closing the server window,
 quitting the Mac client or disconnecting SSH leaves those agents running.
@@ -180,9 +186,25 @@ Finish. Continue moves between pages; Install is the explicit action that change
 The Accounts step first offers credential copying, then a separate page for individual sign-ins.
 Import results finish with Done, including partial results, before account status is refreshed.
 
+The introduction lists the requirements before any address is typed: Ubuntu 24.04 or 26.04 on
+x86_64, an SSH login as root or with passwordless sudo that is used only for installation and
+maintenance, and the separate `bloom` account that runs everything afterwards. The address step
+repeats the login rule under the field. The Installation step shows what is installed as a list
+(development tools, the account, where projects live, Bloom Server and the maintenance service),
+with every path behind one help button, and each optional extra states what it is for and what
+it costs in disk space. The wording lives in `ServerInstallationSummary` in the core, and
+`ServerUninstallPlanTests` keeps words such as systemd, AppArmor and rootless out of it.
+
+**Server Settings > About This Server** repeats that summary for a connected server: the system
+reported by its checks, the installed version when Updates has loaded it, the account and data
+directory, what was installed, and the limits that matter. One server is connected at a time and
+switching disconnects the current one, clients poll rather than receive pushes, and removing a
+server is not uninstalling it.
+
 Remove Server in the sidebar asks for confirmation and forgets only this Mac's saved connection.
 It leaves server processes, projects and credentials alone, and retains local drafts and key
-files. Removed bundled presets stay removed on relaunch. Other saved connections remain available
+files. Its alert says Bloom Server keeps running and points to **Uninstall Bloom Server…**.
+Removed bundled presets stay removed on relaunch. Other saved connections remain available
 under the sidebar footer's Saved Servers menu.
 
 Server checks keep the problem and available actions visible. Hover over a circled question mark
@@ -196,6 +218,45 @@ unknown service state and observed active work. This is an explicit administrati
 atomic maintenance mode: another client can start work after the final activity check. Connected
 clients disconnect; projects and conversations remain on disk. Installation starts the service
 again. Installation itself never stops a running server automatically.
+
+### Uninstall Bloom Server
+
+**Uninstall Bloom Server…** is in the server's sidebar menu and in **Server Settings > About This
+Server**. It uses the same administrator SSH path as setup: the address is prefilled as
+`root@host`, the host key is verified and the installer's check must describe the saved server's
+installation (host and data directory) before the confirmation is offered. The confirmation lists
+what is removed and what stays, from `ServerUninstallPlan`, with one choice: keep the `bloom`
+account and its data (the default), or delete it. Progress streams into the same output view as
+setup, and the result lists what the installer actually removed and kept, then offers to remove
+the connection from this Mac as well.
+
+On the server this is `install-bloom-server.py --uninstall`, with `--delete-data` and `--force`:
+
+- **Always removed:** the `bloom-server.service` unit (stopped and disabled first, and refused if
+  its contents are not the unit Bloom writes), the maintenance supervisor's state in
+  `/var/lib/bloom-maintenance/<service>`, its socket, and its programs in `/usr/local/libexec`
+  unless another installation still has state there. Lingering is turned off for the account and
+  its user services stop, which stops rootless Docker containers. Optional parts are removed only
+  when their Bloom markers verify them: `/opt/bloom-browser` and its AppArmor profile when they
+  belong to this account, the managed swap file and unit (kept and reported if swap cannot be
+  turned off), and `/etc/sysctl.d/90-bloom-docker.conf`.
+- **Keeping data (default):** the release files in `~/bloom/server` and this Mac's `bloom-client`
+  key lines are removed as the account itself. The account, `~/bloom/data`, workspaces and
+  sign-ins stay. The installation marker is rewritten as `prepared` with `uninstalled: true`, so a
+  later installation adopts the account and its data instead of refusing it as unknown.
+- **`--delete-data`:** processes of the account are killed, custom data paths outside its home are
+  deleted as the account, then `userdel --remove` deletes the account and its home, and the marker
+  is removed.
+- **Never removed:** Git, GitHub CLI, tmux, Node.js, npm, CA certificates and Docker packages. The
+  completion event lists them as kept.
+
+It refuses with `server_busy` while agents, queued deliveries or workspace setup are active and
+with `maintenance_busy` while a maintenance job runs. `--force` (**Uninstall Anyway…** in the app)
+continues past those two and an unreadable activity database, and nothing else: a changed unit or
+a maintenance configuration that does not match this installation is refused regardless. Every
+step checks whether its part still exists and the marker changes last, so an interrupted run can
+be repeated; a run with nothing left reports `unchanged: true`. The `complete` event carries
+`removed`, `kept`, `deletedData` and `message`.
 
 The wizard creates the `bloom` service account with `/home/bloom` as its home. Bloom-owned runtime
 and state use `~/bloom`:
@@ -659,10 +720,32 @@ Supported installations are deliberately specific:
   The plan discloses container and Docker service restarts. This is not a blanket APT upgrade or
   support for every Docker installation. Package changes do not have automatic package rollback.
 
+The Mac checks for updates in the background while it is connected: once shortly after each
+connection, then every six hours, or twenty minutes after a request that failed. It sends the same
+`inspect` the Updates screen does, so the supervisor (whose GitHub lookup is cached for fifteen
+minutes) remains the only thing that talks to GitHub. When an update exists, the sidebar's server
+heading shows a small download arrow and Server Settings badges Updates and lists the new versions
+with **Review Update…**. Nothing is ever installed without that review. Checks need maintenance
+access, so a Mac without the key shows nothing. `ServerUpdateCheckSchedule` and
+`ServerUpdateNotice` in BloomClient hold these decisions, for iPhone and iPad to share.
+
+Releases publish `bloom-server-linux-x86_64.json` beside the package. When a release has one, the
+supervisor reads it before offering the release: a different client protocol, a different
+maintenance protocol, another architecture or a newer glibc than the server has marks the release
+`incompatible` with the reason, instead of offering an update that would be refused after its
+download. A release with a newer protocol names the way forward: update Bloom on the Mac, then use
+**Update Server…**, which installs the server that app includes. Older releases without the
+description are offered as before, and every rule is still checked on the downloaded manifest.
+
 Maintenance requires `diagnostics.maintenanceManagement: true` and a separate administrator key.
 The wizard retains the key in this Mac's Keychain and installs only its SHA-256 digest on the
-server. Other clients enter the maintenance key in Updates; normal workspace authentication alone
-cannot authorise maintenance. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
+server, and its Finish step says so and offers **Copy Key for Another Device…**. Other clients
+enter the maintenance key in Updates; normal workspace authentication alone cannot authorise
+maintenance. A client without the key but with administrator SSH access can choose **Issue New
+Key…** in Updates instead. After a confirmation that other devices will need the new key, it
+generates a key, sends only its digest over SSH (`install-bloom-server.py
+--replace-maintenance-key`), saves the key in its Keychain, and the running supervisor adopts the
+new digest without restarting. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
 plans, phases, idempotency, logs and shared client behaviour.
 
 On older SSH servers, **Set Up Server Updates…** keeps the administrator checks and installation

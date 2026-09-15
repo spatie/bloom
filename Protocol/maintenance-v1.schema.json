@@ -259,6 +259,16 @@
         },
         "detail": {
           "type": "string"
+        },
+        "incompatible": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

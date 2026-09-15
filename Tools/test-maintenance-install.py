@@ -85,6 +85,36 @@ class MaintenanceInstallTests(unittest.TestCase):
             self.publish()
         self.assertEqual(self.installation.config_path.read_bytes(), original)
 
+    def test_administrator_replacement_rewrites_only_the_digest(self):
+        self.publish()
+        before = json.loads(self.installation.config_path.read_text())
+        self.args.maintenance_key_sha256 = 'd' * 64
+        self.installation.key_accepted = False
+        self.installation.replace_key()
+        after = json.loads(self.installation.config_path.read_text())
+        self.assertTrue(self.installation.key_accepted)
+        self.assertEqual(after['access_token_sha256'], 'd' * 64)
+        self.assertEqual({key: value for key, value in after.items() if key != 'access_token_sha256'},
+                         {key: value for key, value in before.items() if key != 'access_token_sha256'})
+        self.assertEqual(self.installation.config_path.stat().st_mode & 0o777, 0o600)
+        self.installation.replace_key()
+        self.assertTrue(self.installation.key_accepted)
+
+    def test_replacement_needs_an_installed_supervisor_and_a_valid_digest(self):
+        self.args.maintenance_key_sha256 = 'd' * 64
+        with self.assertRaises(MaintenanceInstallFailure) as missing:
+            self.installation.replace_key()
+        self.assertEqual(missing.exception.code, 'maintenance_unavailable')
+        self.assertFalse(self.installation.config_path.exists())
+        self.publish()
+        original = self.installation.config_path.read_bytes()
+        for digest in (None, 'raw-private-key', 'D' * 64):
+            self.args.maintenance_key_sha256 = digest
+            with self.assertRaises(MaintenanceInstallFailure) as invalid:
+                self.installation.replace_key()
+            self.assertEqual(invalid.exception.code, 'invalid_maintenance_key')
+        self.assertEqual(self.installation.config_path.read_bytes(), original)
+
     def test_existing_config_enables_maintenance_without_new_credential(self):
         self.publish()
         self.args.maintenance_key_sha256 = None
