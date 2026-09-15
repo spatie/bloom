@@ -33,9 +33,10 @@ extension ServerMaintenanceModel {
         let scope = ServerUpdateCheckSchedule.scope(serverID: server.connectionProfile?.id, connectionGeneration: server.connectionGeneration)
         guard updateChecks.isDue(scope: scope, connected: server.isConnected, busy: isBusyForUpdateCheck, now: now), let scope else { return }
         await refresh()
-        let outcome: ServerUpdateCheckSchedule.Outcome = session.map {
-            .outcome(authorized: $0.authorized, capability: $0.capability, failure: $0.failure)
-        } ?? .failed
+        var outcome = ServerUpdateCheckSchedule.Outcome.failed
+        if let session {
+            outcome = ServerUpdateCheckSchedule.outcome(authorized: session.authorized, capability: session.capability, failure: session.failure)
+        }
         updateChecks.record(outcome, scope: scope, at: Date())
     }
 
