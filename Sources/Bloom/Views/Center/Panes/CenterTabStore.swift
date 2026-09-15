@@ -143,7 +143,7 @@ final class CenterTabStore {
     @discardableResult
     func add(
         kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil,
-        directory: String = "", runScriptID: String? = nil
+        directory: String = "", agentSessionID: SessionID? = nil, runScriptID: String? = nil
     ) -> CenterTab {
         var tabs = tabs(for: workspaceID)
         let tab = CenterTab(
@@ -153,11 +153,16 @@ final class CenterTabStore {
             url: url,
             isNamed: title != nil,
             directory: directory,
+            agentSessionID: agentSessionID,
             runScriptID: runScriptID
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)
         return tab
+    }
+
+    func terminal(for sessionID: SessionID, in workspaceID: WorkspaceID) -> CenterTab? {
+        tabs(for: workspaceID).first { $0.kind == .terminal && $0.agentSessionID == sessionID }
     }
 
     /// Every terminal tab of a workspace, by id, without loading the workspace into the cache.
@@ -414,15 +419,18 @@ final class CenterTabStore {
 
     /// Closes a tab and stops whatever it was running. Any pane showing it goes with it, and the
     /// tab it was a pane of settles around the gap. See `TabSurgery`.
+    /// What a tab on a server has to do before it goes, such as ending the shell there. False keeps
+    /// the tab, because a server that could not be reached has not closed anything.
     @ObservationIgnored private var closeHandlers: [String: @MainActor () async -> Bool] = [:]
 
     func onClose(_ tab: CenterTab, perform: @escaping @MainActor () async -> Bool) {
         closeHandlers[tab.id] = perform
     }
 
-    func close(_ tab: CenterTab) async {
+    func close(_ tab: CenterTab, in model: any WorkspacePaneModel) async {
         if let close = closeHandlers[tab.id], !(await close()) { return }
         closeHandlers[tab.id] = nil
+        WorkspaceTabsStore.shared.prepareToClose(.tool(tab.id), in: model)
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
         WorkspaceTabsStore.shared.forget(.tool(tab.id), workspaceID: tab.workspaceID)
 
@@ -482,6 +490,9 @@ final class CenterTabStore {
     /// workspace whose panel had not loaded yet.
     private func stopShell(for tab: CenterTab) {
         TerminalSessionStore.shared.closePanes(of: tab.id)
+        if let sessionID = tab.agentSessionID {
+            try? AgentKind.removeInteractiveLaunch(sessionID: sessionID)
+        }
     }
 
     // MARK: - Persistence
@@ -498,6 +509,7 @@ final class CenterTabStore {
         // it: from here the list in hand is the list on disk.
         unreadable.remove(workspaceID)
         tabsByWorkspace[workspaceID] = tabs
+        WorkspaceTabsStore.shared.updateOrder(tools: tabs.map(\.id), workspaceID: workspaceID)
         Self.persist(tabs, workspaceID: workspaceID)
     }
 

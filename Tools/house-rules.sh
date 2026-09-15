@@ -341,7 +341,6 @@ id_type_allowed_lines=(
 # property so adding another bare internal id in the same file still fails.
 id_type_allowed_properties=(
   'Sources/BloomCore/Agent/Delivery.swift:providerTurnID'             # the provider's accepted turn, used for recovery
-  'Sources/BloomCore/Transcript/TurnCheckpoint.swift:providerTurnID' # the same provider turn correlated with a snapshot
   'Sources/BloomCore/Agent/PlanArtefact.swift:sourceID'               # the provider's plan item or tool-use token
 )
 # A stored property whose name ends in ID or Ids and whose type is a bare

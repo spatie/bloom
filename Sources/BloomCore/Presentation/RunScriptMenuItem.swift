@@ -1,6 +1,6 @@
 import Foundation
 
-/// One run script's row in the tab strip's `+` menu.
+/// One run script's row in the title bar's `+` menu.
 ///
 /// The command is the row's second line, so what is about to run can be read before it runs. A
 /// script that is already running says so instead, because picking it then shows the tab rather

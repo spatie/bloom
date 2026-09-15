@@ -101,6 +101,11 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     }
     func closeSession(_ session: Session) async {
         guard await perform(.closeSession(sessionID: session.id)) != nil else { return }
+        // The same bookkeeping `WorkspaceModel.closeSession` does, so the strip picks the tab
+        // beside it rather than falling back to the first one, and no pane keeps pointing at it.
+        let tabs = WorkspaceTabsStore.shared
+        tabs.prepareToClose(.chat(session.id), in: self)
+        tabs.forget(.chat(session.id), workspaceID: workspace.id)
         server.forgetConversation(session.id)
         await reloadSessions()
     }

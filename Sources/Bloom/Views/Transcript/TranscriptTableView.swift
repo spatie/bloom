@@ -11,11 +11,35 @@ final class TranscriptTableView: NSTableView {
     /// composer to reply in, which is an archived workspace. See `SelectionToChat`.
     var quoteSelection: (@MainActor (String) -> Void)?
 
+    /// The table has been laid out at a new width, and the rows on screen are owed heights for it.
+    /// See `TranscriptTable.Coordinator.widthChanged`.
+    var didChangeWidth: (@MainActor () -> Void)?
+
     private var isAligningRows = false
     private var alignmentWork: Task<Void, Never>?
+    /// The width `didChangeWidth` was last said at, so a width is said once however many layout
+    /// passes a frame of a drag takes.
+    private var laidOutWidth: CGFloat = 0
+
+    /// **Said from the table's own layout, and not from the scroll view's frame notification.**
+    /// That notification is posted from inside the scroll view's resize, and nothing promises the
+    /// table has taken its new width by then. A row measured against the width the table is about
+    /// to stop being wraps to the wrong number of lines. By the time the table lays itself out,
+    /// its width is the column's width.
+    ///
+    /// The layout is asked for here as well, rather than trusting a frame change to ask for one.
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthMoved = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if widthMoved { needsLayout = true }
+    }
 
     override func layout() {
         super.layout()
+        if bounds.width != laidOutWidth {
+            laidOutWidth = bounds.width
+            didChangeWidth?()
+        }
         alignRowOrigins()
     }
 

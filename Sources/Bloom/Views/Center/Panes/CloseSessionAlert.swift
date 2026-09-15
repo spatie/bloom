@@ -74,11 +74,6 @@ final class CloseSessionAlert {
     private func perform(_ session: Session, in model: any WorkspacePaneModel) {
         Task {
             await model.closeSession(session)
-            guard !model.sessions.contains(where: { $0.id == session.id }) else { return }
-            // A no-op unless the chat was a pane of some tab. A tab down to one pane dissolves
-            // into whatever is left rather than taking the column with it, and a tab named after
-            // this conversation is re-filed under one of its other panes. See `TabSurgery`.
-            WorkspaceTabsStore.shared.forget(.chat(session.id), workspaceID: model.workspace.id)
         }
     }
 }

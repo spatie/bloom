@@ -16,14 +16,27 @@ import BloomCore
 /// committing is a control the band did not ask for. `PullRequestSummary.mergeControl` carries
 /// what that costs.
 ///
-/// **The system's split button, drawn by the system.** A `Menu` with a `primaryAction` and
-/// `.menuStyle(.button)` IS this control on macOS: it draws the hairline, the chevron, the pressed
-/// states and the keyboard, and an inline `Picker` inside it draws the tick in the menu's state
-/// column, which nothing hand rolled can do.
+/// **The system's split button, drawn by the system, with the fill painted behind it.** A
+/// `Menu` with a `primaryAction` and `.menuStyle(.button)` IS this control on macOS: it draws the
+/// hairline, the chevron, the pressed states and the keyboard, and an inline `Picker` inside it
+/// draws the tick in the menu's state column, which nothing hand rolled can do. What it does not
+/// do is take a colour. Measured on this SDK, rendered offscreen at `controlActiveState.active`:
+/// a `Button` with `.borderedProminent` and `.tint(.red)` comes out red, and the same modifiers on
+/// a `Menu` come out as the neutral capsule, prominent or not, glass or not. So the state's colour
+/// is painted as a rounded rect behind the control. A dedicated AppKit host gives this one control
+/// dark appearance, making its label, chevron and hairline light even inside a light title bar.
+/// A SwiftUI colour-scheme override alone is ignored in a native title-bar accessory.
+///
+/// The band's colour is a hard requirement rather than decoration: `PullRequestTint.fill` is the
+/// rule that the one prominent button carries the colour of the band it stands in, so a red
+/// "Checks failing" band ends in a red button. A neutral capsule there would be the strip losing
+/// the signal it exists to carry.
 struct MergeSplitButton: View {
     /// The method in force for this project. The button promises it and the menu ticks it, and
     /// they are the same value: see `body` for what it takes to keep that true.
     var method: GitHub.MergeMethod
+    /// The colour of the band this stands in.
+    var fill: Color
     /// Whether GitHub will take a merge at all. A running agent is not in here: the cluster
     /// answers for that, once, for every control in it.
     var canMerge: Bool
@@ -33,19 +46,46 @@ struct MergeSplitButton: View {
     /// Merges, by the method in force. Opens the confirmation, like every path to a merge here.
     var merge: () -> Void
 
+    /// Whether the CLUSTER is enabled, which is where a running agent's answer arrives. Read
+    /// rather than assumed, because the painted fill has to dim with the control it is behind:
+    /// a full strength red capsule under a greyed out label reads as a live button.
+    @Environment(\.isEnabled) private var isClusterEnabled
+
+    private var isLive: Bool { isClusterEnabled && canMerge }
+
     var body: some View {
+        // Two forms, as every other control in this strip has, and for the same reason: the
+        // headline is the part that must not be what truncates.
+        //
+        // Nothing sizes this row from outside. A `.fixedSize()` sat here and proposed an
+        // unspecified width, which a `ViewThatFits` reads as room for its first candidate, so
+        // "Squash and merge" kept its title at every width the pane could be and the icon-only
+        // form below it was never once drawn. The candidates carry their own, on `control`, which
+        // is what makes each of them report the width its label really wants. See
+        // `PullRequestSummary.continueButton`, where the same slip was on four more.
+        MergeControlHost(content: styled.labelStyle(.titleAndIcon))
+        .fixedSize()
+        // **The label and the tick are one value, and this is what makes that true.** A `Menu`'s
+        // content is not evaluated when the view is rebuilt; it is evaluated when the menu opens,
+        // out of the closure SwiftUI stored, and the tick is drawn from the selection that closure
+        // captured. The label is re-read on every rebuild. So the button said "Rebase and merge"
+        // over a menu still ticking Squash: two ages of one value, which is the exact fault this
+        // control exists to remove. Giving it the value's identity makes a changed method a new
+        // control, so there is no older closure left to evaluate.
+        .id(method)
+    }
+
+    private var styled: some View {
         control
-            .labelStyle(.titleAndIcon)
-            .fixedSize()
-            // **The label and the tick are one value, and this is what makes that true.** A
-            // `Menu`'s content is not evaluated when the view is rebuilt; it is evaluated when the
-            // menu opens, out of the closure SwiftUI stored, and the tick is drawn from the
-            // selection that closure captured. The label is re-read on every rebuild. So the
-            // button said "Rebase and merge" over a menu still ticking Squash: two ages of one
-            // value, which is the exact fault this control exists to remove. Giving it the value's
-            // identity makes a changed method a new control, so there is no older closure left to
-            // evaluate.
-            .id(method)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
+            .background(
+                // Dimmed rather than hidden when the press is not available, which is how AppKit
+                // draws a disabled prominent button and therefore how this one has to look beside
+                // them.
+                fill.opacity(isLive ? 1 : 0.35),
+                in: RoundedRectangle(cornerRadius: Metrics.corner)
+            )
     }
 
     private var control: some View {
@@ -85,5 +125,55 @@ struct MergeSplitButton: View {
     /// Writing to it changes the mode. There is deliberately no path from here to a merge.
     private var binding: Binding<GitHub.MergeMethod> {
         Binding(get: { method }, set: { choose($0) })
+    }
+}
+
+/// Scope AppKit appearance to the split control, not its window or neighbouring title-bar items.
+private struct MergeControlHost<Content: View>: NSViewRepresentable {
+    var content: Content
+
+    func makeNSView(context: Context) -> MergeHostingView {
+        let host = MergeHostingView(rootView: root(context))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.sizingOptions = [.intrinsicContentSize]
+        return host
+    }
+
+    func updateNSView(_ host: MergeHostingView, context: Context) {
+        host.rootView = root(context)
+        host.needsLayout = true
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MergeHostingView, context: Context) -> CGSize? {
+        nsView.fittingSize
+    }
+
+    /// Always drawn active. When the window is not key, AppKit draws the menu's bezel as an opaque
+    /// neutral capsule over the painted fill, and the strip came out with a grey Merge button and
+    /// dark ink in a green band. The offscreen probe never saw it because it asks for the active
+    /// state, and that override is exactly what keeps the band's colour here.
+    private func root(_ context: Context) -> AnyView {
+        AnyView(
+            content
+                .environment(\.self, context.environment)
+                .environment(\.colorScheme, .dark)
+                .environment(\.controlActiveState, .active)
+        )
+    }
+
+    final class MergeHostingView: NSHostingView<AnyView> {
+        override func layout() {
+            super.layout()
+            applyControlAppearance(in: self)
+        }
+
+        // SwiftUI explicitly gives the embedded native control the title bar's appearance.
+        // Override only controls owned by this host, after they have been created and laid out.
+        private func applyControlAppearance(in view: NSView) {
+            if let control = view as? NSControl, control.appearance?.name != .darkAqua {
+                control.appearance = NSAppearance(named: .darkAqua)
+            }
+            for child in view.subviews { applyControlAppearance(in: child) }
+        }
     }
 }

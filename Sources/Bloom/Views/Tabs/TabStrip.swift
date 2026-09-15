@@ -2,15 +2,8 @@ import SwiftUI
 
 /// The colours a tab wears while it is the selected one.
 ///
-/// A selected tab is the top of the pane it opens rather than a lid laid over it, so it is filled
-/// with that pane's own ground. Usually the ground is one of Bloom's, and then the ink on it is
-/// Bloom's own label colour. A terminal running the user's Ghostty theme is the exception: its
-/// pane is whatever that theme says, and the only ink guaranteed to read on it is the foreground
-/// the same theme names.
-///
-/// The pair is taken whole or not at all. A theme that gives a ground but no foreground leaves
-/// nothing that is certain to be legible, and a tab whose own name has vanished is worse than one
-/// that does not match the pane below it.
+/// The selected capsule uses its pane's background and text colours. Terminal tabs can carry a
+/// custom Ghostty theme, so the background and foreground must stay together for readable labels.
 struct TabSurface: Equatable {
     /// What the selected tab is filled with.
     var fill: Color
@@ -53,24 +46,10 @@ enum TabPane {
 
 }
 
-/// The track a row of tabs sits in.
-///
-/// One component for both of Bloom's strips: the centre column's conversations and tools, and the
-/// bottom panel's setup, scripts and shells. What they share is everything that makes a run of
-/// labels read as tabs, which is the bar's height, the recess under it, the rule that closes it
-/// off from the pane, and the fact that only the tabs scroll. What they do not share are the
-/// controls around them, which is why those are slots rather than options: the centre column ends
-/// in the inspector's toggle, the bottom panel begins with the chevron that collapses it.
-///
-/// There are three of those slots and the middle one is the interesting one. `leading` and
-/// `trailing` are the ends of the strip and stay there. `append` rides the end of the TABS: it is
-/// where the `+` goes, and it sits against the last tab while the tabs fit and against the end of
-/// the strip once they do not. Both strips put their `+` there.
-///
-/// The slots carry their own separators. A strip knows whether a rule belongs before its first
-/// control; this view does not, and guessing produced a stray hairline at one end or the other.
+/// Tabs share the pane's available width. Controls stay at the ends while crowded tabs scroll.
 struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
     var pane: TabPane
+    var tabCount: Int
     /// The id of the selected tab, if the caller tags its tabs with `.id`.
     ///
     /// The strip scrolls whichever tab this names fully into view, on selection and on every
@@ -89,22 +68,19 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
     var append: Append
     var trailing: Trailing
 
-    /// The width the tabs have to fit in. Only used to re-aim the scroll when the window is
-    /// resized, so it is stored rounded to whole points and changes about as often as they do.
+    @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Available width for the tabs, rounded down so their combined width stays inside the track.
     @State private var width: CGFloat = 0
-    /// What the tabs come to when nothing is holding them back, which is what the scrolling part
-    /// of the strip is capped at. See `body`.
-    ///
-    /// Optional so that a strip with no tabs at all is told apart from one that has not been
-    /// measured yet. They want opposite answers: no tabs means no room for tabs, so whatever
-    /// follows them starts at the leading edge, while no measurement means carry on as before and
-    /// let the scroller have the row.
+    /// Measured separately to suppress stale overflow fades while the tabs still fit.
     @State private var tabsWidth: CGFloat?
     /// Which ends of the strip have tabs beyond them. Rounded to whole points for the same reason
     /// as `width`: a drag must not write state once a frame.
     @State private var overflow = TabStripOverflow()
 
     init(
+        tabCount: Int,
         pane: TabPane = .content,
         selection: AnyHashable? = nil,
         @ViewBuilder leading: () -> Leading,
@@ -113,6 +89,7 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.pane = pane
+        self.tabCount = tabCount
         self.selection = selection
         self.leading = leading()
         self.tabs = tabs()
@@ -127,27 +104,23 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     tabs
+                        .environment(\.tabItemWidth, itemWidth)
+                        .background {
+                            Capsule()
+                                .fill(Palette.hover.opacity(appearsActive ? 1 : 0.8))
+                                .frame(height: Metrics.barHeight - Metrics.spacingSmall)
+                                .allowsHitTesting(false)
+                        }
                         .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded(.up) } action: {
                             tabsWidth = $0
                         }
+                        // Keep existing tabs moving while the new or closing tab fades. Scoping
+                        // this to the count leaves title updates and window resizing immediate.
+                        .animation(reduceMotion ? nil : Motion.pane, value: tabCount)
                 }
                 .scrollIndicators(.never)
-                // Only as wide as the tabs, so whatever `append` holds sits against the last tab
-                // rather than out at the end of the strip with a lake of empty chrome between
-                // them. The cap is an upper bound and nothing more: the moment the tabs come to
-                // more than the strip can show, the row hands the scroller everything that is
-                // left and the `+` lands exactly where it has always been, hard against the
-                // controls at the end. There is no threshold to cross and nothing jumps, because
-                // the two positions are the same position at the width where the tabs stop
-                // fitting.
-                //
-                // Uncapped until the first measurement, which is the greedy scroller this has
-                // always been.
-                //
-                // The measurement cannot chase itself: a horizontal scroller proposes no width to
-                // what it holds, so the tabs come to the same total whatever this cap says.
-                .frame(maxWidth: tabsWidth ?? .infinity)
-                .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { width = $0 }
+                .frame(maxWidth: .infinity)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded(.down) } action: { width = $0 }
                 // A tab that runs off the end used to be sliced down the middle of a letter, which
                 // reads as a layout bug rather than as an edge: "All changes" came out as "All
                 // change" with the s cut in half, hard against the `+`. The strip could always be
@@ -164,46 +137,47 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
                 // whole, so a tab already in view does not move at all.
                 .onChange(of: selection, initial: true) { _, _ in reveal(proxy) }
                 .onChange(of: width) { _, _ in reveal(proxy) }
+                .onChange(of: tabCount) { _, _ in reveal(proxy) }
             }
 
             append
 
-            // What is left of the strip once the tabs and the `+` have had theirs. It is the whole
-            // of the gap the user sees to the right of the tabs, and it belongs to this view
-            // rather than to a caller: a strip whose slots were all intrinsically sized would not
-            // fill the column it is drawn in.
-            Spacer(minLength: 0)
-
             trailing
         }
+        .padding(.leading, Metrics.spacingWide)
         .frame(height: Metrics.barHeight)
         .background(Palette.sidebar)
-        // The busy signal belongs to the rule under the title bar and to nothing else. The centre
-        // column's strip is the only one drawn on that rule: the bottom panel's is a `.sunken`
-        // strip halfway down the window, and a second line brightening there would be a second
-        // heartbeat in a window that is meant to have one.
-        .tabStripMaterial(busy: pane == .content)
+        // No full width busy rule here any more: a band sweeps through each busy tab instead,
+        // which `TabItemView` draws. See `BusySignalPlacement`.
+        .tabStripMaterial()
     }
 }
 
 extension TabStrip {
-    /// Opaque across the middle, fading only at an end that has tabs past it.
-    ///
-    /// Written as one gradient with four stops rather than as two overlays, because a stop that is
-    /// not wanted can be collapsed onto its neighbour and then it draws nothing. With neither end
-    /// overflowing this is a flat black mask, which is the same as no mask at all.
+    private var itemWidth: CGFloat {
+        guard tabCount > 0 else { return TabItemView.minimumWidth }
+        // No share for the separators: they take no width. See `TabStripSeparator`.
+        return max(TabItemView.minimumWidth, width / CGFloat(tabCount))
+    }
+
+    @ViewBuilder
     private var fade: some View {
-        let step = width > 0 ? min(TabStripOverflow.fadeWidth / width, 0.5) : 0
-        return LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: overflow.leading ? step : 0),
-                .init(color: .black, location: overflow.trailing ? 1 - step : 1),
-                .init(color: .clear, location: 1),
-            ],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
+        // Scroll geometry can arrive before the tabs settle after a resize or count change.
+        if let tabsWidth, tabsWidth <= width {
+            Color.black
+        } else {
+            let step = width > 0 ? min(TabStripOverflow.fadeWidth / width, 0.5) : 0
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: overflow.leading ? step : 0),
+                    .init(color: .black, location: overflow.trailing ? 1 - step : 1),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
     }
 
     /// Whether there is anything past either end, from the scroll view's own geometry. A point of
@@ -232,6 +206,7 @@ extension TabStrip {
 extension TabStrip where Leading == EmptyView {
     /// A strip whose leading end is the first tab.
     init(
+        tabCount: Int,
         pane: TabPane = .content,
         selection: AnyHashable? = nil,
         @ViewBuilder tabs: () -> Tabs,
@@ -239,7 +214,7 @@ extension TabStrip where Leading == EmptyView {
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.init(
-            pane: pane, selection: selection,
+            tabCount: tabCount, pane: pane, selection: selection,
             leading: { EmptyView() }, tabs: tabs, append: append, trailing: trailing
         )
     }
@@ -249,6 +224,7 @@ extension TabStrip where Trailing == EmptyView {
     /// A strip that ends with whatever follows its tabs, which is the bottom panel: the `+` is the
     /// last thing in it and there is no control pinned past that.
     init(
+        tabCount: Int,
         pane: TabPane = .content,
         selection: AnyHashable? = nil,
         @ViewBuilder leading: () -> Leading,
@@ -256,7 +232,7 @@ extension TabStrip where Trailing == EmptyView {
         @ViewBuilder append: () -> Append
     ) {
         self.init(
-            pane: pane, selection: selection,
+            tabCount: tabCount, pane: pane, selection: selection,
             leading: leading, tabs: tabs, append: append, trailing: { EmptyView() }
         )
     }
@@ -282,19 +258,31 @@ struct TabStripOverflow: Equatable {
 /// two unselected tabs is exactly half the bar and two device pixels across. It used to be a
 /// hairline over a taller run, which read as a grid line.
 ///
-/// Softened, because the same measurement covers the contrast: Safari's rule is about six per cent
-/// darker than the strip it is on, and the separator colour at full strength was nearly twice that.
-/// A rule between two tabs is there to be found, not to be seen.
+/// Drawn in the tertiary ink at low strength rather than in the separator colour. The separator at
+/// 70 per cent was sampled off a two times capture of Bloom at 226 on a 234 strip, three per cent
+/// darker, and the owner's report was that the rule between two inactive tabs could not be seen at
+/// all beside Safari's. `Palette.border` is nearly the strip's own tint, so no strength of it
+/// reaches a rule you can find; a grey from the text ramp does, in both appearances.
 ///
-/// It is kept in the layout when it is not wanted rather than removed, because a rule that came and
-/// went as the selection moved would shift every tab beside it by half a point.
+/// **No width in the layout.** The rule used to be a one point view between two tabs, and that
+/// point belonged to neither of them: a click on it selected nothing, and a hover highlight stopped
+/// short of it, so Safari's clean capsule over the place the rule had been came out as a capsule
+/// with a line of dead strip beside it. The rule is now drawn centred on the boundary where two
+/// tabs meet, and the boundary is inside one tab or the other. Hidden rather than removed still,
+/// so the row's structure does not change as the selection moves.
 struct TabStripSeparator: View {
     var isHidden = false
 
     var body: some View {
-        Rectangle()
-            .fill(Palette.border.opacity(0.7))
-            .frame(width: Metrics.hairline, height: Metrics.barHeight / 2)
+        Color.clear
+            .frame(width: 0, height: Metrics.barHeight / 2)
+            .overlay {
+                Rectangle()
+                    .fill(Palette.textTertiary.opacity(0.35))
+                    .frame(width: Metrics.hairline)
+            }
             .opacity(isHidden ? 0 : 1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }

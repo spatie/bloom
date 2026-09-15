@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import BloomCore
 
-/// The one way a run script is started, whoever asks: the tab strip's `+`, the Workspace menu, or
+/// The one way a run script is started, whoever asks: the title bar's `+`, the Workspace menu, or
 /// a workspace opening with scripts set to autostart.
 ///
 /// **Picking a script that is running shows it rather than starting a second copy.** A second

@@ -29,6 +29,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     var isInstallingUpdate = false
 
     func attach(_ model: AppModel) {
+        Log.launchStep("window appeared")
         appModel = model
         // The switch probe drives a selection and reads back what the window settled on, so it
         // needs the state too, and this is the same one moment everything else is handed it. It
@@ -63,6 +64,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     /// for it, which is not what anyone wants from a deep link that is meant to add a workspace
     /// to the window already on screen.
     func applicationWillFinishLaunching(_ notification: Notification) {
+        Log.launchStep("will finish launching")
         NSAppleEventManager.shared().setEventHandler(
             self,
             andSelector: #selector(handleURLEvent(_:withReply:)),
@@ -72,6 +74,8 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Log.launchStep("did finish launching")
+        defer { Log.launchStep("did finish launching returned") }
         // Guarded because merely asking for the centre aborts a process that is not a registered
         // bundle, which `swift run` and `.build/debug/Bloom` are not. See
         // `NotificationService.isAvailable` for the crash this line was.

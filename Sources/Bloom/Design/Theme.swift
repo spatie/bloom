@@ -108,20 +108,6 @@ enum Palette {
     /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
     @MainActor static var selected: Color { themed(\.selected) }
 
-    /// A resting selection in the sidebar, which is the one list not standing on a white page.
-    ///
-    /// `selected` is opaque and chosen against the page (`#DCE7EA` in the default light theme). The
-    /// sidebar is glass over the window's blue wash, which composites to within a few units of
-    /// that same value, so the selected workspace had a fill nobody could see and Finder's plain
-    /// grey sidebar was easier to read than ours. Ink at an alpha darkens whatever is underneath
-    /// by the same step. Nine percent black, Finder's figure, read as a heavy grey slab over the
-    /// glass once it was in the window, so it is six, and nine in dark.
-    static let sidebarSelected = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(white: 1, alpha: 0.09)
-            : NSColor(white: 0, alpha: 0.06)
-    })
-
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
     /// Selection and control emphasis supplied by macOS.
     ///
@@ -405,7 +391,8 @@ enum Palette {
     /// percent of value and invisible: it measured 4.39 to 1 on the sunken surface, and the sunken
     /// surface is where a strip sits.
     static let warning = dynamic(PaletteInk.warning)
-    /// An agent mid turn: the sidebar's dot, the tab's dot, and the rule under the tab strip.
+    /// An agent mid turn: the sidebar's dot and the transcript's "Working" dot. A busy tab and a
+    /// busy column's top edge sweep in `accentFill` instead; see `BusySweep`.
     ///
     /// **A hue of its own, and it must never equal `positive`.** It was `accent`, which is what
     /// `positive` is too, and the report was that "a green busy indicator is easily being confused
@@ -445,6 +432,19 @@ enum Palette {
     static let runningNSColor = dynamicNSColor(
         light: PaletteInk.running.light, dark: PaletteInk.running.dark
     )
+
+    /// The house fill as an `NSColor`, for `BusySweepView`'s layers. See `accentNSColor`.
+    static let accentFillNSColor = dynamicNSColor(PaletteInk.accentFill)
+
+    /// The faint capsule under a busy tab that is not selected, for the sweep to live in. The house
+    /// fill at `BusySweep.tabWash`, which is stronger in dark for the reason that type gives.
+    static let busyTabWash = dynamicTint(PaletteInk.accentFill, BusySweep.tabWash)
+
+    /// What Reduce Motion lays over a busy tab's selected capsule, which has no band to say it.
+    static let busyTabStill = dynamicTint(PaletteInk.accentFill, BusySweep.tabStill)
+
+    /// The top of the column's still wash under Reduce Motion. See `ColumnBusySignal`.
+    static let busyColumnStill = dynamicTint(PaletteInk.accentFill, BusySweep.columnStill)
 
     /// A pull request that has landed.
     ///
@@ -592,6 +592,15 @@ enum Palette {
         dynamic(light: ink.light, dark: ink.dark)
     }
 
+    /// A pair at an opacity that also differs between appearances, for a tint over chrome. Both
+    /// halves come from the core, so `PaletteContrastTests` measures the composite that is drawn.
+    static func dynamicTint(_ ink: PaletteInk.Pair, _ strength: BusySweep.Strength) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(rgb: ink.member(dark: isDark)).withAlphaComponent(strength.member(dark: isDark))
+        })
+    }
+
     /// The same thing as an `NSColor`, for the handful of places that talk to AppKit directly.
     static func dynamicNSColor(light: UInt32, dark: UInt32) -> NSColor {
         NSColor(name: nil) { appearance in
@@ -722,33 +731,9 @@ enum Metrics {
 
     static let gutter: CGFloat = 12
 
-    /// The box a small button at the trailing edge of a header is drawn and hit in: the project's
-    /// `+`, the button that adds a project, the project settings window's own header control.
-    ///
-    /// Fifteen points tall, not the twenty four an icon in a sixteen point frame with four points
-    /// of padding comes to. A sidebar section header is drawn in a band of nineteen points, and it
-    /// clips: a list row holds its 32 point pitch until the header's content passes nineteen and
-    /// then sizes to the content, so a twenty four point button put five points of extra air above
-    /// every project header, which read as a gap in the column rather than as the top of the next
-    /// project.
-    ///
-    /// The last four of those nineteen points are what this number spends. The button is drawn and
-    /// hit in the same box, and that box is also its hover plate, so an eighteen point plate filled
-    /// the band to within half a point of the bottom of the row. The list's selection fill takes
-    /// the WHOLE of the row under it, top edge included, so a hovered header above a selected
-    /// workspace put a grey plate and a grey pill half a point apart and the two read as one smear.
-    /// Fifteen leaves two points of ground above and below the plate, which is the tight rung of
-    /// the spacing scale and enough to see daylight at both edges. Measured off a window capture:
-    /// plate 24 by 15 at two points clear, selection fill the full 32 point row beneath it.
-    ///
-    /// Three points smaller is three points of click target gone, out of a row that is only
-    /// nineteen tall to begin with. Wider than it is tall, which is the shape of every small button
-    /// in a Mac toolbar, and still enough to hit without hunting.
-    ///
-    /// Here rather than in `SidebarMetrics`, where it started, because the project settings window
-    /// reads it and that window is not the sidebar: a constant named after one pane and used from
-    /// another is how the two drift.
-    static let headerButton = CGSize(width: 24, height: 15)
+    /// Square drawing and click target for header controls, including the project's `+`.
+    /// Twenty points leaves space around the hover fill in both section headers and project rows.
+    static let headerButton = CGSize(width: 20, height: 20)
     /// One point, which on Retina is two physical pixels.
     ///
     /// It was one physical pixel, which is an iOS and web idea rather than a Mac one: AppKit's own
@@ -983,8 +968,8 @@ enum Motion {
     /// rest arriving.
     static let arrival: Animation = .easeOut(duration: 0.18)
 
-    /// A transcript being drawn again after it has been held back: at its new width when a divider
-    /// is let go, and at all when the conversation a pane was pointed at has landed in it.
+    /// A transcript being drawn again after it has been held back, when the conversation a pane was
+    /// pointed at has landed in it.
     ///
     /// A duration rather than an `Animation` because what plays it is a `CATransition` on a layer.
     /// The same length as `pane`, deliberately: both are a pane's own movement finishing rather
@@ -1015,27 +1000,16 @@ enum Motion {
 /// Content strips stay opaque. The window title bar and navigation sidebar use their existing
 /// native materials, not per-view effect layers added to the scrolling surfaces here.
 extension View {
-    /// The strip a tab bar sits in: the chrome colour with the pane's top edge already on it.
+    /// The tab strip's background and lower divider.
     ///
-    /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the
-    /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip
-    /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
-    /// that break is what joins the tab to the content below.
-    ///
-    /// `busy` puts the activity signal on that rule, and it goes in this background rather than in
-    /// an overlay for exactly the reason the rule does: the lit rule has to be broken by the
-    /// selected tab on the same pixels the rule is broken on, or the tab reads as sitting on top of
-    /// a line rather than as part of it. See `ActivityRule`.
-    ///
-    /// `busy` and no longer `pulsing`, because the signal no longer pulses: it is a crest running
-    /// the rule, and a parameter named after a figure that has been replaced is the next reader's
-    /// wrong turn. The same rename took `RuleSweep` to `RulePulse` when the light stopped sweeping.
-    func tabStripMaterial(busy: Bool = false) -> some View {
+    /// The busy signal used to light this divider. It sweeps through each busy tab's capsule now,
+    /// because one line across every tab could not say which was working. See
+    /// `BusySignalPlacement`.
+    func tabStripMaterial() -> some View {
         background {
             ZStack(alignment: .bottom) {
                 Palette.sidebar
                 Hairline()
-                if busy { ActivityRule() }
             }
         }
     }
@@ -1185,6 +1159,8 @@ struct CountLabel: View {
     /// rather than sitting inside a selected row.
     var isOnSelection = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// What the number is always at least as wide as. Three digits, in figures that are all one
     /// width, so nothing under a thousand moves it. A thousand and over grows it by one digit and
     /// no more, because it is set without a thousands separator: see `Figures.count`.
@@ -1201,7 +1177,9 @@ struct CountLabel: View {
             Text(count, format: Figures.count)
                 .monospacedDigit()
                 .lineLimit(1)
+                .contentTransition(.numericText(value: Double(count)))
         }
+        .animation(reduceMotion ? nil : Motion.hover, value: count)
         .font(Typo.caption)
         // One step quieter than the label it follows, in both states, because it is the label's
         // subordinate rather than a second thing to read.
@@ -1219,15 +1197,18 @@ struct DiffStatLabel: View {
     var compact: Bool = false
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: Metrics.spacingSmall) {
             if additions > 0 {
                 Text("+\(Self.abbreviate(additions))")
+                    .contentTransition(.numericText(value: Double(additions)))
                     .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.positive)
             }
             if deletions > 0 {
                 Text("-\(Self.abbreviate(deletions))")
+                    .contentTransition(.numericText(value: Double(deletions)))
                     .foregroundStyle(
                         isOnSelection
                             ? Palette.selectedEmphasizedText.opacity(0.75)
@@ -1235,6 +1216,11 @@ struct DiffStatLabel: View {
                     )
             }
         }
+        // The digits roll rather than jump when the six second refresh moves them, which is how
+        // a changing figure is drawn everywhere else on this Mac. Keyed on the two values, so the
+        // refreshes that change nothing, which are most of them, animate nothing.
+        .animation(reduceMotion ? nil : Motion.hover, value: additions)
+        .animation(reduceMotion ? nil : Motion.hover, value: deletions)
         // One rung, two designs: `compact` is the monospaced form used inside a chip, where the
         // digits have to line up with a filename set in the same face, not a smaller form. It was
         // written as a size step and never was one, because both styles resolved to 10.

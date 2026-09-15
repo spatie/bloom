@@ -205,6 +205,14 @@ public struct SubagentRoster: Sendable, Hashable {
         subagents.first { $0.id == id }
     }
 
+    /// The subagent started by this call, while the roster still holds it. What the Agent call
+    /// row in the chat asks before falling back to the rows stored under the call: see
+    /// `SubagentRunLink`.
+    public func subagent(forToolUseID toolUseID: String) -> Subagent? {
+        guard !toolUseID.isEmpty, let id = byToolUse[toolUseID] else { return nil }
+        return self[id]
+    }
+
     /// Whether any subagent is still working, which is what a workspace row would ask if it wanted
     /// to summarise the children it is drawing.
     public var isWorking: Bool { subagents.contains { $0.state == .running } }

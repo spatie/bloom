@@ -67,6 +67,8 @@ struct ComposerFooterView: View {
     var showsAgentControls: Bool = true
     var remote: RemoteSessionConnection?
     var creationSource: CreationComposerSource?
+    var usesCLIChat: Binding<Bool>?
+    var supportsCLIChat: Bool = true
 
     // Key the fetched value as well as the task, so changing projects cannot briefly show the
     // previous project's speed before SwiftUI starts the replacement task.
@@ -342,17 +344,23 @@ struct ComposerFooterView: View {
                 }
             }
 
-            // A paperclip, not the plus that used to sit here: a plus already means "new session"
-            // in the tab strip directly above, and it says nothing about what is being added.
             if let onSideConversation {
                 Button(action: onSideConversation) {
-                    Image(systemName: "arrow.turn.down.right")
+                    ComposerControlLabel(text: nil) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .imageScale(.medium)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("Ask a side question (/btw)")
                 .accessibilityLabel("Ask a side question")
+                // The chat pane hangs the side conversation card off this frame. It is in all
+                // three variants of the row, and only the one `ViewThatFits` draws reports it.
+                .anchorPreference(key: SideConversationButtonAnchor.self, value: .bounds) { $0 }
             }
 
+            // A paperclip, not the plus that used to sit here: a plus already means "new session"
+            // in the tab strip directly above, and it says nothing about what is being added.
             // Gone with the rest when there is no agent: nothing reads an attachment into a shell.
             if showsAgentControls {
                 Button(action: onAttach) {
@@ -363,6 +371,18 @@ struct ComposerFooterView: View {
                 .accessibilityLabel("Attach a file")
             }
 
+            if let usesCLIChat {
+                Toggle(isOn: usesCLIChat) {
+                    Image(systemName: "terminal")
+                }
+                .toggleStyle(.button)
+                .disabled(!supportsCLIChat)
+                .help(supportsCLIChat
+                      ? "Open this chat in the CLI"
+                      : "CLI chat supports Claude Code and Codex")
+                .accessibilityLabel("Open chat in CLI")
+            }
+
             if intent == .create {
                 Spacer(minLength: Metrics.spacing)
             }
@@ -370,16 +390,19 @@ struct ComposerFooterView: View {
             // Stop before Send, and only while there is a turn to stop. The pair used to be one
             // control; see `ComposerStopButton` for why it no longer can be, and why Send is the
             // one that keeps the end of the row in every state.
-            if isRunning {
-                ComposerStopButton(onStop: onStop)
-            }
+            HStack(spacing: Metrics.spacingWide) {
+                if isRunning {
+                    ComposerStopButton(onStop: onStop)
+                }
 
-            ComposerSendButton(
-                intent: intent,
-                queues: queues,
-                canSend: canSend,
-                onSend: onSend
-            )
+                ComposerSendButton(
+                    intent: intent,
+                    queues: queues,
+                    canSend: canSend,
+                    onSend: onSend
+                )
+            }
+            .padding(.leading, Metrics.spacingWide)
         }
     }
 

@@ -122,11 +122,20 @@ extension AppModel {
         // screen said. `ComposerView.prepare` corrected it when the workspace was opened, which
         // is a race the opening turn can win: a workspace created in the background and never
         // looked at would run its first turn on a model nobody picked.
-        let effectiveControls: ComposerControls
+        var effectiveControls: ComposerControls
         if let controls {
             effectiveControls = controls
         } else {
             effectiveControls = try await resolvedControls(for: repo)
+        }
+
+        if let agentKind = opensWith.cliAgentKind {
+            if controls == nil || effectiveControls.agentKind != agentKind {
+                effectiveControls.model = ""
+                effectiveControls.effort = ""
+                effectiveControls.permissionMode = .auto
+            }
+            effectiveControls.agentKind = agentKind
         }
 
         // Whether to ask a model for a name at all. Read here rather than inside the closure
@@ -147,7 +156,7 @@ extension AppModel {
         if OceanCatalog.shouldClaim(
             userSuppliedName: name ?? checkout?.workspaceName,
             userSuppliedBranch: branch,
-            isChatWorkspace: opensWith == .chat,
+            isChatWorkspace: opensWith.runsAnAgent,
             wantsAutomaticName: wantsAName,
             // A workspace with no agent, started with nothing written, has no other source of a
             // name: no turn is sent, so no model is asked, and there is no sentence to slug a
@@ -240,7 +249,7 @@ extension AppModel {
             name: suppliedName,
             checkout: checkout,
             controls: effectiveControls,
-            opensSession: opensWith == .chat,
+            opensSession: opensWith.runsAnAgent,
             resuming: resuming,
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
             // transcript, a failure raises the one sentence every route says about a failed setup,
@@ -293,7 +302,7 @@ extension AppModel {
                 .adopt(stagedPaths, from: $0.directory, into: started.workspace.path)
         } ?? []
         let opening = WorkspaceStartAttachments.opening(
-            prompt, staged: stagedPaths, arrived: arrived, isChatWorkspace: opensWith == .chat
+            prompt, staged: stagedPaths, arrived: arrived, isChatWorkspace: opensWith.runsAnAgent
         )
 
         // The persisted setup state carries the creation choice. The opening prompt still goes
@@ -308,12 +317,12 @@ extension AppModel {
     /// window agrees with one created from the sheet rather than falling back to the built-in.
     /// Repository settings first, then the Settings screen, then a machine-wide file. See
     /// `ComposerDefaults.resolve`.
-    private func resolvedControls(for repo: Repo) async throws -> ComposerControls {
+    func resolvedControls(for repo: Repo?) async throws -> ComposerControls {
         guard let store else { return ComposerControls() }
 
         let appDefaults = await AppDefaults.load(from: store)
         let repoSettings = await Task.detached(priority: .userInitiated) {
-            SettingsLoader.load(repo: repo.path)
+            repo.map { SettingsLoader.load(repo: $0.path) } ?? RepoSettings()
         }.value
         // The Codex list as this window last fetched it, which may well be empty here: nothing
         // waits for a fetch to start a workspace. Empty costs only the effort fallback, because
@@ -331,11 +340,9 @@ extension AppModel {
         // that rule, and the Models screen records the backend beside the model so the common case
         // needs no list to look an id up in.
         return ComposerControls(
-            model: resolved.model,
-            effort: resolved.effort,
-            agentKind: resolved.backend,
-            permissionMode: resolved.permissionMode,
+            defaults: resolved,
             isFastMode: appDefaults.fastMode,
+            outputStyle: appDefaults.outputStyle,
             codexContextWindow: appDefaults.codexContextWindow
         )
     }
@@ -364,6 +371,15 @@ extension AppModel {
         opensWith: WorkspaceStartMode,
         select: Bool
     ) async {
+        if opensWith.cliAgentKind != nil, let session = started.session {
+            let tabs = CenterTabStore.shared
+            tabs.load(workspaceID: started.workspace.id)
+            tabs.add(
+                kind: .terminal, workspaceID: started.workspace.id,
+                title: session.agentKind.label, agentSessionID: session.id
+            )
+            model(for: started.workspace).pendingCLILaunches.insert(session.id)
+        }
         await reload()
 
         // Nothing waits for this: the worktree exists and the first turn goes out long before a

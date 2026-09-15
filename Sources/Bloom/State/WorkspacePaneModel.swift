@@ -20,6 +20,8 @@ protocol WorkspacePaneModel: WorkspaceFileReview, Observable {
     func onAppear() async
     func reloadSessions() async
     func makePaneSession(title: String?, controls: ComposerControls?, draft: String) async -> Session?
+    /// A new chat for the `+` and the split menus, as the pane it opens in.
+    func createChat(title: String?) async -> PaneContent?
     func renameSession(_ session: Session, title: String) async
     func closeSession(_ session: Session) async
     func reorderSessions(to ids: [SessionID])
@@ -47,6 +49,12 @@ extension WorkspacePaneModel {
 
     @discardableResult func createSession(title: String? = nil, controls: ComposerControls? = nil, draft: String = "") async -> Session? {
         await makePaneSession(title: title, controls: controls, draft: draft)
+    }
+
+    /// An ordinary conversation. `WorkspaceModel` has its own, because a local workspace can open
+    /// the chat in the agent's CLI instead, and a shell for that only exists on this Mac.
+    func createChat(title: String?) async -> PaneContent? {
+        await makePaneSession(title: title, controls: nil, draft: "").map { .chat($0.id) }
     }
 }
 

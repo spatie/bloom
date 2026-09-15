@@ -2,7 +2,7 @@ import Foundation
 
 /// The three kinds of thing a pane can be opened on, and what each of them is called.
 ///
-/// The nouns and the glyphs live here for the reason `PaneSymbol` exists: the strip's `+` menu and
+/// The nouns and the glyphs live here for the reason `PaneSymbol` exists: the title bar's `+` menu and
 /// the split submenus of both the centre pane and a terminal pane now offer the same three items,
 /// and three literals in three files drift the first time one of them is renamed. A menu where
 /// Browser wears a globe in one place and something else in another is worse than a menu with no

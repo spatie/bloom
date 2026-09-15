@@ -19,6 +19,17 @@ import Foundation
 /// anybody means by closing a tab. Cmd+Ctrl+W is the neighbouring item that takes a pane out of
 /// the arrangement while leaving what it was showing alive; this one ends the thing itself.
 public enum TabClosure {
+    /// Closing a background tab leaves the selection alone. An active tab hands selection to
+    /// its left neighbour, or its right neighbour when it was first in the strip.
+    public static func selectionAfterClosing<ID: Equatable>(
+        _ id: ID, selected: ID?, tabs: [ID]
+    ) -> ID? {
+        guard selected == id else { return selected }
+        guard let index = tabs.firstIndex(of: id) else { return nil }
+        if index > 0 { return tabs[index - 1] }
+        return tabs.dropFirst().first
+    }
+
     /// The content Cmd+W acts on, or nothing when the workspace has no tab at all.
     ///
     /// - Parameters:

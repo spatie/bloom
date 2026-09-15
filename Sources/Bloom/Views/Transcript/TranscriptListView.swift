@@ -272,8 +272,11 @@ struct TranscriptListView: View {
 
     /// A user bubble takes this share of the pane, and never gets narrower than the floor, so a
     /// long prompt wraps sensibly and a short one still reads as one side of a conversation.
-    private static let bubbleShare: CGFloat = 0.7
-    private static let bubbleFloor: CGFloat = 240
+    /// Not private, because the subagent pane draws a prompt in the same bubble and a copied 0.7
+    /// is a bubble that stops matching the chat the moment this one changes.
+    /// Nonisolated, because it is read inside a geometry closure SwiftUI runs off the main actor.
+    nonisolated static let bubbleShare: CGFloat = 0.7
+    nonisolated static let bubbleFloor: CGFloat = 240
 
     // MARK: - The rows
 
@@ -474,6 +477,27 @@ struct TranscriptListView: View {
         var foldSeq: Int?
         var hiddenIndices: Set<Int> = []
 
+        // What an Agent call row opens. Built once for the pass, and nil where there is no
+        // workspace for a pane to hang off, which is Ask Bloom. See `SubagentRunActions`.
+        let runActions: SubagentRunActions? = home.workspaceID.map { workspaceID in
+            SubagentRunActions(
+                isLive: { [transcript] in transcript.subagents.subagent(forToolUseID: $0) != nil },
+                open: { [app, transcript] toolUseID, hasRecordedRows, isSettled in
+                    let target = SubagentRunLink.target(
+                        toolUseID: toolUseID,
+                        hasRecordedRows: hasRecordedRows,
+                        isSettled: isSettled,
+                        liveID: { transcript.subagents.subagent(forToolUseID: toolUseID)?.id }
+                    )
+                    switch target {
+                    case .live(let id): app.selection = .subagent(workspaceID, id)
+                    case .recorded(let id): app.selection = .subagentCall(workspaceID, toolUseID: id)
+                    case .unavailable: break
+                    }
+                }
+            )
+        }
+
         var out: [TranscriptTableEntry] = []
         // A workspace's setup script, its worktree events and its opening prompt. All three are
         // things a worktree has. Ask Bloom uses this opening entry only for the space below the
@@ -490,19 +514,30 @@ struct TranscriptListView: View {
                 },
                 content: {
                     AnyView(
-                        WorkspaceEventsView(
-                            workspaceID: workspaceID,
-                            isRunning: isRunningSetup,
-                            // Nothing said yet AND nothing waiting to be said. Once there is a bubble
-                            // on screen, "You can ask for something now" is answered by the bubble.
-                            isFirstThing: transcript.hasNothingToShow,
-                            paneHeight: paneHeight,
-                            onVisibilityChange: { showsSetup = $0 },
-                            onShowLogEnd: { wasAsked in showSetupLogEnd(wasAsked: wasAsked) }
-                        )
-                        // Match Ask Bloom's opening space so the first bubble clears the tab bar.
+                        // The opening space so the first bubble clears the fade and the tab bar.
                         // This cannot be a content inset: see `TranscriptTable.makeNSView`.
-                        .padding(.top, Metrics.pane)
+                        //
+                        // **A spacer of its own, and not `.padding(.top)` on the feed.** The feed is
+                        // a `Group` over a `ForEach`, and in a repository with no setup script that
+                        // `ForEach` is empty: padding hung on no views is no view, the cell measured
+                        // nought, and the first message landed six points from the top with its
+                        // upper half under the fade.
+                        VStack(alignment: .leading, spacing: 0) {
+                            Color.clear
+                                .frame(height: TranscriptLayout.topSpace)
+                                .accessibilityHidden(true)
+                            WorkspaceEventsView(
+                                workspaceID: workspaceID,
+                                isRunning: isRunningSetup,
+                                // Nothing said yet AND nothing waiting to be said. Once there is a
+                                // bubble on screen, "You can ask for something now" is answered by
+                                // the bubble.
+                                isFirstThing: transcript.hasNothingToShow,
+                                paneHeight: paneHeight,
+                                onVisibilityChange: { showsSetup = $0 },
+                                onShowLogEnd: { wasAsked in showSetupLogEnd(wasAsked: wasAsked) }
+                            )
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     )
                 }
@@ -514,7 +549,7 @@ struct TranscriptListView: View {
                 id: .setup,
                 contentKey: TranscriptContentKey { $0.combine("ask-top-spacing") },
                 content: {
-                    AnyView(Color.clear.frame(height: Metrics.pane).accessibilityHidden(true))
+                    AnyView(Color.clear.frame(height: TranscriptLayout.topSpace).accessibilityHidden(true))
                 }
             ))
         }
@@ -557,7 +592,18 @@ struct TranscriptListView: View {
                    hiddenIndices.contains(index)
                     || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload) { continue }
             }
+            // A subagent's row, which the call that started it stands for. See "A subagent is one
+            // row" in `TranscriptFold`, which also says what stays.
+            if folds.absorbs(
+                index: index, seq: row.seq, parent: row.parentToolUseID, revealed: revealed
+            ) { continue }
             guard !TranscriptNoise.isHidden(row) else { continue }
+            // How much work the subagent this call started has done. In the key below, so a child
+            // landing redraws this row where it stands instead of putting a row in the list.
+            let subagentActions = row.kind == .toolUse ? folds.actions(underCall: row.refID) : nil
+            // Whether anything is stored under it to open, prose included. In the key for the
+            // count's reason: the row becomes openable where it stands.
+            let subagentHasRun = row.kind == .toolUse && folds.hasRun(underCall: row.refID)
             let isExpanded = expanded.contains(row.seq)
             let wasStopped = row.seq == stoppedTurnSeq
             let recovered = recoveredRuns[row.seq]
@@ -583,6 +629,8 @@ struct TranscriptListView: View {
                 $0.combine(row.permissionNote)
                 $0.combine(isExpanded)
                 $0.combine(row.parentToolUseID)
+                $0.combine(subagentActions)
+                $0.combine(subagentHasRun)
                 $0.combine(wasStopped)
                 $0.combine(recovered != nil)
                 $0.combine(closesTranscript)
@@ -641,6 +689,9 @@ struct TranscriptListView: View {
                                 home: home,
                                 isExpanded: isExpanded,
                                 isNested: row.parentToolUseID != nil,
+                                subagentActions: subagentActions,
+                                subagentHasRun: subagentHasRun,
+                                runActions: runActions,
                                 projectName: projectName,
                                 onToggle: { toggle(row.seq) },
                                 onAnswer: { requestID, decision in
@@ -906,7 +957,7 @@ struct TranscriptListView: View {
         // under it still works.
         .overlay(alignment: .top) {
             LinearGradient(colors: [Palette.surface, Palette.surface.opacity(0)], startPoint: .top, endPoint: .bottom)
-                .frame(height: Metrics.spacingWide * 2)
+                .frame(height: TranscriptLayout.topFade)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }

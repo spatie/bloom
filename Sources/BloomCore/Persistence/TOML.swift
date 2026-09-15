@@ -55,7 +55,7 @@ public indirect enum TOMLValue: Sendable, Equatable {
 /// Where each key of a parsed file first appeared: its position among its siblings, and its line.
 ///
 /// **A side record rather than an ordered `.table`, and the choice is about who pays.** A settings
-/// file is a list somebody wrote in an order they chose, and the tab strip's `+` menu has to show
+/// file is a list somebody wrote in an order they chose, and the title bar's `+` menu has to show
 /// run scripts in that order. `TOMLValue.table` is a dictionary, so the order is gone by the time
 /// anything reads it, and they used to come out sorted by id. Making the case hold an ordered
 /// container instead would change the type every consumer of `TOMLValue` switches over, every

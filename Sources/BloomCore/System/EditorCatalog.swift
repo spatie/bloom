@@ -201,6 +201,7 @@ public enum EditorCatalog {
         ExternalApp(bundleID: "com.fournova.Tower3", name: "Tower", targets: .folder),
         ExternalApp(bundleID: "com.sublimemerge", name: "Sublime Merge", targets: .folder),
         ExternalApp(bundleID: "com.DanPristupov.Fork", name: "Fork", targets: .folder),
+        ExternalApp(bundleID: "com.axosoft.gitkraken", name: "GitKraken", targets: .folder),
     ]
 
     /// One JetBrains IDE, with the identifiers its other build channels ship under.
@@ -231,13 +232,16 @@ public enum EditorCatalog {
     /// entry, and only a rule that looks for an exact match across the whole catalogue first can
     /// say so. Asking each entry in turn whether it matches would hand it to whichever of the two
     /// is listed first.
-    public static func owner(ofBundleID bundleID: String) -> ExternalApp? {
-        if let exact = known.first(where: { app in
+    ///
+    /// - Parameter apps: the list to search, which is the built-in catalogue unless the caller
+    ///   has the user's own additions in hand as well. See `catalogue(adding:)`.
+    public static func owner(ofBundleID bundleID: String, in apps: [ExternalApp] = known) -> ExternalApp? {
+        if let exact = apps.first(where: { app in
             app.bundleIDs.contains { $0.caseInsensitiveCompare(bundleID) == .orderedSame }
         }) {
             return exact
         }
-        return known.first { $0.matches(bundleID: bundleID) }
+        return apps.first { $0.matches(bundleID: bundleID) }
     }
 
     /// Whether this identifier is already one of ours.
@@ -246,7 +250,35 @@ public enum EditorCatalog {
     /// that the copy of PhpStorm the catalogue found and the copy the user set as the handler for
     /// `.php` do not both turn up as rows. `knownIDs` alone answered no for
     /// `com.jetbrains.PhpStormLight-EAP` and that is exactly the identifier the handler has.
-    public static func isKnown(bundleID: String) -> Bool { owner(ofBundleID: bundleID) != nil }
+    public static func isKnown(bundleID: String, in apps: [ExternalApp] = known) -> Bool {
+        owner(ofBundleID: bundleID, in: apps) != nil
+    }
+
+    /// The built-in catalogue with the user's own applications after it. See `OpenInCustomApps`
+    /// for why the user gets a say at all.
+    ///
+    /// An addition the catalogue already owns is dropped rather than shown twice, which is what
+    /// keeps a copy of Bloom that gains a built-in entry from drawing the same application under
+    /// two names. The catalogue's entry wins because it carries the variant identifiers and the
+    /// file name the user's cannot. Additions come after the built-ins and in the order they
+    /// were added, for the reason `ordered(_:lastUsed:)` gives: a list that can be learned.
+    public static func catalogue(adding custom: [ExternalApp]) -> [ExternalApp] {
+        var result = known
+        for app in custom where !isKnown(bundleID: app.bundleID, in: result) {
+            result.append(app)
+        }
+        return result
+    }
+
+    /// Whether the system's default application for a file type needs a row of its own in a
+    /// file's menu, or is already there.
+    ///
+    /// A user's addition only counts when it is offered files. One added as folders only is not in
+    /// a file's menu at all, so treating it as known would take away the "open this file" row the
+    /// system default gave it before it was added.
+    public static func needsSystemDefaultRow(bundleID: String, adding custom: [ExternalApp]) -> Bool {
+        !isKnown(bundleID: bundleID) && !isKnown(bundleID: bundleID, in: custom.filter { $0.opens(.file) })
+    }
 
     /// The known applications that are installed, in the catalogue's own order.
     ///

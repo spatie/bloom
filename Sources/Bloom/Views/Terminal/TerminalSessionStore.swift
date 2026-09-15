@@ -81,11 +81,14 @@ final class TerminalSessionStore {
     /// A tmux-backed pane needs the session killed as well. Signalling the pane only reaches the
     /// tmux *client*, which is a detach, and detaching is the opposite of what closing a pane means.
     func closePane(id: String) {
+        pendingCommands[id] = nil
         if let workspaceID = paneOwner.removeValue(forKey: id) {
             let persistence = self.persistence
             Task { await persistence?.kill(workspaceID: workspaceID, paneIDs: [id]) }
         }
         paneSession[id] = nil
+        paneAgents[id] = nil
+        Task { await refreshAgentActivity() }
         // A pane id is a fresh uuid and is never handed out again, so its remembered command is
         // unreachable the moment the pane goes and would sit in the settings table for the life of
         // the database.
@@ -277,17 +280,28 @@ final class TerminalSessionStore {
         workspace: Workspace,
         repo: Repo?,
         port: Int,
-        directory: String = ""
+        directory: String = "",
+        output: String? = nil
     ) -> BloomTerminalView {
-        if let existing = terminals[tab.id.rawValue] { return existing }
+        if let existing = terminals[tab.id.rawValue], existing.hasStarted { return existing }
 
-        let view = BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 640, height: 320))
+        let view = terminals[tab.id.rawValue]
+            ?? BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 640, height: 320))
 
         // A pane that is already over, drawn one last time before SwiftUI catches up. It gets an
         // empty terminal that forks nothing and is not filed under its id, so the draw after this
         // one drops it. See `closedPanes`.
         guard !closedPanes.contains(tab.id.rawValue) else {
             view.willStop()
+            return view
+        }
+
+        if let output {
+            if terminals[tab.id.rawValue] == nil {
+                terminals[tab.id.rawValue] = view
+                paneOwner[tab.id.rawValue] = workspace.id
+            }
+            view.showOutput(output)
             return view
         }
 
@@ -327,8 +341,9 @@ final class TerminalSessionStore {
         terminals[tab.id.rawValue] = view
         if let command = pendingCommands.removeValue(forKey: tab.id.rawValue) {
             type(command, into: view, pane: tab.id.rawValue)
+        } else {
+            offerLastCommand(inPane: tab.id.rawValue, decision: decision)
         }
-        offerLastCommand(inPane: tab.id.rawValue, decision: decision)
         activity.ensurePolling()
         return view
     }
@@ -375,6 +390,156 @@ final class TerminalSessionStore {
 
     /// The command recorder's poll. Cancelled on the way out, after one last pass.
     private var recordTask: Task<Void, Never>?
+    private var paneAgents: [String: AgentKind] = [:]
+    private var agentProcesses: [String: Int32] = [:]
+    private var lastHookDates: [SessionID: Date] = [:]
+    private let activityStartedAt = Date()
+    private(set) var agentTurns: [SessionID: AgentTurns.Live] = [:]
+    private(set) var runningWorkspaceIDs: Set<WorkspaceID> = []
+    var onAgentActivityChanged: (() -> Void)?
+    var onAgentTurnFinished: ((WorkspaceID) async -> Void)?
+
+    func detectedAgent(inPane pane: String) -> AgentKind? {
+        paneAgents[pane]
+    }
+
+    func detectedAgent(inTab tab: String) -> AgentKind? {
+        TerminalSplitStore.shared.panes(of: tab).compactMap { paneAgents[$0] }.first
+    }
+
+    private func refreshAgentActivity() async {
+        guard let store = repoStore else { return }
+        let panes = livePanes()
+        let linkedTabs = CenterTabStore.shared.tabsByWorkspace.values.flatMap { $0 }
+            .filter { $0.kind == .terminal && $0.agentSessionID != nil }
+        guard !panes.isEmpty || !linkedTabs.isEmpty else {
+            paneAgents = [:]
+            if !agentTurns.isEmpty || !runningWorkspaceIDs.isEmpty {
+                agentTurns = [:]
+                runningWorkspaceIDs = []
+                onAgentActivityChanged?()
+            }
+            return
+        }
+        let observedAt = Date()
+        guard let table = await ProcessTable.current() else { return }
+        var pids: [String: Int32] = [:]
+        if let persistence {
+            guard let snapshot = await persistence.panePIDSnapshot() else { return }
+            pids = snapshot
+        }
+        var detected: [String: AgentKind] = [:]
+        var processes: [String: Int32] = [:]
+        for pane in panes {
+            let shell = pane.session.flatMap { pids[$0] } ?? pane.shell
+            if let process = table.interactiveAgentProcess(ofShell: shell) {
+                detected[pane.pane] = ProcessTable.interactiveAgent(command: process.command)
+                processes[pane.pane] = process.pid
+            }
+        }
+        var runningPanes = Set(detected.compactMap { pane, kind in
+            kind.interactiveScreenIsBusy(lines: currentScreen(inPane: pane)) ? pane : nil
+        })
+        var turns: [SessionID: AgentTurns.Live] = [:]
+        for tab in linkedTabs {
+            guard let sessionID = tab.agentSessionID,
+                  let session = try? await store.session(id: sessionID),
+                  session.archivedAt == nil else { continue }
+            let paneIDs = TerminalSplitStore.shared.panes(of: tab.id)
+            for pane in paneIDs where detected[pane] == nil {
+                let name = TmuxSessions.sessionName(workspaceID: tab.workspaceID, paneID: pane)
+                if let shell = pids[name], let process = table.interactiveAgentProcess(ofShell: shell) {
+                    detected[pane] = ProcessTable.interactiveAgent(command: process.command)
+                    processes[pane] = process.pid
+                }
+            }
+            let isPresent = detected[tab.id] == session.agentKind
+            var state: SessionState = isPresent && runningPanes.contains(tab.id) ? .running
+                : (session.state == .failed ? .failed : .idle)
+            var externalSession: String?
+            let statusURL = AgentKind.interactiveStatusURL(sessionID: sessionID)
+            let replaced = agentProcesses[tab.id] != nil && agentProcesses[tab.id] != processes[tab.id]
+            if let attributes = try? statusURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+               let size = attributes.fileSize, size <= 1_048_576,
+               let data = try? Data(contentsOf: statusURL) {
+                let oldHook = attributes.contentModificationDate == lastHookDates[sessionID]
+                let disappeared = !isPresent && (agentProcesses[tab.id] != nil
+                    || session.state == .running || session.state == .waiting)
+                if disappeared || (replaced && oldHook),
+                   let modified = attributes.contentModificationDate, modified <= observedAt {
+                    try? FileManager.default.removeItem(at: statusURL)
+                } else if isPresent {
+                    state = AgentKind.interactiveHookState(data: data) ?? .idle
+                    externalSession = AgentKind.interactiveHookSessionID(data: data)
+                    if let modified = attributes.contentModificationDate,
+                       lastHookDates[sessionID] != modified {
+                        lastHookDates[sessionID] = modified
+                        if modified >= activityStartedAt,
+                           let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           event["hook_event_name"] as? String == "Stop" {
+                            await onAgentTurnFinished?(tab.workspaceID)
+                        }
+                    }
+                }
+            }
+            if isPresent, let externalSession,
+               let workspace = try? await store.workspace(id: tab.workspaceID),
+               CenterTabStore.shared.terminal(for: sessionID, in: tab.workspaceID)?.id == tab.id,
+               let resume = try? session.agentKind.prepareInteractiveCommand(
+                   directory: workspace.path, prompt: "", sessionID: sessionID,
+                   model: session.model, effort: session.effort,
+                   permissionMode: session.permissionMode, resuming: externalSession
+               ) {
+                await recall.rememberResume(resume, inPane: tab.id, store: store)
+            }
+            if isPresent { runningPanes.remove(tab.id) }
+            turns[sessionID] = AgentTurns.Live(
+                sessionID: sessionID, workspaceID: tab.workspaceID,
+                isRunning: state == .running, isAwaitingPermission: state == .waiting
+            )
+            if session.state != state || (externalSession != nil && session.agentSessionID != externalSession) {
+                let nextState = state
+                let nextID = externalSession
+                _ = try? await store.update(sessionID: sessionID) { row in
+                    row.applyInteractiveState(nextState)
+                    if let nextID { row.agentSessionID = nextID }
+                }
+            }
+        }
+        agentProcesses = processes
+        if paneAgents != detected { paneAgents = detected }
+        let running = Set(runningPanes.compactMap { paneOwner[$0] })
+        if agentTurns != turns || runningWorkspaceIDs != running {
+            agentTurns = turns
+            runningWorkspaceIDs = running
+            onAgentActivityChanged?()
+        }
+    }
+
+    private func currentScreen(inPane pane: String) -> [String] {
+        guard let terminal = terminals[pane]?.getTerminal() else { return [] }
+        let start = terminal.buffer.totalLinesTrimmed
+        var lower = start
+        var upper = start + terminal.rows
+        while terminal.getScrollInvariantLine(row: upper) != nil {
+            lower = upper
+            upper = start + (upper - start) * 2
+        }
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if terminal.getScrollInvariantLine(row: middle) == nil {
+                upper = middle
+            } else {
+                lower = middle + 1
+            }
+        }
+        // Read the live screen even when the user has scrolled into history.
+        return (max(start, upper - terminal.rows)..<upper).compactMap {
+            terminal.getScrollInvariantLine(row: $0)?.translateToString(
+                trimRight: true, skipNullCellsFollowingWide: true
+            )
+        }
+    }
 
     func useStore(_ store: Store?) {
         if repoStore == nil { repoStore = store }
@@ -393,10 +558,16 @@ final class TerminalSessionStore {
     private func startRecordingCommands() {
         guard recordTask == nil, repoStore != nil else { return }
         recordTask = Task { [weak self] in
+            var ticks = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
+                await self?.refreshAgentActivity()
+                try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
-                await self?.recordCommands()
+                ticks += 1
+                if ticks == 15 {
+                    await self?.recordCommands()
+                    ticks = 0
+                }
             }
         }
     }

@@ -131,10 +131,16 @@ final class TerminalPersistence {
     /// Empty rather than nil when tmux is absent or the server is down, for the same reason
     /// `sessions()` answers with none: nothing can be running in a session that does not exist.
     func panePIDs() async -> [String: Int32] {
+        await panePIDSnapshot() ?? [:]
+    }
+
+    func panePIDSnapshot() async -> [String: Int32]? {
         guard let command else { return [:] }
         guard let result = try? await Shell.run(
             command.executable, command.listPanes, timeout: .seconds(5)
-        ) else { return [:] }
+        ) else { return nil }
+        guard result.ok || result.stderr.contains("no server running")
+            || result.stderr.contains("No such file or directory") else { return nil }
         return TmuxSessions.parsePanePIDs(result.stdout)
     }
 

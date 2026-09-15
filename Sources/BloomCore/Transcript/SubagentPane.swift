@@ -81,7 +81,10 @@ public enum SubagentPane: Sendable {
         }
         let elapsed = SubagentRow.duration(subagent.secondsElapsed(at: now))
         if !elapsed.isEmpty { parts.append(elapsed) }
-        return parts.joined(separator: " . ")
+        // A middle dot, which is what every other meta line in the window is joined with. It was
+        // a spaced full stop, and in the owner's screenshot "general-purpose . 5m 38s" read as a
+        // sentence that had lost its words.
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - What it was given
@@ -113,34 +116,37 @@ public enum SubagentPane: Sendable {
 
     /// How long a brief may be before the pane opens with it shut.
     ///
-    /// Shown in full when it is under this, because a two line prompt behind a disclosure arrow is
-    /// a click to read two lines.
-    ///
-    /// **Past it the pane now shows none of it, where it used to show the first 500 characters.**
-    /// That head was six or seven lines of a handed-off brief, on top of a title, a subtitle and
-    /// the CLI's own summary, and between them they filled the pane: what the subagent DID began
-    /// below the fold of the one view somebody opens to find out. The title and the summary
-    /// already say what it was asked for in a sentence, and the brief is the reader's own words,
-    /// which is the one thing in this pane they have read before. So it is a line to press, and
-    /// the conversation starts at the top.
+    /// Shown in full when it is under this, because a two line prompt behind a control is a click
+    /// to read two lines.
     public static let briefCollapseLimit = 500
 
     public static func briefCollapses(_ brief: String) -> Bool {
         brief.count > briefCollapseLimit
     }
 
-    /// What the line that opens a long brief says.
+    /// How much of a long prompt its shut bubble shows.
     ///
-    /// Named rather than `TextFold`'s "Show all", because there is nothing above it to be all of:
-    /// a shut brief draws no text at all, so a button offering to show the rest of nothing says
-    /// nothing about what is behind it.
-    public static func briefToggle(isExpanded: Bool, kind: SubagentKind) -> String {
-        switch (isExpanded, kind) {
-        case (false, .agent): "Show the prompt"
-        case (true, .agent): "Hide the prompt"
-        case (false, .command): "Show the command"
-        case (true, .command): "Hide the command"
-        }
+    /// **It used to show none of it**, behind an uppercase "Asked" and a "Show the prompt" link,
+    /// because the first 500 characters had filled the pane and pushed what the subagent did below
+    /// the fold. The owner asked for the pane to read like the chat, where a prompt is a bubble, and
+    /// a bubble with nothing in it is not one. So it is a bubble of about three lines at the
+    /// chat's measure: enough to recognise which brief this was, short enough that the work starts
+    /// on the first screen. The chat itself never shuts a bubble, because a person's own message
+    /// is a sentence long; a handed-off brief runs to a page and a half.
+    public static let briefPreviewLimit = 280
+
+    /// The shut bubble's text, or nil when the brief is short enough to be shown whole.
+    ///
+    /// Cut at the last whitespace before the limit rather than mid word, and on one line, because
+    /// a brief's first paragraphs are usually a heading and a blank line and those would spend the
+    /// preview on nothing.
+    public static func briefPreview(_ brief: String) -> String? {
+        guard briefCollapses(brief) else { return nil }
+        let oneLine = brief.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard oneLine.count > briefPreviewLimit else { return oneLine }
+        let head = oneLine.prefix(briefPreviewLimit)
+        let cut = head.lastIndex(where: \.isWhitespace).map { head[..<$0] } ?? head
+        return String(cut).trimmingCharacters(in: .whitespaces) + "…"
     }
 
     /// The command line a background command was given.

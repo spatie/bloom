@@ -190,7 +190,7 @@ enum AppChromeProbe {
                 await render(UserTurnRowView(text: "Please review Sources/Bloom/Design/Theme.swift", home: TranscriptHome())
                     .environment(AppModel()), size: CGSize(width: 650, height: 160),
                              name: "bubble-\(name)", scheme: scheme)
-                await render(MergeSplitButton(method: .merge, canMerge: true, choose: { _ in }, merge: {}),
+                await render(MergeSplitButton(method: .merge, fill: Palette.positive, canMerge: true, choose: { _ in }, merge: {}),
                              size: CGSize(width: 300, height: 80), name: "merge-\(name)", scheme: scheme)
             }
         }

@@ -50,6 +50,39 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
         durationMS = message.durationMS
         refID = message.refID
     }
+
+    /// This row in the only terms `TranscriptFold` cares about.
+    ///
+    /// Here rather than inside `TranscriptModel.presentationFolds`, where it was written, because
+    /// the subagent pane folds its rows too and a second copy of what counts as settled or featured
+    /// is a subagent pane that folds differently from the chat the day one of them changes.
+    ///
+    /// - Parameters:
+    ///   - seq: the identity the fold names a run by. The row's own `seq` for a stored row; the
+    ///     subagent pane passes its payload derived id, because its positions move on a re-read.
+    ///   - isFresh: a tool call made moments ago. Only the live chat knows, so it is handed in.
+    nonisolated func foldFact(seq: Int? = nil, isFresh: Bool = false) -> TranscriptFold.Fact {
+        let settled: Bool
+        switch kind {
+        case .toolUse: settled = resultPayload != nil
+        case .permissionAsk: settled = permissionDecision != nil
+        default: settled = true
+        }
+        return TranscriptFold.Fact(
+            seq: seq ?? self.seq,
+            kind: kind,
+            failed: isError || refusal != nil,
+            featured: isQuestion
+                || MediaShowRow.isCall(payload) || CodexImageViewRow.isCall(payload),
+            drawsNothing: TranscriptNoise.isHidden(self)
+                || TranscriptRowInk.drawsNothing(kind: kind, payload: payload),
+            settled: settled,
+            isFresh: isFresh,
+            toolUseID: kind == .toolUse ? refID : nil,
+            parentToolUseID: parentToolUseID,
+            opensTurn: BackgroundWake.isRow(kind: kind, payload: payload)
+        )
+    }
 }
 
 /// The state behind one session's transcript: the rows, whether the agent is running, and the
@@ -117,25 +150,8 @@ final class TranscriptModel {
     func presentationFolds() -> TranscriptFold.Folds {
         let freshCalls = freshCalls
         return foldCache.resolve(rows.lazy.map { row in
-            let settled: Bool
-            switch row.kind {
-            case .toolUse: settled = row.resultPayload != nil
-            case .permissionAsk: settled = row.permissionDecision != nil
-            default: settled = true
-            }
-            return TranscriptFold.Fact(
-                seq: row.seq,
-                kind: row.kind,
-                failed: row.isError || row.refusal != nil,
-                featured: row.isQuestion
-                    || MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
-                drawsNothing: TranscriptNoise.isHidden(row)
-                    || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
-                settled: settled,
-                isFresh: row.kind == .toolUse && row.refID.map(freshCalls.contains) == true,
-                toolUseID: row.kind == .toolUse ? row.refID : nil,
-                parentToolUseID: row.parentToolUseID,
-                opensTurn: BackgroundWake.isRow(kind: row.kind, payload: row.payload)
+            row.foldFact(
+                isFresh: row.kind == .toolUse && row.refID.map(freshCalls.contains) == true
             )
         })
     }
@@ -435,48 +451,6 @@ final class TranscriptModel {
         isLoaded = true
     }
 
-    private var historyWorkspaceHeld: Bool {
-        workspace.map { HistoryWorkspaceGate.shared.holds($0.id) } ?? false
-    }
-
-    private func historyBlocksSending() async -> Bool {
-        if historyWorkspaceHeld { return true }
-        guard let store, let workspace else { return false }
-        do {
-            guard let journal = try await store.pendingCheckpointRewind(workspaceID: workspace.id) else { return false }
-            HistoryWorkspaceGate.shared.mark(workspace.id, unresolved: true)
-            history.blockingSessionID = journal.checkpoint.sessionID
-            history.failure = "Resolve the interrupted rewind in its conversation before sending more messages."
-            if journal.checkpoint.sessionID == session.id { history.pendingRewind = journal }
-            return true
-        } catch {
-            history.failure = "Could not check the workspace's rewind state: \(error)"
-            return true
-        }
-    }
-
-    func providerContainsTurn(_ turnID: String) async throws -> Bool {
-        guard let runner = ensureRunner(), runner.supportsConversationRewind else { throw ConversationRewindError.unsupported }
-        return try await runner.containsTurn(turnID)
-    }
-
-    func rewindProvider(beforeTurnID: String) async throws {
-        guard let runner = ensureRunner(), runner.supportsConversationRewind else { throw ConversationRewindError.unsupported }
-        try await runner.rewind(beforeTurnID: beforeTurnID)
-    }
-
-    func reloadAfterRewind() async {
-        guard let store else { return }
-        wasStoppedByHand = true
-        sending = nil
-        steering = nil
-        clearStreaming()
-        await read(from: store)
-        await refreshSession()
-        PromptAttachmentStore.shared.restoreDraftAttachments(draft, sessionID: session.id.rawValue)
-        composerFocusRequests += 1
-    }
-
     // MARK: - Loading
 
     func load() async {
@@ -564,8 +538,7 @@ final class TranscriptModel {
         // start a paid turn on a Mac nobody is sitting at, so it is shown as pending and goes with
         // the owner's next message. See `DeliveryHold.none`.
         await refreshQueue()
-        await history.load(store: store, sessionID: session.id, workspaceID: workspace?.id)
-        if workspace != nil { await history.cleanupRetired(store: store, sessionID: session.id, cwd: cwd) }
+        await history.load(store: store, sessionID: session.id)
         isLoaded = true
     }
 
@@ -762,6 +735,13 @@ final class TranscriptModel {
             return submitted
         }
         guard !isWorkspaceArchiving else { return false }
+        if usesInteractiveTerminal {
+            app.alert = BloomAlert(
+                title: "This agent runs in a terminal",
+                message: "Open its agent tab and enter the prompt in the CLI."
+            )
+            return false
+        }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return false }
 
@@ -853,7 +833,7 @@ final class TranscriptModel {
     /// question the moment a running turn stopped holding the queue on two of the four backends:
     /// the tooltip went on offering to queue a message that was about to go straight out.
     var queuesNextMessage: Bool {
-        if history.isCapturing || history.isFinalisingTurn || (history.hasActiveTurn && !isRunning) || historyWorkspaceHeld { return true }
+        if history.isCapturing || history.isFinalisingTurn || (history.hasActiveTurn && !isRunning) { return true }
         if isRunning, session.interactionMode != activeInteractionMode { return true }
         return !Delivery.goesImmediately(
             behind: pendingDeliveries, hold: deliveryHold, on: session.agentKind
@@ -867,7 +847,6 @@ final class TranscriptModel {
     /// queue may not do: both read `DeliveryHold`. See `DeliveryHold.sentence(on:)`.
     var holdSentence: String? {
         if let remoteQueueError { return remoteQueueError }
-        if historyWorkspaceHeld { return "Resolve the interrupted rewind before sending more messages." }
         if history.isCapturing || history.isFinalisingTurn { return "Saving this turn's file changes." }
         if pendingDeliveries.first?.state == .uncertain {
             return "Bloom could not confirm delivery. Check the conversation before sending again."
@@ -896,8 +875,9 @@ final class TranscriptModel {
     /// for at that moment, and both are covered by the queue simply sitting there, visibly, until
     /// somebody says something.
     func drain() async {
+        guard !usesInteractiveTerminal else { return }
         guard !isReconcilingPresentation else { return }
-        guard !history.isCapturing, !history.isFinalisingTurn, !(history.hasActiveTurn && !isRunning), !(await historyBlocksSending()) else { return }
+        guard !history.isCapturing, !history.isFinalisingTurn, !(history.hasActiveTurn && !isRunning) else { return }
         guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
         guard drainState.begin() else { return }
         var allowRepeat = true
@@ -1206,10 +1186,6 @@ final class TranscriptModel {
             await abandon(delivery, saying: "Bloom could not open an agent for this chat.")
             return false
         }
-        guard !historyWorkspaceHeld else {
-            await abandon(delivery, saying: "Resolve the interrupted rewind before sending more messages.")
-            return false
-        }
         // The queue is moving, whether or not that begins a turn.
         wasStoppedByHand = false
 
@@ -1250,7 +1226,6 @@ final class TranscriptModel {
             // model is handed is the envelope, and what the transcript draws is the words. See
             // `Delivery.sent` and `SessionRunner.send(_:recording:)`.
             try await runner.sendDelivery(delivery)
-            if startsATurn, let store { await history.sent(delivery: delivery, store: store) }
             // The runner writes the user row as part of the send, and until this line nothing read
             // it back: the transcript only pulled rows on an agent event, so the owner's own
             // message did not appear until the answer did. Reading it here is what retires the
@@ -1487,6 +1462,7 @@ final class TranscriptModel {
     /// second caller of this would take the app down. There is no reason for the guarantee to be
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
+        guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
         let preferences = RunnerPreferences(session: session)
@@ -1520,6 +1496,12 @@ final class TranscriptModel {
         startIdleEviction()
         if pumpTask == nil { startPump(on: runner) }
         return runner
+    }
+
+    private var usesInteractiveTerminal: Bool {
+        guard let workspaceID = session.workspaceID else { return false }
+        CenterTabStore.shared.load(workspaceID: workspaceID)
+        return CenterTabStore.shared.terminal(for: session.id, in: workspaceID) != nil
     }
 
     /// The one place a backend becomes a process. Static and taking only values, so which runner a

@@ -1,6 +1,6 @@
 import Foundation
 
-/// What choosing a run script from the tab strip's `+` menu does, given the tabs already open.
+/// What choosing a run script from the title bar's `+` menu does, given the tabs already open.
 ///
 /// **A run script is a thing that is running or not, not a thing to open copies of.** Picking
 /// `Vite` twice and getting two dev servers fighting over one port is never what was meant. So a

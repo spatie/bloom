@@ -46,6 +46,7 @@ final class TerminalCommandRecall {
 
     /// Panes that had something running as of the last poll. See `remember`.
     private var busy: Set<String> = []
+    private var resumeCommands: [String: String] = [:]
 
     // MARK: - What Bloom typed
 
@@ -61,6 +62,15 @@ final class TerminalCommandRecall {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !busy.contains(pane) else { return }
         sent[pane] = trimmed
+    }
+
+    func rememberResume(_ command: String, inPane pane: String, store: Store) async {
+        resumeCommands[pane] = command
+        guard sent[pane] != command else { return }
+        sent[pane] = command
+        recorded[pane] = command
+        if offers[pane] != nil { offers[pane] = command }
+        try? await store.setSetting(TerminalCommandMemory.key(paneID: pane), command)
     }
 
     // MARK: - The offer
@@ -115,6 +125,7 @@ final class TerminalCommandRecall {
             offers[pane] = nil
             sent[pane] = nil
             recorded[pane] = nil
+            resumeCommands[pane] = nil
             busy.remove(pane)
             withdrawn.remove(pane)
         }
@@ -143,7 +154,13 @@ final class TerminalCommandRecall {
     ) async {
         guard let store, offers[pane] == nil else { return }
         let stored = try? await store.setting(TerminalCommandMemory.key(paneID: pane))
-        guard let command = TerminalCommandMemory.offerable(stored) else { return }
+        let isAgent = CenterTabStore.shared.tabsByWorkspace.values.joined().contains {
+            $0.id == pane && $0.agentSessionID != nil
+        }
+        guard let command = TerminalCommandMemory.offerable(
+            stored, maximumLength: isAgent ? 262_144 : TerminalCommandMemory.lengthLimit
+        ) else { return }
+        if isAgent { resumeCommands[pane] = command }
         recorded[pane] = command
 
         if let session, let persistence {
@@ -190,10 +207,12 @@ final class TerminalCommandRecall {
                 busy.remove(pane.pane)
                 sent[pane.pane] = nil
                 guard offers[pane.pane] == nil else { continue }
+                resumeCommands[pane.pane] = nil
             } else {
                 busy.insert(pane.pane)
             }
-            let remembered = TerminalCommandMemory.remembered(
+            let resume = table.interactiveAgent(ofShell: shell) == nil ? nil : resumeCommands[pane.pane]
+            let remembered = resume ?? TerminalCommandMemory.remembered(
                 sent: sent[pane.pane], running: running
             )
             guard remembered != recorded[pane.pane] else { continue }

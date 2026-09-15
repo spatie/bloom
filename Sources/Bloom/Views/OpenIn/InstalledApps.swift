@@ -46,9 +46,21 @@ enum InstalledApps {
         return cache
     }
 
+    /// Forgets both halves of the cache, so the next menu is built from a fresh scan.
+    ///
+    /// Called when the user edits their own additions in Settings. The age on the cache is there
+    /// for an application installed behind Bloom's back; an application added in Bloom's own
+    /// settings pane and then missing from the menu for up to a minute would read as the pane
+    /// not working.
+    static func invalidate() {
+        scannedAt = nil
+        defaultsScannedAt = nil
+        systemDefaults = [:]
+    }
+
     private static func scan() -> [DetectedApp] {
         defer { listings = [:] }
-        return EditorCatalog.known.compactMap { app in
+        return EditorCatalog.catalogue(adding: OpenInCustomApps().apps).compactMap { app in
             guard let url = locate(app) else { return nil }
             return DetectedApp(app: app, url: url, icon: icon(at: url))
         }
@@ -150,7 +162,7 @@ enum InstalledApps {
         var found: DetectedApp?
         if let url = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: path)),
            let bundleID = Bundle(url: url)?.bundleIdentifier,
-           !EditorCatalog.isKnown(bundleID: bundleID) {
+           EditorCatalog.needsSystemDefaultRow(bundleID: bundleID, adding: OpenInCustomApps().apps) {
             found = DetectedApp(
                 app: ExternalApp(bundleID: bundleID, name: name(of: url), targets: .file),
                 url: url,
@@ -163,7 +175,7 @@ enum InstalledApps {
 
     /// Sized here rather than in the menu, because SwiftUI hands an `NSImage` to AppKit at whatever
     /// size the image says it is, and an application icon says 512 points.
-    private static func icon(at url: URL) -> NSImage {
+    static func icon(at url: URL) -> NSImage {
         let icon = NSWorkspace.shared.icon(forFile: url.path)
         let sized = icon.copy() as? NSImage ?? icon
         sized.size = NSSize(width: 16, height: 16)
@@ -171,7 +183,7 @@ enum InstalledApps {
     }
 
     /// What Finder calls it, which is the name the user knows and is localised for them.
-    private static func name(of url: URL) -> String {
+    static func name(of url: URL) -> String {
         let display = FileManager.default.displayName(atPath: url.path)
         return display.hasSuffix(".app") ? String(display.dropLast(4)) : display
     }

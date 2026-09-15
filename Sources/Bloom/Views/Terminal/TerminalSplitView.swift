@@ -253,7 +253,7 @@ struct TerminalSplitView: View {
 
         // A conversation and a page cannot live in a shell tree at all, so those two carve the
         // CENTRE pane this tab is sitting in and open there, through `NewPane`, which is the door
-        // the strip's `+` and the centre pane's own menu already use. See `CenterPaneView.split`.
+        // the title bar's `+` and the centre pane's own menu already use. See `CenterPaneView.split`.
         case .split(let axis, let kind):
             splitColumn(axis, kind)
             return true

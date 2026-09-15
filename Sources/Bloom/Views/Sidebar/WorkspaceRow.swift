@@ -24,14 +24,12 @@ import BloomCore
 /// the tile's column and the name on the project's own. See `SidebarMetrics.rowIndent` and
 /// `SidebarMetrics.nameColumn`.
 ///
-/// The row draws no background of its own. It lives in a `List` with `.listStyle(.sidebar)`, and
-/// that list already draws AppKit selection: the accent colour while the list has the keyboard, a
-/// quiet grey when it does not. Painting a second highlight underneath was what produced the solid
-/// dark bar the owner saw.
+/// The row draws no background of its own. `SidebarView` hands the list one quiet grey for the
+/// selected row, in every state, through `sidebarSelection(_:)`. Painting a second highlight in
+/// here was what produced the solid dark bar the owner saw.
 ///
-/// Text uses the hierarchical styles rather than fixed label colours for the same reason: inside
-/// a selected row the list inverts `.primary` and `.secondary` for us, and a pinned
-/// `NSColor.labelColor` would stay dark on the accent fill.
+/// Text uses the hierarchical styles rather than fixed label colours, so that it follows whatever
+/// ground the list gives it.
 struct WorkspaceRow: View {
     var workspace: Workspace
     var remote: ServerWindowModel?
@@ -55,12 +53,12 @@ struct WorkspaceRow: View {
 
     /// How many of this turn's subagents failed, whichever of them still have rows of their own.
     private var subagentFailures: Int { remote == nil ? app.subagentFailures(of: workspace.id) : 0 }
-    /// Whether this row is the one the list is painting with the accent colour.
+    /// Whether this row sits on an accent fill, which in the sidebar it never does.
     ///
-    /// This is the list's own answer, not one derived from the window's active state. AppKit fills
-    /// a selected row with the accent only while the list itself holds the keyboard, so a row that
-    /// inverted whenever the window was merely key drew white counts on the grey unfocused bar
-    /// every time focus was in the composer or a terminal.
+    /// `sidebarSelection(_:)` pins this to standard, because the sidebar's selection is grey in
+    /// every state. It is still read rather than removed, so the row stays right if it is ever
+    /// drawn into a list that does paint the accent. Deriving it from the window's active state
+    /// instead drew white counts on the grey bar every time focus was in the composer or a terminal.
     @Environment(\.backgroundProminence) private var backgroundProminence
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -404,7 +402,7 @@ struct WorkspaceRow: View {
         // the sentence. The app had three, and this row was the one that wrote two spaces and
         // no brackets. The other two were `SidebarProjectsHeader`, which already reads this
         // way, and `ComposerStopButton`, which spelled the keys out in words.
-        .help("Archive workspace (⌘⌫)")
+        .help("Archive workspace (\(MenuBarCatalogue[.archive].keyText))")
         .accessibilityLabel("Archive \(workspace.name)")
         .archiveConfirmation($archiveRequest, arrowEdge: .leading, onConfirm: onConfirmArchive)
     }

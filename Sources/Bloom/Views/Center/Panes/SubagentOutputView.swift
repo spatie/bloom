@@ -25,22 +25,22 @@ import BloomCore
 /// `WorkspaceModel.subagentStreamLines(forToolUseID:)`.
 ///
 /// **It stays live while the subagent works**, which is the case it is most often opened in. The
-/// brief is known the moment the task starts, so it is on screen immediately; the output file
-/// grows under the CLI's hand, so it is re-read on `SubagentPane.refreshSeconds`. The version
-/// before this keyed its one read on the subagent's state, so a pane opened mid run showed
-/// whatever prefix existed at the instant it was opened and then nothing more until the end.
+/// output file grows under the CLI's hand, so it is re-read on `SubagentPane.refreshSeconds`, and
+/// the view follows the newest row the way the chat does: while the reader is at the end, and not
+/// once they have scrolled up to read something.
 ///
-/// **What it does NOT do any more is draw the conversation itself.** It used to put a caption and
-/// a `Text` over every entry, which is a second renderer for the thing the pane beside it already
-/// renders, and it lost every argument that one had won: an answer written in markdown arrived as
-/// literal asterisks, and a Bash call arrived as a screen of pretty printed JSON where the
-/// transcript draws one line with the command in it. `SubagentConversationView` hands the rows to
-/// `TranscriptRowView`, which is the only thing in the window that decides how a row is drawn.
+/// **An agent's pane reads like the chat**, because the owner asked why it did not. The
+/// conversation is `SubagentConversationView`, which is the chat's own rows, fold, bubble and
+/// working line in the chat's reading column. A background command has no conversation in it and
+/// keeps the command line and what it printed, as code.
 ///
-/// Everything decided is decided in `SubagentPane`, `SubagentKind` and `SubagentTranscript`.
+/// Everything decided is decided in `SubagentPane`, `SubagentKind`, `SubagentTranscript` and
+/// `SubagentConversation`.
 struct SubagentOutputView: View {
     var model: WorkspaceModel
-    var subagentID: SubagentID
+    /// Which run: one the roster holds, opened from the sidebar or from a call row while it is
+    /// still held, or one read back from the rows stored under its call. See `SubagentRunLink`.
+    var target: SubagentRunLink.Target
 
     /// The conversation, already folded into rows. Rows rather than the messages they came from,
     /// because folding a result onto its call parses the largest payload in the file and this
@@ -49,6 +49,22 @@ struct SubagentOutputView: View {
     @State private var failure: SubagentOutput.Failure?
     @State private var isBriefExpanded = false
 
+    /// Where the pane is scrolled to, standing at the bottom edge from the first frame.
+    ///
+    /// A position standing at `.bottom` is reapplied by SwiftUI on every layout pass that grows the
+    /// content, which is how a running subagent is followed. A reader's own scroll replaces it with
+    /// a point, and from then on nothing moves under them until they come back to the end.
+    @State private var position = ScrollPosition(edge: .bottom)
+    /// Whether the reader is at the end, at `ScrollEnd.threshold`, which is the test the chat uses
+    /// to decide whether an arriving row may move the view.
+    @State private var followsEnd = true
+    /// The width the prompt's bubble may fill, computed the way the chat computes it. See
+    /// `TranscriptBubbleWidth`.
+    @State private var bubbleWidth = TranscriptBubbleWidth()
+    /// Where a file chip's hover card is drawn, over the scroll view rather than inside a row that
+    /// would clip it. See `TranscriptHoverHost`.
+    @State private var hoverHost = TranscriptHoverHost()
+
     /// The conversation's text size, face and line height, read here for the reason `ChatPaneView`
     /// reads them: this pane is a conversation, and a reader who has set the transcript larger has
     /// not asked for a subagent's half of it to stay small.
@@ -56,8 +72,20 @@ struct SubagentOutputView: View {
     private var chatFontID: String { ColourThemePreference.shared.chatFont }
     private var lineHeight: ChatLineHeight { ColourThemePreference.shared.chatLineHeight }
 
+    /// The roster's account while it has one, and the call's own once it has not, which is the
+    /// case of a finished subagent opened from the chat after the next turn started or after a
+    /// relaunch.
     private var subagent: Subagent? {
-        model.activeTranscript?.subagents[subagentID]
+        let roster = model.activeTranscript?.subagents
+        switch target {
+        case .live(let id):
+            return roster?[id]
+        case .recorded(let toolUseID):
+            return roster?.subagent(forToolUseID: toolUseID)
+                ?? model.recordedSubagent(forToolUseID: toolUseID)
+        case .unavailable:
+            return nil
+        }
     }
 
     private var kind: SubagentKind { subagent?.kind ?? .agent }
@@ -69,40 +97,102 @@ struct SubagentOutputView: View {
 
     var body: some View {
         ScrollView {
-            // Plain, with the lazy stack one level down in `SubagentConversationView`. Two nested
-            // lazy stacks is the outer one measuring the inner one whole, which is the laziness
-            // this pane actually needs given away to get it on the three views above.
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                // The chat's opening space, so the header clears the fade at the top of the pane
+                // exactly as a first bubble does there.
+                Color.clear
+                    .frame(height: TranscriptLayout.topSpace)
+                    .accessibilityHidden(true)
+
                 if let subagent {
                     header(subagent)
-                    brief(subagent)
+                        .subagentReadingColumn()
+
+                    switch subagent.kind {
+                    case .agent: agentBody(subagent)
+                    case .command: commandBody(subagent)
+                    }
                 } else {
                     // Only reachable if the turn was cleared out from under the selection, which
                     // the next turn starting does by design.
-                    Text("That subagent belonged to a turn that has since been replaced.")
+                    Text(missingSentence)
                         .font(Typo.body)
                         .foregroundStyle(Palette.textSecondary)
-                        .padding(.horizontal, TranscriptLayout.inset)
+                        .subagentReadingColumn()
                 }
-
-                output
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Metrics.pane)
+            .padding(.bottom, Metrics.pane)
         }
-        .background(Palette.windowBackground)
+        .scrollPosition($position)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            ScrollEnd.isAtEnd(
+                contentHeight: geometry.contentSize.height,
+                viewportHeight: geometry.containerSize.height,
+                offset: geometry.contentOffset.y
+            )
+        } action: { _, atEnd in
+            followsEnd = atEnd
+        }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            TranscriptGeometry.cap(
+                width: proxy.size.width,
+                share: TranscriptListView.bubbleShare,
+                gutter: Metrics.gutter,
+                floor: TranscriptListView.bubbleFloor
+            )
+        } action: { cap in
+            // On a change only: the setter notifies on every assignment. See `TranscriptListView`.
+            if bubbleWidth.cap != cap { bubbleWidth.cap = cap }
+        }
+        .overlay(alignment: .top) {
+            // The chat's fade into the tab strip, for the chat's reason: text scrolling up was cut
+            // off hard against it, a line sliced through its middle.
+            LinearGradient(
+                colors: [Palette.surface, Palette.surface.opacity(0)], startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: TranscriptLayout.topFade)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .overlay { TranscriptHoverOverlay(host: hoverHost) }
+        .background(Palette.surface)
+        .environment(\.transcriptHoverHost, hoverHost)
+        .environment(\.transcriptBubbleWidth, bubbleWidth)
         .environment(\.fontScale, textSize.scale)
         .environment(\.chatFont, ChatFont(rawValue: chatFontID))
         .environment(\.chatLineHeight, lineHeight)
         // What a link in a subagent's answer does when it is pressed, which is what it does in the
         // transcript: one rule for every address the window draws. See `TranscriptLink.actions`.
         .markdownLinkActions(TranscriptLink.actions(for: model))
+        .onChange(of: reading) { _, _ in
+            guard followsEnd else { return }
+            position.scrollTo(edge: .bottom)
+        }
+        // A different subagent is a different conversation, opened at its end like the chat opens
+        // one. Its opened rows and runs are its own, which the `id` on the conversation gives it.
+        .onChange(of: target) { _, _ in
+            isBriefExpanded = false
+            followsEnd = true
+            position.scrollTo(edge: .bottom)
+        }
         // Re-read when the selection moves to a different subagent, and when this one ends. The
         // running case keeps re-reading inside the task rather than re-keying it: an id that
         // carried the elapsed seconds would tear the whole pane down and rebuild it once a second,
-        // losing the scroll position and any brief the reader had just opened.
-        .onChange(of: subagentID) { _, _ in isBriefExpanded = false }
-        .task(id: "\(subagentID.rawValue):\(SubagentPane.refreshes(subagent))") { await follow() }
+        // losing the scroll position and any row the reader had just opened.
+        .task(id: "\(target):\(SubagentPane.refreshes(subagent))") { await follow() }
+    }
+
+    /// What the pane says when there is no subagent to describe at all.
+    private var missingSentence: String {
+        if case .recorded = target {
+            // The call is not in the conversation that is open now: a different chat became the
+            // active one after the row was clicked.
+            return "That agent's run is not in the chat that is open now."
+        }
+        // Only reachable if the turn was cleared out from under the selection, which the next
+        // turn starting does by design.
+        return "That subagent belonged to a turn that has since been replaced."
     }
 
     /// Read the file, and keep reading it for as long as the task is running.
@@ -120,11 +210,12 @@ struct SubagentOutputView: View {
     }
 
     private func load() async {
-        if let parsed = await model.activeTranscript?.codexSubagentTranscript(for: subagentID) {
+        if case .live(let id) = target,
+           let parsed = await model.activeTranscript?.codexSubagentTranscript(for: id) {
             guard !Task.isCancelled else { return }
             let updated = await Task.detached { SubagentReading(parsed) }.value
             guard !Task.isCancelled else { return }
-            reading = updated
+            if updated != reading { reading = updated }
             failure = nil
             return
         }
@@ -155,10 +246,12 @@ struct SubagentOutputView: View {
         guard !Task.isCancelled else { return }
         switch result {
         case .success(let parsed):
-            reading = parsed
+            // Compared first, because a write that changes nothing would still move the scroll
+            // position to the end once a second under a reader who is at it.
+            if parsed != reading { reading = parsed }
             failure = nil
         case .failure(let reason):
-            reading = SubagentReading()
+            if reading != SubagentReading() { reading = SubagentReading() }
             failure = reason
         }
     }
@@ -168,106 +261,114 @@ struct SubagentOutputView: View {
 
     // MARK: - Parts
 
+    /// What it is and how long it has taken, set the way the chat sets a row: the mark in the
+    /// glyph column, the title beside it, and the meta line under the title in the label face.
     private func header(_ subagent: Subagent) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            HStack(spacing: Metrics.spacingSmall) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
+            HStack(spacing: TranscriptLayout.glyphGap) {
                 SubagentMarkGlyph(mark: SubagentRow(subagent).mark)
+                    .frame(width: TranscriptLayout.glyphWidth)
                 Text(SubagentRow.title(of: subagent))
                     .font(Typo.title)
+                    .foregroundStyle(Palette.textPrimary)
+                    .textSelection(.enabled)
             }
 
-            Text(SubagentPane.subtitle(subagent))
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
+            Group {
+                // Ticking while it runs, from the same clock the sidebar row counts on. Nothing
+                // else in the pane changes once a second when the subagent is quiet, so without
+                // this the duration stood still between rows.
+                if subagent.state == .running {
+                    TimelineView(.periodic(from: .now, by: SubagentPane.refreshSeconds)) { context in
+                        Text(SubagentPane.subtitle(subagent, now: context.date))
+                    }
+                } else {
+                    Text(SubagentPane.subtitle(subagent))
+                }
+            }
+            .font(Typo.label)
+            .foregroundStyle(Palette.textSecondary)
+            .monospacedDigit()
+            .padding(.leading, TranscriptLayout.glyphWidth + TranscriptLayout.glyphGap)
 
-            // The whole of it, not the row's truncation. The row has 260 points and this pane is
-            // the place the sentence is allowed to be a sentence.
-            if !subagent.summary.isEmpty {
+            // The CLI's one sentence, only where there is no conversation to read. Beside a
+            // transcript it repeated the answer the transcript ends with.
+            if !subagent.summary.isEmpty, reading.rows.isEmpty, reading.printed.isEmpty {
                 Text(subagent.summary)
                     .font(Typo.body)
                     .textSelection(.enabled)
+                    .padding(.top, TranscriptLayout.block)
             }
         }
-        .padding(.horizontal, TranscriptLayout.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, TranscriptLayout.block)
     }
 
-    /// What it was given to do: a prompt for an agent, a command line for a background command.
-    ///
-    /// The prompt arrives on `task_started` and is therefore on screen from the first frame, which
-    /// is the half of this that is useful before the task has finished. A command line arrives
-    /// nowhere on the task's own lines, so it is lifted back out of the parent's Bash call: see
-    /// `SubagentPane.commandLine`.
-    ///
-    /// **A long one opens shut**, showing the line that opens it and nothing else. See
-    /// `SubagentPane.briefCollapseLimit` for why: the head it used to show filled the pane with
-    /// the reader's own words and pushed what the subagent DID below the fold.
-    ///
-    /// A prompt is markdown that somebody wrote, so it is rendered as the markdown it is, by the
-    /// same view that renders an answer. Set as literal text it arrived full of `**` and backticks,
-    /// which is the complaint that started all of this.
+    /// An agent: its brief as the prompt, its rows as the chat draws them, its working line.
     @ViewBuilder
-    private func brief(_ subagent: Subagent) -> some View {
-        let text = briefText(subagent)
-        if !text.isEmpty {
-            let collapses = SubagentPane.briefCollapses(text)
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                caption(SubagentPane.briefLabel(subagent.kind))
-                    .padding(.horizontal, TranscriptLayout.inset)
+    private func agentBody(_ subagent: Subagent) -> some View {
+        let isRunning = subagent.state == .running
+        SubagentConversationView(
+            rows: reading.rows,
+            // `task_started` is the honest copy and it is gone with the turn that carried it, so
+            // the one read back out of the transcript stands in for a pane opened after that.
+            prompt: subagent.prompt.isEmpty ? reading.prompt : subagent.prompt,
+            home: home,
+            droppedRows: reading.droppedRows,
+            isRunning: isRunning
+        )
+        .id(target)
 
-                if collapses {
-                    Button(SubagentPane.briefToggle(isExpanded: isBriefExpanded, kind: subagent.kind)) {
+        // A running subagent that has not spoken yet is covered by the working line above. Once
+        // it has stopped, having nothing to read is worth a sentence.
+        if let failure, !isRunning {
+            Text(SubagentPane.nothingToShow(failure, kind: .agent, isRunning: false))
+                .font(Typo.body)
+                .foregroundStyle(Palette.textSecondary)
+                .subagentReadingColumn()
+        }
+    }
+
+    /// A background command: the line it ran and what it printed, both code.
+    ///
+    /// The command line arrives nowhere on the task's own lines, so it is lifted back out of the
+    /// parent's Bash call: see `SubagentPane.commandLine`.
+    @ViewBuilder
+    private func commandBody(_ subagent: Subagent) -> some View {
+        let command = model.commandLine(forToolUseID: subagent.toolUseID) ?? ""
+        if !command.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                caption(SubagentPane.briefLabel(.command))
+                if SubagentPane.briefCollapses(command) {
+                    Button(TextFold.title(isExpanded: isBriefExpanded)) {
                         isBriefExpanded.toggle()
                     }
                     .linkButton()
                     .font(Typo.caption)
-                    .padding(.horizontal, TranscriptLayout.inset)
                 }
-
-                if !collapses || isBriefExpanded {
-                    if SubagentPane.briefIsCode(subagent.kind) {
-                        DetailCodeBlock(text: text, copyTitle: "Copy the command")
-                            .padding(.horizontal, TranscriptLayout.inset)
-                    } else {
-                        ProseRowView(text: text)
-                    }
+                if !SubagentPane.briefCollapses(command) || isBriefExpanded {
+                    DetailCodeBlock(text: command, copyTitle: "Copy the command")
                 }
             }
             .padding(.bottom, TranscriptLayout.block)
+            .subagentReadingColumn()
         }
-    }
 
-    private func briefText(_ subagent: Subagent) -> String {
-        switch subagent.kind {
-        // `task_started` is the honest copy and it is gone with the turn that carried it, so the
-        // one read back out of the transcript stands in for a pane opened after that.
-        case .agent: subagent.prompt.isEmpty ? reading.prompt : subagent.prompt
-        case .command: model.commandLine(forToolUseID: subagent.toolUseID) ?? ""
-        }
-    }
-
-    @ViewBuilder
-    private var output: some View {
-        if let failure {
-            Text(SubagentPane.nothingToShow(
-                failure, kind: kind, isRunning: subagent?.state == .running
-            ))
+        Group {
+            if let failure {
+                Text(SubagentPane.nothingToShow(
+                    failure, kind: .command, isRunning: subagent.state == .running
+                ))
                 .font(Typo.body)
                 .foregroundStyle(Palette.textSecondary)
-                .padding(.horizontal, TranscriptLayout.inset)
-        } else if !reading.printed.isEmpty {
-            // A background command has no conversation in it. What it has to say is the bytes it
-            // wrote to a terminal, which are code and are set as code.
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                caption(SubagentPane.outputLabel(.command))
-                DetailCodeBlock(text: reading.printed, copyTitle: "Copy the output")
+            } else if !reading.printed.isEmpty {
+                VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                    caption(SubagentPane.outputLabel(.command))
+                    DetailCodeBlock(text: reading.printed, copyTitle: "Copy the output")
+                }
             }
-            .padding(.horizontal, TranscriptLayout.inset)
-        } else {
-            SubagentConversationView(
-                rows: reading.rows, home: home, droppedRows: reading.droppedRows
-            )
         }
+        .subagentReadingColumn()
     }
 
     private func caption(_ text: String) -> some View {

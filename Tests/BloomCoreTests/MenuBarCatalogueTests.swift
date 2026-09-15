@@ -22,6 +22,13 @@ struct MenuBarCatalogueTests {
         #expect(MenuBarCatalogue[.fileForward].key == MenuShortcut("]", .command))
     }
 
+    @Test("Command-Backspace belongs to text editing, even without a published focus value")
+    func commandBackspaceDoesNotArchive() {
+        let editingKey = MenuShortcut(.delete, .command)
+        #expect(!MenuBarCatalogue.commands.contains { $0.key == editingKey })
+        #expect(MenuBarCatalogue[.archive].key == MenuShortcut(.delete, .command, .shift))
+    }
+
     @Test("every action has exactly one row, so a lookup cannot trap")
     func everyActionHasARow() {
         for action in MenuBarAction.allCases {

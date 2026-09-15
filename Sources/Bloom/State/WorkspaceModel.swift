@@ -362,6 +362,8 @@ final class WorkspaceModel {
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
+    var pendingCLILaunches: Set<SessionID> = []
+    private(set) var pendingCLIPrompts: [SessionID: String] = [:]
     /// The script alone, where `setupTask` is the script and whatever follows it. Stop cancels
     /// this one, so the queue behind the run still drains; archiving and quitting cancel the
     /// outer task, which reaches this through `stream`'s cancellation handler.
@@ -435,15 +437,23 @@ final class WorkspaceModel {
     /// arrival at a workspace whose sessions had not moved since the last one. That is a second
     /// full layout of the centre column, on the main thread, for a list that is the same list.
     func reloadSessions() async {
+        CenterTabStore.shared.load(workspaceID: workspace.id)
         guard let store else { return }
         SwitchTrace.mark("sessions.query.start", workspace: workspace.id)
-        let fresh = (try? await store.sessions(workspaceID: workspace.id)) ?? []
+        guard let fresh = try? await store.sessions(workspaceID: workspace.id) else { return }
         SwitchTrace.mark("sessions.query.done", workspace: workspace.id)
         if sessions != fresh { sessions = fresh }
         // Conditional for the reason every write here is, and raised only once the answer is in
         // hand: the guard above is the store not being there to ask, which is doubt rather than an
         // empty workspace.
         if !hasReadSessions { hasReadSessions = true }
+        let tabs = CenterTabStore.shared
+        tabs.load(workspaceID: workspace.id)
+        WorkspaceTabsStore.shared.updateOrder(
+            sessions: TabSet.tabbable(fresh),
+            tools: tabs.hasReadTabs(for: workspace.id) ? tabs.tabs(for: workspace.id).map(\.id) : nil,
+            workspaceID: workspace.id
+        )
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
             activeSessionID = sessions.first { $0.sideConversationParentID == nil }?.id
@@ -474,24 +484,55 @@ final class WorkspaceModel {
         draft: String = ""
     ) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
+        // Quick prompts can submit before the composer appears. Settle defaults before exposing
+        // the session, otherwise its first turn can launch Claude despite a Codex default.
+        let openingControls: ComposerControls
+        if let controls {
+            openingControls = controls
+        } else {
+            guard let resolved = try? await app.resolvedControls(for: repo) else { return nil }
+            openingControls = resolved
+        }
+        guard !app.isArchiving(workspace.id) else { return nil }
         var session = Session(
             workspaceID: workspace.id,
             title: title ?? PaneNaming.nextTitle(base: PaneNaming.chat, taken: sessions.map(\.title)),
             sortOrder: sessions.count
         )
-        if let controls {
-            session.model = controls.model
-            session.effort = controls.effort
-            session.agentKind = controls.agentKind
-            session.permissionMode = controls.permissionMode
-            session.interactionMode = controls.interactionMode
-        }
+        session.model = openingControls.model
+        session.effort = openingControls.effort
+        session.agentKind = openingControls.agentKind
+        session.permissionMode = openingControls.permissionMode
+        session.interactionMode = openingControls.interactionMode
         guard let stored = try? await store.upsert(session) else { return nil }
-        if let controls { await controls.store(sessionID: stored.id, in: store) }
+        await openingControls.store(sessionID: stored.id, in: store)
         if !draft.isEmpty { try? await store.saveDraft(sessionID: stored.id, body: draft) }
         await reloadSessions()
         activeSessionID = stored.id
         return stored
+    }
+
+    func createChat(title: String? = nil) async -> PaneContent? {
+        guard let store, let repo = app.repo(for: workspace) else { return nil }
+        let defaults = await AppDefaults.load(from: store)
+        let controls = ComposerControls(
+            defaults: ComposerDefaults.resolve(
+                repo: SettingsLoader.load(repo: workspace.path), app: defaults,
+                models: ComposerModelCatalog.shared.models
+            ),
+            isFastMode: defaults.fastMode, outputStyle: defaults.outputStyle,
+            codexContextWindow: defaults.codexContextWindow
+        )
+        guard let session = await createSession(title: title, controls: controls) else { return nil }
+        guard WorkspaceStartMode.chat(usesCLI: defaults.terminalChat, agent: controls.agentKind).cliAgentKind != nil
+        else { return .chat(session.id) }
+        CenterTabStore.shared.add(
+            kind: .terminal, workspaceID: workspace.id,
+            title: title ?? session.agentKind.label, agentSessionID: session.id
+        )
+        pendingCLILaunches.insert(session.id)
+        await launchCLI(session, prompt: "", repo: repo)
+        return .chat(session.id)
     }
 
     /// Retires the old runner only after its replacement has been saved successfully.
@@ -556,10 +597,6 @@ final class WorkspaceModel {
     /// Persist the replacement before stopping the old agent so a failed write leaves it usable.
     func replaceSession(_ session: Session, controls: ComposerControls) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
-        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
-            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before replacing a conversation.")
-            return nil
-        }
         do {
             let next = try await store.replaceWorkspaceConversation(id: session.id, controls: controls)
             transcripts.removeValue(forKey: session.id)?.teardown()
@@ -575,15 +612,19 @@ final class WorkspaceModel {
 
     func closeSession(_ session: Session) async {
         guard let store else { return }
-        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
-            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before closing a conversation.")
-            return
-        }
         do {
             _ = try await store.update(sessionID: session.id) { $0.archivedAt = Date() }
         } catch {
             app.notice = BloomNotice(message: "Could not close the conversation: \(error.readableMessage)")
             return
+        }
+        let tabs = WorkspaceTabsStore.shared
+        tabs.prepareToClose(.chat(session.id), in: self)
+        tabs.forget(.chat(session.id), workspaceID: workspace.id)
+        if let terminal = CenterTabStore.shared.terminal(for: session.id, in: workspace.id) {
+            await CenterTabStore.shared.close(terminal, in: self)
+            pendingCLILaunches.remove(session.id)
+            pendingCLIPrompts[session.id] = nil
         }
         transcripts[session.id]?.teardown()
         transcripts[session.id] = nil
@@ -631,13 +672,14 @@ final class WorkspaceModel {
     /// Builds a session's transcript if this launch has not seen it yet. Called from a task, never
     /// from a body, for the reason `transcript(for:)` spells out.
     func prepareTranscript(for sessionID: SessionID) {
-        guard let session = sessions.first(where: { $0.id == sessionID }) else { return }
+        guard CenterTabStore.shared.terminal(for: sessionID, in: workspace.id) == nil,
+              let session = sessions.first(where: { $0.id == sessionID }) else { return }
         transcript(for: session)
     }
 
     private func prepareActiveTranscript() {
         guard let session = activeSession else { return }
-        transcript(for: session)
+        prepareTranscript(for: session.id)
     }
 
     // MARK: - Crew
@@ -927,17 +969,20 @@ final class WorkspaceModel {
     /// was not running as far as this property was concerned, however plainly the session row said
     /// otherwise.
     var isRunning: Bool {
-        AgentTurns.workspace(.running, sessions: sessions, live: liveTurns)
+        TerminalSessionStore.shared.runningWorkspaceIDs.contains(workspace.id)
+            || AgentTurns.workspace(.running, sessions: sessions, live: liveTurns)
     }
 
     /// What this workspace's live transcripts say about their own sessions, for the rule above and
     /// for `AppModel`'s mirrors. Only the transcripts that exist: asking for one would build a
     /// model for every session in the strip.
     var liveTurns: [AgentTurns.Live] {
-        transcripts.keys.compactMap(liveTurn(for:))
+        let ids = Set(transcripts.keys).union(sessions.map(\.id))
+        return ids.compactMap(liveTurn(for:))
     }
 
     private func liveTurn(for sessionID: SessionID) -> AgentTurns.Live? {
+        if let terminal = TerminalSessionStore.shared.agentTurns[sessionID] { return terminal }
         guard let transcript = transcripts[sessionID] else { return nil }
         return AgentTurns.Live(
             sessionID: sessionID,
@@ -981,6 +1026,27 @@ final class WorkspaceModel {
         guard !toolUseID.isEmpty, let transcript = activeTranscript else { return nil }
         guard let row = transcript.rows.last(where: { $0.refID == toolUseID }) else { return nil }
         return SubagentPane.commandLine(inPayload: row.payload)
+    }
+
+    /// A subagent rebuilt from the Agent call that started it, for the pane opened from the chat
+    /// once the roster has forgotten it. The call's input goes through `TranscriptEventCache`, so
+    /// a pane redrawn once a second parses it once. See `SubagentRunLink`.
+    func recordedSubagent(forToolUseID toolUseID: String) -> Subagent? {
+        guard !toolUseID.isEmpty, let transcript = activeTranscript,
+              let row = transcript.rows.last(where: { $0.kind == .toolUse && $0.refID == toolUseID })
+        else { return nil }
+        var input: JSONValue?
+        if case .toolUse(let use)? = TranscriptEventCache.event(rowID: row.id, payload: row.payload) {
+            input = use.input
+        }
+        return SubagentRunLink.recordedSubagent(
+            toolUseID: toolUseID,
+            input: input,
+            startedAt: row.createdAt,
+            isSettled: row.resultPayload != nil,
+            failed: row.isError || row.refusal != nil,
+            durationMS: row.durationMS
+        )
     }
 
     /// Whether any session here has an agent stopped and waiting on a person.
@@ -1058,13 +1124,32 @@ final class WorkspaceModel {
     /// workspace with "list the technologies used", typed "test" a moment later, and got "test"
     /// answered first. See `Delivery` and `TranscriptModel.submit`.
     func startSetupThenSend(prompt: String?, repo: Repo) async {
-        await enqueueOpening(prompt)
+        let cliSession = activeSession.flatMap { session in
+            CenterTabStore.shared.terminal(for: session.id, in: workspace.id).map { _ in session }
+        }
+        if let cliSession { pendingCLIPrompts[cliSession.id] = prompt }
+        let cliDelivery: Delivery?
+        if let cliSession, let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            cliDelivery = try? await store?.enqueueDelivery(Delivery(targetSessionID: cliSession.id, body: prompt))
+            if let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
+               let command = prepareCLICommand(for: cliSession, prompt: prompt) {
+                try? await store?.setSetting(TerminalCommandMemory.key(paneID: terminal.id), command)
+            }
+        } else {
+            cliDelivery = nil
+        }
+        if cliSession == nil { await enqueueOpening(prompt) }
 
         setupTask?.cancel()
         setupGeneration += 1
         let generation = setupGeneration
         setupTask = Task { [weak self] in
-            await self?.runSetupThenSend(repo: repo)
+            await self?.runSetupThenSend(repo: repo, cliSession: cliSession, cliPrompt: prompt)
+            if let cliDelivery, let self, !Task.isCancelled,
+               !self.pendingCLILaunches.contains(cliDelivery.targetSessionID),
+               CenterTabStore.shared.terminal(for: cliDelivery.targetSessionID, in: self.workspace.id) != nil {
+                _ = try? await self.store?.markDelivered(id: cliDelivery.id)
+            }
             // Only clear the handle if it is still this run's. A cancelled setup finishes after
             // the one that replaced it has already been stored, and clearing unconditionally
             // dropped the live handle, which left the new run with nothing able to cancel it.
@@ -1095,7 +1180,7 @@ final class WorkspaceModel {
 
     /// Runs the setup script, streaming into the transcript's setup row, then lets the chat's
     /// queue move.
-    func runSetupThenSend(repo: Repo) async {
+    func runSetupThenSend(repo: Repo, cliSession: Session? = nil, cliPrompt: String? = nil) async {
         guard let manager = app.manager else { return }
 
         // Off the main actor: this reads and parses up to six files from disk, and it runs at the
@@ -1141,11 +1226,47 @@ final class WorkspaceModel {
         }
 
         await reloadSessions()
-        guard !Task.isCancelled, let session = activeSession else { return }
+        guard !Task.isCancelled else { return }
+        if let cliSession {
+            await launchCLI(cliSession, prompt: cliPrompt ?? "", repo: repo)
+            return
+        }
+        guard let session = activeSession,
+              CenterTabStore.shared.terminal(for: session.id, in: workspace.id) == nil else { return }
         // The worktree is built, so whatever was asked for while it was being built may go, oldest
         // first. Nothing is passed in: the opening prompt is already in the queue, and so is
         // anything typed into the composer since. See `enqueueOpening`.
         await transcript(for: session).drain()
+    }
+
+    private func launchCLI(_ cliSession: Session, prompt: String, repo: Repo) async {
+        let port = await ensurePort()
+        guard !Task.isCancelled,
+              let terminal = CenterTabStore.shared.terminal(for: cliSession.id, in: workspace.id),
+              sessions.contains(where: { $0.id == cliSession.id }),
+              let command = prepareCLICommand(for: cliSession, prompt: prompt) else { return }
+        try? FileManager.default.removeItem(at: AgentKind.interactiveStatusURL(sessionID: cliSession.id))
+        let terminals = TerminalSessionStore.shared
+        terminals.useStore(store)
+        terminals.run(command, inPaneID: terminal.id)
+        _ = terminals.terminal(
+            for: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: workspace.id, title: terminal.title),
+            workspace: workspace, repo: repo, port: port, directory: terminal.directory
+        )
+        pendingCLILaunches.remove(cliSession.id)
+        pendingCLIPrompts[cliSession.id] = nil
+    }
+
+    private func prepareCLICommand(for session: Session, prompt: String) -> String? {
+        do {
+            return try session.agentKind.prepareInteractiveCommand(
+                directory: workspace.path, prompt: prompt, sessionID: session.id,
+                model: session.model, effort: session.effort, permissionMode: session.permissionMode
+            )
+        } catch {
+            app.alert = BloomAlert(title: "Could not launch the agent", message: error.readableMessage)
+            return nil
+        }
     }
 
     /// The workspace's own port block, allocated once however many callers ask at once.
@@ -1221,26 +1342,15 @@ final class WorkspaceModel {
     private func stream(
         setupIn repo: Repo, through manager: WorkspaceManager, operationLease: WorkspaceOperationLease? = nil
     ) async -> Bool {
-        guard !HistoryWorkspaceGate.shared.holds(workspace.id),
-              let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup),
-              lease.isValid(in: workspace.path, operation: .setup) else {
+        guard let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path),
+              lease.isValid(in: workspace.path) else {
             operationLease?.release()
             if operationLease != nil { isRunningSetup = false }
-            app.notice = BloomNotice(message: "Resolve the workspace's rewind before running setup.")
+            app.notice = BloomNotice(message: "Setup is already running in this workspace.")
             return false
         }
         isRunningSetup = true
         defer { isRunningSetup = false; lease.release() }
-        do {
-            guard let store = app.store,
-                  try await store.pendingCheckpointRewind(workspaceID: workspace.id) == nil else {
-                app.notice = BloomNotice(message: "Resolve the interrupted rewind before running setup.")
-                return false
-            }
-        } catch {
-            if !Task.isCancelled { app.notice = BloomNotice(message: "Bloom could not check this workspace's rewind state. Setup did not start.") }
-            return false
-        }
         setupWasStopped = false
         setupStartedAt = .now
         setupDurationMS = nil
@@ -1266,7 +1376,8 @@ final class WorkspaceModel {
 
         let workspace = workspace
         let port = port
-        let run = Task {
+        // A weak exit callback alone still lets the outer task retain the model.
+        let run = Task { [weak self] in
             await manager.runSetup(
                 workspace: workspace, repo: repo, port: port, operationLease: lease,
                 onExit: { [weak self] status in
@@ -1339,11 +1450,10 @@ final class WorkspaceModel {
     /// Through the same `setupTask` the first run uses, so archiving or quitting stops a
     /// `composer install` started from here exactly as it stops one started at creation.
     func runSetupAgain() {
-        guard !app.isArchiving(workspace.id), !HistoryWorkspaceGate.shared.holds(workspace.id),
-              canRunSetup, let repo, let manager = app.manager,
-              let lease = WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup) else { return }
-        // The scheduled task has not run yet. Reserve now so a rewind cannot pass its idle
-        // check in the interval between this button action and the task's first instruction.
+        guard !app.isArchiving(workspace.id), canRunSetup, let repo, let manager = app.manager,
+              let lease = WorkspaceOperationLease.acquire(in: workspace.path) else { return }
+        // The scheduled task has not run yet. Reserve now so a second run cannot start in the
+        // interval between this button action and the task's first instruction.
         isRunningSetup = true
         setupTask?.cancel()
         setupGeneration += 1

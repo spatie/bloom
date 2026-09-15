@@ -56,6 +56,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// Absolute, and read at fork time rather than trusted: a tab outlives the folder under it.
     /// See `FolderTerminal.launchDirectory`.
     var directory: String = ""
+    var agentSessionID: SessionID?
     /// Review only: whether this tab stays on the file it was opened with.
     ///
     /// **The workspace's review tab is one tab that walks over many files, and that is still what
@@ -129,6 +130,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
         pageTitle = try container.decodeIfPresent(String.self, forKey: .pageTitle) ?? ""
         isNamed = try container.decodeIfPresent(Bool.self, forKey: .isNamed) ?? false
+        agentSessionID = try container.decodeIfPresent(SessionID.self, forKey: .agentSessionID)
         directory = try container.decodeIfPresent(String.self, forKey: .directory) ?? ""
         // False for every tab written before this existed, which is what all of them are: the one
         // shared review. See `isPinnedToPath`.
@@ -141,7 +143,8 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     init(
         id: String = newID(), workspaceID: WorkspaceID, kind: Kind, title: String,
         url: String = "", path: String = "", pageTitle: String = "", isNamed: Bool = false,
-        directory: String = "", isPinnedToPath: Bool = false, runScriptID: String? = nil
+        directory: String = "", isPinnedToPath: Bool = false, agentSessionID: SessionID? = nil,
+        runScriptID: String? = nil
     ) {
         self.runScriptID = runScriptID
         self.isPinnedToPath = isPinnedToPath
@@ -155,5 +158,6 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         self.pageTitle = pageTitle
         self.isNamed = isNamed
         self.directory = directory
+        self.agentSessionID = agentSessionID
     }
 }
