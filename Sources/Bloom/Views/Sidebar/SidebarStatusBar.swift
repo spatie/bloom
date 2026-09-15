@@ -28,26 +28,30 @@ struct SidebarStatusBar: View {
             Hairline()
 
             HStack(spacing: Metrics.spacingSmall) {
-                Menu {
-                    Button("Add Server…", systemImage: "server.rack") { openWindow(id: ServerSetupWindow.id) }
-                    if !app.remoteServer.savedServers.profiles.isEmpty {
-                        Divider()
-                        Menu("Saved Servers") {
-                            ForEach(app.remoteServer.savedServers.profiles) { profile in
-                                Button(profile.displayName) { Task { await app.remoteServer.selectServer(profile) } }
+                // Every item in this menu is about servers, so with the Settings switch off there
+                // is nothing left to put in it. See `RemoteServerAvailability`.
+                if RemoteServerAvailability.shared.isEnabled {
+                    Menu {
+                        Button("Add Server…", systemImage: "server.rack") { openWindow(id: ServerSetupWindow.id) }
+                        if !app.remoteServer.savedServers.profiles.isEmpty {
+                            Divider()
+                            Menu("Saved Servers") {
+                                ForEach(app.remoteServer.savedServers.profiles) { profile in
+                                    Button(profile.displayName) { Task { await app.remoteServer.selectServer(profile) } }
+                                }
                             }
+                            .disabled(app.remoteServer.isConnecting || app.remoteServer.isPerformingCommand || app.remoteServer.isRemovingServer)
                         }
-                        .disabled(app.remoteServer.isConnecting || app.remoteServer.isPerformingCommand || app.remoteServer.isRemovingServer)
+                    } label: {
+                        Label("Add", systemImage: "plus")
                     }
-                } label: {
-                    Label("Add", systemImage: "plus")
+                    .labelStyle(.iconOnly)
+                    .menuStyle(.button)
+                    .buttonStyle(.accessoryBar)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Add a server")
                 }
-                .labelStyle(.iconOnly)
-                .menuStyle(.button)
-                .buttonStyle(.accessoryBar)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Add a server")
                 status
 
                 Spacer(minLength: Metrics.spacingSmall)

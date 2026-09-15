@@ -75,6 +75,9 @@ final class AppModel {
     var selection: SidebarSelection {
         get { storedSelection }
         set {
+            // With remote servers switched off, a server's row is refused here rather than hidden
+            // on every surface that draws one. See `RemoteServerFeature.admits`.
+            guard RemoteServerFeature.admits(newValue, isEnabled: RemoteServerAvailability.shared.isEnabled) else { return }
             // Observation treats an identical assignment as a mutation. A click on the selected
             // sidebar row can arrive here again, and without this guard it writes defaults,
             // rebuilds the subagent rows and starts another settings read for no state change.
@@ -126,12 +129,17 @@ final class AppModel {
     /// A saved server ID is restored only after that server returns its catalogue.
     private func restoreLastSelection() {
         guard case .home = storedSelection else { return }
-        if remoteServer.isConfigured, let saved = SidebarSelectionMemory.savedRemote(in: .standard) {
+        switch RemoteServerFeature.launchRestore(
+            savedRemote: SidebarSelectionMemory.savedRemote(in: .standard),
+            isEnabled: RemoteServerAvailability.shared.isEnabled, isConfigured: remoteServer.isConfigured
+        ) {
+        case .remote(let saved):
             pendingRemoteSelection = saved
             reconcileRemoteSelection()
             return
+        case .local(let forgetsRemote):
+            if forgetsRemote { SidebarSelectionMemory.clearRemote(in: .standard) }
         }
-        SidebarSelectionMemory.clearRemote(in: .standard)
         guard let id = UserDefaults.standard.string(forKey: SidebarSelectionMemory.localWorkspaceKey).map(WorkspaceID.init),
               workspaces.contains(where: { $0.id == id }) else { return }
         selection = .workspace(id)
@@ -144,8 +152,22 @@ final class AppModel {
         if selection.isRemote { selection = .home }
     }
 
+    /// Leave a server's row because remote servers were switched off. Unlike
+    /// `clearRemoteSelection` it goes back to the last local workspace rather than Home, and it
+    /// is here rather than beside the rest of the switch because `pendingRemoteSelection` is
+    /// private to this file.
+    func leaveRemoteSelection() {
+        pendingRemoteSelection = nil
+        let lastLocal = UserDefaults.standard.string(forKey: SidebarSelectionMemory.localWorkspaceKey).map(WorkspaceID.init)
+        if let next = RemoteServerFeature.selectionAfterDisabling(
+            selection, lastLocalWorkspace: lastLocal, workspaces: Set(workspaces.map(\.id))
+        ) {
+            selection = next
+        }
+    }
+
     func reconcileRemoteSelection() {
-        guard remoteServer.isConnected, let catalogue = remoteServer.catalogue else { return }
+        guard RemoteServerAvailability.shared.isEnabled, remoteServer.isConnected, let catalogue = remoteServer.catalogue else { return }
         let candidate = pendingRemoteSelection ?? (selection.isRemote ? selection : nil)
         guard let candidate else { return }
         let exists = SidebarSelectionMemory.contains(

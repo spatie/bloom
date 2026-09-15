@@ -16,6 +16,7 @@ import BloomCore
 /// split view, the inspector, the archive confirmation and the alert.
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    private let remoteServers = RemoteServerAvailability.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
 
@@ -166,12 +167,26 @@ struct RootView: View {
             }
             .animation(reduceMotion ? nil : Motion.pane, value: app.notice)
 
-            .task {
-                await app.bootstrap()
+            .task { await app.bootstrap() }
+            // Keyed on the Settings switch as well as on loading, so turning remote servers off
+            // cancels the reconnect loop rather than leaving it ticking with nothing to do, and
+            // turning them on starts it again. After loading, as it was when it followed
+            // `bootstrap` in the task above. See `RemoteServerFeature`.
+            .task(id: app.isLoaded && remoteServers.isEnabled) {
+                guard app.isLoaded, remoteServers.isEnabled else { return }
                 await app.remoteServer.maintainConnection()
             }
-            .task(id: app.remoteServer.connectionGeneration) { await app.remoteServer.poll() }
-            .task(id: app.remoteServer.connectionGeneration) { await app.remoteServer.pollReview() }
+            .task(id: RemotePollKey(generation: app.remoteServer.connectionGeneration, isEnabled: remoteServers.isEnabled)) {
+                guard remoteServers.isEnabled else { return }
+                await app.remoteServer.poll()
+            }
+            .task(id: RemotePollKey(generation: app.remoteServer.connectionGeneration, isEnabled: remoteServers.isEnabled)) {
+                guard remoteServers.isEnabled else { return }
+                await app.remoteServer.pollReview()
+            }
+            .onChange(of: remoteServers.isEnabled) { _, isEnabled in
+                Task { await app.remoteServersAvailabilityChanged(to: isEnabled) }
+            }
             // The install ping. Started from here because this is the first moment there is a window
             // and a model, and it keeps a loop of its own from then on rather than living inside this
             // task: Bloom goes on running with its window closed, and a view's task does not. It waits
@@ -519,4 +534,10 @@ extension Notification {
     static let bloomPullRequestKey = "bloom.newWorkspace.pullRequest"
     /// Which workspace a `bloomRenameWorkspace` post is about, as its raw id.
     static let bloomWorkspaceIDKey = "bloom.workspaceID"
+}
+
+/// What the two server polling tasks restart on: a new connection, or the Settings switch.
+private struct RemotePollKey: Equatable {
+    let generation: Int
+    let isEnabled: Bool
 }

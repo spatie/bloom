@@ -13,6 +13,7 @@ struct ServerAccountsWindow: Scene {
                 .id(model.remoteServer.connectionProfile?.id)
                 .environment(model)
                 .windowRole(.utility)
+                .closesWhenRemoteServersAreOff()
         }
         .windowResizability(.contentSize)
     }
