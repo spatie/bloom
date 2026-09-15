@@ -19,7 +19,7 @@ bloom_ios_path() {
 
 bloom_ios_begin() {
     local mode="${1:-build}" lock existing project_dir build_dir archive_path
-    cd "$(dirname "${BASH_SOURCE[0]}")/.."
+    cd "$(dirname "${BASH_SOURCE[0]}")/.." || return 1
     project_dir="$(bloom_ios_path project)"
     build_dir="$(bloom_ios_path build)"
     archive_path="$(bloom_ios_path archive)"
