@@ -259,6 +259,16 @@
         },
         "detail": {
           "type": "string"
+        },
+        "incompatible": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -4107,6 +4117,19 @@
               "type": "null"
             }
           ]
+        },
+        "codexSpeeds": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/CodexSpeed"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -4116,6 +4139,22 @@
         "styles"
       ],
       "additionalProperties": true
+    },
+    "CodexSpeed": {
+      "type": "object",
+      "properties": {
+        "isFast": {
+          "type": "boolean"
+        },
+        "supportsFast": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "isFast",
+        "supportsFast"
+      ],
+      "additionalProperties": false
     },
     "AgentAuthentication": {
       "type": "object",

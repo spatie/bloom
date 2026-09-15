@@ -61,6 +61,8 @@ struct ServerProtocolVectorTests {
             ("catalogue", .catalogue(.init(repositories: [repo], workspaces: [], sessions: [session], archivedWorkspaces: [archived]))),
             ("composer", .composer(.init(controls: controls, models: [], commands: [], styles: [], availableAgents: [.codex]))),
             ("composerAuthentication", .composer(.init(controls: controls, authentication: [.init(agent: .codex, state: .signInRequired)]))),
+            ("composerCodexSpeeds", .composer(.init(controls: controls, availableAgents: [.codex],
+                codexSpeeds: ["example-model": .init(isFast: true, supportsFast: true)]))),
             ("archivePreview", .archivePreview(.init(id: id, workspace: archived,
                 report: .init(hasUncommittedChanges: true, untrackedFiles: ["notes.txt"], unpushedCommits: 2, modifiedIgnoredFiles: [".env"]),
                 hazards: .init(isAgentRunning: true, isDeletingBranch: true), createdAt: epoch))),
