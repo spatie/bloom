@@ -649,10 +649,32 @@ Supported installations are deliberately specific:
   The plan discloses container and Docker service restarts. This is not a blanket APT upgrade or
   support for every Docker installation. Package changes do not have automatic package rollback.
 
+The Mac checks for updates in the background while it is connected: once shortly after each
+connection, then every six hours, or twenty minutes after a request that failed. It sends the same
+`inspect` the Updates screen does, so the supervisor (whose GitHub lookup is cached for fifteen
+minutes) remains the only thing that talks to GitHub. When an update exists, the sidebar's server
+heading shows a small download arrow and Server Settings badges Updates and lists the new versions
+with **Review Update…**. Nothing is ever installed without that review. Checks need maintenance
+access, so a Mac without the key shows nothing. `ServerUpdateCheckSchedule` and
+`ServerUpdateNotice` in BloomClient hold these decisions, for iPhone and iPad to share.
+
+Releases publish `bloom-server-linux-x86_64.json` beside the package. When a release has one, the
+supervisor reads it before offering the release: a different client protocol, a different
+maintenance protocol, another architecture or a newer glibc than the server has marks the release
+`incompatible` with the reason, instead of offering an update that would be refused after its
+download. A release with a newer protocol names the way forward: update Bloom on the Mac, then use
+**Update Server…**, which installs the server that app includes. Older releases without the
+description are offered as before, and every rule is still checked on the downloaded manifest.
+
 Maintenance requires `diagnostics.maintenanceManagement: true` and a separate administrator key.
 The wizard retains the key in this Mac's Keychain and installs only its SHA-256 digest on the
-server. Other clients enter the maintenance key in Updates; normal workspace authentication alone
-cannot authorise maintenance. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
+server, and its Finish step says so and offers **Copy Key for Another Device…**. Other clients
+enter the maintenance key in Updates; normal workspace authentication alone cannot authorise
+maintenance. A client without the key but with administrator SSH access can choose **Issue New
+Key…** in Updates instead. After a confirmation that other devices will need the new key, it
+generates a key, sends only its digest over SSH (`install-bloom-server.py
+--replace-maintenance-key`), saves the key in its Keychain, and the running supervisor adopts the
+new digest without restarting. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
 plans, phases, idempotency, logs and shared client behaviour.
 
 On older SSH servers, **Set Up Server Updates…** keeps the administrator checks and installation

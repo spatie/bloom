@@ -2,7 +2,10 @@ import Foundation
 
 /// A completed installer is distinct from a healthy service and a restored client connection.
 public enum ServerAdministrationOutcome: Sendable, Equatable {
-    case updated, started, updatedNeedsConnection, updateFailedServerRunning, needsAttention
+    case updated, started, updatedNeedsConnection, updateFailedServerRunning, needsAttention, keyIssued
+
+    /// A replaced key either reached the server and this Keychain, or the old key still stands.
+    public static func resolveKeyReplacement(issued: Bool) -> Self { issued ? .keyIssued : .needsAttention }
 
     public static func resolve(updating: Bool, installed: Bool, running: Bool, connected: Bool, failed: Bool) -> Self {
         if updating {
@@ -19,6 +22,7 @@ public enum ServerAdministrationOutcome: Sendable, Equatable {
         case .updatedNeedsConnection: "Installed, connection needs attention"
         case .updateFailedServerRunning: "Update did not finish. Server is running"
         case .needsAttention: "Server needs attention"
+        case .keyIssued: "New maintenance key issued"
         }
     }
 
@@ -29,8 +33,9 @@ public enum ServerAdministrationOutcome: Sendable, Equatable {
         case .updatedNeedsConnection: "The package was installed, but startup or reconnection could not be confirmed. Check the connection before trying another update."
         case .updateFailedServerRunning: "Bloom restored the service. Review the error and output before trying the update again."
         case .needsAttention: "The operation did not finish successfully. Review the error and output below."
+        case .keyIssued: "This Mac can install updates with the new key, saved in its Keychain. Other devices need the new key before they can install updates again."
         }
     }
 
-    public var succeeded: Bool { self == .updated || self == .started }
+    public var succeeded: Bool { self == .updated || self == .started || self == .keyIssued }
 }

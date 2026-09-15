@@ -38,6 +38,18 @@ struct SidebarServerHeader: View {
             .help("Server settings")
             Text(server.displayName).lineLimit(1).truncationMode(.middle)
                 .accessibilityAddTraits(.isHeader)
+            if let notice = app.serverMaintenance.updateNotice, !server.isMaintainingServer {
+                Button {
+                    app.serverMaintenance.revealsUpdates = true
+                    openWindow(id: ServerWindow.id)
+                } label: {
+                    Label(notice.headline, systemImage: "arrow.down.circle.fill").labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.controlAccent)
+                .help(notice.summary + " Review it in Server Settings.")
+                .accessibilityIdentifier("sidebar-server-update-available")
+            }
             if server.isConnecting && !server.isMaintainingServer { ProgressView().controlSize(.mini) }
             Spacer(minLength: 0)
             Menu { actions } label: {

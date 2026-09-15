@@ -4,13 +4,15 @@ import BloomCore
 /// Maintenance stays inside Updates, using the same trust, installer and diagnostic model as setup.
 struct ServerMaintenanceAdministrationView: View {
     @Bindable var setup: ServerSetupModel
-    let isStarting: Bool
+    let intent: ServerMaintenanceModel.AdministrationIntent
     let isRunning: Bool
     let outcome: ServerAdministrationOutcome?
     let reconnect: () -> Void
     let review: () -> Void
     let recover: () -> Void
     let finish: () -> Void
+
+    private var isStarting: Bool { intent == .start }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
@@ -24,30 +26,29 @@ struct ServerMaintenanceAdministrationView: View {
                     if outcome == .updatedNeedsConnection || outcome == .updateFailedServerRunning {
                         Button("Reconnect", action: reconnect)
                     }
-                    if !outcome.succeeded { Button("Start Server…", action: recover) }
+                    if !outcome.succeeded, intent != .replaceKey { Button("Start Server…", action: recover) }
                     Button("Done", action: finish)
                 }
                 if !setup.activity.lines.isEmpty { ServerSetupLogView(activity: setup.activity) }
             } else if isRunning || setup.isBusy {
                 HStack(spacing: Metrics.spacing) {
                     ProgressView().controlSize(.small)
-                    Text(setup.phase == .checking ? "Checking administrator access…" : setup.phase == .connecting ? "Reconnecting to your workspaces…" : isStarting ? "Starting Bloom Server…" : "Updating Bloom Server…")
-                        .font(Typo.labelEmphasis)
+                    Text(runningTitle).font(Typo.labelEmphasis)
                 }
                 if setup.phase == .checking {
                     Text("This checks the server without changing it.").settingsFootnote()
                 } else {
                     Text(setup.activity.currentMessage).settingsFootnote()
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Keep this Mac connected. Bloom will reconnect automatically when the server is ready.")
-                        .settingsFootnote().fixedSize(horizontal: false, vertical: true)
+                    if intent != .replaceKey {
+                        Text("Keep this Mac connected. Bloom will reconnect automatically when the server is ready.")
+                            .settingsFootnote().fixedSize(horizontal: false, vertical: true)
+                    }
                     ServerSetupLogView(activity: setup.activity)
                 }
             } else {
-                if !isStarting { ServerSetupVersionsView(comparison: setup.versionComparison) }
-                Text(isStarting ? "Start the existing service without reinstalling it. Bloom will reconnect this Mac when it is ready."
-                     : "Install the maintenance service so future updates can run independently of this Mac. Bloom handles stopping, updating and starting the server.")
-                    .settingsFootnote()
+                if intent == .update { ServerSetupVersionsView(comparison: setup.versionComparison) }
+                Text(introduction).settingsFootnote()
                 TextField("Administrator SSH address", text: $setup.host, prompt: Text("root@server.example.com"))
                     .textFieldStyle(.roundedBorder)
                 TextField("Private key file (optional)", text: $setup.identityFile, prompt: Text("Use this Mac’s SSH agent"))
@@ -79,16 +80,20 @@ struct ServerMaintenanceAdministrationView: View {
                     if !check.existing {
                         Text("No existing Bloom installation was found. Add a new server from the sidebar to install it.").settingsFootnote()
                     }
-                    if !isStarting {
+                    if intent == .update {
                         Text("Installs the Bloom Server package included with this app and its managed update service. Projects, GitHub and agent sign-ins are preserved. Docker and agent tools are not updated in this step.").settingsFootnote()
                     }
-                    Button(isStarting ? "Start and Reconnect…" : "Review Update…", action: review)
+                    if intent == .replaceKey, check.existing, check.maintenanceManagement != true {
+                        Text("This server does not have the maintenance service yet. Set up server updates first; that creates its key.")
+                            .foregroundStyle(Palette.warning).textSelection(.enabled)
+                    }
+                    Button(reviewTitle, action: review)
                         .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
-                        .disabled(isStarting ? !setup.canMaintainExistingServer : !setup.canUpdateExistingServer)
+                        .disabled(!canReview)
                 }
                 if let failure = setup.failure {
                     ServerSetupFailureView(failure: failure)
-                    if !isStarting, setup.maintenanceInstallationCompleted || setup.maintenanceServerRunning {
+                    if intent == .update, setup.maintenanceInstallationCompleted || setup.maintenanceServerRunning {
                         Button("Start Server…", action: recover)
                     }
                 }
@@ -99,5 +104,42 @@ struct ServerMaintenanceAdministrationView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var runningTitle: String {
+        switch setup.phase {
+        case .checking: "Checking administrator access…"
+        case .connecting: "Reconnecting to your workspaces…"
+        default:
+            switch intent {
+            case .start: "Starting Bloom Server…"
+            case .update: "Updating Bloom Server…"
+            case .replaceKey: "Issuing a new maintenance key…"
+            }
+        }
+    }
+
+    private var introduction: String {
+        switch intent {
+        case .start: "Start the existing service without reinstalling it. Bloom will reconnect this Mac when it is ready."
+        case .update: "Install the maintenance service so future updates can run independently of this Mac. Bloom handles stopping, updating and starting the server."
+        case .replaceKey: "Issue a new maintenance key with administrator access. The server keeps only a hash of it, nothing restarts, and this Mac saves the key in its Keychain."
+        }
+    }
+
+    private var reviewTitle: String {
+        switch intent {
+        case .start: "Start and Reconnect…"
+        case .update: "Review Update…"
+        case .replaceKey: "Issue New Key…"
+        }
+    }
+
+    private var canReview: Bool {
+        switch intent {
+        case .start: setup.canMaintainExistingServer
+        case .update: setup.canUpdateExistingServer
+        case .replaceKey: setup.canReplaceMaintenanceKey
+        }
     }
 }

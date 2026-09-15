@@ -8,7 +8,7 @@ struct ServerWindow: Scene {
 
     var body: some Scene {
         Window("Server Settings", id: Self.id) {
-            ServerConnectionContent(server: model.remoteServer)
+            ServerConnectionContent(server: model.remoteServer, maintenance: model.serverMaintenance)
                 .environment(model)
                 .windowRole(.utility)
         }
@@ -22,18 +22,18 @@ private struct ServerConnectionContent: View {
     @State private var showsSetup: Bool
     @State private var storage: ServerStorageModel
     @State private var updates: ServerToolUpdatesModel
-    @State private var maintenance: ServerMaintenanceModel
+    let maintenance: ServerMaintenanceModel
     @State private var skills: ServerSkillsModel
     @State private var editorID = UUID()
     @State private var section: ServerSettingsSection? = .connection
 
-    init(server: ServerWindowModel) {
+    init(server: ServerWindowModel, maintenance: ServerMaintenanceModel) {
         self.server = server
+        self.maintenance = maintenance
         _setup = State(initialValue: ServerSetupModel(server: server))
         _showsSetup = State(initialValue: false)
         _storage = State(initialValue: ServerStorageModel(server: server))
         _updates = State(initialValue: ServerToolUpdatesModel(server: server))
-        _maintenance = State(initialValue: ServerMaintenanceModel(server: server))
         _skills = State(initialValue: ServerSkillsModel(server: server))
     }
 
@@ -48,6 +48,11 @@ private struct ServerConnectionContent: View {
                     showsSetup = true
                 })
             }
+        }
+        .onChange(of: maintenance.revealsUpdates, initial: true) { _, reveals in
+            guard reveals else { return }
+            section = .updates
+            maintenance.revealsUpdates = false
         }
         .onAppear { server.setConnectionEditing(true, id: editorID) }
         .onDisappear { server.setConnectionEditing(false, id: editorID) }
@@ -80,6 +85,7 @@ private struct ServerConnectionView: View {
                 Section("Server") {
                     ForEach(ServerSettingsSection.allCases, id: \.self) { item in
                         Label(item.title, systemImage: item.systemImage).tag(item)
+                            .badge(item == .updates ? maintenance.updateNotice?.count ?? 0 : 0)
                     }
                 }
             }

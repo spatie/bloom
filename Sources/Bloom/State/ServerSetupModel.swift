@@ -72,6 +72,10 @@ final class ServerSetupModel {
     private var maintenanceReconnectGeneration: Int?
     private(set) var maintenanceInstallationCompleted = false
     private(set) var maintenanceServerRunning = false
+    /// Where this setup saved the server's maintenance key, once the server confirmed its digest.
+    /// The Finish step offers to copy the key only then, so it never offers a key the server refused.
+    private(set) var maintenanceKeyServerID: String?
+    private(set) var maintenanceKeyIssued = false
     private var generation = UUID()
     private var retryStep = Phase.address
     private var validatedHost = ""
@@ -204,6 +208,35 @@ final class ServerSetupModel {
         if completed { activity.finish() }
     }
 
+    var canReplaceMaintenanceKey: Bool { canMaintainExistingServer && check?.maintenanceManagement == true }
+
+    /// Issue a new maintenance key with administrator SSH access, for a device that has lost or
+    /// never had the key. The new key waits in a pending Keychain slot before its digest is sent,
+    /// so a lost reply retries with the same key instead of stranding one the server accepted.
+    func replaceMaintenanceKey(serverID: String) async {
+        guard canReplaceMaintenanceKey, let connection, !serverID.isEmpty else { return }
+        maintenanceKeyIssued = false
+        let completed = await perform(.installing) {
+            let script = try self.installerScript()
+            let pendingKey = "replacement:" + serverID
+            let key = try ServerMaintenanceCredentials.load(serverID: pendingKey) ?? ServerMaintenanceCredentials.generateToken()
+            try ServerMaintenanceCredentials.save(token: key, serverID: pendingKey)
+            self.record("Issuing a new maintenance key. Only its SHA-256 digest is sent to the server.")
+            let event = try await connection.replaceMaintenanceKey(script: script, digest: ServerMaintenanceCredentials.digest(of: key)) { [weak self] event in
+                await self?.receive(event)
+            }
+            guard event.maintenanceKeyAccepted == true else {
+                throw ServerSetupFailure.installation(code: "maintenance_key", message: "The server did not confirm the new maintenance key.",
+                    recovery: "Check the server again and retry. Until then the previous key still applies.")
+            }
+            try ServerMaintenanceCredentials.save(token: key, serverID: serverID)
+            try? ServerMaintenanceCredentials.delete(serverID: pendingKey)
+            self.maintenanceKeyIssued = true
+            self.record("The new maintenance key is saved in this Mac’s Keychain.")
+        }
+        if completed { activity.finish() }
+    }
+
     func updateExistingServer() async {
         guard canUpdateExistingServer else { return }
         let profileID = server.connectionProfile?.id
@@ -251,9 +284,9 @@ final class ServerSetupModel {
             // credential. Only its digest crosses the administrator SSH connection.
             let pendingKey = "setup:" + self.validatedHost
             let maintenanceKey = try ServerMaintenanceCredentials.load(serverID: pendingKey)
-                ?? SymmetricKey(size: .bits256).withUnsafeBytes { Data($0).base64EncodedString() }
+                ?? ServerMaintenanceCredentials.generateToken()
             try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: pendingKey)
-            let maintenanceDigest = SHA256.hash(data: Data(maintenanceKey.utf8)).map { String(format: "%02x", $0) }.joined()
+            let maintenanceDigest = ServerMaintenanceCredentials.digest(of: maintenanceKey)
             self.record("Client key ready. Connecting to upload the server package.")
             let installOperation = self.installConnection
             let publicKey = URL(fileURLWithPath: key.path + ".pub")
@@ -305,7 +338,9 @@ final class ServerSetupModel {
             // when cancellation arrives during the final readiness check.
             self.installed = installed
             if installed.maintenanceKeyAccepted == true, let endpoint = self.installedEndpoint {
-                try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: PaneStateNamespace.connectionID(endpoint))
+                let serverID = PaneStateNamespace.connectionID(endpoint)
+                try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: serverID)
+                self.maintenanceKeyServerID = serverID
             }
             self.activity.finish()
             if restartingExistingServer {

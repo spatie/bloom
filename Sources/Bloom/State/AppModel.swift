@@ -45,6 +45,8 @@ struct BloomAlert: Identifiable {
 @Observable
 final class AppModel {
     let remoteServer = ServerWindowModel()
+    /// Built on first use from `remoteServer`; see `AppModel+ServerUpdates`.
+    @ObservationIgnored var serverMaintenanceStorage: ServerMaintenanceModel?
     private(set) var store: Store?
     private(set) var manager: WorkspaceManager?
     /// The workspace bridge: one unix socket for this instance, and the token table an agent's MCP
@@ -408,6 +410,7 @@ final class AppModel {
     func bootstrap() async {
         Self.probeInstance = self
         remoteServer.onCatalogueChanged = { [weak self] in self?.reconcileRemoteSelection() }
+        startServerUpdateChecks()
         guard store == nil else { return }
         Log.launchStep("bootstrap")
         let began = Date()
