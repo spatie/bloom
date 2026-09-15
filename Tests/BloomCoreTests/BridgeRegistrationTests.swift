@@ -102,7 +102,7 @@ struct BridgeRegistrationTests {
         let environment = try #require(server["env"] as? [String: String])
         #expect(environment[BridgeProtocol.socketVariable] == attachment.socketPath)
         #expect(environment[BridgeProtocol.tokenVariable] == attachment.token)
-        #expect(environment[BridgeProtocol.roleVariable] == "child")
+        #expect(environment[BridgeProtocol.roleVariable] == "workspace")
     }
 
     @Test("the config file is written where only its owner can read it")
