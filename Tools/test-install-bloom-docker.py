@@ -69,7 +69,9 @@ class DockerTests(unittest.TestCase):
         second = self.prepare()
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(config.stat().st_mtime_ns, stamp)
-        self.assertEqual(json.loads(config.read_text()), {"data-root": str(self.home / "bloom/docker/data")})
+        self.assertEqual(json.loads(config.read_text()), {"data-root": str(self.home / "bloom/docker/data"), "builder": {"gc": docker.BUILDER_GC}})
+        self.assertEqual(json.loads(first.stdout), {"daemonConfigurationChanged": True, "serviceExisted": False})
+        self.assertEqual(json.loads(second.stdout), {"daemonConfigurationChanged": False, "serviceExisted": False})
         self.assertEqual(os.readlink(self.home / "bloom/bin/docker"), "/usr/bin/docker")
         self.assertEqual(os.readlink(self.home / "bloom/bin/rootlesskit"), "/usr/bin/rootlesskit")
 
@@ -88,6 +90,67 @@ class DockerTests(unittest.TestCase):
         path.write_text(original)
         self.assertNotEqual(self.prepare().returncode, 0)
         self.assertEqual(path.read_text(), original)
+
+    def test_builder_gc_uses_keys_docker_29_reads_with_a_cap(self):
+        self.assertTrue(docker.BUILDER_GC["enabled"])
+        self.assertEqual(docker.BUILDER_GC["defaultMaxUsedSpace"], "2GB")
+        self.assertNotIn("defaultKeepStorage", docker.BUILDER_GC)
+
+    def test_repair_merges_gc_into_earlier_configuration_and_keeps_other_keys(self):
+        self.assertEqual(self.prepare().returncode, 0)
+        path = self.home / ".config/docker/daemon.json"
+        data_root = str(self.home / "bloom/docker/data")
+        path.write_text(json.dumps({"data-root": data_root, "log-driver": "local", "builder": {"entitlements": {"network-host": True}}}))
+        unit = self.home / ".config/systemd/user/docker.service"
+        unit.write_text("managed unit")
+        merged = self.prepare()
+        self.assertEqual(merged.returncode, 0, merged.stderr)
+        self.assertEqual(json.loads(merged.stdout), {"daemonConfigurationChanged": True, "serviceExisted": True})
+        self.assertEqual(json.loads(path.read_text()), {"data-root": data_root, "log-driver": "local",
+            "builder": {"entitlements": {"network-host": True}, "gc": docker.BUILDER_GC}})
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        stamp = path.stat().st_mtime_ns
+        again = self.prepare()
+        self.assertEqual(json.loads(again.stdout)["daemonConfigurationChanged"], False)
+        self.assertEqual(path.stat().st_mtime_ns, stamp)
+        self.assertEqual([item.name for item in path.parent.iterdir()], ["daemon.json"])
+
+    def test_administrator_gc_policy_is_not_overwritten(self):
+        self.assertEqual(self.prepare().returncode, 0)
+        path = self.home / ".config/docker/daemon.json"
+        custom = {"data-root": str(self.home / "bloom/docker/data"), "builder": {"gc": {"enabled": False}}}
+        path.write_text(json.dumps(custom, sort_keys=True) + "\n")
+        result = self.prepare()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(json.loads(result.stdout)["daemonConfigurationChanged"])
+        self.assertEqual(json.loads(path.read_text()), custom)
+
+    def test_linked_daemon_configuration_is_not_followed(self):
+        self.assertEqual(self.prepare().returncode, 0)
+        path = self.home / ".config/docker/daemon.json"
+        target = self.home / "elsewhere.json"
+        target.write_text(path.read_text())
+        path.unlink()
+        path.symlink_to(target)
+        self.assertNotEqual(self.prepare().returncode, 0)
+        self.assertTrue(path.is_symlink())
+
+    def install_with_preparation(self, prepared):
+        def run(arguments, **_options):
+            return json.dumps(prepared) + "\n" if arguments[0] == sys.executable else ""
+        with mock.patch.object(Path, "read_text", return_value='ID=ubuntu\n'), mock.patch.object(Path, "is_file", return_value=True), \
+             mock.patch.object(docker, "protected"), mock.patch.object(docker, "configure_file_watches"), mock.patch.object(docker, "reserve_ranges"), \
+             mock.patch.object(docker, "command", side_effect=run) as command, mock.patch.object(docker, "verify", return_value={"ready": True}):
+            docker.install(self.account)
+        return [c for c in command.call_args_list if c.args[0][:2] == ["systemctl", "--user"]]
+
+    def test_changed_configuration_restarts_only_an_existing_user_service(self):
+        restarts = self.install_with_preparation({"daemonConfigurationChanged": True, "serviceExisted": True})
+        self.assertEqual([c.args[0] for c in restarts], [["systemctl", "--user", "restart", "docker.service"]])
+        self.assertIs(restarts[0].kwargs["account"], self.account)
+        self.assertEqual(restarts[0].kwargs["env"]["XDG_RUNTIME_DIR"], f"/run/user/{os.getuid()}")
+        self.assertEqual(self.install_with_preparation({"daemonConfigurationChanged": False, "serviceExisted": True}), [])
+        self.assertEqual(self.install_with_preparation({"daemonConfigurationChanged": True, "serviceExisted": False}), [])
 
     def test_unmanaged_user_service_is_not_adopted(self):
         path = self.home / ".config/systemd/user/docker.service"

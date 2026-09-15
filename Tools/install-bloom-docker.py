@@ -178,13 +178,58 @@ for name, target in {"docker": "/usr/bin/docker", "rootlesskit": "/usr/bin/rootl
             raise RuntimeError("Existing Docker executable differs: " + str(link))
     else:
         link.symlink_to(target)
+def daemon(path, data_root):
+    configuration = {}
+    if path.exists() or path.is_symlink():
+        value = path.lstat()
+        if not stat.S_ISREG(value.st_mode) or value.st_uid != os.getuid():
+            raise RuntimeError("Existing Docker configuration differs: " + str(path))
+        configuration = json.loads(path.read_text())
+        if not isinstance(configuration, dict) or configuration.get("data-root") != data_root:
+            raise RuntimeError("Existing Docker configuration differs: " + str(path))
+    configuration["data-root"] = data_root
+    builder = configuration.setdefault("builder", {})
+    if not isinstance(builder, dict):
+        raise RuntimeError("Existing Docker builder configuration is not an object: " + str(path))
+    # An administrator's own gc block is kept as written; Bloom only fills in a missing one.
+    builder.setdefault("gc", dict(BUILDER_GC))
+    content = json.dumps(configuration, sort_keys=True) + "\n"
+    if path.exists() and path.read_text() == content:
+        return False
+    temporary = path.with_name(".daemon.json.bloom")
+    if temporary.exists() or temporary.is_symlink():
+        temporary.unlink()
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as output:
+        output.write(content)
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary, path)
+    return True
 marker = home / "bloom/docker/.bloom-managed"
 unit = home / ".config/systemd/user/docker.service"
-if (unit.exists() or unit.is_symlink()) and not marker.exists():
+existed = unit.exists() or unit.is_symlink()
+if existed and not marker.exists():
     raise RuntimeError("An existing user Docker service is not managed by Bloom")
-file(home / ".config/docker/daemon.json", json.dumps({"data-root": str(home / "bloom/docker/data")}, sort_keys=True) + "\n")
+changed = daemon(home / ".config/docker/daemon.json", str(home / "bloom/docker/data"))
 file(marker, "Bloom rootless Docker v1\n")
+print(json.dumps({"daemonConfigurationChanged": changed, "serviceExisted": existed}))
 '''
+
+# BuildKit garbage collection for the private daemon. Measured on a 25 GB Ubuntu server with one
+# Laravel project and two workspaces: 4.8 GB of build cache and 87% of the disk used, because the
+# only daemon.json key was data-root and BuildKit's disk-derived default lets cache use 80% of it.
+#
+# Ubuntu 24.04 (noble-updates) and 26.04 both ship docker.io 29.1.3, whose daemon/config/builder.go
+# reads defaultReservedSpace, defaultMaxUsedSpace and defaultMinFreeSpace; defaultKeepStorage is
+# the deprecated spelling of defaultReservedSpace alone, which is a floor rather than a cap once
+# the other two exist. BuildKit v0.26's calculateKeepBytes keeps at most maxUsedSpace, shrinks
+# further while free space is under minFreeSpace, and never goes below reservedSpace. Sizes parse
+# with units.RAMInBytes, so "2GB" is 2 GiB. Rootless dockerd embeds the same BuildKit and applies
+# the policy to its own data-root. An older dockerd validates daemon.json one level deep only, so
+# it ignores keys it does not know here instead of refusing to start.
+BUILDER_GC = {"enabled": True, "defaultReservedSpace": "1GB", "defaultMaxUsedSpace": "2GB", "defaultMinFreeSpace": "3GB"}
+PREPARE_HOME = "BUILDER_GC = " + repr(BUILDER_GC) + "\n" + PREPARE_HOME
 
 
 def user_environment(account):
@@ -269,13 +314,20 @@ def install(account):
     emit("progress", step="docker_account", message="Preparing private container storage and subordinate user IDs")
     reserve_ranges(account)
     environment = user_environment(account)
-    command([sys.executable, "-c", PREPARE_HOME, account.pw_dir], account=account, env=environment, live=False)
+    output = command([sys.executable, "-c", PREPARE_HOME, account.pw_dir], account=account, env=environment, live=False)
+    prepared = json.loads(output.strip().splitlines()[-1]) if output.strip() else {}
     emit("progress", step="docker_service", message="Starting Docker as the Bloom account")
     command(["loginctl", "enable-linger", account.pw_name])
     command(["systemctl", "start", f"user@{account.pw_uid}.service"])
     # No --force: the upstream prerequisite checks must succeed without bypasses.
     command(["/usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh", "install"],
             account=account, env=environment, timeout=180)
+    # The helper only starts a daemon that is not running, so a repair that changed daemon.json
+    # would otherwise leave the old garbage collection policy live until the next reboot. Only
+    # this account's user service restarts; a fresh install already started with the new file.
+    if prepared.get("daemonConfigurationChanged") and prepared.get("serviceExisted"):
+        emit("progress", step="docker_service", message="Restarting Docker to apply build cache limits")
+        command(["systemctl", "--user", "restart", "docker.service"], account=account, env=environment, timeout=120)
     command(["/usr/bin/docker", "context", "use", "rootless"], account=account, env=environment, timeout=15)
     emit("progress", step="docker_verify", message="Checking the private Docker daemon and Compose")
     return verify(account)
