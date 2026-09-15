@@ -108,9 +108,10 @@ struct BridgeServerTests {
         // a workspace's name is one column of one row. `agent_list` is on it for the same reason
         // again: a crew is rows in `sessions` joined by `parent_session_id`, so listing one
         // reaches nothing but the store, while starting, saying and stopping all need the window.
+        // `workspace_diff` reads a worktree through git, which needs no window either.
         #expect(names == [
             "agent_list", "chat_list", "chat_read", "quick_prompt_create", "quick_prompt_list", "whoami",
-            "workspace_rename",
+            "workspace_diff", "workspace_rename",
         ])
 
         let called = try await caller.call(
