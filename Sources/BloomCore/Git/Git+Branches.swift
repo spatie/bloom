@@ -76,11 +76,16 @@ extension Git {
     ///
     /// Throws only when none of the three resolve, which means the base branch does not exist in
     /// any form. Guessing a revision at that point would be the one mistake worth failing over.
+    ///
+    /// - Parameter age: how old a fetch another caller already made may be and still be used. See
+    ///   `BaseBranchFetches`, which is where the fetch is shared.
     public static func baseRevision(
-        branch: String, in directory: String
+        branch: String, in directory: String, acceptingFetchWithin age: Duration? = nil
     ) async throws -> (revision: String, base: ContinuationBase) {
         try validate(branch: branch)
-        let fetched = await fetch(branch, in: directory)
+        let fetched = await BaseBranchFetches.shared.refresh(
+            branch, in: directory, acceptingWithin: age
+        )
 
         if let revision = await revision(of: "refs/remotes/\(remote)/\(branch)", in: directory) {
             return (revision, fetched ? .fetched : .cachedRemote)
