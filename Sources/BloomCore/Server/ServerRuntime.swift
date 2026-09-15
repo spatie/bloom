@@ -609,7 +609,9 @@ public actor ServerRuntime {
             }
             return live
         }
-        let task = Task { () throws -> ServerSession in
+        // Strong for the creation, which `creating` awaits anyway; the ending callback the session
+        // keeps is weak, and saying so here is what Xcode 27's ImplicitStrongCapture asks for.
+        let task = Task { [self] () throws -> ServerSession in
             let session = try await self.storedSession(id)
             guard session.archivedAt == nil else { throw ServerFailure("This conversation is closed.") }
             guard let workspaceID = session.workspaceID,

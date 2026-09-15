@@ -213,7 +213,7 @@ final class ServerSetupModel {
         activity = ServerSetupActivity()
         isUninstalling = true
         defer { isUninstalling = false }
-        let completed = await perform(.checking) {
+        let completed = await perform(.checking) { [self] in
             let script = try self.installerScript()
             self.record(deletesData ? "Uninstalling Bloom Server and deleting the account’s data." : "Uninstalling Bloom Server and keeping the account’s data.")
             let event = try await connection.uninstall(script: script, deletesData: deletesData, force: force) { [weak self] event in
@@ -251,7 +251,7 @@ final class ServerSetupModel {
         let profileID = server.connectionProfile?.id
         let connectionGeneration = server.connectionGeneration
         maintenanceServerRunning = false
-        let completed = await perform(.connecting) {
+        let completed = await perform(.connecting) { [self] in
             self.record("Starting the existing Bloom Server installation.")
             _ = try await connection.startServer(script: self.installerScript()) { [weak self] event in
                 await self?.receive(event)
@@ -275,7 +275,7 @@ final class ServerSetupModel {
     func replaceMaintenanceKey(serverID: String) async {
         guard canReplaceMaintenanceKey, let connection, !serverID.isEmpty else { return }
         maintenanceKeyIssued = false
-        let completed = await perform(.installing) {
+        let completed = await perform(.installing) { [self] in
             let script = try self.installerScript()
             let pendingKey = "replacement:" + serverID
             let key = try ServerMaintenanceCredentials.load(serverID: pendingKey) ?? ServerMaintenanceCredentials.generateToken()
@@ -334,7 +334,7 @@ final class ServerSetupModel {
         let reviewedGeneration = server.connectionGeneration
         activity.begin(browser: installsBrowserTools, docker: installsDocker, swap: willInstallSwap)
         progress = []
-        let completed = await perform(.installing) {
+        let completed = await perform(.installing) { [self] in
             let package = try self.serverPackage()
             let script = try self.installerScript()
             let key = try await self.prepareClientKey()

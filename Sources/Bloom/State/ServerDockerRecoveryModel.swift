@@ -56,7 +56,7 @@ final class ServerDockerRecoveryModel {
 
     func install() async {
         guard let status, status.state == .needsSetup else { return }
-        await perform("Setting up rootless Docker") {
+        await perform("Setting up rootless Docker") { [self] in
             let host = self.administratorHost.trimmingCharacters(in: .whitespacesAndNewlines)
             guard host.split(separator: "@").last.map(String.init) == self.request.destination else {
                 throw ServerSetupFailure.installation(code: "invalid_address", message: "Use an administrator account on " + self.request.destination + ".",

@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomClient
 import BloomCore
 
 /// The whole worktree, not just what changed.
