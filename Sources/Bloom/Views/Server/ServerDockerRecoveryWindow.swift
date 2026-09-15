@@ -36,6 +36,8 @@ struct ServerDockerRecoveryWindow: Scene {
         }
         .windowResizability(.contentSize)
         .restorationBehavior(.disabled)
+        // Opened with a request only. See `ServerWindow`.
+        .commandsRemoved()
     }
 }
 

@@ -14,6 +14,10 @@ struct ServerWindow: Scene {
                 .closesWhenRemoteServersAreOff()
         }
         .windowResizability(.contentSize)
+        // Out of the Window menu, which lists every `Window` scene on its own and ignores the
+        // feature switch: with servers off the item opened a window that the guard above closed
+        // again at once, so choosing it looked like nothing happened.
+        .commandsRemoved()
     }
 }
 

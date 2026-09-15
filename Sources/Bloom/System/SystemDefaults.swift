@@ -31,7 +31,7 @@ enum SystemDefaults {
             MenuBarStatusItem.settingKey: MenuBarStatusItem.isOnByDefault,
             InstallPing.settingKey: InstallPing.isOnByDefault,
             CrashReporting.settingKey: CrashReporting.isOnByDefault,
-            RemoteServerFeature.settingKey: RemoteServerFeature.isOnByDefault,
+            RemoteServerFeature.settingKey: RemoteServerFeature.isOnByDefault(bundleIdentifier: Bundle.main.bundleIdentifier),
         ])
     }
 }

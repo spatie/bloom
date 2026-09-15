@@ -16,6 +16,8 @@ struct ServerAccountsWindow: Scene {
                 .closesWhenRemoteServersAreOff()
         }
         .windowResizability(.contentSize)
+        // Opened from Server Settings and the sidebar only. See `ServerWindow`.
+        .commandsRemoved()
     }
 }
 

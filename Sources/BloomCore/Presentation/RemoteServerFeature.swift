@@ -17,6 +17,13 @@ public enum RemoteServerFeature {
     /// Off, so a fresh install shows no servers and starts no connection until somebody asks.
     public static let isOnByDefault = false
 
+    /// On in Bloom Remote, the separate copy built only to try servers with, and off everywhere
+    /// else. Its first launch showed no servers and no way to add one, because the Window menu's
+    /// Add Server opened a window the switch closed again at once.
+    public static func isOnByDefault(bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == Store.remoteBundleIdentifier || isOnByDefault
+    }
+
     public static let settingTitle = "Remote servers"
     public static let settingDetail = "Adds servers to the sidebar, the File menu and the create windows, so workspaces can run on another machine."
     public static let settingFootnote = "Saved servers are kept while this is off, but Bloom hides them and does not connect."

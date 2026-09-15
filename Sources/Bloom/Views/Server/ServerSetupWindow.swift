@@ -13,6 +13,8 @@ struct ServerSetupWindow: Scene {
                 .closesWhenRemoteServersAreOff()
         }
         .windowResizability(.contentSize)
+        // File > Add Server… is the menu's way in, and it follows the switch. See `ServerWindow`.
+        .commandsRemoved()
     }
 }
 

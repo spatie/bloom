@@ -21,6 +21,14 @@ struct RemoteServerFeatureTests {
         #expect(RemoteServerFeature.isEnabled(in: defaults))
     }
 
+    @Test("on by default in Bloom Remote only")
+    func onByDefaultInRemote() {
+        #expect(RemoteServerFeature.isOnByDefault(bundleIdentifier: Store.remoteBundleIdentifier))
+        #expect(!RemoteServerFeature.isOnByDefault(bundleIdentifier: "be.spatie.bloom"))
+        #expect(!RemoteServerFeature.isOnByDefault(bundleIdentifier: "be.spatie.bloom.dev"))
+        #expect(!RemoteServerFeature.isOnByDefault(bundleIdentifier: nil))
+    }
+
     @Test("a remote selection is refused only while the feature is off")
     func admitsSelections() {
         #expect(!RemoteServerFeature.admits(.remoteWorkspace(remote), isEnabled: false))
