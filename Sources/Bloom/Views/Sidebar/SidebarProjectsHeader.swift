@@ -21,8 +21,9 @@ struct SidebarProjectsHeader: View {
     @State private var isHovered = false
 
     /// Measured in an offscreen native List: the section header ends 14 points past row content.
-    /// Match their trailing edges so both square buttons share a centre line.
-    private static let buttonTrailingInset: CGFloat = 14
+    /// Match their trailing edges so both square buttons share a centre line. A server's heading
+    /// is a section header too and uses the same inset.
+    static let buttonTrailingInset: CGFloat = 14
 
     var body: some View {
         HStack(spacing: Metrics.spacing) {

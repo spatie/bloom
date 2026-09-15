@@ -127,7 +127,7 @@ struct SidebarView: View {
                         }
                     }
                 } header: {
-                    SidebarServerHeader(server: app.remoteServer)
+                    SidebarServerHeader(server: app.remoteServer, trailingInset: SidebarProjectsHeader.buttonTrailingInset)
                 }
                 .task(id: app.remoteServer.connectionGeneration) { app.remoteServer.loadSidebarPreferences() }
     }

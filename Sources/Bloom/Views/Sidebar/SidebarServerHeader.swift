@@ -4,6 +4,10 @@ import BloomCore
 /// Servers are flat group headings, at the same depth as This Mac.
 struct SidebarServerHeader: View {
     @Bindable var server: ServerWindowModel
+    /// Zero as a plain row, and `SidebarProjectsHeader.buttonTrailingInset` as a section header,
+    /// which the list draws 14 points wider than a row. Without it the actions button sat past
+    /// the project `+` and the This Mac button above it.
+    var trailingInset: CGFloat = 0
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
     @State private var hovered = false
@@ -19,6 +23,7 @@ struct SidebarServerHeader: View {
             header
             connectionStatus
         }
+        .padding(.trailing, trailingInset)
         .popover(isPresented: $showsConnectionFailure) { ServerConnectionFailureView(server: server) }
         .onChange(of: server.isConnected) { _, connected in
             if connected { showsConnectionFailure = false }
