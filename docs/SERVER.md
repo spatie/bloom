@@ -99,12 +99,79 @@ The reader selects build cache or unused images, reviews the current server, the
 Cleanup uses only that account's verified, private rootless Docker engine. It never removes
 containers, volumes, workspace files, uploads, credentials or swap. Images referenced by either
 running or stopped containers stay available. Later builds may need to recreate caches or download
-images again. Retained data from archived workspaces is not automatically deleted by this panel.
+images again. Retained data from archived workspaces is not deleted by that cleanup.
+
+**Leftovers** lists containers, volumes and networks whose workspace is archived or no longer on
+the server, grouped by workspace with Docker's sizes. A resource is listed only when its
+`com.docker.compose.project` label contains a workspace id, or its `bloom.workspace` label is one;
+unlabelled resources, other projects and images are never included. **Remove…** on a workspace or
+**Remove All Leftovers…** refreshes the list, asks for confirmation, and sends only workspace ids.
+The server lists the engine again, recomputes leftovers, skips any workspace that has been restored
+since, and removes containers, then volumes, then networks. Restores of those workspaces are refused
+while the removal runs.
 
 Only one cleanup runs at a time. Failed or interrupted operations retain per-category outcomes,
 with a copyable report and a refresh action. Closing settings does not revoke an already confirmed
 cleanup. The server API supports both SSH and authenticated HTTPS clients; older servers without
 the storage capability show an update-required state instead of receiving an unknown command.
+
+### Archiving, deleting and removing projects
+
+**Archive** stops a workspace's agents, runs its archive script, removes its worktree and, when the
+project asks for it, its branch. It deletes no records: the conversation, notes and review comments
+stay in the server's database so the workspace can be restored. The confirmation is computed on
+the server and checked again before anything moves.
+
+**Delete Permanently** is offered for archived workspaces only, from **Archived workspaces** in the
+server heading's project menu. The server lists what goes before asking, and it takes:
+
+- every database record of the workspace, the same rows a delete removes on the Mac: chats,
+  transcript messages and their search index, drafts, queued messages, terminal tabs, review
+  comments and the note;
+- the agent CLIs' own transcripts for that worktree in the service account's home: the Claude Code
+  sessions under `~/.claude/projects/` whose recorded working directory is the worktree, and the
+  Codex rollout files under `~/.codex/sessions/` for the workspace's own threads whose first line
+  names the worktree. A thread another workspace resumed is kept. Nothing is matched by pattern;
+- the workspace's browser profile under `~/bloom/data/browser/workspaces/`.
+
+Deleting rows frees pages inside SQLite rather than disk space, so afterwards the server compacts
+its database (`VACUUM`) once no agent turn, workspace change or command is running. It checks every
+fifteen seconds for an hour and skips the work when less than 8 MB is free inside the file.
+
+**Remove project** is in the server project's menu. It archives every active workspace first,
+through the same archive, and is refused while any of them has an agent working or work that exists
+only in its worktree, naming them. It then deletes every workspace as Delete Permanently does, and
+the project. A repository Bloom cloned from a URL into `~/bloom/data/repositories/<name>-<hash>` is
+deleted with it; a repository path somebody entered is never deleted, nor is a clone another
+project, another project's workspace or an unknown worktree still uses. The confirmation says
+which applies.
+
+On the Mac, removing a local project with active workspaces offers **Archive Workspaces, Then
+Remove** beside the plain removal, and a permanent delete also takes the CLI transcripts above.
+
+Docker also collects its own garbage, because a 25 GB test server with one Laravel project and two
+workspaces reached 87% full (7.45 GB of images, 4.8 GB of build cache) with nothing ever pruned.
+
+- **Build cache cap.** Optional Docker setup writes a BuildKit garbage collection policy into the
+  account's `~/.config/docker/daemon.json`: `builder.gc` enabled, at most 2 GiB used, shrinking
+  towards a 1 GiB floor while fewer than 3 GiB are free. The keys are the ones docker.io 29.1.3
+  reads, which Ubuntu 24.04 and 26.04 both ship. Running setup again on an existing managed Docker
+  merges the policy in, keeps every other key, leaves an administrator's own `builder.gc` alone,
+  and restarts only the account's user service when the file changed.
+- **After setup.** When a workspace setup script succeeds, the server prunes dangling images
+  (`docker image prune --force`) in the background, at most once every ten minutes. It never uses
+  `--all` and never touches containers or volumes, and a prune never delays or fails the setup.
+- **Low space.** Every ten minutes, and after a setup fails, the server compares free space on
+  the filesystem holding its data with 15% of that volume, bounded to between 3 GiB and 10 GiB.
+  Under it, at most once an hour, it prunes dangling build cache and dangling images. If space
+  was still low after the previous hourly pass, the next one prunes all unused build cache.
+- **Telling clients.** The Disk check in server diagnostics turns to attention at the same
+  threshold, and while a cleanup has left space low its detail says so and points at archiving
+  workspaces or Storage & Cleanup.
+
+Automatic cleanup uses the same verified private engine as the manual one, skips quietly when
+Docker is missing or not Bloom's rootless installation, and never runs alongside a manual cleanup.
+Its rate limits are kept in memory, so a restarted server may prune once sooner than the interval.
 
 Failures retain the address and selected key. A step list and selectable live output remain visible
 during installation. Structured errors retain the sanitised command, exit status and diagnostic tail;
@@ -177,7 +244,12 @@ stored on the server. Closing a terminal tab stops that server shell; quitting t
 detaches it. Remote projects group their workspaces using the same sidebar rows and menus.
 Names, colours, pins, unread marks and archive status live on the server. Collapsed projects
 and tab layouts stay on each client. Archive confirmations are computed and rechecked on the
-server; archived workspaces can be restored with their conversation history and notes.
+server; archived workspaces can be restored with their conversation history and notes. When the
+workspace has containers or volumes that name its id, the confirmation measures them on the service
+account's rootless engine and offers to remove them, on by default. The client returns that answer
+with the confirmation; a client that sends none keeps them, and so does an archive an agent asked
+for. Removal runs after the archive script, including when the script was skipped because the
+worktree was already missing, and a Docker failure stops the archive before the worktree is removed.
 
 ### Guided installation layout
 
@@ -786,6 +858,9 @@ connection before this initial migration; Bloom does not infer administrator acc
 
 The root-owned Python supervisor and support modules live in `/usr/local/libexec`; protected
 metadata, recovery files and verified releases live in `/var/lib/bloom-maintenance/bloom-server`.
+Only the running release, the one it replaced and the one the configuration names are kept, and job
+history keeps the newest 20 jobs; [the maintenance contract](SERVER-MAINTENANCE.md#retained-releases-and-job-history)
+has the rules.
 Project data remains under the Bloom account. These privileged Python modules are installed and
 updated through the administrator installer. A runtime update does not replace the supervisor
 or its privileged support code.

@@ -13,7 +13,7 @@ func TestStorageRequiresTheExistingOwnerControlAccess(t *testing.T) {
 		json.NewEncoder(connection).Encode(map[string]any{"version": protocolVersion, "id": request.ID, "result": map[string]any{"accepted": map[string]any{}}})
 	})
 	for _, operation := range []string{`{"storage":{}}`, `{"cleanupStorage":{"targets":["buildCache","unusedImages"]}}`} {
-		body := `{"version":15,"id":"00000000-0000-4000-8000-000000000001","operation":` + operation + `}`
+		body := `{"version":16,"id":"00000000-0000-4000-8000-000000000001","operation":` + operation + `}`
 		before := count.Load()
 		for _, token := range []string{
 			"",

@@ -3,7 +3,7 @@ import Testing
 @testable import BloomClient
 
 struct RemoteWireSessionTests {
-    @Test(arguments: [12, 13, 14, 15])
+    @Test(arguments: [12, 13, 14, 15, 16])
     func negotiatesKnownVersionsBeforeSendingOnce(version: Int) async throws {
         let host = WireHost(version: version)
         let client = RemoteWireSession { try await host.exchange($0) }
@@ -17,7 +17,7 @@ struct RemoteWireSessionTests {
         #expect(sends.first?.version == version)
     }
 
-    @Test(arguments: [11, 16])
+    @Test(arguments: [11, 17])
     func refusesUnknownVersionsWithoutSendingMutation(version: Int) async {
         let host = WireHost(version: version)
         let client = RemoteWireSession { try await host.exchange($0) }

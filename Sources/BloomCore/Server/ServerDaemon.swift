@@ -46,7 +46,10 @@ public final class ServerDaemon: Sendable {
         let runtime = ServerRuntime(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner, maintenanceTrial: maintenanceTrial, runnerExitGrace: runnerExitGrace)
         do {
             let bridge = try await runtime.startBridge(socketPath: mcpSocketPath(directory: directory))
-            if !maintenanceTrial { try await runtime.restoreQueuedPrompts() }
+            if !maintenanceTrial {
+                try await runtime.restoreQueuedPrompts()
+                runtime.housekeeper.startPeriodicChecks()
+            }
             let socketPath = try socketPath(directory: directory)
             let connections = ServerConnections { request in await runtime.respond(to: request) }
             let listener = try UnixSocketListener(path: socketPath, groupID: gatewayGroupID) { connections.accept($0) }
@@ -61,6 +64,7 @@ public final class ServerDaemon: Sendable {
         listener.stop()
         connections.stop()
         let runtime = runtime, ownership = lock, connections = connections
+        runtime.housekeeper.stop()
         Task {
             await runtime.shutdown()
             await connections.drain()

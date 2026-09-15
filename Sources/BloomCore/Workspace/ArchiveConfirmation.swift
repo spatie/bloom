@@ -2,6 +2,8 @@ import Foundation
 import BloomClient
 
 public typealias ArchiveHazards = BloomClient.ArchiveHazards
+public typealias ArchiveDockerFootprint = BloomClient.ArchiveDockerFootprint
+public typealias WorkspaceDockerResource = BloomClient.WorkspaceDockerResource
 
 /// An archive the app refused to carry out, waiting on the user, in the words the dialogue uses.
 ///
@@ -42,20 +44,51 @@ public struct ArchiveRequest: Identifiable, Sendable {
     public var problem: String?
     /// What the app knows about this workspace that git does not. See `ArchiveHazards`.
     public var hazards: ArchiveHazards
+    /// The containers and volumes that name this workspace, when Docker could be asked.
+    public var docker: ArchiveDockerFootprint?
+    /// The owner's answer to the Docker choice, which the confirmation lets them change.
+    ///
+    /// On by default. The choice is only offered for resources that carry this workspace's own id
+    /// (see `WorkspaceDockerOwnership`), so nothing it removes can be another workspace's or a
+    /// stack several share, and a database left behind by every archive is exactly the disk
+    /// filling up that this exists to stop. Off is one click away for somebody who wants the data.
+    public var removesDocker: Bool
 
     public init(
         workspace: Workspace,
         report: WorkspaceSafetyReport,
         deleteBranch: Bool? = nil,
         problem: String? = nil,
-        hazards: ArchiveHazards = ArchiveHazards()
+        hazards: ArchiveHazards = ArchiveHazards(),
+        docker: ArchiveDockerFootprint? = nil
     ) {
         self.workspace = workspace
         self.report = report
         self.deleteBranch = deleteBranch
         self.problem = problem
         self.hazards = hazards
+        self.docker = docker
+        removesDocker = docker?.offersRemoval == true
     }
+
+    /// Whether the confirmation shows the Docker choice at all.
+    ///
+    /// Not for a folder git no longer recognises: that archive keeps everything on disk and skips
+    /// the script, because something may still be writing there, and a container is the likeliest
+    /// something.
+    public var offersDockerRemoval: Bool {
+        report.preservedFolderPath == nil && docker?.offersRemoval == true
+    }
+
+    /// What the archive is actually asked to do, which is the choice only where it was offered.
+    public var removesDockerResources: Bool { offersDockerRemoval && removesDocker }
+
+    public var dockerToggleLabel: String {
+        "Also remove this workspace\u{2019}s containers and volumes (its database and cached data)"
+    }
+
+    /// The second answer on a dialogue that cannot hold a toggle.
+    public var keepDockerLabel: String { "Archive and keep containers" }
 
     /// Work that would be gone for good, in the order a reader weighs it.
     ///
@@ -83,7 +116,11 @@ public struct ArchiveRequest: Identifiable, Sendable {
     public var severity: Severity {
         if problem != nil { return .destructive }
         if !losses.isEmpty { return .destructive }
-        return notes.isEmpty ? .routine : .worthMentioning
+        // Worth mentioning rather than routine, so the archive stops and asks: removing a
+        // database is not something to do on a keyboard shortcut nobody was shown a choice for.
+        // Not destructive, because the owner can say no in the same dialogue and a dev database
+        // is recreated by setup, where uncommitted work is not recreated by anything.
+        return notes.isEmpty && !offersDockerRemoval ? .routine : .worthMentioning
     }
 
     public var isDestructive: Bool { severity == .destructive }
@@ -119,6 +156,13 @@ public struct ArchiveRequest: Identifiable, Sendable {
             text += hazards.isDeletingBranch ? "deleted too." : "kept."
         }
         text += " The workspace moves to Archived."
+
+        if offersDockerRemoval, let docker {
+            text += "\n\nIn Docker it has \(docker.summary). "
+            text += removesDocker
+                ? "They are removed after the archive script runs. Shared images are kept."
+                : "They are kept."
+        }
 
         // Only where the stakes are already low. A merged pull request means the branch's code is
         // on the default branch, which is worth saying next to a list of ignored files and is not

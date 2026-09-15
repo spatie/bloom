@@ -137,6 +137,14 @@ struct RepoSettingsView: View {
             isPresented: $isConfirmingRemove,
             titleVisibility: .visible
         ) {
+            if app.offersArchiveFirst(repo) {
+                Button(ProjectRemoval.archiveFirstLabel, role: .destructive) {
+                    Task {
+                        await app.archiveWorkspacesThenRemove(repo)
+                        dismiss()
+                    }
+                }
+            }
             Button(removal.confirmLabel, role: .destructive, action: removeProject)
             Button(removal.cancelLabel, role: .cancel) {}
         } message: {

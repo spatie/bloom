@@ -2,11 +2,11 @@
 
 Start with [the server protocol guide](../docs/SERVER-PROTOCOL.md).
 
-- `bloom-v15.schema.json`: JSON Schema draft 2020-12 for envelopes, all method/action names and portable payloads.
+- `bloom-v16.schema.json`: JSON Schema draft 2020-12 for envelopes, all method/action names and portable payloads.
 - `generate-schema.py`: regenerates the schema and checks version, method inventories and argument names against the Swift source.
-- `vectors-v15.json`: checked-in output from production Swift encoding, with synthetic identifiers/data.
+- `vectors-v16.json`: checked-in output from production Swift encoding, with synthetic identifiers/data.
 - `verify.py`: validates vectors encoded by the production Swift Codable types.
-- `maintenance-v1.schema.json`: capability-gated supervisor maintenance payloads, included in protocols 14 and 15.
+- `maintenance-v1.schema.json`: capability-gated supervisor maintenance payloads, included in protocols 14, 15 and 16.
 - `verify-maintenance.py`: validates maintenance DTO exports and malformed request/outcome regressions.
 - `examples/bloom_client.py`: read-only SSH/HTTPS Python client with strict host/TLS verification.
 - `examples/test_bloom_client.py`: framing, negotiation and credential-boundary regressions.
@@ -22,6 +22,7 @@ The SSH example uses POSIX nonblocking pipes and a locally installed OpenSSH cli
 
 Version 13 and 14 schemas and vectors remain checked in for existing clients. Version 14 adds the leased UI bridge.
 Version 15 replies to `create` before setup runs and adds the `setupOutput` workspace action.
+Version 16 adds permanent removal: `deletePreview` and `delete` on workspaces, `removalPreview` and `remove` on projects.
 
 Supervised updates require `diagnostics.maintenanceManagement: true` and separate maintenance
 authentication. See [maintenance lifecycle and client rules](../docs/SERVER-MAINTENANCE.md).

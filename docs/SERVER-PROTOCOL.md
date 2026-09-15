@@ -1,10 +1,10 @@
 # Bloom server protocol
 
-This is the public client contract for Bloom Server protocol 15. A client can be written in any
+This is the public client contract for Bloom Server protocol 16. A client can be written in any
 language. It sends JSON requests to the owning server; it never opens the server's SQLite database.
 The same operations serve macOS, iPhone, iPad and other clients.
 
-The checked-in [JSON Schema](../Protocol/bloom-v15.schema.json) describes the envelopes, every
+The checked-in [JSON Schema](../Protocol/bloom-v16.schema.json) describes the envelopes, every
 operation and nested action, and the review/transcript framing. The
 [Python example](../Protocol/examples/bloom_client.py) uses the standard library and supports
 SSH and HTTPS. It makes only read-only requests. No server deployment or Swift runtime is needed
@@ -49,7 +49,7 @@ Authorization: Bearer <access-token>
 ```
 
 The body is exactly the same JSON envelope, without needing a trailing LF. Success and application
-failures both use HTTP 200 with a Bloom reply. The current gateway accepts protocols 12, 13, 14 and 15. Older gateways that reject a newer hello before it reaches the runtime need a gateway update.
+failures both use HTTP 200 with a Bloom reply. The current gateway accepts protocols 12, 13, 14, 15 and 16. Older gateways that reject a newer hello before it reaches the runtime need a gateway update.
 It rejects HTTP redirects in native clients so bearer credentials cannot move to another origin.
 A custom client must also refuse redirects and verify TLS normally.
 
@@ -70,11 +70,11 @@ within one runtime. Deploy separate runtimes/accounts when that isolation is req
 This is a tagged JSON protocol, not JSON-RPC 2.0. There is no `jsonrpc`, `method` or `params` field.
 
 ```json
-{"version":15,"id":"00000000-0000-4000-8000-000000000001","operation":{"hello":{}}}
+{"version":16,"id":"00000000-0000-4000-8000-000000000001","operation":{"hello":{}}}
 ```
 
 ```json
-{"version":15,"id":"00000000-0000-4000-8000-000000000001","result":{"hello":{"name":"example-server"}}}
+{"version":16,"id":"00000000-0000-4000-8000-000000000001","result":{"hello":{"name":"example-server"}}}
 ```
 
 Each request contains `version`, a UUID `id`, and exactly one operation tag. Each reply contains
@@ -120,18 +120,21 @@ Other encoding rules:
 
 ## Version negotiation
 
-Current clients support versions 15, 14, 13 and 12. Version 15 replies to `create` before the setup
-script runs and adds the `setupOutput` workspace action (see below); version 14 adds the leased `uiBridge`; version 13 adds `diagnostics`; the existing workspace
+Current clients support versions 16, 15, 14, 13 and 12. Version 16 adds permanent removal: the
+`deletePreview` and `delete` workspace actions and the `removalPreview` and `remove` project actions
+(see below). Version 15 replies to `create` before the setup
+script runs and adds the `setupOutput` workspace action; version 14 adds the leased `uiBridge`; version 13 adds `diagnostics`; the existing workspace
 operations retain their version-12 encoding. This is an explicit compatibility exception, not a
 promise that any older or newer version is compatible.
 
-1. Send a read-only version-15 `hello` with a fresh UUID.
-2. Validate the reply ID. If the reply is version 15, require a successful `hello` with a `name`.
-3. Only if the reply is version 12, 13 or 14 and its result is exactly
+1. Send a read-only version-16 `hello` with a fresh UUID.
+2. Validate the reply ID. If the reply is version 16, require a successful `hello` with a `name`.
+3. Only if the reply is version 12, 13, 14 or 15 and its result is exactly
    `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`,
    resend that same hello ID with the version named by the reply.
 4. Require a successful hello at that exact version. Pin it for this connection. Do not call
-   `diagnostics` on version 12, `uiBridge` below version 14, or `setupOutput` below version 15.
+   `diagnostics` on version 12, `uiBridge` below version 14, `setupOutput` below version 15, or the
+   removal actions below version 16.
 5. Refuse all other version mismatches and reconnect after a server upgrade.
 
 Never probe compatibility with a mutation. Never resend a mutation with a different wire version.
@@ -243,6 +246,7 @@ for every operation. Names and field names are case-sensitive.
 | `diagnostics` | none, protocol 13 or later | `diagnostics._0` | R |
 | `storage` | none, requires `diagnostics.storageManagement == true` | `storage._0` | R |
 | `cleanupStorage` | `targets` array of `buildCache` and/or `unusedImages`, same capability | `storageCleanup._0` | M |
+| `removeStorageLeftovers` | `workspaceIDs` array from `storage._0.leftovers`, same capability, protocol 16 or later | `storageLeftoverRemoval._0` | M |
 | `catalogue` | none | `catalogue._0` | R |
 | `creation` | `_0: CreationAction` | `creation._0` | mixed |
 | `previewAddress` | `_0: address` | `text._0` | R |
@@ -311,6 +315,8 @@ Wrap these inside `project.action` alongside the repository ID.
 | `settings` | none | `projectSettings._0` | R |
 | `saveSettings` | `edits`, `expected` current RepoSettings | `projectSettings._0` | M |
 | `filesToCopy` | `patterns` array | `filesToCopy._0` | R |
+| `removalPreview` | none, protocol 16 or later | `removalPreview._0` | R |
+| `remove` | `confirmation` UUID from removal preview, protocol 16 or later | `accepted`, `text._0`, or a fresh `removalPreview._0` | M |
 
 ### WorkspaceAction
 
@@ -324,8 +330,10 @@ Wrap these inside `workspace.action` alongside the workspace ID.
 | `runSetup` | none | `accepted` once the script has ended | M |
 | `setupOutput` | none, protocol 15 or later | `setupOutput._0: {state, log, startedAt?, durationMS?}` | R |
 | `archivePreview` | none | `archivePreview._0` | R |
-| `archive` | `confirmation` UUID from archive preview | `accepted` | M |
+| `archive` | `confirmation` UUID from archive preview; optional `removingDocker` bool, protocol 16 or later | `accepted` | M |
 | `restore` | none | `accepted` | M |
+| `deletePreview` | none, archived workspace, protocol 16 or later | `removalPreview._0` | R |
+| `delete` | `confirmation` UUID from delete preview, protocol 16 or later | `accepted`, `text._0`, or a fresh `removalPreview._0` | M |
 | `files` | none | `files._0` relative-path array | R |
 | `pullRequest` | none | `text._0` URL or empty string | R |
 | `runScripts` | none | `runScripts._0` array | R |
@@ -345,7 +353,24 @@ Wrap these inside `workspace.action` alongside the workspace ID.
 
 Archiving requires reading its preview and submitting the returned opaque confirmation UUID.
 Show the reported hazards before asking the user to confirm. The server retains that confirmation
-and rechecks the workspace; a client cannot supply its own safety report. `commit` stages all
+and rechecks the workspace; a client cannot supply its own safety report. From protocol 16 the
+preview may carry `docker`, an `ArchiveDockerFootprint` whose `resources` are the workspace's own
+Docker containers, volumes and networks (`kind`, `name`, optional `composeProject`, `isRunning`,
+optional `sizeLabel`). It is measured separately from `hazards`, so it can change without
+invalidating the confirmation. Send `removingDocker: true` with `archive` only when the reader chose
+to remove those resources; omit it, or send `false`, to keep them.
+
+Permanent removal follows the same shape. `deletePreview` (an archived workspace) and
+`removalPreview` (a project) return `RemovalPreview`: `id`, `title`, `message`, `confirmLabel`,
+`cancelLabel`, `createdAt` and an optional `blocker`. Show the server's words as they are; do not
+compose your own. When `blocker` is set, show it instead of a confirmation, because the server
+refuses `remove` while it holds. Otherwise submit the `id` as `confirmation` within ten minutes.
+The server measures again first, and replies with a fresh `removalPreview` rather than acting when
+anything it promised has changed; a newer preview for the same target replaces the older one.
+`accepted` means everything went; `text._0` means the records went and names files the server
+could not remove. `delete` refuses an active workspace. `remove` archives each active workspace
+through the ordinary archive first and is blocked when any of them would need an archive
+confirmation. `commit` stages all
 changes before committing. `createPullRequest` also pushes the branch. These are user actions,
 not background refresh operations.
 
@@ -520,7 +545,7 @@ python3 Protocol/verify.py /tmp/bloom-wire-vectors.json
 python3 -m unittest discover -s Protocol/examples -p 'test_*.py'
 ```
 
-The checked-in [vectors](../Protocol/vectors-v15.json) contain only synthetic identifiers and data.
+The checked-in [vectors](../Protocol/vectors-v16.json) contain only synthetic identifiers and data.
 The verifier also compares freshly encoded values with these examples so encoding drift requires
 reviewing and updating the published samples. The vector test includes unnamed/nested enums, optional omission, opaque IDs, Base64 bytes and the
 2001 date epoch. The verifier checks every vector against the schema and checks that the schema
@@ -546,7 +571,7 @@ message is refused. Ordinary `send` calls without this field retain distinct ide
 
 ### Storage inspection and cleanup
 
-Storage management is an additive capability on protocol 13, 14 and 15. Read `diagnostics` first and
+Storage management is an additive capability on protocol 13, 14, 15 and 16. Read `diagnostics` first and
 require `diagnostics._0.storageManagement == true` before sending either operation. A missing or
 false flag means this server needs an update. Never probe support by attempting cleanup. The
 shared Swift wire session performs this check and keeps the existing connection usable on older
@@ -563,8 +588,8 @@ provided only for build cache, not Docker's potentially misleading image percent
 After explicit confirmation, send `{"cleanupStorage":{"targets":["buildCache","unusedImages"]}}`
 with a fresh durable command UUID. Targets must be distinct and nonempty. They remove only unused
 builder cache and images unused by every container in Bloom's validated private rootless Docker
-engine. No command removes containers, volumes, workspace folders, databases, credentials, or
-arbitrary client-supplied paths. Cache and image downloads may be needed again for later builds.
+engine. `cleanupStorage` never removes containers, volumes, workspace folders, databases,
+credentials, or arbitrary client-supplied paths. Cache and image downloads may be needed again for later builds.
 
 The reply `storageCleanup._0` contains `outcomes`, optional refreshed `report`, and `interrupted`.
 Each outcome has its `target`, `status` (`completed`, `uncertain`, `failed`), `message`, and optional
@@ -574,6 +599,15 @@ Refresh the report before offering another cleanup; never automatically retry wi
 After a lost connection, retry the exact original request UUID to retrieve the journalled result.
 A deliberate later cleanup uses a new UUID after reviewing and confirming it again.
 
+From protocol 16 the report may also carry `leftovers`, Docker resources that belong to a workspace
+that is archived or no longer on the server, and `leftoversMessage` when they could not be listed.
+Each `ServerStorageLeftover` has `workspaceID`, optional `workspaceName`, `owner` (`archived` or
+`unknown`) and `resources` in the same shape as an archive preview's. After confirmation, send
+`{"removeStorageLeftovers":{"workspaceIDs":[...]}}` with IDs taken from that report. The reply
+`storageLeftoverRemoval._0` has one `outcome` per workspace (`workspaceID`, `status`, `message`)
+and an optional refreshed `report`. The server lists the resources again before removing any, so an
+ID that no longer has leftovers removes nothing. Older servers refuse the operation.
+
 Inspection and cleanup use the existing owner-control transport boundary. SSH requires the
 runtime account's Unix-socket access. HTTPS requires the gateway's configured access-token scopes
 and subject/email allowlist, with the API audience. Preview tokens grant no control access.
@@ -582,8 +616,9 @@ invent a per-principal `canCleanup` permission. Use separate runtimes for that i
 The engine refuses unknown Docker contexts, rootful daemons, or storage outside the managed
 account. Cleanup is serialised and its category outcomes are journalled like other mutations.
 
-Portable DTOs: `Packages/BloomClient/Sources/BloomClient/ServerStorage.swift`. The JSON Schema and
-production Codable vectors include both storage operations and their reports.
+Portable DTOs: `Packages/BloomClient/Sources/BloomClient/ServerStorage.swift`,
+`ServerStorageLeftovers.swift` and `WorkspaceDockerResource.swift`. The JSON Schema and production
+Codable vectors include all three storage operations and their reports.
 
 
 ### Skill management

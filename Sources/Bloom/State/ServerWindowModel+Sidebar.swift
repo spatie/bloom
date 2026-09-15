@@ -69,7 +69,10 @@ extension ServerWindowModel {
         let id = preview.workspace.id
         guard archivingWorkspaceIDs.insert(id).inserted else { return }
         defer { archivingWorkspaceIDs.remove(id) }
-        let result = await perform(.workspace(workspaceID: id, action: .archive(confirmation: preview.id)))
+        // The request is the one the confirmation handed back, carrying the owner's Docker answer;
+        // the stored preview is only what proves the server computed it.
+        let removingDocker: Bool? = request.offersDockerRemoval ? request.removesDocker : nil
+        let result = await perform(.workspace(workspaceID: id, action: .archive(confirmation: preview.id, removingDocker: removingDocker)))
         guard endpoint == capturedEndpoint else { return }
         switch result {
         case .archivePreview(let fresh):

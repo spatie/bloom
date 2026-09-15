@@ -8,6 +8,9 @@ public struct RemoteArchivePreview: Decodable, Sendable {
     public let report: WorkspaceSafetyReport
     public let hazards: ArchiveHazards
     public let createdAt: Date
+    /// Absent from older servers and when Docker could not be asked. A client that never shows
+    /// the choice sends no `removingDocker`, and the server keeps the containers.
+    public let docker: ArchiveDockerFootprint?
 }
 
 extension RemoteCommand {
@@ -15,8 +18,10 @@ extension RemoteCommand {
         Self(.object(["cancelQueued": .object(["sessionID": .string(sessionID.rawValue), "deliveryID": .string(deliveryID.rawValue)])]), id: id)
     }
 
-    public static func archive(workspaceID: WorkspaceID, confirmation: UUID, id: UUID = UUID()) -> Self {
-        workspace(workspaceID, action: "archive", arguments: ["confirmation": .string(confirmation.uuidString)], id: id)
+    public static func archive(workspaceID: WorkspaceID, confirmation: UUID, removingDocker: Bool? = nil, id: UUID = UUID()) -> Self {
+        var arguments: [String: JSONValue] = ["confirmation": .string(confirmation.uuidString)]
+        if let removingDocker { arguments["removingDocker"] = .bool(removingDocker) }
+        return workspace(workspaceID, action: "archive", arguments: arguments, id: id)
     }
 
     public static func restore(workspaceID: WorkspaceID, id: UUID = UUID()) -> Self {
@@ -46,8 +51,8 @@ extension RemoteWorkspaceService {
         try await acceptLifecycleCommand(.cancelQueued(sessionID: sessionID, deliveryID: deliveryID, id: commandID))
     }
 
-    public func archive(workspaceID: WorkspaceID, confirmation: UUID, commandID: UUID = UUID()) async throws {
-        try await acceptLifecycleCommand(.archive(workspaceID: workspaceID, confirmation: confirmation, id: commandID))
+    public func archive(workspaceID: WorkspaceID, confirmation: UUID, removingDocker: Bool? = nil, commandID: UUID = UUID()) async throws {
+        try await acceptLifecycleCommand(.archive(workspaceID: workspaceID, confirmation: confirmation, removingDocker: removingDocker, id: commandID))
     }
 
     public func restore(workspaceID: WorkspaceID, commandID: UUID = UUID()) async throws {

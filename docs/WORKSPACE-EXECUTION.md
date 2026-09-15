@@ -24,7 +24,10 @@ agent environment, never into web, database or queue services.
 
 Setup and archive scripts run on the host. Setup can create the container before any agent starts;
 archive can stop it before Bloom removes the worktree. Run scripts execute in the same container
-shell as interactive commands.
+shell as interactive commands. Name the compose project after `$BLOOM_WORKSPACE_ID` (for example
+`COMPOSE_PROJECT_NAME="myapp-${BLOOM_WORKSPACE_ID//-/}"`) and the archive confirmation can remove the
+workspace's containers and volumes even when the archive script is skipped; see "Containers and
+volumes per workspace" in the README.
 
 Shared `.conductor/settings.toml` and `.bloom/settings.toml` are read from the workspace's branch.
 If a shared file is absent there, the project root file remains the fallback. Project-root local

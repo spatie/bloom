@@ -13,14 +13,15 @@ extension ServerOperation {
         case .workspace(let id, let action):
             guard action.mutates else { return nil }
             switch action {
-            case .archive, .restore: return nil
+            // An archived workspace is closed to admissions, so a delete takes the transition itself.
+            case .archive, .restore, .delete: return nil
             default: return .workspace(id)
             }
         case .terminalStream(let id, _): return .workspace(id)
         case .send(let id, _, _), .setComposer(let id, _), .configure(let id, _, _, _),
              .closeSession(let id), .stop(let id), .answer(let id, _, _), .cancelQueued(let id, _),
              .renameSession(let id, _), .markRead(let id, _): return .session(id)
-        case .maintenance, .skills, .uiBridge, .creation, .reviewSnapshot, .reviewPatch, .diagnostics, .storage, .cleanupStorage, .hello, .previewAddress,
+        case .maintenance, .skills, .uiBridge, .creation, .reviewSnapshot, .reviewPatch, .diagnostics, .storage, .cleanupStorage, .removeStorageLeftovers, .hello, .previewAddress,
              .composer, .project, .catalogue, .create, .transcript, .changes, .patch, .file: return nil
         }
     }

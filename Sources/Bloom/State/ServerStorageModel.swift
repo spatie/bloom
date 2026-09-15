@@ -13,10 +13,18 @@ final class ServerStorageModel {
         let targets: [ServerStorageCleanupTarget]
     }
 
+    /// Leftovers the reader chose to remove, held with the connection they were listed on.
+    struct LeftoverReview: Identifiable {
+        let id = UUID()
+        let generation: Int
+        let confirmation: ServerStorageLeftoverConfirmation
+    }
+
     let server: ServerWindowModel
     var selected: Set<ServerStorageCleanupTarget> = [.buildCache]
     private(set) var report: ServerStorageReport?
     private(set) var lastCleanup: ServerStorageCleanupResult?
+    private(set) var lastLeftoverRemoval: ServerStorageLeftoverRemoval?
     private(set) var error: String?
     private(set) var unsupported = false
     private(set) var isLoading = false
@@ -38,7 +46,7 @@ final class ServerStorageModel {
     func refresh() async {
         let generation = server.connectionGeneration
         if reportGeneration != generation {
-            report = nil; lastCleanup = nil; unsupported = false; selected = [.buildCache]; error = nil
+            report = nil; lastCleanup = nil; lastLeftoverRemoval = nil; unsupported = false; selected = [.buildCache]; error = nil
         }
         guard !isCleaning else { return }
         let id = UUID()
@@ -61,7 +69,9 @@ final class ServerStorageModel {
                 capabilityGeneration = generation
             }
             unsupported = false
-            let result = try await server.read(.storage, timeout: .seconds(30))
+            // Longer than Docker's usage alone needs: the leftover listing measures volumes, which
+            // the server gives a minute of its own.
+            let result = try await server.read(.storage, timeout: .seconds(120))
             try Task.checkCancellation()
             guard requestID == id, generation == server.connectionGeneration else { return }
             guard case .storage(let value) = result else { throw ServerFailure("The server did not return its storage usage.") }
@@ -109,6 +119,53 @@ final class ServerStorageModel {
         }
     }
 
+    var canRemoveLeftovers: Bool {
+        server.isConnected && !server.isConnecting && !server.isPerformingCommand
+            && !isLoading && !isCleaning && !needsRefresh && !unsupported && error == nil
+            && reportGeneration == server.connectionGeneration && report?.dockerState == .ready
+            && report?.leftovers?.isEmpty == false
+    }
+
+    /// Lists again before asking, so the question names what is there now. `ids` nil is all of it.
+    func prepareLeftoverRemoval(_ ids: [WorkspaceID]?) async -> LeftoverReview? {
+        guard canRemoveLeftovers else { return nil }
+        let generation = server.connectionGeneration
+        await refresh()
+        guard generation == server.connectionGeneration, canRemoveLeftovers, let leftovers = report?.leftovers else { return nil }
+        let chosen = ids.map { wanted in leftovers.filter { wanted.contains($0.workspaceID) } } ?? leftovers
+        guard !chosen.isEmpty else { return nil }
+        return LeftoverReview(generation: generation,
+            confirmation: ServerStorageLeftoverConfirmation(leftovers: chosen, serverName: server.displayName))
+    }
+
+    func removeLeftovers(_ review: LeftoverReview) async {
+        guard review.generation == server.connectionGeneration, server.isConnected else {
+            error = "The server connection changed. Refresh storage and review the leftovers again."
+            return
+        }
+        let serverName = review.confirmation.serverName
+        isCleaning = true; cleaningServerName = serverName; error = nil; lastCleanup = nil; lastLeftoverRemoval = nil
+        defer { isCleaning = false; cleaningServerName = nil }
+        let ids = review.confirmation.leftovers.map(\.workspaceID)
+        let response = await server.perform(.removeStorageLeftovers(workspaceIDs: ids), timeout: .seconds(600))
+        guard review.generation == server.connectionGeneration else {
+            report = nil; reportGeneration = nil; needsRefresh = true
+            error = "Removal was started on \(serverName). Reconnect to that server to check its result."
+            return
+        }
+        guard let response, case .storageLeftoverRemoval(let result) = response else {
+            needsRefresh = true
+            error = server.error ?? "Removal was not confirmed. Refresh storage before trying again."
+            return
+        }
+        lastLeftoverRemoval = result
+        if let value = result.report {
+            report = value; reportGeneration = review.generation
+        } else {
+            needsRefresh = true
+        }
+    }
+
     var diagnosticReport: String {
         var lines = ["Bloom Server storage", "Server: " + server.displayName]
         if let report {
@@ -119,7 +176,9 @@ final class ServerStorageModel {
             lines += report.usage.map { "\($0.kind): \($0.sizeLabel)" }
             lines += report.notes
         }
+        for leftover in report?.leftovers ?? [] { lines.append("Leftover " + leftover.workspaceID.rawValue + ": " + leftover.detail) }
         for outcome in lastCleanup?.outcomes ?? [] { lines.append(outcome.target.title + ": " + outcome.message) }
+        for outcome in lastLeftoverRemoval?.outcomes ?? [] { lines.append("Leftover " + outcome.workspaceID.rawValue + ": " + outcome.message) }
         if let error { lines.append(error) }
         return ServerSetupDiagnostics.sanitise(lines.joined(separator: "\n"))
     }

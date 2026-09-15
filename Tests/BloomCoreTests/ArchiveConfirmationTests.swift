@@ -235,6 +235,55 @@ struct ArchiveConfirmationTests {
         #expect(request.message.contains("Also in the worktree, ignored by git"))
     }
 
+    // MARK: - Docker
+
+    private let footprint = ArchiveDockerFootprint(resources: [
+        .init(kind: .container, name: "tt-postgres-1", isRunning: true),
+        .init(kind: .container, name: "tt-redis-1"),
+        .init(kind: .volume, name: "tt_database"),
+        .init(kind: .network, name: "tt_default"),
+    ])
+
+    @Test("a workspace with its own containers is asked about, with removal on by default")
+    func dockerIsOfferedAndOnByDefault() {
+        let request = ArchiveRequest(workspace: makeWorkspace(), report: WorkspaceSafetyReport(), docker: footprint)
+        #expect(request.offersDockerRemoval)
+        #expect(request.removesDockerResources)
+        // Asked, so the archive stops for the choice, but not in the red voice kept for lost work.
+        #expect(request.severity == .worthMentioning)
+        #expect(request.confirmLabel == "Archive")
+        #expect(request.message.contains("In Docker it has 2 containers and 1 volume. They are removed after the archive script runs."))
+    }
+
+    @Test("turning removal off says the containers are kept and asks the archive for nothing")
+    func dockerCanBeKept() {
+        var request = ArchiveRequest(workspace: makeWorkspace(), report: WorkspaceSafetyReport(), docker: footprint)
+        request.removesDocker = false
+        #expect(!request.removesDockerResources)
+        #expect(request.message.contains("They are kept."))
+    }
+
+    @Test("no footprint, or only a network, leaves a clean archive routine")
+    func noDockerStaysRoutine() {
+        let plain = ArchiveRequest(workspace: makeWorkspace(), report: WorkspaceSafetyReport())
+        #expect(plain.severity == .routine)
+        #expect(!plain.message.contains("Docker"))
+        let network = ArchiveRequest(workspace: makeWorkspace(), report: WorkspaceSafetyReport(),
+            docker: ArchiveDockerFootprint(resources: [.init(kind: .network, name: "tt_default")]))
+        #expect(!network.offersDockerRemoval)
+        #expect(network.severity == .routine)
+    }
+
+    @Test("a folder git no longer recognises keeps its containers along with everything else")
+    func preservedFolderNeverOffersDocker() {
+        var report = WorkspaceSafetyReport()
+        report.preservedFolderPath = "/tmp/bloom/kept"
+        let request = ArchiveRequest(workspace: makeWorkspace(), report: report, docker: footprint)
+        #expect(!request.offersDockerRemoval)
+        #expect(!request.removesDockerResources)
+        #expect(!request.message.contains("Docker"))
+    }
+
     @Test("the whole list is still one voice for the error that refuses an archive")
     func theErrorPathStillSeesEverything() {
         // `WorkspaceError.unsafeToArchive` reports every reason the archive was refused, so

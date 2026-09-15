@@ -9,6 +9,8 @@ struct ServerStorageView: View {
     @Bindable var model: ServerStorageModel
     @State private var review: ServerStorageModel.Review?
     @State private var confirmsCleanup = false
+    @State private var leftoverReview: ServerStorageModel.LeftoverReview?
+    @State private var confirmsLeftovers = false
 
     private struct ConnectionState: Equatable {
         var generation: Int
@@ -55,6 +57,7 @@ struct ServerStorageView: View {
                         }
                     }
                     if let result = model.lastCleanup { resultSection(result) }
+                    if let removal = model.lastLeftoverRemoval { leftoverResultSection(removal) }
                 }
                 if let error = model.error {
                     Section("Could not complete the request") {
@@ -102,8 +105,18 @@ struct ServerStorageView: View {
         } message: { value in
             Text("Remove \(value.targets.map(\.title).joined(separator: " and ").lowercased()). Images used by containers, databases, uploads, workspace files and credentials will be kept. Future builds may need to download or rebuild files.")
         }
+        .alert(leftoverReview?.confirmation.title ?? "", isPresented: $confirmsLeftovers, presenting: leftoverReview) { value in
+            Button("Cancel", role: .cancel) {}
+            Button(value.confirmation.confirmLabel, role: .destructive) {
+                // Like cleanup, a confirmed removal is allowed to outlive this settings window.
+                Task { await model.removeLeftovers(value) }
+            }
+        } message: { value in
+            Text(value.confirmation.message)
+        }
         .task(id: ConnectionState(generation: server.connectionGeneration, connected: server.isConnected)) {
             confirmsCleanup = false
+            confirmsLeftovers = false
             await model.refresh()
         }
     }
@@ -175,10 +188,61 @@ struct ServerStorageView: View {
                     .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }
+        if report.dockerState == .ready { leftoversSection(report) }
         Section("Retained data") {
             Label("Databases and workspace data are kept", systemImage: "externaldrive.badge.checkmark")
-            Text("This cleanup keeps database and Redis volumes, uploads, archived workspace data, credentials and swap. Archiving a workspace does not remove all of that data.")
+            Text("Build cache and image cleanup keeps database and Redis volumes, uploads, archived workspace data, credentials and swap. Containers and volumes of archived workspaces are listed under Leftovers.")
                 .font(Typo.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private func leftoversSection(_ report: ServerStorageReport) -> some View {
+        Section("Leftovers") {
+            if let leftovers = report.leftovers {
+                if leftovers.isEmpty {
+                    Text("No containers or volumes are left from archived or removed workspaces.")
+                        .font(Typo.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(leftovers) { leftover in
+                        LabeledContent {
+                            Button("Remove…") { reviewLeftovers([leftover.workspaceID]) }
+                                .disabled(!model.canRemoveLeftovers)
+                        } label: {
+                            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                                Text(leftover.title)
+                                Text(leftover.detail).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Remove All Leftovers…") { reviewLeftovers(nil) }
+                            .disabled(!model.canRemoveLeftovers)
+                    }
+                }
+                Text("Only containers and volumes whose compose project or bloom.workspace label names a workspace id are listed. Shared images are never included.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+            } else {
+                Text(report.leftoversMessage ?? "Update Bloom Server to list containers and volumes left by archived workspaces.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func reviewLeftovers(_ ids: [WorkspaceID]?) {
+        Task {
+            leftoverReview = await model.prepareLeftoverRemoval(ids)
+            confirmsLeftovers = leftoverReview != nil
+        }
+    }
+
+    private func leftoverResultSection(_ removal: ServerStorageLeftoverRemoval) -> some View {
+        Section(removal.needsAttention ? "Leftover removal needs attention" : "Leftovers removed") {
+            ForEach(Array(removal.outcomes.enumerated()), id: \.offset) { _, outcome in
+                Label(outcome.message, systemImage: outcome.status == .completed ? "checkmark.circle" : "exclamationmark.triangle")
+                    .foregroundStyle(outcome.status == .completed ? Palette.controlAccent : Palette.warning)
+                    .font(Typo.caption).textSelection(.enabled)
+            }
         }
     }
 

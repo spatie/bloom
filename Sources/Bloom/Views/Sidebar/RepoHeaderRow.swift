@@ -47,6 +47,9 @@ struct RepoHeaderRow: View {
     @State private var isConfirmingRemove = false
     /// What the dialog says, from the moment the menu item was pressed. See `askAboutRemoving`.
     @State private var removal: Confirmation?
+    /// Taken with `removal`, for the same reason: `offersArchiveFirst` reads the workspace list.
+    @State private var offersArchiveFirst = false
+    @State private var remoteRemoval: ServerRemovalRequest?
     /// Lights the `+` and swaps the project's mark for its settings gear. It belongs to this row
     /// rather than to a hover id shared across the whole list, so crossing the pane lights one
     /// project at a time.
@@ -148,10 +151,17 @@ struct RepoHeaderRow: View {
             titleVisibility: .visible,
             presenting: removal
         ) { removal in
+            if offersArchiveFirst {
+                Button(ProjectRemoval.archiveFirstLabel, role: .destructive, action: archiveThenRemoveRepo)
+            }
             Button(removal.confirmLabel, role: .destructive, action: removeRepo)
             Button(removal.cancelLabel, role: .cancel) {}
         } message: { removal in
             Text(removal.message)
+        }
+        // A server project's removal is worded and checked on the server. See `ServerRemovalPreview`.
+        .confirmation($remoteRemoval) { $0.confirmation } onConfirm: { request in
+            Task { remoteRemoval = await remote?.confirm(request, app: app) }
         }
     }
 
@@ -391,12 +401,28 @@ struct RepoHeaderRow: View {
     /// reassigns it whenever any diff stat moves: the same observation edge `DetailColumn` names
     /// in its own doc, one pane over.
     private func askAboutRemoving() {
+        if let remote {
+            Task {
+                guard let request = await remote.askToRemove(repo) else { return }
+                if let blocker = request.preview.blocker {
+                    app.alert = BloomAlert(title: request.preview.title, message: blocker)
+                } else {
+                    remoteRemoval = request
+                }
+            }
+            return
+        }
         removal = app.projectRemoval(repo)
+        offersArchiveFirst = app.offersArchiveFirst(repo)
         isConfirmingRemove = true
     }
 
     private func removeRepo() {
         Task { await app.removeRepository(repo) }
+    }
+
+    private func archiveThenRemoveRepo() {
+        Task { await app.archiveWorkspacesThenRemove(repo) }
     }
 
     private func beginRepoRename() {

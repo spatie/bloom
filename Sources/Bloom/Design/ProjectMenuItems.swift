@@ -73,6 +73,7 @@ struct ProjectMenuItems: View {
         }
         if let remote { Button("Archived workspaces…") { remote.showsArchivedWorkspaces = true } }
         Divider()
-        Button("Remove project", role: .destructive, action: onRemove).disabled(remote != nil)
+        // A server project too: the server computes what goes and asks. See `ServerRemovalPreview`.
+        Button("Remove project", role: .destructive, action: onRemove)
     }
 }

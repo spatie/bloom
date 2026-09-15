@@ -7,3 +7,7 @@ public typealias ServerStorageCleanupTarget = BloomClient.ServerStorageCleanupTa
 public typealias ServerStorageCleanupStatus = BloomClient.ServerStorageCleanupStatus
 public typealias ServerStorageCleanupOutcome = BloomClient.ServerStorageCleanupOutcome
 public typealias ServerStorageCleanupResult = BloomClient.ServerStorageCleanupResult
+public typealias ServerStorageLeftover = BloomClient.ServerStorageLeftover
+public typealias ServerStorageLeftoverConfirmation = BloomClient.ServerStorageLeftoverConfirmation
+public typealias ServerStorageLeftoverOutcome = BloomClient.ServerStorageLeftoverOutcome
+public typealias ServerStorageLeftoverRemoval = BloomClient.ServerStorageLeftoverRemoval

@@ -1,8 +1,8 @@
 import Foundation
 
 public enum BloomWire {
-    public static let version = 15
-    public static let supportedVersions: Set<Int> = [12, 13, 14, version]
+    public static let version = 16
+    public static let supportedVersions: Set<Int> = [12, 13, 14, 15, version]
 }
 
 /// The command ID survives a transport failure. Retrying this value cannot create another turn.

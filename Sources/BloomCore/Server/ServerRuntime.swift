@@ -10,6 +10,8 @@ public actor ServerRuntime {
     public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
     private let store: Store
     private let storage: ServerStorageService
+    /// Prunes Docker in the background after setups and when space runs low. See `ServerDockerHousekeeping`.
+    nonisolated let housekeeper: ServerDockerHousekeeper
     private let skills: ServerSkillsService
     private let makeRunner: RunnerFactory?
     /// How long a session's shutdown waits for its terminated runner to exit. See `ServerSession.shutdown()`.
@@ -38,6 +40,11 @@ public actor ServerRuntime {
     /// When each setup this process watched began, and how long it took once it ended.
     private var setupClock: [WorkspaceID: (startedAt: Date, durationMS: Int?)] = [:]
     private var archivePreviews: [UUID: ServerArchivePreview] = [:]
+    /// Permanent removals waiting for their confirmation. See `ServerRemovalPreview`.
+    private var removalPlans: [UUID: ServerRemovalPlan] = [:]
+    private var removingProjects: Set<RepoID> = []
+    /// The one pending `VACUUM`. See `scheduleCompaction`.
+    private var compaction: Task<Void, Never>?
     private var isClosed = false
     private var shutdownTask: Task<Void, Never>?
     private var promptQueue: ServerPromptQueue?
@@ -59,7 +66,9 @@ public actor ServerRuntime {
          maintenanceRestoration: (@Sendable () async throws -> Void)? = nil, runnerExitGrace: Duration = .seconds(6)) {
         self.workspaceAdmissions = workspaceAdmissions
         self.store = store
-        storage = storageService ?? ServerStorageService(directory: (store.path as NSString).deletingLastPathComponent)
+        storage = storageService ?? ServerStorageService(directory: (store.path as NSString).deletingLastPathComponent,
+            workspaces: { [store] in try await store.workspaces(includeArchived: true) })
+        housekeeper = ServerDockerHousekeeper(storage: storage)
         skills = skillsService ?? ServerSkillsService(directory: URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("skills").path,
                                      home: FileManager.default.homeDirectoryForCurrentUser.path)
         self.installedAgents = installedAgents
@@ -148,6 +157,17 @@ public actor ServerRuntime {
         }
         if case .workspace(_, .setupOutput) = request.operation, request.version < 15 {
             return ServerReply(id: request.id, result: .failure("Live setup output requires Bloom protocol 15."))
+        }
+        switch request.operation {
+        case .workspace(_, .deletePreview), .workspace(_, .delete), .project(_, .removalPreview), .project(_, .remove):
+            if request.version < 16 {
+                return ServerReply(id: request.id, result: .failure("Deleting workspaces and removing projects require Bloom protocol 16."))
+            }
+        case .removeStorageLeftovers:
+            if request.version < 16 {
+                return ServerReply(id: request.id, result: .failure("Removing leftover Docker resources requires Bloom protocol 16."))
+            }
+        default: break
         }
         if case .diagnostics = request.operation, request.version < 13 {
             return ServerReply(id: request.id, result: .failure("Server diagnostics require Bloom protocol 13."))
@@ -252,9 +272,18 @@ public actor ServerRuntime {
             return .storage(await storage.inspect())
         case .cleanupStorage(let targets):
             return .storageCleanup(try await storage.clean(targets))
+        case .removeStorageLeftovers(let ids):
+            // Held as changing for the whole removal, so a restore cannot start setting a workspace
+            // up again while its volumes are being deleted underneath it.
+            guard changingWorkspaces.isDisjoint(with: ids) else {
+                throw ServerFailure("A workspace is being archived or restored. Refresh storage and try again.")
+            }
+            changingWorkspaces.formUnion(ids)
+            defer { changingWorkspaces.subtract(ids) }
+            return .storageLeftoverRemoval(try await storage.removeLeftovers(ids))
         case .diagnostics:
             return .diagnostics(await ServerDiagnosticsCollector.collect(directory: (store.path as NSString).deletingLastPathComponent,
-                authentication: await authenticationStatuses(await installedAgents(store))))
+                authentication: await authenticationStatuses(await installedAgents(store)), cleanupNotice: await housekeeper.notice))
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
         case .previewAddress(let address):
@@ -307,7 +336,15 @@ public actor ServerRuntime {
             try await configure(id, controls: controls)
             return .accepted
         case .project(let id, let action):
-            return try await ServerSidebar.project(action, id: id, store: store)
+            switch action {
+            case .removalPreview:
+                guard let repo = try await store.repo(id: id) else { throw ServerFailure("This project is no longer available.") }
+                return .removalPreview(remember(try await projectRemovalPlan(repo)))
+            case .remove(let confirmation):
+                return try await removeProject(id, confirmation: confirmation)
+            default:
+                return try await ServerSidebar.project(action, id: id, store: store)
+            }
         case .catalogue:
             let workspaces = try await store.workspaces()
             var storedSessions: [Session] = []
@@ -337,8 +374,13 @@ public actor ServerRuntime {
             switch action {
             case .archivePreview:
                 return .archivePreview(try await prepareArchive(workspace(id)))
-            case .archive(let confirmation): return try await archiveWorkspace(id, confirmation: confirmation)
+            case .archive(let confirmation, let removingDocker):
+                return try await archiveWorkspace(id, confirmation: confirmation, removingDocker: removingDocker == true)
             case .restore: return try await restoreWorkspace(id)
+            case .deletePreview:
+                guard !changingWorkspaces.contains(id) else { throw ServerFailure("This workspace is already being changed.") }
+                return .removalPreview(remember(try await ServerRemoval.workspacePlan(storedWorkspace(id), context: removalContext())))
+            case .delete(let confirmation): return try await deleteWorkspace(id, confirmation: confirmation)
             case .newSession(let agent, _, _, _):
                 try ServerAgentAvailability.require(agent, in: await installedAgents(store))
                 return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
@@ -368,7 +410,14 @@ public actor ServerRuntime {
                         throw ServerFailure("Stop the workspace's agents and clear queued prompts before running setup again.")
                     }
                 }
-                return try await ServerWorkspaceOperations.perform(action, workspace: selected, store: store, terminals: terminals)
+                do {
+                    let reply = try await ServerWorkspaceOperations.perform(action, workspace: selected, store: store, terminals: terminals)
+                    housekeeper.setupEnded(succeeded: true)
+                    return reply
+                } catch {
+                    housekeeper.setupEnded(succeeded: false)
+                    throw error
+                }
             default:
                 return try await ServerWorkspaceOperations.perform(action,
                     workspace: workspace(id, readingDuringSetup: !action.mutates), store: store, terminals: terminals)
@@ -485,15 +534,18 @@ public actor ServerRuntime {
         return workspace
     }
 
-    private func prepareArchive(_ workspace: Workspace, keepingBranch: Bool = false) async throws -> ServerArchivePreview {
-        var preview = try await ServerSidebar.preview(workspace: workspace, store: store)
+    /// `measuringDocker` is off for the archive's own rechecks, which compare git's answers only,
+    /// and for an agent's archive, which never removes containers: listing Docker there would cost
+    /// a validation and three listings for a value nothing reads.
+    private func prepareArchive(_ workspace: Workspace, keepingBranch: Bool = false, measuringDocker: Bool = true) async throws -> ServerArchivePreview {
+        var preview = try await ServerSidebar.preview(workspace: workspace, store: store, docker: measuringDocker ? storage.workspaceDocker : nil)
         if keepingBranch { preview.hazards.isDeletingBranch = false }
         archivePreviews = archivePreviews.filter { Date().timeIntervalSince($0.value.createdAt) < 600 }
         archivePreviews[preview.id] = preview
         return preview
     }
 
-    private func archiveWorkspace(_ id: WorkspaceID, confirmation: UUID, bridgeSafe: Bool = false) async throws -> ServerResult {
+    private func archiveWorkspace(_ id: WorkspaceID, confirmation: UUID, removingDocker: Bool = false, bridgeSafe: Bool = false) async throws -> ServerResult {
         guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
         defer { changingWorkspaces.remove(id) }
         let transition = try workspaceAdmissions.beginTransition(id)
@@ -503,7 +555,7 @@ public actor ServerRuntime {
         if workspace.state == .archived { remainsClosed = true; return .accepted }
         guard let accepted = archivePreviews[confirmation], accepted.workspace.id == id,
               Date().timeIntervalSince(accepted.createdAt) < 600 else {
-            return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe))
+            return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: !bridgeSafe))
         }
         // Both RPC and MCP mutations hold tickets, including work paused before its first
         // Store write. Capture sessions only once those accepted operations have settled.
@@ -515,8 +567,10 @@ public actor ServerRuntime {
             setup.cancel()
             await setup.value
         }
-        let fresh = try await prepareArchive(workspace, keepingBranch: bridgeSafe)
-        guard fresh.report == accepted.report, fresh.hazards == accepted.hazards else { return .archivePreview(fresh) }
+        let fresh = try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: false)
+        guard fresh.report == accepted.report, fresh.hazards == accepted.hazards else {
+            return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: !bridgeSafe))
+        }
         let chats = try await store.sessions(workspaceID: id)
         for chat in chats {
             _ = try await execute(.stop(sessionID: chat.id))
@@ -525,13 +579,17 @@ public actor ServerRuntime {
             sessions.removeValue(forKey: chat.id)
             bridge?.retire(sessionID: chat.id)
         }
-        let settled = try await prepareArchive(workspace, keepingBranch: bridgeSafe)
+        let settled = try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: false)
         guard settled.report == accepted.report, settled.hazards.isDeletingBranch == accepted.hazards.isDeletingBranch else {
-            return .archivePreview(settled)
+            return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: !bridgeSafe))
         }
         guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's repository is unavailable.") }
+        // Only a choice the confirmation actually offered: an answer to a question never shown,
+        // or an agent's archive, keeps the containers.
+        let removesDocker = removingDocker && !bridgeSafe && accepted.request.offersDockerRemoval
         try await WorkspaceManager(store: store).archive(workspace: workspace, repo: repo,
-            deleteBranch: accepted.hazards.isDeletingBranch, force: !bridgeSafe)
+            deleteBranch: accepted.hazards.isDeletingBranch, force: !bridgeSafe,
+            docker: removesDocker ? storage.workspaceDocker : nil)
         remainsClosed = true
         await uiBroker.close(workspaceID: id)
         await terminalStreams.close(workspaceID: id)
@@ -557,6 +615,151 @@ public actor ServerRuntime {
         remainsClosed = false
         return .accepted
     }
+
+    // MARK: - Permanent removal
+
+    private func removalContext() -> ServerRemovalContext { ServerRemovalContext(store: store) }
+
+    /// Keeps a plan for its confirmation, replacing any earlier plan for the same target, so a
+    /// reader who asked twice cannot confirm the older of two answers.
+    private func remember(_ plan: ServerRemovalPlan) -> ServerRemovalPreview {
+        removalPlans = removalPlans.filter { Date().timeIntervalSince($0.value.preview.createdAt) < 600 && $0.value.target != plan.target }
+        removalPlans[plan.preview.id] = plan
+        return plan.preview
+    }
+
+    private func acceptedRemoval(_ confirmation: UUID, target: ServerRemovalPlan.Target) -> ServerRemovalPlan? {
+        guard let plan = removalPlans[confirmation], plan.target == target,
+              Date().timeIntervalSince(plan.preview.createdAt) < 600 else { return nil }
+        return plan
+    }
+
+    private func storedWorkspace(_ id: WorkspaceID) async throws -> Workspace {
+        guard let workspace = try await store.workspace(id: id) else { throw ServerFailure("This workspace is no longer available.") }
+        return workspace
+    }
+
+    private func deleteWorkspace(_ id: WorkspaceID, confirmation: UUID) async throws -> ServerResult {
+        guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
+        defer { changingWorkspaces.remove(id) }
+        // The same transition a restore takes, so a restore and a delete cannot pass each other.
+        // Closed afterwards either way: a delete that failed leaves an archived workspace.
+        let transition = try workspaceAdmissions.beginTransition(id)
+        defer { transition.finish(closed: true) }
+        try await transition.drain()
+        let fresh = try await ServerRemoval.workspacePlan(storedWorkspace(id), context: removalContext())
+        guard let accepted = acceptedRemoval(confirmation, target: .workspace(id)), accepted.matches(fresh) else {
+            return .removalPreview(remember(fresh))
+        }
+        removalPlans.removeValue(forKey: confirmation)
+        return try await purge(fresh)
+    }
+
+    private func projectRemovalPlan(_ repo: Repo) async throws -> ServerRemovalPlan {
+        var archives: [WorkspaceID: Result<ServerArchivePreview, ServerFailure>] = [:]
+        for active in try await store.workspaces(repoID: repo.id) {
+            do {
+                archives[active.id] = .success(try await prepareArchive(workspace(active.id)))
+            } catch {
+                archives[active.id] = .failure(ServerFailure(error.localizedDescription))
+            }
+        }
+        return try await ServerRemoval.projectPlan(repo, archives: archives, context: removalContext())
+    }
+
+    /// Archives the project's active workspaces through the ordinary archive, then deletes.
+    ///
+    /// Each archive is its own confirmed, rechecked archive: its agents are stopped, its archive
+    /// script runs and its worktree goes, and a workspace whose answer moved sends the whole
+    /// removal back as a fresh preview with nothing deleted. Only once every workspace is archived
+    /// is the plan measured a final time, because the worktrees that just went were what kept a
+    /// clone in use, and the clone is still only deleted when the reader was told it would be.
+    private func removeProject(_ id: RepoID, confirmation: UUID) async throws -> ServerResult {
+        guard removingProjects.insert(id).inserted else { throw ServerFailure("This project is already being removed.") }
+        defer { removingProjects.remove(id) }
+        guard let repo = try await store.repo(id: id) else { throw ServerFailure("This project is no longer available.") }
+        let fresh = try await projectRemovalPlan(repo)
+        guard let accepted = acceptedRemoval(confirmation, target: .project(id)), accepted.matches(fresh) else {
+            return .removalPreview(remember(fresh))
+        }
+        if let blocker = fresh.preview.blocker { throw ServerFailure(blocker) }
+        removalPlans.removeValue(forKey: confirmation)
+        for (workspaceID, archive) in fresh.archives.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            guard case .accepted = try await archiveWorkspace(workspaceID, confirmation: archive) else {
+                return .removalPreview(remember(try await projectRemovalPlan(repo)))
+            }
+        }
+        var settled = try await projectRemovalPlan(repo)
+        guard settled.preview.blocker == nil, settled.archives.isEmpty else { return .removalPreview(remember(settled)) }
+        if accepted.clone == nil { settled.clone = nil }
+        return try await purge(settled, repo: repo)
+    }
+
+    /// Files first, then rows. The files are found from the rows, so a delete interrupted after
+    /// the rows went would leave transcripts and profiles nothing could ever find again; the other
+    /// way round, a retry measures what is left and asks again.
+    private func purge(_ plan: ServerRemovalPlan, repo: Repo? = nil) async throws -> ServerResult {
+        // A workspace delete already holds its one workspace. A project's archived workspaces are
+        // held here, so a restore cannot bring one back between its files going and its rows.
+        let pending = repo == nil ? [] : plan.workspaceIDs
+        let locked = pending.filter { changingWorkspaces.insert($0).inserted }
+        defer { for id in locked { changingWorkspaces.remove(id) } }
+        guard locked.count == pending.count else {
+            throw ServerFailure("A workspace in this project is being changed. Try again shortly.")
+        }
+        var failures = ServerRemoval.removeFiles(of: plan)
+        try await store.deleteArchivedWorkspaces(ids: plan.workspaceIDs)
+        if let repo {
+            guard try await store.workspaces(repoID: repo.id).isEmpty else {
+                throw ServerFailure("A workspace was started in this project while it was being removed. Nothing more was deleted.")
+            }
+            try await store.deleteRepo(id: repo.id)
+            if let clone = plan.clone {
+                do { try FileManager.default.removeItem(atPath: clone) } catch { failures.append(clone) }
+            }
+        }
+        archivePreviews = archivePreviews.filter { !plan.workspaceIDs.contains($0.value.workspace.id) }
+        scheduleCompaction()
+        guard failures.isEmpty else {
+            return .text("Deleted, but these could not be removed from the server: " + failures.joined(separator: ", "))
+        }
+        return .accepted
+    }
+
+    /// Hands the pages a delete freed back to the disk, once nothing is working.
+    ///
+    /// **Not straight after the delete, and not never.** On the Mac compaction is a button, because
+    /// `VACUUM` holds the store for as long as copying the whole file takes and a window that
+    /// froze on its own would be a bug report. A server has no button to press and nobody sitting
+    /// in front of it, and the whole reason somebody deletes there is a disk that is filling, so
+    /// leaving the pages on SQLite's free list would free nothing they can see. The stall is the
+    /// same actor stall, and every RPC and every agent event waits behind it, so it waits for a
+    /// moment when no turn is streaming, no workspace is changing and no command is running, and
+    /// checks every fifteen seconds for up to an hour. Below `DatabaseSize.isWorthCompacting` it
+    /// does nothing at all. A deferred compaction that never found a quiet hour is picked up by the
+    /// next delete.
+    private func scheduleCompaction() {
+        guard compaction == nil else { return }
+        compaction = Task { [weak self] in
+            for _ in 0..<240 {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled, let self else { return }
+                if await self.compactIfQuiet() { break }
+            }
+            await self?.endCompaction()
+        }
+    }
+
+    private func compactIfQuiet() async -> Bool {
+        guard !isClosed else { return true }
+        guard commands.isEmpty, changingWorkspaces.isEmpty, backgroundSetups.isEmpty else { return false }
+        for session in sessions.values where await session.isBusy { return false }
+        guard let size = try? await store.databaseSize(), size.isWorthCompacting else { return true }
+        try? await store.compactDatabase()
+        return true
+    }
+
+    private func endCompaction() { compaction = nil }
 
     private func startWorkspace(_ request: ServerWorkspaceRequest, origin: WorkspaceOrigin = .user) async throws -> ServerResult {
         try requireMaintenanceAdmission()
@@ -586,6 +789,7 @@ public actor ServerRuntime {
         let manager = WorkspaceManager(store: store)
         let path = try await repositories.resolve(request.repositoryPath, dataDirectory: URL(fileURLWithPath: store.path).deletingLastPathComponent())
         let repo = try await manager.addRepository(at: path)
+        guard !removingProjects.contains(repo.id) else { throw ServerFailure("This project is being removed.") }
         let suppliedName = request.mode == nil ? request.name : nil
         // The same sea the local create window claims, from this server's own catalogue table.
         // Without it a terminal or browser start with nothing typed came back as "New workspace"
@@ -660,11 +864,13 @@ public actor ServerRuntime {
         let id = workspace.id
         let startedAt = Date()
         setupClock[id] = (startedAt, nil)
-        let store = store
+        let store = store, housekeeper = housekeeper
         backgroundSetups[id] = Task { [weak self] in
             let manager = WorkspaceManager(store: store)
             let port = await manager.ensurePort(for: workspace)
-            _ = await manager.runSetup(workspace: workspace, repo: repo, port: port, onOutput: { _ in })
+            let succeeded = await manager.runSetup(workspace: workspace, repo: repo, port: port, onOutput: { _ in })
+            // A cancelled setup was an archive stopping it, not a build that needs tidying after.
+            if !Task.isCancelled { housekeeper.setupEnded(succeeded: succeeded) }
             await self?.finishBackgroundSetup(id, startedAt: startedAt, heldSession: heldSession)
         }
     }
@@ -760,6 +966,7 @@ public actor ServerRuntime {
         for command in runningCommands { command.cancel() }
         let archiving = Array(bridgeArchives.values)
         for task in archiving { task.cancel() }
+        compaction?.cancel()
         // Cancelling stops each script and files its run as stopped. Awaited before the queue
         // shuts down, so none of them resumes a prompt into a queue that is going away.
         let setups = Array(backgroundSetups.values)
@@ -982,7 +1189,7 @@ extension ServerRuntime {
                 return .requested
             }
             if let objection = await WorkspaceArchiveSafety.objection(to: current, excusing: nil, store: store) { return .refused(objection) }
-            let preview = try await prepareArchive(current, keepingBranch: true)
+            let preview = try await prepareArchive(current, keepingBranch: true, measuringDocker: false)
             guard preview.report.isSafeToDiscard(deletingBranch: false, isPullRequestMerged: preview.hazards.isPullRequestMerged),
                   !preview.hazards.isAgentRunning else {
                 return .refused("Archiving needs confirmation because this workspace has unprotected work. Review its archive preview in Bloom.")

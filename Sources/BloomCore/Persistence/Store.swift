@@ -1317,8 +1317,20 @@ public actor Store {
         }
     }
 
+    /// Forgets a project and every workspace it has, in one transaction.
+    ///
+    /// The cascade from `repos` takes the workspaces and everything with a foreign key to them,
+    /// and it used to be the whole of this. It left `drafts` and `deliveries` behind for every chat
+    /// the project had, the two tables `deleteArchivedWorkspaces` names for exactly that reason, so
+    /// each workspace goes through the same purge first.
     public func deleteRepo(id: RepoID) throws {
-        try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
+        try db.transaction {
+            for row in try db.query("SELECT id FROM workspaces WHERE repo_id = ?", [.text(id)]) {
+                guard let workspaceID = row.string("id") else { continue }
+                try purgeWorkspaceRows(WorkspaceID(workspaceID))
+            }
+            try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
+        }
     }
 
     // MARK: - Workspaces
@@ -1513,12 +1525,26 @@ public actor Store {
     /// measuring a 500 MB transcript table cheap enough to do every time the screen opens, rather
     /// than a number cached somewhere and quietly wrong.
     public func archivedFootprints() throws -> [ArchivedWorkspaceFootprint] {
-        let rows = try db.query("""
+        try footprints(rows: db.query("""
             SELECT w.*, r.name AS repo_name
             FROM workspaces w
             JOIN repos r ON r.id = w.repo_id
             WHERE w.state = 'archived'
-            """)
+            """))
+    }
+
+    /// The same measurement over one project's workspaces, active ones included, for a project
+    /// removal that deletes every record the project has. See `ServerRemoval`.
+    public func footprints(repoID: RepoID) throws -> [ArchivedWorkspaceFootprint] {
+        try footprints(rows: db.query("""
+            SELECT w.*, r.name AS repo_name
+            FROM workspaces w
+            JOIN repos r ON r.id = w.repo_id
+            WHERE w.repo_id = ?
+            """, [.text(repoID)]))
+    }
+
+    private func footprints(rows: [Row]) throws -> [ArchivedWorkspaceFootprint] {
         guard !rows.isEmpty else { return [] }
 
         var sessions: [String: Int] = [:]
@@ -1603,37 +1629,66 @@ public actor Store {
                     "SELECT 1 AS ok FROM workspaces WHERE id = ? AND state = 'archived'", [.text(id)]
                 ).first != nil
                 guard isArchived else { continue }
-
-                try db.run(
-                    "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
-                    [.text(id)]
-                )
-                // A message between workspaces still queued into or out of this one will now never
-                // go, so the bubble in the other chat has to stop saying "queued" and offering Cancel.
-                try db.run(
-                    """
-                    UPDATE workspace_messages SET state = 'cancelled'
-                    WHERE state = 'queued' AND delivery_id IN (
-                        SELECT id FROM deliveries
-                        WHERE source_workspace_id = ?
-                           OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
-                    )
-                    """,
-                    [.text(id), .text(id)]
-                )
-                try db.run(
-                    """
-                    DELETE FROM deliveries
-                    WHERE source_workspace_id = ?
-                       OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
-                    """,
-                    [.text(id), .text(id)]
-                )
-                try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
+                try purgeWorkspaceRows(id)
                 deleted += 1
             }
             return deleted
         }
+    }
+
+    /// One workspace's rows, including the two tables no foreign key reaches. Called inside a
+    /// transaction by both deletes; see `deleteArchivedWorkspaces` for why each statement is here.
+    private func purgeWorkspaceRows(_ id: WorkspaceID) throws {
+        try db.run(
+            "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
+            [.text(id)]
+        )
+        // A message between workspaces still queued into or out of this one will now never
+        // go, so the bubble in the other chat has to stop saying "queued" and offering Cancel.
+        try db.run(
+            """
+            UPDATE workspace_messages SET state = 'cancelled'
+            WHERE state = 'queued' AND delivery_id IN (
+                SELECT id FROM deliveries
+                WHERE source_workspace_id = ?
+                   OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
+            )
+            """,
+            [.text(id), .text(id)]
+        )
+        try db.run(
+            """
+            DELETE FROM deliveries
+            WHERE source_workspace_id = ?
+               OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
+            """,
+            [.text(id), .text(id)]
+        )
+        try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
+    }
+
+    /// Every agent CLI thread a workspace's chats held, closed chats included, because a closed
+    /// chat's transcript is still on disk. Read before a permanent delete, which is the only thing
+    /// that wants it. See `AgentTranscriptFiles`.
+    public func agentThreads(workspaceID: WorkspaceID) throws -> [AgentThread] {
+        try db.query(
+            "SELECT agent_kind, agent_session_id FROM sessions WHERE workspace_id = ? AND agent_session_id IS NOT NULL",
+            [.text(workspaceID)]
+        ).compactMap { row in
+            guard let id = row.string("agent_session_id"), !id.isEmpty else { return nil }
+            return AgentThread(kind: AgentKind(rawValue: row.string("agent_kind") ?? "") ?? .claudeCode, agentSessionID: id)
+        }
+    }
+
+    /// Thread ids held by any chat outside `workspaceIDs`, Ask Bloom included. A carried-on chat
+    /// resumes the archived one's thread by id, so these are the files a delete must leave alone.
+    public func agentThreadIDs(outside workspaceIDs: [WorkspaceID]) throws -> Set<String> {
+        let excluded = Set(workspaceIDs.map(\.rawValue))
+        return Set(try db.query("SELECT workspace_id, agent_session_id FROM sessions WHERE agent_session_id IS NOT NULL").compactMap { row in
+            guard let id = row.string("agent_session_id"), !id.isEmpty else { return nil }
+            if let workspace = row.string("workspace_id"), excluded.contains(workspace) { return nil }
+            return id
+        })
     }
 
     /// How big the database file is, and how much of it is space nothing is using.

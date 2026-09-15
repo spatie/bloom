@@ -144,6 +144,50 @@ extension AppModel {
         }
     }
 
+    func offersArchiveFirst(_ repo: Repo) -> Bool {
+        ProjectRemoval.offersArchiveFirst(workspaces: workspaces.filter { $0.repoID == repo.id })
+    }
+
+    /// Archives every active workspace of a project, running its archive script and removing its
+    /// worktree, and then forgets the project. See `ProjectRemoval.archiveFirstLabel`.
+    ///
+    /// Every workspace is checked before any is archived. The archive itself refuses a workspace
+    /// with work only in its worktree or an agent mid turn, and meeting that refusal on the third
+    /// of four would leave two archived, two not, and a project still in the sidebar. So the same
+    /// two questions are asked of all of them first, and a single no archives nothing. Each archive
+    /// then asks again for itself, because a turn can start in between.
+    func archiveWorkspacesThenRemove(_ repo: Repo) async {
+        guard let manager else { return }
+        let active = workspaces.filter { $0.repoID == repo.id && $0.state == .active }
+        let deletesBranch = SettingsLoader.load(repo: repo.path).deleteBranchOnArchive
+        var reasons: [String] = []
+        for workspace in active {
+            if isRunning(workspace) || isAwaitingPermission(workspace) {
+                reasons.append("\(workspace.name) has an agent working in it")
+                continue
+            }
+            guard let report = try? await manager.safetyReport(workspace: workspace, repo: repo) else {
+                reasons.append("\(workspace.name) could not be checked for unsaved work")
+                continue
+            }
+            if !report.isSafeToDiscard(deletingBranch: deletesBranch, isPullRequestMerged: isPullRequestMerged(workspace)) {
+                reasons.append("\(workspace.name) holds work that exists nowhere else")
+            }
+        }
+        guard reasons.isEmpty else {
+            alert = BloomAlert(title: "Nothing was removed", message: ProjectRemoval.archiveFirstRefusal(project: repo.name, reasons: reasons))
+            return
+        }
+        for workspace in active {
+            if case .refused(let reason) = await archive(workspace, allowsConfirmation: false) {
+                alert = BloomAlert(title: "\(repo.name) was not removed",
+                                   message: "\(workspace.name) could not be archived, so the project is still here. \(reason)")
+                return
+            }
+        }
+        await removeRepository(repo)
+    }
+
     func toggleCollapsed(_ repo: Repo) async {
         guard let store else { return }
         // Toggled against the stored row rather than against the copy the sidebar was drawn

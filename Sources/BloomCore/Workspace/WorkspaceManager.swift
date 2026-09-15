@@ -12,6 +12,9 @@ public enum WorkspaceError: Error, CustomStringConvertible {
     case unsafeToArchive(WorkspaceSafetyReport)
     case archiveScriptFailed(status: Int32, output: String)
     case archiveScriptIncomplete(ShellFailure)
+    /// The archive was asked to remove the workspace's containers and volumes and Docker refused.
+    /// Nothing after it ran, so the worktree and the branch are still there.
+    case dockerCleanupFailed(String)
     /// The row was read, the work was done, and by the time it came to write the result there was
     /// no such workspace in the database any more. Only reachable when the project it belonged to
     /// was removed while this was running, which cascades its workspaces away.
@@ -30,6 +33,8 @@ public enum WorkspaceError: Error, CustomStringConvertible {
                 + output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(500)
         case .archiveScriptIncomplete(let failure):
             "The archive script did not finish, so nothing was removed: \(failure.description)"
+        case .dockerCleanupFailed(let detail):
+            "The archive script ran, but its containers and volumes could not be removed, so the worktree was kept: \(detail)"
         case .workspaceGone(let name): "\(name) is no longer in the database"
         }
     }
@@ -750,13 +755,17 @@ public struct WorkspaceManager: Sendable {
     ///   one. Nothing here can ask: `gh` lives above this layer and a report that shelled out to
     ///   the network would make every archive wait on it. Passing it in is what stops a squash
     ///   merged branch, which git calls unmerged, from being refused as unsafe.
+    /// - Parameter docker: the engine to remove this workspace's containers, volumes and networks
+    ///   from, when the owner chose that in the confirmation. `nil` keeps them, which is what
+    ///   every caller that showed nobody the choice passes.
     public func archive(
         workspace: Workspace,
         repo: Repo,
         deleteBranch: Bool? = nil,
         force: Bool = false,
         isPullRequestMerged: Bool = false,
-        archiveScriptTimeout: Duration = WorkspaceManager.archiveScriptTimeout
+        archiveScriptTimeout: Duration = WorkspaceManager.archiveScriptTimeout,
+        docker: WorkspaceDocker? = nil
     ) async throws {
         // Already archived, so there is nothing here to wind down. Everything below this line acts
         // on a worktree that has been removed once already: the archive script would run in a
@@ -835,6 +844,22 @@ public struct WorkspaceManager: Sendable {
                     status: result.status,
                     output: result.stderr.isEmpty ? result.stdout : result.stderr
                 )
+            }
+        }
+
+        // After the script, so a project whose own teardown does `docker compose down -v` gets to
+        // do it its way first and this finds nothing left. And outside the script's condition,
+        // because the case this exists for is the one where the script never ran: a worktree
+        // already gone from disk used to skip the script silently and orphan every container and
+        // volume it would have removed, with nothing left in Bloom that knew they were there.
+        //
+        // Before the worktree goes, and a failure stops the archive, for the reason a failing
+        // script does: once the row says archived, nothing comes back for what Docker refused.
+        if let docker {
+            do {
+                try await docker.removeResources(of: workspace.id)
+            } catch {
+                throw WorkspaceError.dockerCleanupFailed(error.localizedDescription)
             }
         }
 

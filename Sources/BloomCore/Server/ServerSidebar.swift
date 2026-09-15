@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 public enum ServerProjectAction: Codable, Sendable, Equatable {
     case rename(String)
@@ -7,11 +8,16 @@ public enum ServerProjectAction: Codable, Sendable, Equatable {
     case settings
     case saveSettings(edits: [SettingsEdit], expected: RepoSettings)
     case filesToCopy(patterns: [String])
+    /// Protocol 16. What removing this project would archive and delete, computed on the server.
+    case removalPreview
+    /// Protocol 16. Archives the project's active workspaces, deletes every record it has and the
+    /// clone Bloom made for it. See `ServerRemoval.projectPlan`.
+    case remove(confirmation: UUID)
 
     var mutates: Bool {
         switch self {
-        case .settings, .filesToCopy: false
-        case .rename, .setHidden, .setAccent, .saveSettings: true
+        case .settings, .filesToCopy, .removalPreview: false
+        case .rename, .setHidden, .setAccent, .saveSettings, .remove: true
         }
     }
 }
@@ -23,9 +29,13 @@ public struct ServerArchivePreview: Codable, Sendable {
     public var report: WorkspaceSafetyReport
     public var hazards: ArchiveHazards
     public var createdAt: Date
+    /// Measured on the server's own engine and kept out of `hazards`, which the archive compares
+    /// for equality before it proceeds: containers come and go as the workspace's agents stop,
+    /// and a list of them would make every archive of a busy workspace ask twice.
+    public var docker: ArchiveDockerFootprint?
 
     public var request: ArchiveRequest {
-        ArchiveRequest(workspace: workspace, report: report, deleteBranch: hazards.isDeletingBranch, hazards: hazards)
+        ArchiveRequest(workspace: workspace, report: report, deleteBranch: hazards.isDeletingBranch, hazards: hazards, docker: docker)
     }
 }
 
@@ -48,6 +58,8 @@ enum ServerSidebar {
             return .projectSettings(ServerProjectSettings.load(repo: repo.path, savedPaths: paths))
         case .filesToCopy(let patterns):
             return .filesToCopy(FilesToCopyResolver.resolve(patterns: patterns, in: repo.path))
+        case .removalPreview, .remove:
+            throw ServerFailure("Project removal must go through the owning runtime.")
         }
         return .accepted
     }
@@ -58,7 +70,7 @@ enum ServerSidebar {
         return name
     }
 
-    static func preview(workspace: Workspace, store: Store) async throws -> ServerArchivePreview {
+    static func preview(workspace: Workspace, store: Store, docker: WorkspaceDocker? = nil) async throws -> ServerArchivePreview {
         guard workspace.setupState != .running else { throw ServerFailure("Wait for workspace setup to finish before archiving.") }
         let sessions = try await store.sessions(workspaceID: workspace.id)
         for session in sessions where try await !store.pendingDeliveries(sessionID: session.id).isEmpty {
@@ -70,6 +82,7 @@ enum ServerSidebar {
             isAgentRunning: sessions.contains { $0.state == .running || $0.state == .waiting },
             isDeletingBranch: SettingsLoader.load(repo: repo.path).deleteBranchOnArchive
         )
-        return ServerArchivePreview(id: UUID(), workspace: workspace, report: report, hazards: hazards, createdAt: Date())
+        let footprint = await docker?.footprint(of: workspace.id)
+        return ServerArchivePreview(id: UUID(), workspace: workspace, report: report, hazards: hazards, createdAt: Date(), docker: footprint)
     }
 }

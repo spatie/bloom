@@ -256,6 +256,15 @@ struct RootView: View {
                 Button(
                     request.confirmLabel, role: request.isDestructive ? .destructive : nil
                 ) { confirmArchive(request) }
+                // A dialogue cannot hold the popover's checkbox, so keeping the containers is a
+                // second answer instead. The first button removes them, as the message says.
+                if request.offersDockerRemoval {
+                    Button(request.keepDockerLabel) {
+                        var keeping = request
+                        keeping.removesDocker = false
+                        confirmArchive(keeping)
+                    }
+                }
                 // No `.keyboardShortcut(.defaultAction)` on the cancel button, and that is not an
                 // oversight. It used to be there, to keep Return off the destructive answer, and it
                 // did that by REPLACING the cancel button's own key binding. A `.cancel` role button

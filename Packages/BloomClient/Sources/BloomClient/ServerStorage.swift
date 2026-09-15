@@ -9,13 +9,19 @@ public struct ServerStorageReport: Codable, Sendable, Equatable {
     public var dockerMessage: String?
     public var usage: [ServerStorageUsage]
     public var notes: [String]
+    /// Containers and volumes whose workspace is archived or gone. `nil` when they were not
+    /// listed, which is an older server or a listing that failed, and never the same as empty.
+    public var leftovers: [ServerStorageLeftover]?
+    public var leftoversMessage: String?
 
     public init(checkedAt: Date = Date(), totalBytes: Int64? = nil, freeBytes: Int64? = nil,
                 dockerState: ServerStorageDockerState, dockerMessage: String? = nil,
-                usage: [ServerStorageUsage] = [], notes: [String] = []) {
+                usage: [ServerStorageUsage] = [], notes: [String] = [],
+                leftovers: [ServerStorageLeftover]? = nil, leftoversMessage: String? = nil) {
         self.checkedAt = checkedAt; self.totalBytes = totalBytes; self.freeBytes = freeBytes
         self.dockerState = dockerState; self.dockerMessage = dockerMessage
         self.usage = usage; self.notes = notes
+        self.leftovers = leftovers; self.leftoversMessage = leftoversMessage
     }
 }
 

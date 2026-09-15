@@ -39,7 +39,7 @@ public actor RemoteWireSession: RemoteRequesting {
             }
             guard maintenanceManagement == true else { throw Self.maintenanceUnavailable }
         }
-        if command.operation["storage"] != nil || command.operation["cleanupStorage"] != nil {
+        if command.operation["storage"] != nil || command.operation["cleanupStorage"] != nil || command.operation["removeStorageLeftovers"] != nil {
             guard connection.version >= 13 else { throw Self.storageUnavailable }
             if storageManagement == nil {
                 let probe = RemoteCommand.call("diagnostics")

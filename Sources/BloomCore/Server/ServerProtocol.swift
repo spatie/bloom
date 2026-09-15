@@ -23,6 +23,9 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     case diagnostics
     case storage
     case cleanupStorage(targets: [ServerStorageCleanupTarget])
+    /// Removes the Docker leftovers of these workspaces, rechecked on the server against a fresh
+    /// listing. See `ServerStorageLeftovers`.
+    case removeStorageLeftovers(workspaceIDs: [WorkspaceID])
     case reviewSnapshot(workspaceID: WorkspaceID, scope: ServerDiffScope, knownRevision: String?, wait: Bool)
     case reviewPatch(workspaceID: WorkspaceID, path: String, scope: ServerDiffScope, knownRevision: String?)
     case creation(ServerCreationOperation)
@@ -55,7 +58,7 @@ public enum ServerOperation: Codable, Sendable, Equatable {
         case .skills(let request): request.action != .inspect && request.action != .read
         case .creation(let action): action.mutates
         case .project(_, let action): action.mutates
-        case .cleanupStorage, .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
+        case .cleanupStorage, .removeStorageLeftovers, .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
         case .workspace(_, let action): action.mutates
         }
     }
@@ -117,6 +120,7 @@ public enum ServerResult: Codable, Sendable {
     case diagnostics(ServerDiagnostics)
     case storage(ServerStorageReport)
     case storageCleanup(ServerStorageCleanupResult)
+    case storageLeftoverRemoval(ServerStorageLeftoverRemoval)
     case creation(ServerCreationResult)
     case catalogue(ServerCatalogue)
     case composer(ServerComposerState)
@@ -133,6 +137,7 @@ public enum ServerResult: Codable, Sendable {
     case setupOutput(ServerSetupOutput)
     case terminalPane(ServerTerminalPane)
     case archivePreview(ServerArchivePreview)
+    case removalPreview(ServerRemovalPreview)
     case projectSettings(ServerProjectSettings)
     case filesToCopy(FilesToCopyPlan)
     case accepted

@@ -5,6 +5,8 @@ import Foundation
 
 let serverTests = [
     "SessionWireCompatibilityTests.swift",
+    "AgentTranscriptFilesTests.swift",
+    "ServerRemovalTests.swift",
     "ShellCaptureTests.swift",
     "ShellTests.swift",
     "AtomicCrewStartTests.swift",
@@ -35,6 +37,7 @@ let serverTests = [
     "RemoteReviewContractTests.swift",
     "MobileProtocolContractTests.swift",
     "ServerDiagnosticsTests.swift",
+    "ServerDockerHousekeepingTests.swift",
     "ServerSkillDirectoryTests.swift",
     "ServerSkillFolderImportTests.swift",
     "ServerSkillsProtocolTests.swift",
@@ -53,6 +56,8 @@ let serverTests = [
     "ServerReviewTests.swift",
     "ServerWorkspaceTests.swift",
     "ServerSidebarTests.swift",
+    "WorkspaceDockerOwnershipTests.swift",
+    "ServerStorageLeftoversTests.swift",
     "ServerPreviewTests.swift",
     "ServerHTTPTests.swift",
     "ServerTerminalStreamTests.swift",

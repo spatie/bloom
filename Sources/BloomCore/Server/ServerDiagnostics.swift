@@ -6,13 +6,13 @@ public typealias ServerDiagnostics = BloomClient.ServerDiagnostics
 public enum ServerDiagnosticsCollector {
     typealias Probe = @Sendable (String, [String]) async -> Bool?
 
-    public static func collect(directory: String, authentication: [AgentAuthenticationStatus]? = nil) async -> ServerDiagnostics {
-        var result = await collect(directory: directory, probe: probe)
+    public static func collect(directory: String, authentication: [AgentAuthenticationStatus]? = nil, cleanupNotice: String? = nil) async -> ServerDiagnostics {
+        var result = await collect(directory: directory, probe: probe, cleanupNotice: cleanupNotice)
         result.authentication = authentication
         return result
     }
 
-    static func collect(directory: String, probe: @escaping Probe) async -> ServerDiagnostics {
+    static func collect(directory: String, probe: @escaping Probe, cleanupNotice: String? = nil) async -> ServerDiagnostics {
         async let git = probe("git", ["--version"])
         async let tmux = probe("tmux", ["-V"])
         async let github = probe("gh", ["auth", "status", "--hostname", "github.com"])
@@ -27,7 +27,8 @@ public enum ServerDiagnosticsCollector {
         checks.append(.init(id: .agents, title: "Agents", status: agents.isEmpty ? .attention : .ready,
                             detail: agents.isEmpty ? "No agent CLI found on the server PATH. Container projects may provide their own." : "Available on the server PATH: \(agents.joined(separator: ", ")). Authentication is checked when an agent starts."))
         let attributes = try? FileManager.default.attributesOfFileSystem(forPath: directory)
-        checks.append(disk(freeBytes: (attributes?[.systemFreeSize] as? NSNumber)?.uint64Value))
+        checks.append(disk(freeBytes: (attributes?[.systemFreeSize] as? NSNumber)?.uint64Value,
+                           totalBytes: (attributes?[.systemSize] as? NSNumber)?.uint64Value, cleanupNotice: cleanupNotice))
         #if os(Linux)
         checks += linuxResources(memory: (try? String(contentsOfFile: "/proc/meminfo", encoding: .utf8)) ?? "",
                                  watches: (try? String(contentsOfFile: "/proc/sys/fs/inotify/max_user_watches", encoding: .utf8)) ?? "")
@@ -65,13 +66,18 @@ public enum ServerDiagnosticsCollector {
                      detail: reason + " Docker is optional. Configure it when a project's setup requires containers; local processes can run without it.")
     }
 
-    static func disk(freeBytes: UInt64?) -> ServerDiagnostics.Check {
+    /// Low is the threshold that also starts automatic Docker cleanup, so the check turns to
+    /// attention at the moment the server begins doing something about it. The cleanup notice is
+    /// how a client learns that the server already tried, without a new wire field.
+    static func disk(freeBytes: UInt64?, totalBytes: UInt64? = nil, cleanupNotice: String? = nil) -> ServerDiagnostics.Check {
         guard let freeBytes else {
             return .init(id: .disk, title: "Disk", status: .unavailable, detail: "Free space for the server data directory could not be measured.")
         }
-        let low = freeBytes < 2 * 1_024 * 1_024 * 1_024
-        return .init(id: .disk, title: "Disk", status: low ? .attention : .ready,
-                     detail: "\(mib(freeBytes)) MiB free on the server data volume." + (low ? " Container images and dependency installs may need more space." : " Workspace volumes on other disks are not measured."))
+        let low = ServerDockerHousekeeping.isLow(totalBytes: totalBytes.map { Int64(clamping: $0) }, freeBytes: Int64(clamping: freeBytes)) == true
+        let detail = "\(mib(freeBytes)) MiB free on the server data volume."
+            + (low ? " Container images and dependency installs may need more space." : " Workspace volumes on other disks are not measured.")
+        return .init(id: .disk, title: "Disk", status: low || cleanupNotice != nil ? .attention : .ready,
+                     detail: detail + (cleanupNotice.map { " " + $0 } ?? ""))
     }
 
     static func linuxResources(memory: String, watches: String) -> [ServerDiagnostics.Check] {

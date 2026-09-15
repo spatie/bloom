@@ -9,8 +9,15 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
     /// Protocol 15. See `ServerSetupOutput`.
     case setupOutput
     case archivePreview
-    case archive(confirmation: UUID)
+    /// `removingDocker` is the owner's answer to the confirmation's Docker choice. Absent means
+    /// keep, so a client that never showed the choice cannot remove a database by omission.
+    case archive(confirmation: UUID, removingDocker: Bool? = nil)
     case restore
+    /// Protocol 16. What deleting this archived workspace permanently would remove, computed on the
+    /// server and kept there. See `ServerRemovalPreview`.
+    case deletePreview
+    /// Protocol 16. Deletes an archived workspace's records, agent transcripts and browser profile.
+    case delete(confirmation: UUID)
     case files
     case pullRequest
     case runScripts
@@ -30,7 +37,7 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .archivePreview, .files, .download, .pullRequest, .runScripts, .browserAddress, .notes, .setupOutput: false
+        case .archivePreview, .deletePreview, .files, .download, .pullRequest, .runScripts, .browserAddress, .notes, .setupOutput: false
         default: true
         }
     }
