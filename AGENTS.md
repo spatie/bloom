@@ -12,6 +12,7 @@ work described below. Load supporting references only when relevant to the task.
 | --- | --- |
 | [bloom-dev-build](.claude/skills/bloom-dev-build/SKILL.md) | Build and install the isolated Bloom Dev app from a committed revision. |
 | [bloom-release](.claude/skills/bloom-release/SKILL.md) | Publish a release, generate and publish notes on GitHub and runbloom.app, or package signed local artefacts. |
+| [bloom-server-release](.claude/skills/bloom-server-release/SKILL.md) | Verify and check a release's Linux server assets, test a supervised server update, or diagnose a failed update or rollback. |
 | [swiftui-pro](.claude/skills/swiftui-pro/SKILL.md) | Write or review Bloom's macOS SwiftUI views. |
 | [swift-concurrency-pro](.claude/skills/swift-concurrency-pro/SKILL.md) | Write or review async code, actor isolation, cancellation and streams. |
 | [swift-testing-pro](.claude/skills/swift-testing-pro/SKILL.md) | Write or review Swift Testing tests in BloomCoreTests. |

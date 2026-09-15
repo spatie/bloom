@@ -52,7 +52,7 @@ def package(binary, output):
         raise RuntimeError("Package inside the Ubuntu Swift build environment")
     release = dict(line.split("=", 1) for line in pathlib.Path("/etc/os-release").read_text().splitlines() if "=" in line)
     if release.get("ID", "").strip('"') != "ubuntu" or release.get("VERSION_ID", "").strip('"') != "24.04" or platform.machine() != "x86_64":
-        raise RuntimeError("The preview package must be built on Ubuntu 24.04 x86_64")
+        raise RuntimeError("The server package must be built on Ubuntu 24.04 x86_64")
     swift_version = run("swift", "--version")
     if "Swift version 6.3.3 " not in swift_version:
         raise RuntimeError("Use Swift 6.3.3; update the runtime notices before changing toolchains")
@@ -112,13 +112,13 @@ def package(binary, output):
             run("patchelf", "--set-rpath", "$ORIGIN/../lib", str(executable))
         (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         (bundle / "README.txt").write_text(
-            "Bloom server preview\n\n"
+            "Bloom Server\n\n"
             "Keep bin/ and lib/ together. No Swift installation is needed.\n"
-            "Built for Ubuntu 24.04 x86_64 and newer compatible systems.\n"
+            "Built on Ubuntu 24.04 x86_64. Supported on Ubuntu 24.04 and 26.04 x86_64.\n"
             "Install Git and your authenticated agent CLIs on the server.\n"
             "Run: bin/bloom-server serve --data-dir /absolute/private/directory\n"
             "The data directory must belong to the service user and have mode 700.\n"
-            "See https://github.com/spatie/bloom/blob/freekmurze/client-server-runtime/docs/SERVER.md\n"
+            "See https://github.com/spatie/bloom/blob/main/docs/SERVER.md\n"
         )
         # Fail before producing an archive if relocation left an unresolved dependency.
         for source in executables:
