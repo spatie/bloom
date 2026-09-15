@@ -178,6 +178,13 @@ places: the listing, the dispatch and the gate.
 | `browser_scroll` | Move the page up, down, to the top or to the bottom, and say where it ended up | ✓ | |
 | `browser_screenshot` | A picture of the pane as it is on screen, as an image | ✓ | |
 | `browser_text` | The visible text of the page, wrapped as untrusted content | ✓ | |
+| `browser_snapshot` | The page as an outline of headings, links, buttons and fields, each with a reference such as `e3`, wrapped as untrusted content | ✓ | |
+| `browser_click` | Click the element a reference names | ✓ | |
+| `browser_fill` | Replace what is in a field, or choose an option of a menu | ✓ | |
+| `browser_press` | Press a key on the focused element or on a referenced one | ✓ | |
+| `browser_wait` | Wait for the page to load, an element, some text or an address | ✓ | |
+| `browser_console` | What the page has logged and thrown since Bloom started listening, wrapped as untrusted content | ✓ | |
+| `browser_network` | What the page has fetched, from the browser's Resource Timing record | ✓ | |
 | `terminal_start` | Open a terminal tab and run a command visibly inside it | ✓ | |
 | `terminal_read` | Read recent rendered output from a terminal tab | ✓ | |
 | `terminal_write` | Type text into a live terminal, optionally followed by Enter | ✓ | |
@@ -339,7 +346,7 @@ workspace it is standing in and no other.
 **The browser and terminal seams are how their tools see the window.** `PaneListing` takes a
 workspace and gives back a `PaneCensus`, and that shape is the point: there is no argument on it
 that could ask the window to do anything, so the tool that reports cannot act. `BrowserPaneCommanding`
-carries one `BrowserPaneCommand` and is what the other six share, so the pane a call means is
+carries one `BrowserPaneCommand` and is what the other twelve share, so the pane a call means is
 resolved once, by `BrowserPaneChoice.choose` in the core, rather than six times in the window.
 `TerminalPaneCommanding` does the equivalent for terminal reads, text and control keys.
 `TerminalStarting` is separate because opening a blank pane is self-approved while running a
@@ -643,56 +650,78 @@ different call.
 
 ### The browser pane, and what it does and does not hand over
 
-**Stated as a capability rather than as a list of tools: an agent working in a workspace can now
-see what the owner has open in that workspace, read one of its browser panes as words or as a
-picture, and move that pane about, in the workspace it is standing in and nowhere else. It cannot
-run script in the page, click anything, fill anything in, or read anything the person cannot see on
-the screen.**
+**Stated as a capability rather than as a list of tools: an agent working in a workspace can see
+what the owner has open in that workspace, read one of its browser panes as words, as a picture or
+as an outline of elements, move that pane about, click, fill in and press keys in it, wait for it,
+and read its console and the requests it made, in the workspace it is standing in and nowhere else.
+It cannot run a script of its own in the page.**
 
 That is the whole of it, and each half is deliberate.
 
-**It cannot run script.** `evaluateJavaScript` would turn six narrow tools into a general
-automation surface, and it is not here. The pane is the owner's own browser with his own session in
-it, so a script in that page reads what he can read and acts as he acts: it can walk an
-administration area, post a form, or lift a token out of `localStorage`. And the caller may be an
-agent that has just read a web page, an issue or a dependency's README, which is to say an agent
-holding text somebody else wrote. Keeping such a tool off the self-approval list would not rescue
-it either, because a permission prompt showing a paragraph of JavaScript is a prompt nobody can
-evaluate: two lines of it look reasonable to anybody. The honest substitute is the narrow verb, so
-what Bloom offers is reading the visible text, taking a picture, scrolling, reloading and going to
-an address, each of them a thing Bloom does rather than a thing the caller describes. What that
-costs is real: no clicking, no forms, no waiting for a selector. An agent that needs those has a
-browser of its own to drive, and the difference is that nobody is logged in there as him. If it is
-ever wanted, the shape is a per-project setting, off by default, never self-approved, with the
-script shown in the prompt, and it is a change to make with the owner asked first.
+**It is agent-browser's loop, drawn on the owner's pane.** `browser_snapshot` answers with one
+element a line, each with a reference such as `e3`; `browser_click`, `browser_fill` and
+`browser_press` take a reference; `browser_wait` waits for the page to answer; the next snapshot
+reads it again. agent-browser itself could not be used, because it drives Chrome over the Chrome
+DevTools Protocol and this pane is a `WKWebView`, which speaks no such protocol and whose own
+inspector protocol is not open to an app. So each verb is a script of Bloom's own.
 
-**The scripts Bloom does run are written out in `BrowserPageScript`, in full, at compile time.**
-Two of them: `document.body.innerText` for the text, and a scroll. There is no case in that enum
-that carries a string, and `BrowserSession.evaluate` takes a `BrowserPageScript` rather than a
-`String`, so the signature is the guarantee rather than a convention somebody has to keep. The one
-thing a caller influences is a distance, and it reaches the source as an `Int` that has already
-been parsed out of JSON and range checked.
+**It cannot run script.** `evaluateJavaScript` with a caller's source would be the whole of
+browser automation in one call, and it is not here. The pane is the owner's own browser with his
+own session in it, so a script in that page reads what he can read and acts as he acts. And the
+caller may be an agent that has just read a web page, an issue or a dependency's README, which is
+to say an agent holding text somebody else wrote. Keeping such a tool off the self-approval list
+would not rescue it either, because a permission prompt showing a paragraph of JavaScript is a
+prompt nobody can evaluate. A prompt that says `browser_click` with `ref: e7`, beside an outline
+that says e7 is the Delete button, is one somebody can answer. If arbitrary script is ever wanted,
+the shape is a per-project setting, off by default, never self-approved, with the script shown in
+the prompt, and it is a change to make with the owner asked first.
+
+**The scripts are written out in the core, and what a caller writes reaches them as arguments.**
+`BrowserPageScript` holds the text and scroll scripts and has no case that carries a string.
+`BrowserAgentScript` holds the rest as function bodies for `callAsyncJavaScript`, so a reference,
+a key or a line to type arrives as a JavaScript value and never as source. They run in a content
+world of Bloom's own, which shares the DOM with the page and nothing else, so the page cannot
+replace the functions a click goes through or read and move the references a snapshot handed out.
+Events are dispatched by script, so a page that checks `isTrusted` ignores them, and the three
+defaults a model most expects from a real key (Enter submits, Tab moves focus, a letter types) are
+performed by hand.
+
+**The console is the one piece that runs in the page's own world, and it starts late on
+purpose.** A content world has its own `console`, so Bloom's would hear nothing; the page's has to
+be wrapped. Wrapping it moves where Web Inspector says a message came from, so it is installed the
+first time `browser_console` is called on a pane rather than when the pane opens, and that first
+call says it cannot show what was logged before. The network list needs nothing installed: it is
+the browser's Resource Timing buffer, which covers the page from its first request and has no
+methods, headers or bodies, and the tool says so.
 
 **What comes back off a page is marked as untrusted where it arrives.** A page can say anything,
 including "ignore your instructions", and a model reading a wall of prose cannot tell which words
-came from the owner. `browser_text` answers inside `BridgeUntrustedText`, which names the address,
-says the lines are data, and quotes any line of the page that would have read as the closing
-marker. That is not a defence and is not described as one: nothing stops a model that decides to
-obey the page. It removes the excuse. The picture `browser_screenshot` returns carries the same
-sentence beside it, and a browser tab's name and address are page-written too, so `pane_list` and
-`browser_read` carry the note as well.
+came from the owner. `browser_text`, `browser_snapshot`, `browser_console` and `browser_network`
+answer inside `BridgeUntrustedText`, which names the address, says the lines are data, and quotes
+any line of the page that would have read as the closing marker. That is not a defence and is not
+described as one: nothing stops a model that decides to obey the page. It removes the excuse. The
+picture `browser_screenshot` returns carries the same sentence beside it, and a browser tab's name
+and address are page-written too, so `pane_list` and `browser_read` carry the note as well. An
+outline line quotes names with their line breaks and quotes escaped, so a button cannot name itself
+into a second element, and a password field reports its length and never its value.
 
 **Nothing here can reach another workspace's window.** There is no workspace argument on any of
 them, exactly as with the four older pane tools, so an agent cannot read a page in a window
 somebody is working in on the other side of the sidebar.
 
-**And nothing here opens a page.** A caller names a browser by the number `pane_list` gives it,
-counting along the strip, and the tools act only on a pane that already has a live web view.
-`CenterTabStore.liveBrowser` is what they ask, never `browser(for:)`, so a listing cannot cause a
-page to be fetched: a tab restored from the last launch that nobody has looked at is reported with
-the address it remembers and refused for anything needing a live page. `browser_go` takes the two
-schemes `pane_open` takes and refuses the rest, through the same reading, so neither door will
-render `file:///` in the owner's window on a model's say-so.
+**Listing never opens a page; acting does.** A caller names a browser by the number `pane_list`
+gives it, counting along the strip. `pane_list` and `browser_read` ask
+`CenterTabStore.liveBrowser`, so a listing cannot cause a page to be fetched: a tab restored from
+the last launch that nobody has looked at is reported with the address it remembers. Every other
+browser tool asks `browser(for:)`, which makes the web view when no pane has drawn it yet, and they
+used not to: an agent that opened a browser behind the tab in front was told nobody had opened it,
+and passed that on as "the page won't load until you click that pane". None of those tools is
+self-approved, so a person has agreed to the call by the time the page is loaded. A web view that
+has never been in a window is given a laptop-sized frame, because one measured outside a window
+loads, runs script and snapshots correctly once it has a size, and at zero points it draws nothing.
+The tools that read a page wait up to ten seconds for a load in progress first. `browser_go` takes
+the two schemes `pane_open` takes and refuses the rest, through the same reading, so neither door
+will render `file:///` in the owner's window on a model's say-so.
 
 ### The strip, and what a tab tells a caller
 
@@ -869,16 +898,17 @@ which tab the reader is looking at, and one click puts it back. The cost that is
 interruption, and it is answered in the tool's description rather than by a prompt: a person may be
 typing in the tab in front, so the tool says to ask before pulling them out of it.
 
-**The seven browser tools split, and the line between them is the chrome.** `pane_list` and
+**The fourteen browser tools split, and the line between them is the chrome.** `pane_list` and
 `browser_read` report the strip and the address bar: what is open, what it is called, where each
 browser is pointed, whether it is loading. Every fact of that is on the screen in front of the owner
 already, none of it is the contents of a page, and they have to be callable unattended because they
-are the first call of any turn that then does something useful. The other five are off the list, in
-two groups. `browser_reload`, `browser_go` and `browser_scroll` change what the person is looking
-at: a reload can lose what they had half typed into a form, a navigation is a request made from
-their browser with whatever they are logged into, and a scroll moves the page under somebody who is
-reading it. `browser_screenshot` and `browser_text` carry the page itself into a model's context,
-which is to say off this machine, and a page he is signed into is his own data. Bloom cannot tell a
+are the first call of any turn that then does something useful. The other twelve are off the list, in
+two groups. `browser_reload`, `browser_go`, `browser_scroll`, `browser_click`, `browser_fill`,
+`browser_press` and `browser_wait` change what the person is looking at or act in it as them:
+a reload can lose what they had half typed into a form, a navigation is a request made from their
+browser with whatever they are logged into, and a scroll moves the page under somebody who is
+reading it. `browser_screenshot`, `browser_text`, `browser_snapshot`, `browser_console` and
+`browser_network` carry the page itself into a model's context, which is to say off this machine, and a page he is signed into is his own data. Bloom cannot tell a
 dev server's front page from an administration screen, so it does not try: it asks, and the person
 who can tell answers.
 

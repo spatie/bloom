@@ -10,9 +10,14 @@ import BloomCore
 /// rebuilds views whenever anything near them changes, and a rebuilt `WKWebView` is a page that
 /// reloads itself, forgets its history and throws away the form you were halfway through.
 ///
-/// It is an ordinary web view and nothing more. There is no message handler, no scheme handler and
-/// no injected script, so a page loaded here has exactly the reach any page in Safari would have:
-/// none at all into this app, its database, its worktrees or the user's credentials.
+/// It is an ordinary web view and nothing more. There is no scheme handler, and a page loaded here
+/// has exactly the reach any page in Safari would have: none at all into this app, its database,
+/// its worktrees or the user's credentials.
+///
+/// The one message handler is the console listener, and it is added only when an agent first
+/// calls `browser_console`. What a page can do with it is post lines into a capped log that
+/// reaches a model marked as untrusted, which is no more than the page could already say in its
+/// own text. See `BrowserSession+Agent`.
 @MainActor
 @Observable
 final class BrowserSession {
@@ -86,6 +91,10 @@ final class BrowserSession {
     /// What this page has handed over, newest last, for the strip under the toolbar. It is also
     /// what holds each download's delegate alive, since `WKDownload.delegate` is weak.
     private(set) var downloads: [BrowserDownloadItem] = []
+
+    /// What the page has logged since an agent first asked. Internal rather than private because
+    /// `BrowserSession+Agent` is its writer. See `BrowserConsoleLog`.
+    @ObservationIgnored var consoleLog = BrowserConsoleLog()
 
     /// Find in Page: whether the bar is up, what is in it and how the last search went. The rules
     /// are `BrowserFind` in the core.
@@ -568,6 +577,7 @@ final class BrowserSession {
         // WebKit's completion handler hangs that page for ever, and a closing tab must not leave a
         // sheet standing on the window either. See `BrowserDialogPresenter`.
         dialogPresenter.dismiss()
+        stopListeningToConsole()
         webView.stopLoading()
         webView.navigationDelegate = nil
         // With the navigation delegate, and for the same reason: a page whose pane has gone must

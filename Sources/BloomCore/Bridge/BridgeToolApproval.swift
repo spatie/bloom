@@ -51,7 +51,7 @@ import Foundation
 ///
 /// ## The browser pane, which is where the line got its sharpest test
 ///
-/// Seven tools reach a browser pane the owner has open, and two of them are on the list. The
+/// Fourteen tools reach a browser pane the owner has open, and two of them are on the list. The
 /// question is not how destructive each one is, it is what a page in that pane actually is: his
 /// own application, logged in as him, with a live session. Anything that reads it out or acts
 /// inside it is doing so as him.
@@ -71,11 +71,19 @@ import Foundation
 /// and a page he is signed into is his data. Bloom cannot tell a dev server's front page from an
 /// administration screen, so it does not try: it asks, and the person who can tell answers.
 ///
-/// **There is no tool here that runs script in the page, and that is a decision rather than an
-/// omission.** The argument is at the head of `BrowserPaneCommand`, and the part that belongs on
-/// this list is that self-approval could not have rescued it: a permission prompt showing a
-/// paragraph of JavaScript is a prompt nobody can evaluate, so keeping it off the list would have
-/// been a safeguard in name only.
+/// The seven that act inside a page or read what it has logged are off the list too, and for both
+/// reasons at once. `browser_click`, `browser_fill` and `browser_press` act as him in a page he
+/// may be signed into, and `browser_wait` is only ever the step between two of them.
+/// `browser_snapshot`, `browser_console` and `browser_network` carry the page off this machine the
+/// way `browser_text` does, and a console or a request list can hold a token as easily as a page
+/// can. Each prompt names a reference or a key rather than a script, which is what makes it a
+/// question a person can answer.
+///
+/// **There is no tool here that runs arbitrary script in the page, and that is a decision rather
+/// than an omission.** The argument is at the head of `BrowserPaneCommand`, and the part that
+/// belongs on this list is that self-approval could not have rescued it: a permission prompt
+/// showing a paragraph of JavaScript is a prompt nobody can evaluate, so keeping it off the list
+/// would have been a safeguard in name only.
 ///
 /// `workspace_merge` is off the list too, and it draws the line one step further out. It destroys
 /// nothing: it sends a turn, and the agent that reads it runs the merge in front of the owner. But
