@@ -12,7 +12,7 @@ struct ServerOwnershipTests {
         await fixture.runner.gate.waitForStart()
         let first = Task { await daemon.shutdown() }, second = Task { await daemon.shutdown() }
         await fixture.runner.gate.waitForTermination()
-        await #expect(throws: ServerFailure.self) { try await fixture.start() }
+        try await fixture.expectOwnershipRefused()
         fixture.runner.allowExit()
         await first.value; await second.value
         // The stopped daemon value is still alive here. Ownership ends with its awaited cleanup,
@@ -28,9 +28,11 @@ struct ServerOwnershipTests {
         await fixture.runner.gate.waitForStart()
         daemon = nil
         await fixture.runner.gate.waitForTermination()
-        await #expect(throws: ServerFailure.self) { try await fixture.start() }
+        try await fixture.expectOwnershipRefused()
         fixture.runner.allowExit()
-        await waitUntil("daemon deinit releases ownership after cleanup") {
+        // Returns as soon as the replacement starts. The limit is long for the reason the
+        // fixture's runner exit grace is: CI's executor stalls outlast the default six seconds.
+        await waitUntil("daemon deinit releases ownership after cleanup", within: .seconds(600)) {
             do {
                 let replacement = try await fixture.start()
                 await replacement.shutdown()
@@ -74,8 +76,25 @@ private struct OwnershipFixture: Sendable {
         let workspace = try await store.upsert(Workspace(repoID: repo.id, name: "Fixture", branch: "main", path: directory, baseBranch: "main"))
         session = try await store.upsert(Session(workspaceID: workspace.id))
     }
+    /// The runner exit grace is ten minutes here rather than production's six seconds. These
+    /// tests hold the runner alive on purpose until `allowExit()`, and CI's test executor stalls
+    /// for thirty seconds and more, which let the real grace expire first: shutdown finished
+    /// and released ownership while the runner still counted as alive, and the next start failed.
+    /// Only `allowExit()` can end the wait now.
     func start() async throws -> ServerDaemon {
-        try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [.claudeCode] }, makeRunner: { [runner] _, _, _ in runner })
+        try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [.claudeCode] }, makeRunner: { [runner] _, _, _ in runner }, runnerExitGrace: .seconds(600))
+    }
+
+    /// A start refused because this directory is owned, and for no other reason. Checking only
+    /// the error type let a start that failed on something else pass as a refusal.
+    func expectOwnershipRefused(sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        do {
+            let unexpected = try await start()
+            Issue.record("Expected the data directory to still be owned", sourceLocation: sourceLocation)
+            await unexpected.shutdown()
+        } catch let failure as ServerFailure {
+            #expect(failure.message == "A Bloom server already owns this data directory.", sourceLocation: sourceLocation)
+        }
     }
 }
 
