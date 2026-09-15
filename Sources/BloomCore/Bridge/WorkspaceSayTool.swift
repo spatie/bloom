@@ -73,12 +73,24 @@ public struct WorkspaceSayTool: BridgeToolHandling {
             workspace_say" is a message it will carry out. Write it as a message to that agent. It \
             cannot see this conversation.
 
-            While it is queued, the owner can cancel it from either chat. If they do, Bloom tells \
-            you here.
+            While it is queued, the owner can delete it from the chat it was sent to. If they do, \
+            Bloom tells you here.
 
             It returns once the message is in that chat. It does not wait for an answer and there \
             is no way to wait for one from here, so say what you sent and get on with your own \
             work. An answer arrives in this chat as a message of its own.
+
+            Pass notify_when_done: true to have Bloom tell this chat once, by itself, when the \
+            turn your message causes there comes to rest: finished (with that agent's last \
+            message), failed (with the reason), or blocked waiting on the owner for a permission \
+            prompt or a question. With it, there is no need to ask the other agent to report \
+            back when it is done.
+
+            Bloom refuses a message identical to one you sent the same workspace in the last \
+            \(Int(WorkspaceSayThrottle.window / 60)) minutes, and more than \
+            \(WorkspaceSayThrottle.limit) messages to the same workspace in that time. Do not \
+            thank or acknowledge an answer with another message: that starts a turn there for \
+            nothing.
 
             A workspace that another agent started may only write to the workspace that started \
             it, or to a workspace whose message has reached it.
@@ -98,6 +110,14 @@ public struct WorkspaceSayTool: BridgeToolHandling {
                     "type": .string("string"),
                     "description": .string(
                         "What to say, written to that agent. It cannot see this conversation."
+                    ),
+                ]),
+                WorkspaceDoneWatch.argument: .object([
+                    "type": .string("boolean"),
+                    "description": .string(
+                        "Have Bloom tell this chat once when the turn this message causes there "
+                            + "comes to rest: finished, failed, or waiting on the owner. Defaults "
+                            + "to false."
                     ),
                 ]),
             ]),
@@ -147,27 +167,48 @@ public struct WorkspaceSayTool: BridgeToolHandling {
                 return .failure(WorkspaceSayTrouble.toItself.sentence)
             }
 
+            // The brake on two agents answering each other for ever. The owner's own client is
+            // exempt: a person is typing there, and a person repeating themselves means it.
+            if identity.role != .owner, let source = sender.workspace {
+                let now = Date()
+                let recent = try await store.workspaceMessages(
+                    from: source.id, to: target.id, since: now.addingTimeInterval(-WorkspaceSayThrottle.window)
+                )
+                if let trouble = WorkspaceSayThrottle.refusal(
+                    sending: text, to: target.name, recent: recent, now: now
+                ) {
+                    return .failure(trouble.sentence)
+                }
+            }
+
             // Which chat an answer goes to: the one that last wrote to this workspace from there.
             var heard: WorkspaceMessage?
             if let source = sender.workspace {
                 heard = try await store.latestWorkspaceMessage(from: target.id, to: source.id)
             }
 
+            // Asked for, and possible: there has to be a chat to tell. The owner's own client has
+            // none, so the flag is dropped and the answer says so rather than refusing a message
+            // the owner meant to send.
+            let wantsNotice = WorkspaceDoneWatch.isRequested(request.param(WorkspaceDoneWatch.argument))
+            let sendEnd = sender.end
+
             let projectName = try await store.repo(id: target.repoID)?.name ?? ""
             let message = WorkspaceMessage(
-                source: sender.end,
+                source: sendEnd,
                 target: WorkspaceMessageEnd(
                     workspaceID: target.id, workspace: target.name, project: projectName
                 ),
                 replySessionID: heard?.source.sessionID,
-                text: text
+                text: text,
+                notifyWhenDone: wantsNotice && sendEnd.sessionID != nil
             )
 
             switch await deliver(message) {
             case .refused(let sentence):
                 return .failure(WorkspaceSayTrouble.appRefused(sentence).sentence)
             case .sent(let sent):
-                return .json(Self.answer(sent))
+                return .json(Self.answer(sent, noticeRequested: wantsNotice))
             }
         } catch {
             return .failure(WorkspaceSayTrouble.unexplained(error.readableMessage).sentence)
@@ -254,14 +295,24 @@ public struct WorkspaceSayTool: BridgeToolHandling {
         static let project = "project"
         static let chat = "chat"
         static let note = "note"
+        static let notifyWhenDone = WorkspaceDoneWatch.argument
     }
 
-    static func answer(_ message: WorkspaceMessage) -> JSONValue {
+    static func answer(_ message: WorkspaceMessage, noticeRequested: Bool = false) -> JSONValue {
         let reply = message.source.workspaceID == nil
             ? "This connection is not a workspace, so the agent there cannot answer you with "
                 + "workspace_say. Call workspace_list to see what became of it."
             : "If it answers, it answers with workspace_say, and its message lands in this chat, "
                 + "unless another chat in this workspace writes to it before it does."
+        let notice = if message.notifyWhenDone {
+            " Bloom will tell this chat once, by itself, when the turn this message causes there "
+                + "comes to rest: finished, failed, or waiting on the owner."
+        } else if noticeRequested {
+            " notify_when_done was ignored: this connection is not a chat in a Bloom workspace, so "
+                + "there is nowhere to deliver the notice."
+        } else {
+            ""
+        }
         let chat = message.target.chat
         return .object([
             Key.state: .string(message.state.rawValue),
@@ -270,11 +321,12 @@ public struct WorkspaceSayTool: BridgeToolHandling {
             Key.workspace: .string(message.target.workspace),
             Key.project: .string(message.target.project),
             Key.chat: .string(chat),
+            Key.notifyWhenDone: .bool(message.notifyWhenDone),
             Key.note: .string(
                 "Sent to the chat '\(chat)' in '\(message.target.workspace)', with the owner's "
                     + "authority. It starts a turn there, or waits for the one that is running, "
-                    + "and the owner can cancel it while it waits. Bloom does not wait for an "
-                    + "answer, so get on with your own work. " + reply
+                    + "and the owner can delete it there while it waits. Bloom does not wait for "
+                    + "an answer, so get on with your own work. " + reply + notice
             ),
         ])
     }
@@ -327,6 +379,10 @@ public enum WorkspaceSayTrouble: Error, Sendable, Equatable {
     case toItself
     case callerHasGone
     case childOutOfReach(given: String)
+    /// The same words, to the same workspace, inside the window. See `WorkspaceSayThrottle`.
+    case repeated(workspace: String)
+    /// Too many messages to the same workspace inside the window.
+    case tooMany(workspace: String, count: Int)
     case appRefused(String)
     case unexplained(String)
 
@@ -384,6 +440,23 @@ public enum WorkspaceSayTrouble: Error, Sendable, Equatable {
                 Another agent started this workspace, so it may only write to the workspace that \
                 started it, or to one whose message has reached it, and '\(given)' is neither. Say \
                 what you need to the workspace that started you, and let it decide.
+                """
+
+        case .repeated(let workspace):
+            return """
+                You already sent exactly that message to '\(workspace)' in the last \
+                \(Int(WorkspaceSayThrottle.window / 60)) minutes, and it arrived, so Bloom did not \
+                send it again. Do not retry. Wait for the answer, which lands in this chat, or tell \
+                the owner if you are stuck.
+                """
+
+        case let .tooMany(workspace, count):
+            return """
+                You have sent \(count) messages to '\(workspace)' in the last \
+                \(Int(WorkspaceSayThrottle.window / 60)) minutes, which is as many as Bloom lets one \
+                workspace send another, so this one was not sent. Two agents answering each other \
+                is a loop that spends a turn on both sides every round. Do not retry and do not \
+                acknowledge: wait for the answer you are owed, or tell the owner what you need.
                 """
 
         case .appRefused(let sentence):

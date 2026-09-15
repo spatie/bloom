@@ -1129,6 +1129,45 @@ public actor Store {
             CREATE INDEX IF NOT EXISTS workspace_messages_route
                 ON workspace_messages(source_workspace_id, target_workspace_id, state);
             """),
+
+            // A chat that asked `workspace_say` or `workspace_start` to tell it when the other
+            // workspace's turn comes to rest. See `WorkspaceDoneWatch`.
+            //
+            // A table of its own rather than two columns on `workspace_messages`, because a start
+            // has no message row and both kinds are looked up the same way: by the workspace whose
+            // turn just ended, unspent. `notified_at` is the whole of "at most once": the notice
+            // goes only when the `UPDATE` setting it changed a row. `notify_when_done` on the
+            // message is the record of what was asked, for a reader of that row.
+            //
+            // The column is added only when missing, because `ALTER TABLE ADD COLUMN` has no `IF
+            // NOT EXISTS` and the store's own tests rewind `user_version` to reproduce an old
+            // schema, which would otherwise take the migration transaction with it.
+            { db in
+                let columns = Set(
+                    try db.query("PRAGMA table_info(workspace_messages);").compactMap { $0.string("name") }
+                )
+                if !columns.contains("notify_when_done") {
+                    try db.execute(
+                        "ALTER TABLE workspace_messages ADD COLUMN notify_when_done INTEGER NOT NULL DEFAULT 0;"
+                    )
+                }
+                try db.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_done_watches (
+                    id TEXT PRIMARY KEY,
+                    message_id TEXT,
+                    watcher_session_id TEXT NOT NULL,
+                    target_workspace_id TEXT NOT NULL,
+                    target_workspace_name TEXT NOT NULL DEFAULT '',
+                    target_project_name TEXT NOT NULL DEFAULT '',
+                    target_session_id TEXT,
+                    target_chat TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    notified_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS workspace_done_watches_target
+                    ON workspace_done_watches(target_workspace_id, notified_at);
+                """)
+            },
         ]
 
         let current = Int(try db.readUserVersion())
@@ -2962,8 +3001,8 @@ public actor Store {
                     (id, source_workspace_id, source_workspace_name, source_project_name,
                      source_session_id, source_chat, target_workspace_id, target_workspace_name,
                      target_project_name, target_session_id, target_chat, reply_session_id, body,
-                     delivery_id, state, created_at, delivered_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, NULL)
+                     delivery_id, state, created_at, delivered_at, notify_when_done)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, NULL, ?)
                 """,
                 [
                     .text(message.id),
@@ -2981,10 +3020,113 @@ public actor Store {
                     .text(message.text),
                     .text(delivery.id),
                     .double(message.createdAt.timeIntervalSince1970),
+                    .int(message.notifyWhenDone ? 1 : 0),
                 ]
             )
+            // In the same transaction, so a message that asked to be told about is never in a
+            // queue without the promise, and a promise never outlives a message that failed to go
+            // in. A sender with no chat has nowhere to be told, and the tool has already said so.
+            if message.notifyWhenDone, let watcher = message.source.sessionID,
+               let targetWorkspaceID = message.target.workspaceID {
+                try insert(WorkspaceDoneWatch(
+                    cause: .message(message.id, state: .queued),
+                    watcherSessionID: watcher,
+                    target: WorkspaceMessageEnd(
+                        workspaceID: targetWorkspaceID,
+                        workspace: message.target.workspace,
+                        project: message.target.project,
+                        sessionID: chat.id,
+                        chat: chat.title
+                    ),
+                    createdAt: message.createdAt
+                ))
+            }
             return try workspaceMessage(id: message.id) ?? message
         }
+    }
+
+    /// What one workspace has sent another since a moment, cancelled messages left out, newest
+    /// first. The count `WorkspaceSayThrottle` brakes on.
+    public func workspaceMessages(
+        from source: WorkspaceID, to target: WorkspaceID, since: Date
+    ) throws -> [WorkspaceMessage] {
+        try db.query(
+            """
+            SELECT * FROM workspace_messages
+            WHERE source_workspace_id = ? AND target_workspace_id = ? AND state != 'cancelled'
+              AND created_at >= ?
+            ORDER BY created_at DESC, rowid DESC
+            """,
+            [.text(source), .text(target), .double(since.timeIntervalSince1970)]
+        ).map(Self.workspaceMessage(from:))
+    }
+
+    // MARK: - Workspace done watches
+
+    /// Records a chat's request to hear when a workspace it started comes to rest. A message's
+    /// watch is written by `enqueueWorkspaceMessage` instead, inside its transaction.
+    public func addWorkspaceDoneWatch(_ watch: WorkspaceDoneWatch) throws {
+        try insert(watch)
+    }
+
+    private func insert(_ watch: WorkspaceDoneWatch) throws {
+        let messageID: SQLValue = if case .message(let id, _) = watch.cause { .text(id) } else { .null }
+        try db.run(
+            """
+            INSERT INTO workspace_done_watches
+                (id, message_id, watcher_session_id, target_workspace_id, target_workspace_name,
+                 target_project_name, target_session_id, target_chat, created_at, notified_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            [
+                .text(watch.id),
+                messageID,
+                .text(watch.watcherSessionID),
+                watch.target.workspaceID.map { .text($0) } ?? .null,
+                .text(watch.target.workspace),
+                .text(watch.target.project),
+                watch.target.sessionID.map { .text($0) } ?? .null,
+                .text(watch.target.chat),
+                .double(watch.createdAt.timeIntervalSince1970),
+            ]
+        )
+    }
+
+    /// Every watch on a workspace that has not been spent, oldest first, each with its message's
+    /// state as it is now. A watch whose message row has gone reads as cancelled, which spends it
+    /// with nothing said.
+    public func unspentWorkspaceDoneWatches(targetWorkspaceID: WorkspaceID) throws -> [WorkspaceDoneWatch] {
+        try db.query(
+            """
+            SELECT w.*, m.state AS message_state FROM workspace_done_watches w
+            LEFT JOIN workspace_messages m ON m.id = w.message_id
+            WHERE w.target_workspace_id = ? AND w.notified_at IS NULL
+            ORDER BY w.created_at, w.rowid
+            """,
+            [.text(targetWorkspaceID)]
+        ).map(Self.workspaceDoneWatch(from:))
+    }
+
+    public func workspaceDoneWatch(id: WorkspaceDoneWatchID) throws -> WorkspaceDoneWatch? {
+        try db.query(
+            """
+            SELECT w.*, m.state AS message_state FROM workspace_done_watches w
+            LEFT JOIN workspace_messages m ON m.id = w.message_id
+            WHERE w.id = ?
+            """,
+            [.text(id)]
+        ).first.map(Self.workspaceDoneWatch(from:))
+    }
+
+    /// Spends a watch. True only for the call that spent it, which is what makes a notice go at
+    /// most once: two endings arriving together both ask, and one of them changes the row.
+    @discardableResult
+    public func claimWorkspaceDoneWatch(id: WorkspaceDoneWatchID, at date: Date = Date()) throws -> Bool {
+        try db.run(
+            "UPDATE workspace_done_watches SET notified_at = ? WHERE id = ? AND notified_at IS NULL",
+            [.double(date.timeIntervalSince1970), .text(id)]
+        )
+        return db.changedRowCount == 1
     }
 
     public func workspaceMessage(id: WorkspaceMessageID) throws -> WorkspaceMessage? {
@@ -3759,7 +3901,35 @@ public actor Store {
             // A word this build does not know is read as cancelled, which offers nothing to press.
             state: WorkspaceMessage.State(rawValue: row.string("state") ?? "") ?? .cancelled,
             createdAt: row.date("created_at") ?? Date(),
-            deliveredAt: row.date("delivered_at")
+            deliveredAt: row.date("delivered_at"),
+            notifyWhenDone: (row.int("notify_when_done") ?? 0) != 0
+        )
+    }
+
+    private static func workspaceDoneWatch(from row: Row) -> WorkspaceDoneWatch {
+        let cause: WorkspaceDoneWatch.Cause = if let messageID = row.string("message_id") {
+            // A message row that has gone, or a state this build does not know, reads as
+            // cancelled, which spends the watch with nothing said.
+            .message(
+                WorkspaceMessageID(messageID),
+                state: WorkspaceMessage.State(rawValue: row.string("message_state") ?? "") ?? .cancelled
+            )
+        } else {
+            .start
+        }
+        return WorkspaceDoneWatch(
+            id: WorkspaceDoneWatchID(row.string("id") ?? newID()),
+            cause: cause,
+            watcherSessionID: SessionID(row.string("watcher_session_id") ?? ""),
+            target: WorkspaceMessageEnd(
+                workspaceID: row.string("target_workspace_id").map(WorkspaceID.init),
+                workspace: row.string("target_workspace_name") ?? "",
+                project: row.string("target_project_name") ?? "",
+                sessionID: row.string("target_session_id").map(SessionID.init),
+                chat: row.string("target_chat") ?? ""
+            ),
+            createdAt: row.date("created_at") ?? Date(),
+            notifiedAt: row.date("notified_at")
         )
     }
 

@@ -48,7 +48,7 @@ struct CrewMessageRowView: View {
     @ViewBuilder private var content: some View {
         switch message.event {
         case .said, .brief, .relayed: spoken
-        case .stopped, .failed, .cancelled: fact
+        case .stopped, .failed, .cancelled, .workspaceDone: fact
         }
     }
 
@@ -109,7 +109,7 @@ struct CrewMessageRowView: View {
         case .relayed: "said"
         // Never drawn: a fact is its own line. Answered rather than defaulted so that a fifth
         // event has to be argued about here instead of arriving as the word "said".
-        case .stopped, .failed, .cancelled: ""
+        case .stopped, .failed, .cancelled, .workspaceDone: ""
         }
     }
 

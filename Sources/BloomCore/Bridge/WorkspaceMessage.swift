@@ -49,6 +49,11 @@ public struct WorkspaceMessage: Identifiable, Sendable, Hashable {
     public let state: State
     public let createdAt: Date
     public let deliveredAt: Date?
+    /// Whether the sending chat asked to be told when the turn this causes comes to rest. Only
+    /// ever true for a sender with a chat to tell; the tool drops it for the owner's own client.
+    /// The promise itself is a `WorkspaceDoneWatch`, written beside this row in the same
+    /// transaction.
+    public let notifyWhenDone: Bool
 
     /// A new message, built by the tool that sends it and not yet in any queue.
     public init(
@@ -57,11 +62,13 @@ public struct WorkspaceMessage: Identifiable, Sendable, Hashable {
         target: WorkspaceMessageEnd,
         replySessionID: SessionID? = nil,
         text: String,
+        notifyWhenDone: Bool = false,
         createdAt: Date = Date()
     ) {
         self.init(
             stored: id, source: source, target: target, replySessionID: replySessionID,
-            text: text, deliveryID: nil, state: .queued, createdAt: createdAt, deliveredAt: nil
+            text: text, deliveryID: nil, state: .queued, createdAt: createdAt, deliveredAt: nil,
+            notifyWhenDone: notifyWhenDone
         )
     }
 
@@ -75,7 +82,8 @@ public struct WorkspaceMessage: Identifiable, Sendable, Hashable {
         deliveryID: DeliveryID?,
         state: State,
         createdAt: Date,
-        deliveredAt: Date?
+        deliveredAt: Date?,
+        notifyWhenDone: Bool = false
     ) {
         self.id = id
         self.source = source
@@ -86,6 +94,7 @@ public struct WorkspaceMessage: Identifiable, Sendable, Hashable {
         self.state = state
         self.createdAt = createdAt
         self.deliveredAt = deliveredAt
+        self.notifyWhenDone = notifyWhenDone
     }
 
     /// What the receiving chat is handed: the words for a person, the envelope for the model, and
