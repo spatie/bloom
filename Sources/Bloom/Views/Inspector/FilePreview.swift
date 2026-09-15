@@ -72,7 +72,7 @@ struct FilePreview: View {
             header
             Hairline()
 
-            MarkdownPreviewSplit(
+            MarkdownPreviewContent(
                 path: absolutePath, revision: model.changesGeneration,
                 isPresented: $showsMarkdownPreview
             ) {
@@ -85,6 +85,7 @@ struct FilePreview: View {
         .onChange(of: isEditable) { _, editable in
             if !editable { isEditing = false }
         }
+        .onChange(of: isEditing) { _, _ in showsMarkdownPreview = false }
     }
 
     private var sourcePane: some View {

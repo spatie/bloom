@@ -263,6 +263,7 @@ struct DiffView: View {
             await prepareWrappedRows()
         }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
+        .onChange(of: mode) { _, _ in showsMarkdownPreview = false }
         .onChange(of: fileComments) { _, _ in rebuild() }
         .onChange(of: draftSelection) { _, _ in rebuild() }
         .onChange(of: model.changesGeneration) { _, _ in refreshWorktreeCopy() }
@@ -321,21 +322,15 @@ struct DiffView: View {
     @ViewBuilder
     private var fileContent: some View {
         if embeddedWidth == nil {
-            MarkdownPreviewSplit(
+            MarkdownPreviewContent(
                 path: absolutePath, revision: model.changesGeneration,
                 isPresented: $showsMarkdownPreview
             ) {
                 sourceContent
             }
         } else if showsMarkdownPreview {
-            MarkdownPreviewSplit(
-                path: absolutePath, revision: model.changesGeneration,
-                isPresented: $showsMarkdownPreview
-            ) {
-                ScrollView([.horizontal, .vertical]) {
-                    sourceContent
-                }
-                .defaultScrollAnchor(.topLeading)
+            MarkdownFilePreview(path: absolutePath, revision: model.changesGeneration) {
+                showsMarkdownPreview = false
             }
             .frame(height: 480)
         } else {
