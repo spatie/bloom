@@ -16,6 +16,13 @@ struct SidebarRepoGroup: Identifiable {
     /// the filter is letting through, and a filter that hides the unread one would otherwise make
     /// the project claim there is nothing waiting, which is the opposite of what the mark is for.
     var hasUnreadWork: Bool
+    /// How many workspaces the project has before the filter is applied.
+    ///
+    /// What tells a project with nothing in it from one whose rows are all filtered out, which is
+    /// the difference between a project the pane leaves out and a project that says "Nothing
+    /// matches the filter". A filter is a question you ask for a moment, and a project vanishing
+    /// while you ask it is the pane answering a different question. See `SidebarPaneRow.rows`.
+    var totalWorkspaces: Int
 
     var id: RepoID { repo.id }
 
@@ -43,7 +50,10 @@ struct SidebarRepoGroup: Identifiable {
             let all = byRepo[repo.id] ?? []
             let rows = SidebarReorder.drawn(all.filter(filter.accepts))
             return SidebarRepoGroup(
-                repo: repo, workspaces: rows, hasUnreadWork: all.contains(where: \.unread)
+                repo: repo,
+                workspaces: rows,
+                hasUnreadWork: all.contains(where: \.unread),
+                totalWorkspaces: all.count
             )
         }
     }
@@ -73,6 +83,9 @@ enum SidebarPaneRow: Identifiable {
     case subagent(SubagentRow, workspaceID: WorkspaceID, repoID: RepoID)
     /// A workspace whose worktree is still being cut. See `PendingWorkspace`.
     case pending(PendingWorkspace)
+    /// One of the pane's section headings when it is grouped by status. Carries its count, because
+    /// a folded section is otherwise a heading that says nothing about what it is holding.
+    case statusHeading(SidebarStatusGroup, count: Int, isFolded: Bool)
     /// The sentence that stands where a project's rows would be when it has none.
     case notice(repoID: RepoID)
 
@@ -93,6 +106,7 @@ enum SidebarPaneRow: Identifiable {
         // changing rather than one row leaving and another arriving in its place.
         case .pending(let pending): "workspace:" + pending.id.rawValue
         case .notice(let repoID): "notice:" + repoID.rawValue
+        case .statusHeading(let group, _, _): "status:" + group.rawValue
         }
     }
 
@@ -105,6 +119,7 @@ enum SidebarPaneRow: Identifiable {
         case .subagent(_, _, let repoID): .subagent(projectID: repoID)
         case .pending(let pending): .pending(projectID: pending.repoID)
         case .notice(let repoID): .notice(projectID: repoID)
+        case .statusHeading: .heading
         }
     }
 
@@ -128,17 +143,32 @@ enum SidebarPaneRow: Identifiable {
     ///   `SidebarReorder.drawn` puts it last. A closure for the same reason as `subagents`, and
     ///   because a create is a change to neither the workspaces nor the projects nor the filter.
     ///   See `PendingWorkspace`.
+    /// - Parameter showsSubagents: whether the children of a workspace's turn are drawn as rows of
+    ///   their own, which is what the count on the workspace row toggles. Folded by default: a
+    ///   fan-out of six puts six rows in the middle of the pane, each a full row tall, each gone a
+    ///   minute later, and the workspace they belong to says how many there are either way.
     static func rows(
         _ groups: [SidebarRepoGroup],
         crew: (WorkspaceID) -> [CrewRow] = { _ in [] },
         subagents: (WorkspaceID) -> [SubagentRow] = { _ in [] },
-        pending: (RepoID) -> [PendingWorkspace] = { _ in [] }
+        pending: (RepoID) -> [PendingWorkspace] = { _ in [] },
+        showsSubagents: (WorkspaceID) -> Bool = { _ in true }
     ) -> [SidebarPaneRow] {
         var rows: [SidebarPaneRow] = []
         for group in groups {
+            let waiting = pending(group.id)
+            // **A project with nothing in it is not drawn at all.** It used to take two rows, its
+            // header and a sentence saying there was nothing under it, neither of which is work and
+            // both of which are in the way of the rows that are. It is still one press away: the
+            // projects button at the foot of the pane lists every project, empty ones included,
+            // each with its own `+`.
+            //
+            // A project whose rows the FILTER is hiding keeps its header and says so, which is the
+            // difference `totalWorkspaces` is for: a filter is a question asked for a moment, and a
+            // project disappearing while it is asked would be the pane answering a different one.
+            guard group.totalWorkspaces > 0 || !waiting.isEmpty else { continue }
             rows.append(.project(group))
             guard !group.repo.collapsed else { continue }
-            let waiting = pending(group.id)
             // A project whose only row is one being cut is not a project with no workspaces, so
             // the notice stays away: "No workspaces yet" printed directly above the workspace
             // being made is the sentence answering itself.
@@ -157,10 +187,13 @@ enum SidebarPaneRow: Identifiable {
                     })
                     // Directly after their workspace and in spawn order, which is what makes the
                     // reading right even though depth past one is drawn at the same indent. See
-                    // `SubagentRow.rows`.
-                    rows.append(contentsOf: subagents(workspace.id).map {
-                        .subagent($0, workspaceID: workspace.id, repoID: group.id)
-                    })
+                    // `SubagentRow.rows`. Only while the workspace's own count is open: see
+                    // `showsSubagents`.
+                    if showsSubagents(workspace.id) {
+                        rows.append(contentsOf: subagents(workspace.id).map {
+                            .subagent($0, workspaceID: workspace.id, repoID: group.id)
+                        })
+                    }
                 }
                 rows.append(contentsOf: waiting.map { .pending($0) })
             }

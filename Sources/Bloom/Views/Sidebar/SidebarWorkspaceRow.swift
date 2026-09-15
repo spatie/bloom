@@ -21,6 +21,13 @@ struct SidebarWorkspaceRow: View {
     /// The project this row is under, for the one thing the flat pane cannot say structurally.
     /// See `body`, and `RepoHeaderRow.name` for why this is words rather than an outline level.
     var projectName: String
+    /// The project, when the row has to draw its tile because no header above it says which project
+    /// this is. Only the status view passes one. See `WorkspaceRow.trailingRepo`.
+    var trailingRepo: Repo?
+    /// Whether this workspace's subagent rows are open. The set lives in `SidebarView`, because the
+    /// rows it controls are built there.
+    var isShowingSubagents: Bool = false
+    var onToggleSubagents: (() -> Void)?
     @Binding var renaming: WorkspaceID?
     @Binding var archivePresentation: SidebarArchivePresentation
 
@@ -41,6 +48,10 @@ struct SidebarWorkspaceRow: View {
             workspace: workspace,
             isRunning: app.isRunning(workspace),
             isAwaitingPermission: app.isAwaitingPermission(workspace),
+            trailingRepo: trailingRepo,
+            subagentCount: app.subagents(of: workspace.id).count,
+            isShowingSubagents: isShowingSubagents,
+            onToggleSubagents: onToggleSubagents,
             renaming: $renaming,
             onArchive: confirmRowArchive,
             onMenuArchive: { archive(from: .menu) },
