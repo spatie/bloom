@@ -45,6 +45,8 @@ struct FileHeaderBar: View {
     var onRevert: () -> Void
     var isCollapsed = false
     var onToggleCollapsed: (() -> Void)?
+    var showsMarkdownPreview = false
+    var onToggleMarkdownPreview: (() -> Void)?
 
     @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
     @AppStorage(DiffWhitespaceSetting.storageKey) private var ignoresWhitespace = false
@@ -115,6 +117,9 @@ struct FileHeaderBar: View {
                     compact
                     collapsed
                 }
+            }
+            if let onToggleMarkdownPreview {
+                MarkdownPreviewButton(isPresented: showsMarkdownPreview, action: onToggleMarkdownPreview)
             }
         }
         .padding(.horizontal, InspectorLayout.inset)

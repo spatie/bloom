@@ -1,7 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// A file the agent did not touch: rendered Markdown or highlighted source, and the same file editable.
+/// A file the agent did not touch: highlighted source, with editing and an optional Markdown preview.
 ///
 /// The View / Edit pair is the whole point of the bar. Every route into a changed file gets
 /// `FileHeaderBar`, which names both of its states in words; a file git has nothing to say about
@@ -23,7 +23,7 @@ struct FilePreview: View {
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
     @State private var language: Language = .plainText
-    @State private var markdown: String?
+    @State private var showsMarkdownPreview = false
     @State private var maxColumns = 0
     @State private var isTruncated = false
     @State private var isLoading = true
@@ -72,31 +72,12 @@ struct FilePreview: View {
             header
             Hairline()
 
-            Group {
-                if isEditing {
-                    FileEditPane(model: model, path: path, session: session) {
-                        // The read-only half is a snapshot of the bytes at load time, so a save
-                        // leaves it a version behind. Re-read rather than left to be noticed.
-                        Task { await load() }
-                    }
-                } else if isLoading {
-                    LoadingView("Reading the file")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if lines.isEmpty {
-                    EmptyStateView(
-                        glyph: "doc",
-                        title: "Nothing to show",
-                        message: "\(filename) is empty, or is not text."
-                    )
-                } else if let markdown {
-                    markdownContent(markdown)
-                } else {
-                    content
-                }
+            MarkdownPreviewSplit(
+                path: absolutePath, revision: model.changesGeneration,
+                isPresented: $showsMarkdownPreview
+            ) {
+                sourcePane
             }
-            // Top, for the reason `ReviewPaneView` gives where it holds this view: an unaligned
-            // fill centres, and a short file centred in a tall pane reads as a layout accident.
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Palette.surface)
         .background { shortcut }
@@ -104,6 +85,32 @@ struct FilePreview: View {
         .onChange(of: isEditable) { _, editable in
             if !editable { isEditing = false }
         }
+    }
+
+    private var sourcePane: some View {
+        Group {
+            if isEditing {
+                FileEditPane(model: model, path: path, session: session) {
+                    // The read-only half is a snapshot of the bytes at load time, so a save
+                    // leaves it a version behind. Re-read rather than left to be noticed.
+                    Task { await load() }
+                }
+            } else if isLoading {
+                LoadingView("Reading the file")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if lines.isEmpty {
+                EmptyStateView(
+                    glyph: "doc",
+                    title: "Nothing to show",
+                    message: "\(filename) is empty, or is not text."
+                )
+            } else {
+                content
+            }
+        }
+        // Top, for the reason `ReviewPaneView` gives where it holds this view: an unaligned
+        // fill centres, and a short file centred in a tall pane reads as a layout accident.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// Cmd+E, the same key `DiffView` binds to the same choice, so one keystroke means "the other
@@ -146,6 +153,11 @@ struct FilePreview: View {
             openInMenu
             if canEditInBloom {
                 modePicker
+            }
+            if Language.detect(path: path) == .markdown {
+                MarkdownPreviewButton(isPresented: showsMarkdownPreview) {
+                    showsMarkdownPreview.toggle()
+                }
             }
         }
         .padding(.horizontal, InspectorLayout.inset)
@@ -236,23 +248,6 @@ struct FilePreview: View {
     /// choice the same way. This used to ask, open, and hand the miss to a second answer.
     private func openInPreferredApp() {
         Reveal.inEditor(absolutePath, repo: model.repo?.id)
-    }
-
-    private func markdownContent(_ text: String) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-                MarkdownView(text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if isTruncated {
-                    Text("Showing the first \(Self.lineLimit.formatted()) lines")
-                        .font(Typo.micro)
-                        .foregroundStyle(Palette.textTertiary)
-                }
-            }
-            .padding(InspectorLayout.inset)
-        }
-        .defaultScrollAnchor(.topLeading)
-        .scrollBounceBehavior(.basedOnSize)
     }
 
     /// `GeometryReader` because the sheet has to be at least as wide as the container AND at least
@@ -384,14 +379,8 @@ struct FilePreview: View {
             let all = source.components(separatedBy: "\n")
             let truncated = all.count > lineLimit
             let kept = truncated ? Array(all.prefix(lineLimit)) : all
-            let markdown = detected == .markdown ? kept.joined(separator: "\n") : nil
-            if let markdown {
-                // Warm the shared parse cache off the main actor before the viewer asks for it.
-                _ = MarkdownPrime.blocks(of: markdown)
-            }
             return Prepared(
                 lines: kept,
-                markdown: markdown,
                 carries: CarryPass.states(for: kept, language: detected),
                 maxColumns: min(
                     kept.reduce(0) { max($0, CodeMetrics.columns(of: $1)) }, columnLimit
@@ -404,13 +393,11 @@ struct FilePreview: View {
 
         guard let prepared else {
             lines = []
-            markdown = nil
             isLoading = false
             return
         }
 
         lines = prepared.lines
-        markdown = prepared.markdown
         carries = prepared.carries
         language = detected
         isTruncated = prepared.isTruncated
@@ -421,7 +408,6 @@ struct FilePreview: View {
     /// Everything the reader needs about a file, so the whole of the reading is one hop.
     private struct Prepared: Sendable {
         var lines: [String]
-        var markdown: String?
         var carries: [LexState]
         var maxColumns: Int
         var isTruncated: Bool
