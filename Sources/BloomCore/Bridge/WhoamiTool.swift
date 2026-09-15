@@ -9,12 +9,12 @@ import Foundation
 /// either.
 ///
 /// It also earns its place past phase one. An agent that can see the branch it is on and the
-/// worktree it is in stops guessing at both from `git` output and a `pwd`, and a child that is
-/// about to be told "you were spawned by workspace X" has somewhere to check that against.
+/// worktree it is in stops guessing at both from `git` output and a `pwd`, and an agent in a
+/// workspace another agent started has somewhere to check which one that was.
 public struct WhoamiTool: BridgeToolHandling {
     public init() {}
 
-    public let roles: Set<BridgeRole> = [.parent, .child, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: "whoami",

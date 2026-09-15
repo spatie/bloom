@@ -1,17 +1,20 @@
 import BloomCore
 
-/// The app's half of `pane_list` and the six `browser_` tools: reading the strip, and doing one
-/// thing to one browser pane.
+/// The app's half of `pane_list` and the `browser_` tools: reading the strip, and doing one thing
+/// to one browser pane.
 ///
 /// Beside `AppModel+WorkspaceBridge.swift` rather than in it, because that file is about starting
 /// a workspace and putting panes on the screen, and this one is about looking at what is already
 /// there. They share `paneTarget`, which is why that one stopped being private.
 ///
-/// **Nothing here creates a web view.** `CenterTabStore.liveBrowser` is asked rather than
-/// `browser(for:)`, so a tool call cannot cause a page to be fetched that nobody had opened: a tab
-/// restored from the last launch and never looked at is reported with the address it remembers and
-/// is refused for anything that needs a live page. A listing that quietly loaded six pages would
-/// be a listing that acts.
+/// **Reading never creates a web view; acting does.** `pane_list` and `browser_read` ask
+/// `CenterTabStore.liveBrowser`, so a listing cannot cause a page to be fetched that nobody had
+/// opened. A listing that quietly loaded six pages would be a listing that acts. Every other tool
+/// goes through `browser(for:)`, and it used not to. That was the bug an agent reported as "the
+/// page won't load until you click that pane": it opened a browser in a tab behind the one in
+/// front, no view had drawn it, so there was no session, and screenshot and text both refused. A
+/// tool that is not self-approved has been answered by a person by the time it gets here, so
+/// loading the page it names is what they agreed to.
 extension AppModel {
     // MARK: - The census
 
@@ -159,7 +162,7 @@ extension AppModel {
 
     // MARK: - Driving one pane
 
-    /// The six `browser_` tools, which all arrive here.
+    /// The `browser_` tools, which all arrive here.
     ///
     /// The pane is chosen by `BrowserPaneChoice.choose` in the core rather than by a rule of this
     /// file's own, so what a model is told when it names browser 4 of two is a sentence the suite
@@ -188,17 +191,22 @@ extension AppModel {
         let tabs = browserTabs(in: model)
         // Counted again rather than remembered, because the strip is live: a tab closed between
         // the census above and this line leaves the number naming something else or nothing.
-        guard chosen.number <= tabs.count,
-              let session = model.paneStores.center.liveBrowser(for: tabs[chosen.number - 1]) else {
+        guard chosen.number <= tabs.count else {
             return .refused(
-                "Browser \(chosen.number) is a tab nobody has opened this session, so there is no "
-                    + "page in it yet. It remembers \(chosen.address). Ask the person to click "
-                    + "the tab, or open what you need with pane_open."
+                "Browser \(chosen.number) was closed while Bloom was finding it. Call pane_list "
+                    + "again."
             )
         }
-        return await perform(
-            command, on: session, tab: tabs[chosen.number - 1], report: chosen, center: model.paneStores.center
-        )
+        let tab = tabs[chosen.number - 1]
+        let center = model.paneStores.center
+        // Made here when no pane has drawn it yet. See the head of this file.
+        let session = center.browser(for: tab, root: model.workspace.path)
+        session.prepareForAgent()
+        if command.readsPage { await session.settle() }
+        // Read again, because the census above was taken before the page had loaded, and a
+        // failure that arrived while settling is the one thing a screenshot must not miss.
+        let current = report(tab, number: chosen.number, name: chosen.name, center: center)
+        return await perform(command, on: session, tab: tab, report: current, center: center)
     }
 
     /// One verb, on one live pane.
@@ -242,13 +250,6 @@ extension AppModel {
                 return .told(
                     trouble + " There is nothing of the page to photograph. browser_read carries "
                         + "the same fact, and browser_reload tries again."
-                )
-            }
-            guard session.webView.bounds.width > 0 else {
-                return .refused(
-                    "Browser \(report.number) is not on screen at the moment, and a picture of a "
-                        + "pane that is not being drawn has nothing in it. Ask the person to bring "
-                        + "that tab to the front."
                 )
             }
             do {
@@ -299,6 +300,67 @@ extension AppModel {
             } catch {
                 return .refused(error.readableMessage)
             }
+
+        default:
+            return await act(command, on: session, report: report)
+        }
+    }
+
+    /// The tools that act inside a page or read what it logged. Every sentence is
+    /// `BrowserInteractionReport` in the core; this is the wiring.
+    private func act(
+        _ command: BrowserPaneCommand, on session: BrowserSession, report: BrowserPaneReport
+    ) async -> BrowserPaneAnswer {
+        // Nothing to outline, click or read in a pane showing Bloom's own error card.
+        if command.readsPage, let trouble = report.trouble {
+            return .told(trouble + " browser_reload tries again.")
+        }
+        do {
+            switch command {
+            case .snapshot:
+                let outline = try await session.outline()
+                return .told(
+                    BridgeUntrustedText.wrap(outline.rendered, from: report.address) + "\n\n"
+                        + BrowserInteractionReport.snapshotFooter
+                )
+
+            case .click(_, let ref):
+                return BrowserInteractionReport.click(try await session.click(ref), ref: ref)
+
+            case .fill(_, let ref, let text):
+                return BrowserInteractionReport.fill(
+                    try await session.fill(ref, with: text), ref: ref, text: text
+                )
+
+            case .press(_, let ref, let key):
+                return BrowserInteractionReport.press(
+                    try await session.press(key, on: ref), key: key, ref: ref
+                )
+
+            case .wait(_, let wait):
+                return BrowserInteractionReport.wait(wait, await session.wait(wait))
+
+            case .console(_, let request):
+                let starting = !session.consoleLog.isListening
+                session.listenToConsole()
+                let log = session.consoleLog.rendered(errorsOnly: request.errorsOnly)
+                if request.clear { session.consoleLog.clear() }
+                let note = starting ? "\n\n" + BrowserInteractionReport.consoleJustStarted : ""
+                return .told(BridgeUntrustedText.wrap(log, from: report.address) + note)
+
+            case .network(_, let filter):
+                let log = try await session.network()
+                return .told(
+                    BridgeUntrustedText.wrap(log.rendered(filter: filter), from: report.address)
+                        + "\n\n" + BrowserInteractionReport.networkNote
+                )
+
+            case .read, .reload, .go, .screenshot, .scroll, .text:
+                // Answered by `perform`, which only hands the rest on.
+                return .refused("Bloom routed \(command.toolName) to the wrong place.")
+            }
+        } catch {
+            return .refused(error.readableMessage)
         }
     }
 }

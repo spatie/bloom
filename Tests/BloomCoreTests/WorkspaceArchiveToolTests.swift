@@ -8,11 +8,8 @@ struct WorkspaceArchiveToolTests {
         let tool = WorkspaceArchiveTool { _ in .archived }
         let toolbox = BridgeToolbox(handlers: [tool])
         #expect(toolbox.handler(named: "workspace_archive", for: .owner) != nil)
-        #expect(toolbox.handler(named: "workspace_archive", for: .parent) != nil)
-        // A child reports and nothing else, here as everywhere.
-        #expect(toolbox.handler(named: "workspace_archive", for: .child) == nil)
-        #expect(toolbox.tools(for: .parent).map(\.name).contains("workspace_archive"))
-        #expect(!toolbox.tools(for: .child).map(\.name).contains("workspace_archive"))
+        #expect(toolbox.handler(named: "workspace_archive", for: .workspace) != nil)
+        #expect(toolbox.tools(for: .workspace).map(\.name).contains("workspace_archive"))
         // Removing a worktree stays a question a person answers, whichever role asks it.
         #expect(!BridgeToolApproval.selfApproved.contains("workspace_archive"))
         #expect(!BridgeToolApproval.isSelfApproved(
@@ -40,23 +37,9 @@ struct WorkspaceArchiveToolTests {
         #expect(await calls.orders.isEmpty)
     }
 
-    @Test("a child cannot reach the handler even by speaking raw MCP at it")
-    func childRoleGate() async throws {
-        let (store, workspace) = try await fixture()
-        let tool = WorkspaceArchiveTool { _ in
-            Issue.record("a child reached the archive lifecycle")
-            return .archived
-        }
-        let identity = BridgeIdentity(
-            sessionID: SessionID("child-session"), workspaceID: workspace.id, role: .child
-        )
-        let result = await tool.call(request([:]), as: identity, store: store)
-        #expect(result.isError)
-    }
+    // MARK: - A workspace agent archives its own, or one it started, and no other
 
-    // MARK: - A workspace agent archives its own workspace and no other
-
-    @Test("a workspace agent gets its own workspace from its token, whatever it asks for")
+    @Test("a workspace agent naming nothing gets its own workspace from its token")
     func workspaceIsolation() async throws {
         let (store, mine) = try await fixture()
         let theirs = try await second(in: store)
@@ -66,22 +49,129 @@ struct WorkspaceArchiveToolTests {
             return .requested
         }
         let identity = BridgeIdentity(
-            sessionID: SessionID("my-session"), workspaceID: mine.id, role: .parent
+            sessionID: SessionID("my-session"), workspaceID: mine.id, role: .workspace
         )
-
-        // Naming any workspace is refused rather than ignored, so a call that meant to reach
-        // another one cannot come back looking as though it worked.
-        for named in [theirs.id.rawValue, theirs.name, mine.id.rawValue] {
-            let result = await tool.call(request(["id": .string(named)]), as: identity, store: store)
-            #expect(result.isError)
-            #expect(result.text.contains("takes no arguments"))
-        }
-        #expect(await calls.orders.isEmpty)
 
         let result = await tool.call(request([:]), as: identity, store: store)
         #expect(!result.isError)
         #expect(await calls.orders.map(\.workspace.id) == [mine.id])
         #expect(try await store.workspace(id: theirs.id)?.state == .active)
+    }
+
+    /// The case that widened the tool: the workspace that handed a job out is the one that knows
+    /// it is done. Not booked for a turn, because the caller is standing in another worktree.
+    @Test("a workspace agent archives a workspace it started, by id, at once")
+    func archivesOneItStarted() async throws {
+        let (store, mine) = try await fixture()
+        let started = try await startedWorkspace(by: mine, in: store)
+        let calls = ArchiveCalls()
+        let tool = WorkspaceArchiveTool { order in
+            await calls.record(order)
+            return .archived
+        }
+        let identity = BridgeIdentity(
+            sessionID: SessionID("my-session"), workspaceID: mine.id, role: .workspace
+        )
+
+        let result = await tool.call(
+            request(["id": .string(started.id.rawValue)]), as: identity, store: store
+        )
+
+        #expect(!result.isError, "\(result.text)")
+        #expect(result.text.contains("Archived '\(started.name)'"))
+        let orders = await calls.orders
+        #expect(orders.map(\.workspace.id) == [started.id])
+        #expect(orders.map(\.afterTurnOf) == [nil])
+    }
+
+    /// Nothing is excused on the started workspace's side: its agent still running means it is
+    /// not done, whoever is asking.
+    @Test("a workspace it started with an agent still running there is refused")
+    func startedAndStillRunning() async throws {
+        let (store, mine) = try await fixture()
+        let started = try await startedWorkspace(by: mine, in: store)
+        var busy = Session(workspaceID: started.id, title: "Still going")
+        busy.state = .running
+        try await store.upsert(busy)
+        let tool = WorkspaceArchiveTool { _ in
+            Issue.record("a busy started workspace reached the archive lifecycle")
+            return .archived
+        }
+        let identity = BridgeIdentity(
+            sessionID: SessionID("my-session"), workspaceID: mine.id, role: .workspace
+        )
+
+        let result = await tool.call(
+            request(["id": .string(started.id.rawValue)]), as: identity, store: store
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("An agent is running"))
+    }
+
+    /// One sentence for a workspace that exists and one that does not, so a refusal cannot be
+    /// used to find out which ids are real.
+    @Test("a workspace it did not start, and an id nothing has, get the same refusal")
+    func notOneItStarted() async throws {
+        let (store, mine) = try await fixture()
+        let theirs = try await second(in: store)
+        let startedByThem = try await startedWorkspace(by: theirs, in: store)
+        let tool = WorkspaceArchiveTool { _ in
+            Issue.record("a workspace the caller did not start reached the archive lifecycle")
+            return .archived
+        }
+        let identity = BridgeIdentity(
+            sessionID: SessionID("my-session"), workspaceID: mine.id, role: .workspace
+        )
+
+        for named in [theirs.id.rawValue, startedByThem.id.rawValue, theirs.name, "no-such-id"] {
+            let result = await tool.call(request(["id": .string(named)]), as: identity, store: store)
+            #expect(result.isError)
+            #expect(result.text.contains("'\(named)' is not one you started"))
+        }
+        #expect(try await store.workspace(id: theirs.id)?.state == .active)
+        #expect(try await store.workspace(id: startedByThem.id)?.state == .active)
+    }
+
+    @Test("a workspace agent naming its own id is told to leave the id out")
+    func namingItsOwnID() async throws {
+        let (store, mine) = try await fixture()
+        let tool = WorkspaceArchiveTool { _ in
+            Issue.record("naming its own id reached the archive lifecycle")
+            return .archived
+        }
+        let identity = BridgeIdentity(
+            sessionID: SessionID("my-session"), workspaceID: mine.id, role: .workspace
+        )
+
+        let result = await tool.call(request(["id": .string(mine.id.rawValue)]), as: identity, store: store)
+
+        #expect(result.isError)
+        #expect(result.text.contains("That is the workspace you are in"))
+    }
+
+    @Test("a workspace agent gets no force, no branch deletion and no other argument shape")
+    func workspaceAgentArguments() async throws {
+        let (store, mine) = try await fixture()
+        let started = try await startedWorkspace(by: mine, in: store)
+        let tool = WorkspaceArchiveTool { _ in
+            Issue.record("a malformed call reached the archive lifecycle")
+            return .archived
+        }
+        let identity = BridgeIdentity(
+            sessionID: SessionID("my-session"), workspaceID: mine.id, role: .workspace
+        )
+
+        for arguments: [String: JSONValue] in [
+            ["id": .integer(1)], ["id": .string(" ")], ["force": .bool(true)],
+            ["id": .string(started.id.rawValue), "force": .bool(true)],
+            ["id": .string(started.id.rawValue), "delete_branch": .bool(true)],
+        ] {
+            let result = await tool.call(request(arguments), as: identity, store: store)
+            #expect(result.isError)
+            #expect(result.text.contains("no force option"))
+        }
+        #expect(try await store.workspace(id: started.id)?.state == .active)
     }
 
     @Test("a token naming a workspace that has gone is refused rather than guessed at")
@@ -92,7 +182,7 @@ struct WorkspaceArchiveToolTests {
             return .archived
         }
         let identity = BridgeIdentity(
-            sessionID: SessionID("s"), workspaceID: WorkspaceID("gone"), role: .parent
+            sessionID: SessionID("s"), workspaceID: WorkspaceID("gone"), role: .workspace
         )
         let result = await tool.call(request([:]), as: identity, store: store)
         #expect(result.isError)
@@ -113,7 +203,7 @@ struct WorkspaceArchiveToolTests {
             return .requested
         }
         let identity = BridgeIdentity(
-            sessionID: session.id, workspaceID: workspace.id, role: .parent
+            sessionID: session.id, workspaceID: workspace.id, role: .workspace
         )
         let result = await tool.call(request([:]), as: identity, store: store)
 
@@ -153,7 +243,7 @@ struct WorkspaceArchiveToolTests {
             return .archived
         }
         let identity = BridgeIdentity(
-            sessionID: SessionID("s"), workspaceID: workspace.id, role: .parent
+            sessionID: SessionID("s"), workspaceID: workspace.id, role: .workspace
         )
         for (request, identity) in [
             (request(["id": .string(workspace.id.rawValue)]), BridgeIdentity.owner),
@@ -179,7 +269,7 @@ struct WorkspaceArchiveToolTests {
             return .archived
         }
         let identity = BridgeIdentity(
-            sessionID: asking.id, workspaceID: workspace.id, role: .parent
+            sessionID: asking.id, workspaceID: workspace.id, role: .workspace
         )
         for (request, identity) in [
             (request(["id": .string(workspace.id.rawValue)]), BridgeIdentity.owner),
@@ -225,7 +315,7 @@ struct WorkspaceArchiveToolTests {
             return .archived
         }
         let identity = BridgeIdentity(
-            sessionID: session.id, workspaceID: workspace.id, role: .parent
+            sessionID: session.id, workspaceID: workspace.id, role: .workspace
         )
         let result = await tool.call(request([:]), as: identity, store: store)
         #expect(result.isError)
@@ -263,6 +353,16 @@ struct WorkspaceArchiveToolTests {
         return try await store.upsert(Workspace(
             repoID: repo.id, name: "Somebody else's work", branch: "theirs",
             path: "/tmp/archive-tool-theirs", baseBranch: "main"
+        ))
+    }
+
+    /// A workspace `starter`'s agent asked for, with the parentage on its row as `workspace_start`
+    /// writes it.
+    private func startedWorkspace(by starter: Workspace, in store: Store) async throws -> Workspace {
+        try await store.upsert(Workspace(
+            repoID: starter.repoID, name: "Started by \(starter.name)", branch: "started-\(starter.id.rawValue)",
+            path: "/tmp/archive-tool-started-\(starter.id.rawValue)", baseBranch: "main",
+            origin: .agent(parentWorkspaceID: starter.id, spawnToolUseID: "toolu_archive")
         ))
     }
 }

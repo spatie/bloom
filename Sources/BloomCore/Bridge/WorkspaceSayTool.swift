@@ -19,15 +19,16 @@ public typealias WorkspaceMessageDelivering =
 
 /// `workspace_say`: say something to the agent in another workspace.
 ///
-/// ## Three callers, one tool
+/// ## Two callers, one tool
 ///
 /// **The owner's own client** names a workspace out loud, as it does for everything, and may write
-/// to any of them. **A parent** does the same, which is the widening this tool exists for: it is
-/// the one tool on the bridge where a workspace agent names another workspace, because talking to
-/// another workspace is the whole subject. **A child** may write to the workspace that started it
-/// and to any workspace whose message has reached it, which is reporting and answering and nothing
-/// more.
-/// See `WorkspaceMessageReach`.
+/// to any of them. **A workspace agent** does the same, which is the widening this tool exists
+/// for, because talking to another workspace is the whole subject.
+///
+/// A workspace another agent started used to be narrowed to the workspace that started it and to
+/// any that had written to it. That narrowing went with the child role, for the reasons
+/// `BridgeRole` gives; the brake on two agents answering each other for ever is
+/// `WorkspaceSayThrottle`, and it applies to every agent alike.
 ///
 /// ## Why it is self-approved
 ///
@@ -53,7 +54,7 @@ public struct WorkspaceSayTool: BridgeToolHandling {
         self.deliver = deliver
     }
 
-    public let roles: Set<BridgeRole> = [.parent, .child, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: WorkspaceSayTool.name,
@@ -91,9 +92,6 @@ public struct WorkspaceSayTool: BridgeToolHandling {
             \(WorkspaceSayThrottle.limit) messages to the same workspace in that time. Do not \
             thank or acknowledge an answer with another message: that starts a turn there for \
             nothing.
-
-            A workspace that another agent started may only write to the workspace that started \
-            it, or to a workspace whose message has reached it.
             """,
         inputSchema: .object([
             "type": .string("object"),
@@ -148,17 +146,8 @@ public struct WorkspaceSayTool: BridgeToolHandling {
                 return .failure(WorkspaceSayTrouble.callerHasGone.sentence)
             }
 
-            // A child's lookup is narrowed to what it may reach before the name is resolved, so a
-            // refusal cannot list, or confirm, a workspace it may not write to.
-            var reach: Set<WorkspaceID>?
-            if identity.role == .child, let source = sender.workspace {
-                reach = WorkspaceMessageReach.reachable(
-                    from: source, heardFrom: try await store.workspacesThatWrote(to: source.id)
-                )
-            }
-
             let target: Workspace
-            switch try await Self.target(named: given, within: reach, store: store) {
+            switch try await Self.target(named: given, store: store) {
             case .failure(let trouble): return .failure(trouble.sentence)
             case .success(let found): target = found
             }
@@ -253,21 +242,11 @@ public struct WorkspaceSayTool: BridgeToolHandling {
     ///
     /// Archived workspaces are looked through as well, only to say so: a workspace archived since
     /// the caller last listed them is a better refusal than "no such workspace".
-    ///
-    /// `reach` is a child's allowance, and a name outside it gets one refusal whatever the reason,
-    /// so the answer says nothing about which workspaces exist.
     static func target(
-        named given: String, within reach: Set<WorkspaceID>? = nil, store: Store
+        named given: String, store: Store
     ) async throws -> Result<Workspace, WorkspaceSayTrouble> {
-        var all = try await store.workspaces(includeArchived: true)
-        if let reach {
-            all = all.filter { reach.contains($0.id) }
-        }
+        let all = try await store.workspaces(includeArchived: true)
         let active = all.filter { $0.state != .archived }
-
-        if reach != nil, case .unknown = BridgeWorkspaceLookup.find(given, among: active) {
-            return .failure(.childOutOfReach(given: given))
-        }
 
         switch BridgeWorkspaceLookup.find(given, among: active) {
         case .found(let workspace):
@@ -378,7 +357,6 @@ public enum WorkspaceSayTrouble: Error, Sendable, Equatable {
     case archived(name: String)
     case toItself
     case callerHasGone
-    case childOutOfReach(given: String)
     /// The same words, to the same workspace, inside the window. See `WorkspaceSayThrottle`.
     case repeated(workspace: String)
     /// Too many messages to the same workspace inside the window.
@@ -433,13 +411,6 @@ public enum WorkspaceSayTrouble: Error, Sendable, Equatable {
             return """
                 Bloom no longer has the workspace this connection speaks for, so it cannot say \
                 where a message from it came from. Its row has gone, which retrying will not undo.
-                """
-
-        case .childOutOfReach(let given):
-            return """
-                Another agent started this workspace, so it may only write to the workspace that \
-                started it, or to one whose message has reached it, and '\(given)' is neither. Say \
-                what you need to the workspace that started you, and let it decide.
                 """
 
         case .repeated(let workspace):

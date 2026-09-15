@@ -7,7 +7,7 @@ struct ServerPaneSplitTests {
     @Test func splitCarriesAuthenticatedChatAndRequiresAnAnchoredClient() async throws {
         let store = try makeTestStore("server-pane-anchor")
         let workspaceID = WorkspaceID("workspace")
-        let identity = BridgeIdentity(sessionID: SessionID("caller"), workspaceID: workspaceID, role: .parent)
+        let identity = BridgeIdentity(sessionID: SessionID("caller"), workspaceID: workspaceID, role: .workspace)
         let broker = ServerUIBroker()
         let tool = try #require(ServerUIBridgeTools.handlers(broker: broker, store: store).first { $0.tool.name == "pane_split" })
         let legacy = try await broker.handle(.attach(workspaceID: workspaceID, clientID: UUID(), actions: ["pane_split"]), registrationID: UUID())

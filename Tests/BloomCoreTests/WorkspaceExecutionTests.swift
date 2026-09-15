@@ -11,7 +11,7 @@ struct WorkspaceExecutionTests {
             "BLOOM_CLAUDE_SKILLS_DIRECTORY": "/service/home/.claude/skills",
             "BLOOM_CODEX_SKILLS_DIRECTORY": "/service/home/.agents/skills",
         ]
-        var attachment = BridgeAttachment(shimPath: "/runtime/bin/bloom-bridge", socketPath: "/private/bridge/socket", token: "test-token", role: .parent,
+        var attachment = BridgeAttachment(shimPath: "/runtime/bin/bloom-bridge", socketPath: "/private/bridge/socket", token: "test-token", role: .workspace,
             containerEnvironment: paths)
         attachment.containerEnvironment["BLOOM_BRIDGE_TOKEN"] = "must-not-override"
         let wrapped = WorkspaceExecution(commandPrefix: ["/workspace/run"], bridgeEnabled: true)
@@ -96,7 +96,7 @@ struct WorkspaceExecutionTests {
 
     @Test("wrapped agents omit the host bridge while ordinary agents keep it")
     func bridgeRegistration() async throws {
-        let bridge = BridgeAttachment(shimPath: "/host/bloom-bridge", socketPath: "/host/bridge.sock", token: "test", role: .parent)
+        let bridge = BridgeAttachment(shimPath: "/host/bloom-bridge", socketPath: "/host/bridge.sock", token: "test", role: .workspace)
         let host = CodexClient.launch(.init(cwd: "/workspace", bridge: bridge))
         let wrapped = CodexClient.launch(.init(commandPrefix: ["/workspace/.bloom/exec"], cwd: "/workspace", bridge: bridge))
         #expect(host.arguments.contains(where: { $0.contains("mcp_servers.") }))
@@ -125,7 +125,7 @@ struct WorkspaceExecutionTests {
         let (repo, workspace) = try fixture()
         try write("[execution]\ncommand = ['.bloom/exec']\nbridge = true", to: workspace.path + "/.bloom/settings.toml")
         try write("#!/bin/sh\nexec \"$@\"\n", to: workspace.path + "/.bloom/exec", executable: true)
-        let attachment = BridgeAttachment(shimPath: "/opt/bloom/release/bin/bloom-bridge", socketPath: "/tmp/bloom-mcp-fixture/socket.sock", token: "fixture-secret", role: .parent)
+        let attachment = BridgeAttachment(shimPath: "/opt/bloom/release/bin/bloom-bridge", socketPath: "/tmp/bloom-mcp-fixture/socket.sock", token: "fixture-secret", role: .workspace)
         let execution = try WorkspaceExecution.resolve(workspace: workspace, repo: repo, environment: [:])
         #expect(execution.supportsBridge)
         let mounts = execution.bridgeEnvironment(attachment, configPath: "/private/mcp-config/current.json")

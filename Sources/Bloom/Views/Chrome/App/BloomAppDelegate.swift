@@ -45,6 +45,8 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // this process and has to execute the same code a click in the create window does, rather
         // than a copy of it written for callers with no window.
         RunningApp.attach(model)
+        // Option+Tab steps through the strip, and the strip is the model's. See `TabCycleShortcut`.
+        TabCycleShortcut.attach(model)
         // The suppression rule needs to know which workspace the window is showing, and this is
         // the first moment there is a window to ask.
         NotificationService.shared.attach(model)

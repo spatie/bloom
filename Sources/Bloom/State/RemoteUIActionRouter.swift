@@ -33,13 +33,13 @@ struct RemoteUIActionRouter {
         }
         let toolName = action.name == "pane_split_anchored" ? "pane_split" : action.name
         guard Self.actions.contains(action.name), let store = app.store,
-              let handler = app.bridgeToolbox().handler(named: toolName, for: .parent) else {
+              let handler = app.bridgeToolbox().handler(named: toolName, for: .workspace) else {
             return .refusal("This client does not support that UI action.")
         }
         // These are exclusively workspace UI handlers. Their session value is never used for
         // execution; the server already authenticated and scoped the real calling agent.
         let caller = action.name == "pane_split_anchored" ? action.arguments["sessionID"]?.stringValue.map(SessionID.init) : nil
-        let identity = BridgeIdentity(sessionID: caller ?? server.selectedSessionID ?? SessionID("remote-ui"), workspaceID: workspaceID, role: .parent)
+        let identity = BridgeIdentity(sessionID: caller ?? server.selectedSessionID ?? SessionID("remote-ui"), workspaceID: workspaceID, role: .workspace)
         let result = await Self.$serverScope.withValue(server) {
             await handler.call(MCPRequest(id: .string(UUID().uuidString), method: toolName, params: arguments), as: identity, store: store)
         }

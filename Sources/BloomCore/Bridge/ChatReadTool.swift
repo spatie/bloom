@@ -9,7 +9,7 @@ import Foundation
 public struct ChatReadTool: BridgeToolHandling {
     public init() {}
 
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
     public let tool = BridgeTool(
         name: "chat_read",
         description: """

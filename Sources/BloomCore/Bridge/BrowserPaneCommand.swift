@@ -2,17 +2,19 @@ import Foundation
 
 /// Looking at, and moving, a browser pane the reader has open.
 ///
-/// One value for six tools, for the reason `PaneOrder` is one value for two: `browser_read`,
-/// `browser_reload`, `browser_go`, `browser_screenshot`, `browser_scroll` and `browser_text` all
-/// ask the same question first, which is "which of the reader's browsers do you mean", and a
-/// second copy of that answer is how two of them would come to disagree about it.
+/// One value for thirteen tools, for the reason `PaneOrder` is one value for two: every
+/// `browser_` tool asks the same question first, which is "which of the reader's browsers do you
+/// mean", and a second copy of that answer is how two of them would come to disagree about it.
 ///
 /// ## Why there is no `browser_eval`, and what stands in for it
 ///
-/// The obvious tool is not here. `WKWebView.evaluateJavaScript` would turn these six into a real
-/// automation surface in an afternoon: click that, fill that in, read that out, wait for that.
-/// Every browser automation library is that one call. It was asked for, in the words "all possible
-/// browser automation", and the answer is no. The reason is what the pane actually is.
+/// The obvious tool is not here. `WKWebView.evaluateJavaScript` with a caller's source would be a
+/// complete automation surface in one call, and every browser automation library is that call
+/// underneath. It was asked for twice. The first time the answer was the six narrow tools that
+/// look at and move a page. The second time, the owner asked for agent-browser's loop in the pane
+/// he is looking at: read the page, click, fill in, press a key, wait, and see the console and the
+/// network. That loop is here now, and arbitrary script still is not. The reason is what the pane
+/// actually is.
 ///
 /// **The pane is the owner's own browser, logged in as him.** The screenshot that started this
 /// feature was of his own application with a live session in it. Script running in that page can
@@ -33,24 +35,31 @@ import Foundation
 /// wrote the tool. A prompt that cannot be read is a prompt that gets approved, and then the whole
 /// safety of the feature rests on nobody ever being tired.
 ///
-/// **So the substitute is the narrow tool rather than the general one.** What the owner asked for
-/// underneath the words was for the agent to be able to SEE the pane: which tabs there are, where
-/// they are pointed, what is on the page, and to be able to move it about. Every one of those is
-/// its own verb here, and each is a thing Bloom does rather than a thing the caller describes:
-/// read the toolbar, take a picture, read the visible text, scroll, reload, go to an address. The
-/// scripts behind the last three are written out in full in `BrowserPageScript` and the only thing
-/// a caller contributes to any of them is an integer.
+/// **So the substitute is the named verb rather than the general one.** Every tool here is a
+/// thing Bloom does rather than a thing the caller describes: read the toolbar, take a picture,
+/// read the text, scroll, reload, go to an address, outline the page, click, fill, press, wait,
+/// read the console, list the requests. The scripts are written out in full in
+/// `BrowserPageScript` and `BrowserAgentScript`, and what a caller contributes to them is a
+/// reference the snapshot issued, a key from a fixed list, or a string handed to
+/// `callAsyncJavaScript` as an argument. None of it is ever source.
 ///
-/// What that costs is real and should be stated rather than glossed: an agent cannot click a
-/// button on the page, cannot fill in a form, cannot read a value out of an input, and cannot wait
-/// for a selector. An agent that needs those has `agent-browser` and a Chrome of its own, which is
-/// what the answer to the original question already pointed at, and the difference is that nobody
-/// is logged in there as him.
+/// **What the verbs buy over eval is a prompt a person can read.** "browser_click ref e7" beside
+/// an outline that says e7 is `button "Delete project"` is a question somebody can answer.
+/// A paragraph of minified JavaScript is not. The verbs do not make acting in a logged-in page
+/// safe, and nothing here pretends they do: a model talked into it can still click the wrong
+/// button, which is why none of the acting tools is self-approved and every description says the
+/// page is the person's own.
 ///
-/// If it is ever wanted, the shape it has to take is a setting the owner turns on per project,
-/// off by default, with the tool refused to every role but `.parent`, never self-approved, and the
-/// script shown in full in the prompt. That is a change to make deliberately and with him asked
-/// first, and it is not this one.
+/// What is still out of reach should be stated rather than glossed. Events are dispatched by
+/// script, so a page that checks `isTrusted` ignores them. There are no uploads, no cross-origin
+/// frames, no cookies or storage, and the network list is Resource Timing rather than a network
+/// panel. An agent that needs any of those has agent-browser and a Chrome of its own, where nobody
+/// is logged in as him.
+///
+/// If arbitrary script is ever wanted, the shape it has to take is a setting the owner turns on
+/// per project, off by default, with the tool refused to every role but `.workspace`, never
+/// self-approved, and the script shown in full in the prompt. That is a change to make
+/// deliberately and with him asked first, and it is not this one.
 public enum BrowserPaneCommand: Sendable, Equatable {
     /// The toolbar's own state for one browser, which is `BrowserPaneReport`.
     case read(Int?)
@@ -62,6 +71,28 @@ public enum BrowserPaneCommand: Sendable, Equatable {
     case scroll(Int?, BrowserScroll)
     /// The rendered text of the page, wrapped in `BridgeUntrustedText`.
     case text(Int?)
+    /// The page as an outline of elements with references. See `BrowserPageOutline`.
+    case snapshot(Int?)
+    case click(Int?, BrowserElementRef)
+    case fill(Int?, BrowserElementRef, String)
+    /// A key, on the referenced element or on whatever has focus.
+    case press(Int?, BrowserElementRef?, BrowserKey)
+    case wait(Int?, BrowserWait)
+    case console(Int?, BrowserConsoleRequest)
+    /// The page's requests, kept to those whose address contains the filter.
+    case network(Int?, String?)
+
+    /// Whether the command needs the page to have arrived before it is worth doing.
+    ///
+    /// A pane an agent has only just opened is still fetching, and a screenshot or an outline of
+    /// that moment is a blank rectangle that reads as a broken page. Reloading and navigating are
+    /// the two that start a load rather than read one, and `browser_wait` is its own judge.
+    public var readsPage: Bool {
+        switch self {
+        case .read, .reload, .go, .wait: false
+        default: true
+        }
+    }
 
     /// Which tool this command came from.
     ///
@@ -78,6 +109,13 @@ public enum BrowserPaneCommand: Sendable, Equatable {
         case .screenshot: BrowserPaneToolName.screenshot
         case .scroll: BrowserPaneToolName.scroll
         case .text: BrowserPaneToolName.text
+        case .snapshot: BrowserPaneToolName.snapshot
+        case .click: BrowserPaneToolName.click
+        case .fill: BrowserPaneToolName.fill
+        case .press: BrowserPaneToolName.press
+        case .wait: BrowserPaneToolName.wait
+        case .console: BrowserPaneToolName.console
+        case .network: BrowserPaneToolName.network
         }
     }
 
@@ -85,7 +123,10 @@ public enum BrowserPaneCommand: Sendable, Equatable {
     public var number: Int? {
         switch self {
         case .read(let number), .reload(let number), .go(let number, _),
-             .screenshot(let number), .scroll(let number, _), .text(let number):
+             .screenshot(let number), .scroll(let number, _), .text(let number),
+             .snapshot(let number), .click(let number, _), .fill(let number, _, _),
+             .press(let number, _, _), .wait(let number, _), .console(let number, _),
+             .network(let number, _):
             number
         }
     }
@@ -176,7 +217,7 @@ public enum BrowserPaneChoice {
     }
 }
 
-/// What each of the six is called on the wire.
+/// What each of them is called on the wire.
 ///
 /// Named rather than written out at each site because the name appears three times for every tool:
 /// in its own declaration, in `BridgeToolApproval.selfApproved`, and in the refusals the window
@@ -189,4 +230,11 @@ public enum BrowserPaneToolName {
     public static let screenshot = "browser_screenshot"
     public static let scroll = "browser_scroll"
     public static let text = "browser_text"
+    public static let snapshot = "browser_snapshot"
+    public static let click = "browser_click"
+    public static let fill = "browser_fill"
+    public static let press = "browser_press"
+    public static let wait = "browser_wait"
+    public static let console = "browser_console"
+    public static let network = "browser_network"
 }

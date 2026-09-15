@@ -19,16 +19,15 @@ import BloomClient
 ///
 /// **The depth limit is one and it is enforced here rather than counted.** A caller whose own
 /// session has a `parentSessionID` is a crew member, and a crew member may not start one. That
-/// test is a column rather than a number kept beside it, for the reason `BridgeRole` gives about
-/// children: a depth counter drifts out of step with the thing it describes, and a flat crew has
-/// no cycle to deadlock in.
+/// test is a column rather than a number kept beside it, for the reason `workspace_start` gives
+/// about nesting: a depth counter drifts out of step with the thing it describes, and a flat crew
+/// has no cycle to deadlock in.
 ///
-/// **`.parent` and nothing else, for all four.** A crew member's session lives in an ordinary
-/// workspace, so its token already carries `.parent` and it reaches these tools through the same
+/// **`.workspace` and nothing else, for all four.** A crew member's session lives in an ordinary
+/// workspace, so its token already carries `.workspace` and it reaches these tools through the same
 /// gate its orchestrator does; the split between the two is made inside each handler, off the
-/// caller's own row, rather than by a fourth role nobody could mint. Not `.owner`, which is
-/// sitting in no workspace and so has no crew to be talking about, and not `.child`, which
-/// reports and that is all.
+/// caller's own row, rather than by a third role nobody could mint. Not `.owner`, which is sitting
+/// in no workspace and so has no crew to be talking about.
 
 /// The four names, written once. Each appears in its own schema, in the refusals the other three
 /// give, and in `BridgeToolApproval.selfApproved`, and a name that is right in three of those
@@ -266,7 +265,7 @@ public struct AgentStartTool: BridgeToolHandling {
         self.start = start
     }
 
-    public let roles: Set<BridgeRole> = [.parent]
+    public let roles: Set<BridgeRole> = [.workspace]
 
     public let tool = BridgeTool(
         name: CrewToolName.start,
@@ -442,7 +441,7 @@ public struct AgentSayTool: BridgeToolHandling {
         self.say = say
     }
 
-    public let roles: Set<BridgeRole> = [.parent]
+    public let roles: Set<BridgeRole> = [.workspace]
 
     public let tool = BridgeTool(
         name: CrewToolName.say,
@@ -643,7 +642,7 @@ public struct AgentSayTool: BridgeToolHandling {
 public struct AgentListTool: BridgeToolHandling {
     public init() {}
 
-    public let roles: Set<BridgeRole> = [.parent]
+    public let roles: Set<BridgeRole> = [.workspace]
 
     public let tool = BridgeTool(
         name: CrewToolName.list,
@@ -787,7 +786,7 @@ public struct AgentStopTool: BridgeToolHandling {
         self.stop = stop
     }
 
-    public let roles: Set<BridgeRole> = [.parent]
+    public let roles: Set<BridgeRole> = [.workspace]
 
     public let tool = BridgeTool(
         name: CrewToolName.stop,

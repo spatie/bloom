@@ -19,11 +19,11 @@ struct WorkspaceSayToolTests {
         let releaserChat: Session
 
         var fixerIdentity: BridgeIdentity {
-            BridgeIdentity(sessionID: fixerChat.id, workspaceID: fixer.id, role: .parent)
+            BridgeIdentity(sessionID: fixerChat.id, workspaceID: fixer.id, role: .workspace)
         }
 
         var releaserIdentity: BridgeIdentity {
-            BridgeIdentity(sessionID: releaserChat.id, workspaceID: releaser.id, role: .parent)
+            BridgeIdentity(sessionID: releaserChat.id, workspaceID: releaser.id, role: .workspace)
         }
 
         var chats: [WorkspaceID: Session] { [fixer.id: fixerChat, releaser.id: releaserChat] }
@@ -88,7 +88,7 @@ struct WorkspaceSayToolTests {
 
     // MARK: - Who may call it
 
-    @Test("all three roles see it, and Bloom answers its own permission question about it")
+    @Test("both roles see it, and Bloom answers its own permission question about it")
     func roles() {
         let toolbox = BridgeToolbox(handlers: [WorkspaceSayTool { _ in .refused("") }])
 
@@ -98,7 +98,7 @@ struct WorkspaceSayToolTests {
         #expect(BridgeToolApproval.isSelfApproved(
             toolName: "\(BridgeToolApproval.toolPrefix)workspace_say"
         ))
-        #expect(BridgeToolbox.standard.handler(named: "workspace_say", for: .parent) == nil)
+        #expect(BridgeToolbox.standard.handler(named: "workspace_say", for: .workspace) == nil)
         // There is no approval flag to pass any more.
         #expect(WorkspaceSayTool { _ in .refused("") }.tool.inputSchema["properties"]?["needs_owner_approval"] == nil)
     }
@@ -350,7 +350,7 @@ struct WorkspaceSayToolTests {
     func vanishedCallerIsRefused() async throws {
         let f = try await fixture("say-vanished")
         let window = Window(store: f.store, chats: f.chats)
-        let ghost = BridgeIdentity(sessionID: SessionID("gone"), workspaceID: WorkspaceID("gone"), role: .parent)
+        let ghost = BridgeIdentity(sessionID: SessionID("gone"), workspaceID: WorkspaceID("gone"), role: .workspace)
 
         let result = await say("Hi.", to: f.releaser, as: ghost, with: window.tool(), store: f.store)
 
@@ -401,9 +401,12 @@ struct WorkspaceSayToolTests {
         #expect(try await f.store.latestWorkspaceMessage(from: f.fixer.id, to: f.releaser.id) == nil)
     }
 
-    @Test("a workspace an agent started may answer the workspace that wrote to it, and nobody else")
-    func childReach() async throws {
-        let store = try makeTestStore("say-child")
+    /// It used to be narrowed to the workspace that started it and to any that had written to it.
+    /// That went with the child role; `WorkspaceSayThrottle` is the brake, and it applies to every
+    /// agent alike.
+    @Test("a workspace an agent started may write to any active workspace, not only the one that started it")
+    func agentStartedReach() async throws {
+        let store = try makeTestStore("say-agent-started")
         let repo = try await store.upsert(Repo(name: "bloom", path: TestScratch.unique("repo")))
         func workspace(_ name: String, origin: WorkspaceOrigin = .user) async throws -> Workspace {
             try await store.upsert(Workspace(
@@ -411,43 +414,25 @@ struct WorkspaceSayToolTests {
                 path: TestScratch.unique(name), baseBranch: "main", origin: origin
             ))
         }
-        let parent = try await workspace("parent")
+        let starter = try await workspace("starter")
         let stranger = try await workspace("stranger")
-        let writer = try await workspace("writer")
-        let child = try await workspace("child", origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "spawn"))
+        let started = try await workspace("started", origin: .agent(parentWorkspaceID: starter.id, spawnToolUseID: "spawn"))
         var chats: [WorkspaceID: Session] = [:]
-        for place in [parent, stranger, writer, child] {
+        for place in [starter, stranger, started] {
             chats[place.id] = try await store.upsert(Session(workspaceID: place.id, title: "Chat"))
         }
-        let childIdentity = BridgeIdentity(sessionID: chats[child.id]!.id, workspaceID: child.id, role: .child)
-        let writerIdentity = BridgeIdentity(sessionID: chats[writer.id]!.id, workspaceID: writer.id, role: .parent)
+        let startedIdentity = BridgeIdentity(
+            sessionID: try #require(chats[started.id]).id, workspaceID: started.id, role: .workspace
+        )
         let window = Window(store: store, chats: chats)
         let tool = window.tool()
 
-        #expect(!(await say("Done.", to: parent, as: childIdentity, with: tool, store: store)).isError)
-        #expect((await say("Hi.", to: stranger, as: childIdentity, with: tool, store: store)).isError)
-        #expect((await say("Hi.", to: writer, as: childIdentity, with: tool, store: store)).isError)
-
-        #expect(!(await say("Status?", to: child, as: writerIdentity, with: tool, store: store)).isError)
-        // Queued is not heard: the child has not read it, and it may yet be cancelled.
-        #expect((await say("On it.", to: writer, as: childIdentity, with: tool, store: store)).isError)
-        _ = try await store.markDelivered(id: try #require(window.sent.last?.deliveryID))
-        #expect(!(await say("On it.", to: writer, as: childIdentity, with: tool, store: store)).isError)
-
-        // A name outside its reach is refused without saying which workspaces exist.
-        let probe = await tool.call(
-            MCPRequest(id: .number(1), method: "workspace_say", params: .object([
-                "workspace": .string("no-such-thing"), "message": .string("Hi."),
-            ])),
-            as: childIdentity, store: store
-        )
-        #expect(probe.isError)
-        #expect(!probe.text.contains("stranger"))
-        #expect(!probe.text.contains("parent"))
-
-        // A child whose own row cannot be read is refused rather than waved through.
-        let ghost = BridgeIdentity(sessionID: SessionID("gone"), workspaceID: WorkspaceID("gone"), role: .child)
-        #expect((await say("Hi.", to: parent, as: ghost, with: tool, store: store)).isError)
+        let toStarter = await say("Done.", to: starter, as: startedIdentity, with: tool, store: store)
+        #expect(!toStarter.isError, "\(toStarter.text)")
+        // Nobody has written to this one, and it did not start this one either.
+        let toStranger = await say("Hi.", to: stranger, as: startedIdentity, with: tool, store: store)
+        #expect(!toStranger.isError, "\(toStranger.text)")
+        #expect(window.sent.map(\.target.workspaceID) == [starter.id, stranger.id])
     }
 
     @Test("the owner's own client may write, and is told nobody can answer it with the tool")

@@ -159,23 +159,26 @@ public typealias PullRequestCheckoutResolving =
 /// caller's turn open for as long as the work took, and would hold this connection's serve loop
 /// with it, so every later bridge call from that session would queue behind it.
 ///
-/// ## A child may not call it, and the two who may are not alike
+/// ## A workspace an agent started may not start more
 ///
-/// The role gate is the first lock and it hides the tool from a child's `tools/list` entirely, so
-/// a child is never tempted by a tool it cannot use. The second lock is below: a caller whose own
-/// workspace was started by an agent is refused even if it speaks raw MCP at the socket. One level
-/// of nesting is the limit, and "has a parent" is the whole test, which is why there is no depth
-/// counter to drift.
+/// This is the one limit on nesting, and it is the lock that matters most on the whole bridge,
+/// because it is what stops one runaway agent cutting worktrees without end. It is checked in the
+/// handler, off the caller's own workspace row: a caller whose workspace was started by an agent
+/// is refused. It used to have a role gate in front of it as well, which hid the tool from such a
+/// caller, and that went with the child role (see `BridgeRole`). The tool is listed to every
+/// workspace agent now and the refusal is what holds. One level is the limit, and "has a parent"
+/// is the whole test, which is why there is no depth counter to drift.
 ///
-/// The two roles that may call it differ in two ways, and both follow from one fact: a parent is
-/// a workspace and the owner's client is not. They used to differ in a third, which was that only
-/// a parent's calls were deduplicated, and that one was a gap rather than a distinction.
+/// The two roles that may call it differ in two ways, and both follow from one fact: a workspace
+/// agent is in a workspace and the owner's client is not. They used to differ in a third, which
+/// was that only a workspace agent's calls were deduplicated, and that one was a gap rather than a
+/// distinction.
 ///
-/// A parent cannot name a project, because its own is the only one it may act in, and `project` is
-/// refused rather than ignored if it names one. The owner's client must name a project, because
-/// nothing else says which, and it may only name one Bloom already has.
+/// A workspace agent cannot name a project, because its own is the only one it may act in, and
+/// `project` is refused rather than ignored if it names one. The owner's client must name a
+/// project, because nothing else says which, and it may only name one Bloom already has.
 ///
-/// A parent's workspaces are `.agent` origin and carry its id; the owner's are `.ownerClient`
+/// A workspace agent's workspaces are `.agent` origin and carry its id; the owner's are `.ownerClient`
 /// origin and carry no parent. How many either may start is not decided here: `WorkspaceOrigin`
 /// answers it through `WorkspaceStartAllowance`, which holds all three answers, the sheet's
 /// included, in one switch.
@@ -199,7 +202,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         self.resolvePullRequest = resolvePullRequest
     }
 
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: "workspace_start",
@@ -558,8 +561,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 return .refused("This workspace's project is no longer in Bloom's database.")
             }
 
-            // The second lock. The role gate already hid this tool from a child, so reaching here
-            // as one means something spoke MCP at the socket directly.
+            // The nesting limit, and the only lock there is: no role hides this tool from a
+            // workspace an agent started. See the head of this type.
             if caller.origin.isAgentSpawned {
                 return .refused(
                     "This workspace was itself started by an agent, and those cannot start more. "

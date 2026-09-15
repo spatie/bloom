@@ -273,14 +273,14 @@ struct PaneToolTests {
     /// sitting in no workspace at all. Listing them for that role advertised four tools in
     /// `tools/list` that every call would refuse. A tool a role can see is a tool that role can
     /// use, and the two have to agree.
-    @Test("only a parent can open, split, close or rename panes")
-    func onlyAParentCanTouchPanes() {
+    @Test("only a workspace agent can open, split, close or rename panes")
+    func onlyAWorkspaceAgentCanTouchPanes() {
         let open = PaneOpenTool { _, _ in .opened("") }
         let split = PaneSplitTool { _, _, _, _ in .opened("") }
         let close = PaneCloseTool { _, _ in .opened("") }
         let rename = PaneRenameTool { _, _, _ in .opened("") }
         for roles in [open.roles, split.roles, close.roles, rename.roles] {
-            #expect(roles == [.parent])
+            #expect(roles == [.workspace])
         }
     }
 

@@ -35,21 +35,26 @@ public typealias WorkspaceArchiving = @Sendable (WorkspaceArchiveOrder) async ->
 
 /// `workspace_archive`: clean a workspace up, keeping everything that exists nowhere else.
 ///
-/// ## Who may call it, and why the two arms are shaped differently
+/// ## Who may call it, and on which workspace
 ///
-/// `.owner` and `.parent`, exactly as `workspace_rename` is, and for the same reasons.
+/// `.owner` and `.workspace`, exactly as `workspace_rename` is, and for the same reasons.
 ///
 /// The owner's client names a workspace out loud, because it is sitting in none and nothing else
-/// says which. A parent names none and is refused if it tries: the token says which workspace is
-/// asking, so there is nothing to forge or mistype, and a call that named another workspace and
-/// quietly got this one would look like it worked. That is the whole of the isolation. A workspace
-/// agent cannot reach another workspace here because there is no argument through which it could.
+/// says which.
 ///
-/// Not `.child`. A child reports and that is all, here as everywhere. A child's workspace is one
-/// an agent asked for and nobody weighed, so it is the last worktree that should be removable by
-/// something nobody weighed either.
+/// A workspace agent archives its own by naming none, and the token says which workspace that
+/// is. It may also name, by id, **a workspace it started** with `workspace_start`, and no other.
+/// That is the case that forced the widening: a workspace hands a job to another, the other
+/// reports back, and the one that asked is the one that knows the job is done. Before, the agent
+/// that was asked to clean up could not (it was a child, and children did nothing), and the agent
+/// that started it could not either (it could only name itself), so the worktree stayed until a
+/// person archived it by hand. Parentage is read off the row, `WorkspaceOrigin.parentWorkspaceID`,
+/// which is written once when the workspace is started and cannot be claimed by a caller.
 ///
-/// ## Why a workspace agent's call is a request rather than an archive
+/// Any workspace it did not start is refused with the same sentence whether it exists or not, so
+/// the refusal does not confirm which ids are real.
+///
+/// ## Why a workspace agent's call on its own workspace is a request rather than an archive
 ///
 /// The agent is inside the worktree that would be removed. `git worktree remove --force`
 /// unlinking files under a running agent is how work gets corrupted rather than merely lost, which
@@ -62,6 +67,11 @@ public typealias WorkspaceArchiving = @Sendable (WorkspaceArchiveOrder) async ->
 ///
 /// A refusal after the fact reaches the owner rather than the agent, because by then there is no
 /// agent to reach. See `AppModel.archiveIfRequested`.
+///
+/// Archiving a workspace it started is not deferred: the caller is standing in a different
+/// worktree, so nothing it is waiting on is removed, and the safety check runs with nothing
+/// excused. A turn still running over there refuses it, which is the right answer, because that
+/// agent is not done.
 ///
 /// ## Why it is not self-approved
 ///
@@ -76,7 +86,7 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
         self.archive = archive
     }
 
-    public let roles: Set<BridgeRole> = [.owner, .parent]
+    public let roles: Set<BridgeRole> = [.owner, .workspace]
 
     public let tool = BridgeTool(
         name: "workspace_archive",
@@ -85,12 +95,17 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
             terminals and dev servers. Its branch, notes and chat history are kept, and the \
             workspace moves to Archived.
 
-            If you are working in a workspace, this archives yours and there is nothing to pass: \
-            do not name a workspace, it will be refused. You are still running, so the worktree \
-            cannot go yet. The call is a request: Bloom checks again once your turn has ended and \
-            archives then. Say everything you have to say in this same turn, because there will \
-            not be another one, and do not report the workspace as archived. Only ask when the \
-            work is done and the owner has said the workspace can go.
+            If you are working in a workspace, pass nothing to archive your own. You are still \
+            running, so the worktree cannot go yet. The call is a request: Bloom checks again once \
+            your turn has ended and archives then. Say everything you have to say in this same \
+            turn, because there will not be another one, and do not report the workspace as \
+            archived. Only ask when the work is done and the owner, or the workspace that started \
+            yours, has said the workspace can go.
+
+            To archive a workspace you started with workspace_start, pass 'id' with the id \
+            workspace_start reported. Only a workspace you started can be named; any other is \
+            refused. It is archived at once if its agent has finished, so call it after that \
+            workspace has reported back, not while it is still working.
 
             From a client of the owner's own, pass 'id' with the exact workspace id from \
             workspace_list. Only call after the owner has asked for that workspace to be archived.
@@ -107,9 +122,10 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
                 "id": .object([
                     "type": .string("string"),
                     "description": .string(
-                        "The exact workspace id returned by workspace_list. Only from the owner's "
-                            + "own client. An agent working in a workspace archives its own and "
-                            + "must leave this out."
+                        "The exact workspace id. From the owner's own client, any id "
+                            + "workspace_list returns. From an agent working in a workspace, only "
+                            + "the id of a workspace it started with workspace_start; leave it out "
+                            + "to archive your own."
                     ),
                 ]),
             ]),
@@ -165,8 +181,8 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
         _ request: MCPRequest, as identity: BridgeIdentity, store: Store
     ) async -> Subject {
         // Enforced here as well as in the toolbox, because the toolbox's gate is what a
-        // `tools/call` goes through and a process speaking raw MCP at the socket with a child's
-        // token is not obliged to.
+        // `tools/call` goes through and a process speaking raw MCP at the socket is not
+        // obliged to.
         guard roles.contains(identity.role) else {
             return .refused(
                 "Only the owner's own client, or the agent working in a workspace, can archive one."
@@ -177,24 +193,20 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
         if case .object(let object)? = request.params { arguments = object }
 
         guard identity.role == .owner else {
-            guard arguments.isEmpty else {
-                return .refused("""
-                    workspace_archive archives the workspace you are in, which is the only one you \
-                    may act in, so it takes no arguments. Ask again with none, and note that there \
-                    is no force option and no way to delete the branch.
-                    """)
-            }
             guard let workspaceID = identity.workspaceID, let sessionID = identity.sessionID else {
                 return .refused(BridgeWorkspaceScope.refusal(tool: "workspace_archive", doing: "archives"))
             }
-            do {
-                guard let own = try await store.workspace(id: workspaceID) else {
-                    return .refused("That workspace is no longer in Bloom, so there is nothing to archive.")
+            if arguments.isEmpty {
+                do {
+                    guard let own = try await store.workspace(id: workspaceID) else {
+                        return .refused("That workspace is no longer in Bloom, so there is nothing to archive.")
+                    }
+                    return .found(own, sessionID)
+                } catch {
+                    return .refused("Bloom could not read this workspace. Nothing was archived; try again shortly.")
                 }
-                return .found(own, sessionID)
-            } catch {
-                return .refused("Bloom could not read this workspace. Nothing was archived; try again shortly.")
             }
+            return await started(request, arguments: arguments, by: workspaceID, store: store)
         }
 
         guard Set(arguments.keys) == ["id"],
@@ -209,6 +221,44 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
             return .found(found, nil)
         } catch {
             return .refused("Bloom could not read this workspace. Nothing was archived; try again shortly.")
+        }
+    }
+
+    /// A workspace agent naming a workspace, which it may only do for one it started.
+    ///
+    /// Answered at once rather than booked, with no turn excused, because the caller is not
+    /// standing in that worktree. See the head of this type.
+    private func started(
+        _ request: MCPRequest, arguments: [String: JSONValue], by caller: WorkspaceID, store: Store
+    ) async -> Subject {
+        guard Set(arguments.keys) == ["id"],
+              let rawID = request.stringParam("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawID.isEmpty else {
+            return .refused("""
+                workspace_archive takes nothing, to archive the workspace you are in, or only 'id', \
+                with the id workspace_start reported for a workspace you started. There is no force \
+                option and no way to delete the branch.
+                """)
+        }
+        let notStarted = """
+            workspace_archive can archive the workspace you are in, or one you started with \
+            workspace_start, and '\(rawID)' is not one you started. Pass the id workspace_start \
+            reported, or leave 'id' out to archive your own. Ask the owner about any other workspace.
+            """
+        do {
+            guard let found = try await store.workspace(id: WorkspaceID(rawID)) else {
+                return .refused(notStarted)
+            }
+            if found.id == caller {
+                return .refused("""
+                    That is the workspace you are in. Leave 'id' out to archive your own, which \
+                    Bloom does once your turn has ended.
+                    """)
+            }
+            guard found.origin.parentWorkspaceID == caller else { return .refused(notStarted) }
+            return .found(found, nil)
+        } catch {
+            return .refused("Bloom could not read that workspace. Nothing was archived; try again shortly.")
         }
     }
 }

@@ -28,7 +28,7 @@ struct ServerRuntimeTests {
         _ = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Finish this turn")))
         await waitUntil("existing turn has started") { await fixture.runner.sends.count == 1 }
         _ = try await runtime.maintenanceControl("quiesce")
-        let identity = BridgeIdentity(sessionID: fixture.session.id, workspaceID: workspaceID, role: .parent)
+        let identity = BridgeIdentity(sessionID: fixture.session.id, workspaceID: workspaceID, role: .workspace)
         let finish = MCPRequest(id: .number(2), method: "workspace_rename", params: .object(["name": .string("Finished tool")]))
         let completed = await runtime.maintenanceBridgeCall(WorkspaceRenameTool(), request: finish, identity: identity, store: fixture.store)
         #expect(!completed.isError)

@@ -188,14 +188,14 @@ public final class BridgeServer: Sendable {
     /// What a session's shim is told, minted fresh. Called once per runner, which is once per
     /// session per launch of the app, by whoever is about to build that process's argv.
     ///
-    /// The role comes off the workspace row rather than from the caller, so a caller cannot state
-    /// one. A workspace with a parent is a child, and having a parent is the whole test.
+    /// The role is `.workspace` whoever started the workspace. What an agent-started workspace may
+    /// not do is decided by the tools that care, off its row. See `BridgeRole`.
     public func attach(
         session: Session,
         workspace: Workspace,
         shimPath: String
     ) -> BridgeAttachment {
-        let role = BridgeRole(origin: workspace.origin)
+        let role = BridgeRole.workspace
         let token = registry.mint(sessionID: session.id, workspaceID: workspace.id, role: role)
         return BridgeAttachment(
             shimPath: shimPath,
@@ -380,8 +380,25 @@ public final class BridgeServer: Sendable {
             // user can make it; the database is the answer.
             note("bridge caller claimed role \(hello.role) and is \(identity.role.rawValue)")
         }
+        if identity.role == .owner, let problem = await ownerPlacementProblem(on: connection) {
+            await refuse(problem, on: connection)
+            note("bridge refused the owner's token from a shim running inside a workspace")
+            return nil
+        }
         await connection.writeLineAsync(encode(BridgeWelcome.accepting()))
         return hello
+    }
+
+    /// Why the owner's token is not welcome from where this shim is running, or nil. See
+    /// `BridgeOwnerPlacement`, which holds the decision and the measurement behind it; this only
+    /// fetches the two facts it needs. A store that cannot answer lets the connection through, for
+    /// the reason that type gives about a directory that cannot be read.
+    private func ownerPlacementProblem(on connection: UnixSocketConnection) async -> String? {
+        guard let pid = connection.peerProcessID,
+              let directory = ProcessWorkingDirectory.of(pid),
+              let workspaces = try? await store.workspaces()
+        else { return nil }
+        return BridgeOwnerPlacement.refusal(workingDirectory: directory, workspaces: workspaces)
     }
 
     private func refuse(_ problem: String, on connection: UnixSocketConnection) async {

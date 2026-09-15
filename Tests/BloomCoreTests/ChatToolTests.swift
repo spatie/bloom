@@ -10,7 +10,7 @@ struct ChatToolTests {
             repoID: repo.id, name: "Test", branch: "test", path: TestScratch.unique("worktree"), baseBranch: "main"
         ))
         let session = try await store.upsert(Session(workspaceID: workspace.id, title: "Current"))
-        let identity = BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .parent)
+        let identity = BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .workspace)
         return (workspace, session, identity)
     }
 
@@ -24,11 +24,10 @@ struct ChatToolTests {
         return try #require(JSONValue.parse(result.text))
     }
 
-    @Test("chat discovery and reads are served to parents and the owner, never to a child")
+    @Test("chat discovery and reads are served to workspace agents and to the owner")
     func gates() {
         for name in ["chat_list", "chat_read"] {
-            #expect(BridgeToolbox.standard.handler(named: name, for: .parent) != nil)
-            #expect(BridgeToolbox.standard.handler(named: name, for: .child) == nil)
+            #expect(BridgeToolbox.standard.handler(named: name, for: .workspace) != nil)
             #expect(BridgeToolbox.standard.handler(named: name, for: .owner) != nil)
             #expect(BridgeToolApproval.isSelfApproved(toolName: BridgeToolApproval.toolPrefix + name))
         }
@@ -51,7 +50,7 @@ struct ChatToolTests {
         return (workspace, session)
     }
 
-    @Test("a parent reads another workspace's chat by its id and by its name, and is told it is data")
+    @Test("a workspace agent reads another workspace's chat by its id and by its name, and is told it is data")
     func anotherWorkspace() async throws {
         let store = try makeTestStore("chat-other")
         let (_, current, identity) = try await seed(store)
@@ -149,20 +148,28 @@ struct ChatToolTests {
         #expect(page["chat_id"] == .string(elsewhere.id.rawValue))
     }
 
-    @Test("a child is refused by the handler as well as by the gate")
-    func childRefused() async throws {
-        let store = try makeTestStore("chat-child")
-        let (workspace, session, _) = try await seed(store)
-        let (release, _) = try await other(store)
-        let child = BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .child)
-        for arguments: [String: JSONValue] in [[:], ["workspace": .string(release.id.rawValue)]] {
-            let listed = await ChatListTool().call(request(arguments), as: child, store: store)
-            #expect(listed.isError)
-            var readArguments = arguments
-            readArguments["chat"] = .string("Current")
-            let read = await ChatReadTool().call(request(readArguments), as: child, store: store)
-            #expect(read.isError)
-        }
+    /// Such a workspace used to be a child and was refused every read. It was reading the chat of
+    /// the workspace it was answering that it most needed, so it reads like any other agent now.
+    @Test("a workspace another agent started reads another workspace's chats like any other")
+    func agentStartedReads() async throws {
+        let store = try makeTestStore("chat-agent-started")
+        let (starter, _, _) = try await seed(store)
+        let (release, elsewhere) = try await other(store)
+        let started = try await store.upsert(Workspace(
+            repoID: starter.repoID, name: "Started", branch: "started", path: TestScratch.unique("started"),
+            baseBranch: "main", origin: .agent(parentWorkspaceID: starter.id, spawnToolUseID: "toolu_chat")
+        ))
+        let session = try await store.upsert(Session(workspaceID: started.id, title: "Own"))
+        let identity = BridgeIdentity(sessionID: session.id, workspaceID: started.id, role: .workspace)
+
+        let listed = await ChatListTool().call(
+            request(["workspace": .string(release.id.rawValue)]), as: identity, store: store
+        )
+        #expect(!listed.isError, "\(listed.text)")
+        let page = try await read(store, identity, ["chat": .string("Elsewhere"), "workspace": .string("Release")])
+        #expect(page["chat_id"] == .string(elsewhere.id.rawValue))
+        let own = try await read(store, identity, ["chat": .string("Own")])
+        #expect(own["chat_id"] == .string(session.id.rawValue))
     }
 
     @Test("a cursor from another workspace's chat is refused for a different chat, and pages on for its own")

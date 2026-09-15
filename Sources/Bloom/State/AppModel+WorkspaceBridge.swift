@@ -34,7 +34,7 @@ extension AppModel {
     /// the core toolbox and not to this one would pass every test in the suite, which serves
     /// `.standard`, and never reach the running app.
     func bridgeToolbox() -> BridgeToolbox {
-        // One closure for the six browser tools rather than six that would have to agree. What
+        // One closure for the browser tools rather than one each that would have to agree. What
         // crosses the line is "do this to that pane", and `driveBrowserForBridge` resolves which
         // pane the same way every time. See `BrowserPaneCommanding`.
         let browser: BrowserPaneCommanding = { [weak self] command, workspaceID in
@@ -101,6 +101,13 @@ extension AppModel {
             BrowserScrollTool(browser),
             BrowserScreenshotTool(browser),
             BrowserTextTool(browser),
+            BrowserSnapshotTool(browser),
+            BrowserClickTool(browser),
+            BrowserFillTool(browser),
+            BrowserPressTool(browser),
+            BrowserWaitTool(browser),
+            BrowserConsoleTool(browser),
+            BrowserNetworkTool(browser),
             WorkspaceArchiveTool { [weak self] order in
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.archiveWorkspaceForBridge(order)

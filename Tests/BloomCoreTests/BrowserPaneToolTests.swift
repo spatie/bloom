@@ -403,11 +403,11 @@ struct BrowserPaneToolTests {
 
     // MARK: - The tools themselves
 
-    /// Every one of the seven is a parent's, and none of them is the owner's.
+    /// Every one of the seven is a workspace agent's, and none of them is the owner's.
     ///
     /// That last half is the mistake this family was born out of: the four pane tools were offered
     /// to `.owner` at first, which stands in no workspace, so every call could only refuse.
-    @Test("every browser tool is a parent's and none is the owner's")
+    @Test("every browser tool is a workspace agent's and none is the owner's")
     func theRoleGate() {
         let drive: BrowserPaneCommanding = { _, _ in .told("") }
         let handlers: [any BridgeToolHandling] = [
@@ -420,7 +420,7 @@ struct BrowserPaneToolTests {
             BrowserTextTool(drive),
         ]
         for handler in handlers {
-            #expect(handler.roles == [.parent], "\(handler.tool.name)")
+            #expect(handler.roles == [.workspace], "\(handler.tool.name)")
         }
     }
 
@@ -566,7 +566,7 @@ struct BrowserPaneToolTests {
     // MARK: - Support
 
     private var identity: BridgeIdentity {
-        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .parent)
+        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .workspace)
     }
 
     /// What the window was asked to do, so a test can assert on the command rather than on the

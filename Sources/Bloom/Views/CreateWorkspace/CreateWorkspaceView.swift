@@ -66,6 +66,9 @@ struct CreateWorkspaceView: View {
 
     @State private var baseBranch = ""
     @State private var branches: [String] = []
+    /// Branches only `origin` has, offered as bases beside the local ones. Kept apart from
+    /// `branches` because that list also answers which local names are taken.
+    @State private var remoteBranches: [String] = []
 
     /// The pull request or branch this workspace opens on, or nil for the route Bloom has always
     /// had: a new branch cut from `baseBranch`. Choosing one takes over the name, the branch and,
@@ -325,6 +328,11 @@ struct CreateWorkspaceView: View {
                 }
             } catch { if !Task.isCancelled { creationProblem = error.localizedDescription } }
         }
+        // The base's fetch, started while the task is still being written, so the cut that
+        // follows Create finds it done rather than waiting on the network. Keyed on the project
+        // and the base together, so choosing another base fetches that one. See
+        // `BaseBranchFetches`.
+        .task(id: prefetchKey) { await prefetchBase() }
         // The draft's chips and the files behind them belong to a window that is going away.
         .onChange(of: repoID) { _, _ in
             checkout = nil; baseBranch = ""; referenceProblem = nil
@@ -910,7 +918,18 @@ struct CreateWorkspaceView: View {
 
     private var branchOptions: [String] {
         guard let repo else { return branches }
-        return WorkspaceStartContext.branchOptions(branches: branches, defaultBranch: repo.defaultBranch)
+        return WorkspaceStartContext.baseBranchOptions(
+            local: branches, remote: remoteBranches, defaultBranch: repo.defaultBranch
+        )
+    }
+
+    /// Which fetch `prefetchBase` should be running, or nil when nothing is being cut: no project,
+    /// no base yet, or a checkout, which fetches in its own way.
+    /// Nil on a server, whose project path is on that machine: a fetch there is the server's cut to
+    /// make, and one started here would run git against a directory this Mac does not have.
+    private var prefetchKey: String? {
+        guard !isRemote, let repo, checkout == nil, !baseBranch.isEmpty else { return nil }
+        return repo.path + "\u{0}" + baseBranch
     }
 
     /// The three lists the picker ranks, as one value.
@@ -1040,6 +1059,7 @@ struct CreateWorkspaceView: View {
         isLoading = false
 
         branches = context.branches
+        remoteBranches = context.remoteBranches
         branchPrefix = context.settings.branchPrefix
         hasSetupScript = !(context.settings.setupScript ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1060,9 +1080,16 @@ struct CreateWorkspaceView: View {
 
         baseBranch = WorkspaceStartContext.resolvedBaseBranch(
             current: baseBranch,
-            branches: branches,
+            branches: branchOptions,
             defaultBranch: repo.defaultBranch
         )
+    }
+
+    /// Brings the chosen base up to date ahead of Create. The answer is not used here: the cut
+    /// asks `BaseBranchFetches` again and gets this one back while it is recent.
+    private func prefetchBase() async {
+        guard let repo, checkout == nil, !baseBranch.isEmpty else { return }
+        await BaseBranchFetches.prefetch(base: baseBranch, in: repo.path)
     }
 
     /// What a row in the source picker means here.
