@@ -36,7 +36,7 @@ struct SettingsView: View {
                     navigationRows([.agents, .sessions, .permissions, .prompts])
                 }
                 Section("Terminal & connections") {
-                    navigationRows([.terminal, .commandLine])
+                    navigationRows([.terminal, .commandLine, .servers])
                 }
             }
             // The menu bar's "Menubar Settings…" names the pane it wants; without this the window
@@ -102,6 +102,7 @@ struct SettingsView: View {
         case .prompts: PromptSettingsView()
         case .terminal: TerminalSettingsView()
         case .commandLine: CommandLineSettingsView()
+        case .servers: RemoteServersSettingsView()
         }
     }
 }
@@ -153,8 +154,6 @@ struct GeneralSettingsView: View {
             }
 
             OpenInSettingsSection()
-
-            RemoteServersSettingsSection()
 
             UpdateSettingsSection()
             InstallPingSettingsSection()

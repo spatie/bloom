@@ -14,8 +14,6 @@ struct RemoteServersSettingsSection: View {
                 Text(RemoteServerFeature.settingTitle)
                 Text(RemoteServerFeature.settingDetail)
             }
-        } header: {
-            Text("Servers")
         } footer: {
             Text(RemoteServerFeature.settingFootnote)
                 .settingsFootnote()

@@ -28,6 +28,14 @@ public enum RemoteServerFeature {
     public static let settingDetail = "Adds servers to the sidebar, the File menu and the create windows, so workspaces can run on another machine."
     public static let settingFootnote = "Saved servers are kept while this is off, but Bloom hides them and does not connect."
 
+    /// The notice at the head of the Servers pane. Said before the switch rather than in its
+    /// footnote, so nobody turns servers on without having read that the protocol can still change
+    /// under a saved server between releases.
+    public static let alphaTitle = "Servers are in alpha"
+    public static let alphaDetail = "Try them out, but expect breaking changes at any time. Bug reports and feature requests are very welcome."
+    /// The Help menu's own label, because the button opens the same sheet that item does.
+    public static let alphaFeedback = "Send Feedback…"
+
     /// Read through `object(forKey:)` so an unregistered key still answers with the default above,
     /// rather than the `false` `bool(forKey:)` would give whatever the default says.
     public static func isEnabled(in defaults: UserDefaults) -> Bool {
