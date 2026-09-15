@@ -968,7 +968,8 @@ public actor AgentRunner {
             sawResult: sawResult,
             state: session.state,
             stderr: stderrTail.joined(separator: "\n"),
-            command: launchedCommand
+            command: launchedCommand,
+            execution: execution.missingAgentContext(cli: configuredExecutable)
         ) {
             Self.log.error("""
                 the agent for \(self.session.id.rawValue, privacy: .public) ended on status \

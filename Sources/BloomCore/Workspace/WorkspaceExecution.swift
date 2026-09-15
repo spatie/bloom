@@ -6,12 +6,27 @@ public struct WorkspaceExecution: Sendable, Hashable {
     public var commandPrefix: [String]
     public var environment: [String: String]
     public var bridgeEnabled: Bool
+    /// `[execution] name`, and the command's executable as the settings file wrote it. Kept
+    /// because an agent that is missing from the environment has to be explained in the words of
+    /// the file that chose the environment, not by an absolute path. See
+    /// `AgentMissingFromEnvironment`.
+    public var name: String?
+    public var configuredCommand: String?
     public var supportsBridge: Bool { commandPrefix.isEmpty || bridgeEnabled }
 
-    public init(commandPrefix: [String] = [], environment: [String: String] = [:], bridgeEnabled: Bool = false) {
+    public init(commandPrefix: [String] = [], environment: [String: String] = [:], bridgeEnabled: Bool = false,
+                name: String? = nil, configuredCommand: String? = nil) {
         self.commandPrefix = commandPrefix
         self.environment = environment
         self.bridgeEnabled = bridgeEnabled
+        self.name = name
+        self.configuredCommand = configuredCommand
+    }
+
+    /// What a wrapped launch of `cli` carries into its error row, or nothing for a host launch.
+    public func missingAgentContext(cli: String) -> AgentMissingFromEnvironment? {
+        guard let first = commandPrefix.first else { return nil }
+        return AgentMissingFromEnvironment(environment: name, command: configuredCommand ?? first, cli: cli)
     }
 
     public static func resolve(workspace: Workspace, repo: Repo, environment: [String: String]) throws -> Self {
@@ -26,8 +41,10 @@ public struct WorkspaceExecution: Sendable, Hashable {
               FileManager.default.isExecutableFile(atPath: executable) else {
             throw Failure("The execution command must name an executable file inside this workspace: \(command[0])")
         }
+        let written = command[0]
         command[0] = executable
-        return Self(commandPrefix: command, environment: environment, bridgeEnabled: settings.executionBridge == true)
+        return Self(commandPrefix: command, environment: environment, bridgeEnabled: settings.executionBridge == true,
+                    name: settings.executionName, configuredCommand: written)
     }
 
     public static func resolve(store: Store, session: Session) async throws -> Self {

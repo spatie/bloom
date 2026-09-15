@@ -44,6 +44,7 @@ let serverTests = [
     "WorkspacePreviewTests.swift",
     "BrowserAddressDisplayTests.swift",
     "WorkspaceExecutionTests.swift",
+    "AgentMissingFromEnvironmentTests.swift",
     "ServerProjectSettingsTests.swift",
     "ServerReviewCacheTests.swift",
     "CodexRunnerTests.swift",
