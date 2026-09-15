@@ -1,8 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// A file the agent did not touch: its source, highlighted with the same primitives the diff
-/// uses, and the same file editable.
+/// A file the agent did not touch: rendered Markdown or highlighted source, and the same file editable.
 ///
 /// The View / Edit pair is the whole point of the bar. Every route into a changed file gets
 /// `FileHeaderBar`, which names both of its states in words; a file git has nothing to say about
@@ -24,6 +23,7 @@ struct FilePreview: View {
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
     @State private var language: Language = .plainText
+    @State private var markdown: String?
     @State private var maxColumns = 0
     @State private var isTruncated = false
     @State private var isLoading = true
@@ -88,6 +88,8 @@ struct FilePreview: View {
                         title: "Nothing to show",
                         message: "\(filename) is empty, or is not text."
                     )
+                } else if let markdown {
+                    markdownContent(markdown)
                 } else {
                     content
                 }
@@ -236,6 +238,23 @@ struct FilePreview: View {
         Reveal.inEditor(absolutePath, repo: model.repo?.id)
     }
 
+    private func markdownContent(_ text: String) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+                MarkdownView(text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if isTruncated {
+                    Text("Showing the first \(Self.lineLimit.formatted()) lines")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+            .padding(InspectorLayout.inset)
+        }
+        .defaultScrollAnchor(.topLeading)
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
     /// `GeometryReader` because the sheet has to be at least as wide as the container AND at least
     /// as wide as the longest line, and there is no container-relative modifier that expresses a
     /// maximum of the two.
@@ -338,13 +357,13 @@ struct FilePreview: View {
         // Same call and same answer as `DiffView`, so the two bars never disagree about whether a
         // file can be edited.
         let absolute = absolutePath
-        guard canEditInBloom else {
+        if canEditInBloom {
+            isEditable = await Task.detached(priority: .utility) {
+                FileEditor.isEditable(absolute)
+            }.value
+        } else {
             isEditable = false
-            return
         }
-        isEditable = await Task.detached(priority: .utility) {
-            FileEditor.isEditable(absolute)
-        }.value
 
         guard !Task.isCancelled else { return }
 
@@ -365,8 +384,14 @@ struct FilePreview: View {
             let all = source.components(separatedBy: "\n")
             let truncated = all.count > lineLimit
             let kept = truncated ? Array(all.prefix(lineLimit)) : all
+            let markdown = detected == .markdown ? kept.joined(separator: "\n") : nil
+            if let markdown {
+                // Warm the shared parse cache off the main actor before the viewer asks for it.
+                _ = MarkdownPrime.blocks(of: markdown)
+            }
             return Prepared(
                 lines: kept,
+                markdown: markdown,
                 carries: CarryPass.states(for: kept, language: detected),
                 maxColumns: min(
                     kept.reduce(0) { max($0, CodeMetrics.columns(of: $1)) }, columnLimit
@@ -379,11 +404,13 @@ struct FilePreview: View {
 
         guard let prepared else {
             lines = []
+            markdown = nil
             isLoading = false
             return
         }
 
         lines = prepared.lines
+        markdown = prepared.markdown
         carries = prepared.carries
         language = detected
         isTruncated = prepared.isTruncated
@@ -394,6 +421,7 @@ struct FilePreview: View {
     /// Everything the reader needs about a file, so the whole of the reading is one hop.
     private struct Prepared: Sendable {
         var lines: [String]
+        var markdown: String?
         var carries: [LexState]
         var maxColumns: Int
         var isTruncated: Bool
