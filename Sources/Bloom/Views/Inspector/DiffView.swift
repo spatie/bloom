@@ -115,6 +115,7 @@ struct DiffView: View {
     @State private var source: FileDiff?
     @State private var preparedWhitespace: Bool?
     @State private var mode: FileViewMode
+    @State private var showsMarkdownPreview = false
     @State private var isEditable = false
     /// The file whose diff is on screen, which is not the same question as `file`.
     ///
@@ -340,6 +341,7 @@ struct DiffView: View {
             await prepareWrappedRows()
         }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
+        .onChange(of: mode) { _, _ in showsMarkdownPreview = false }
         .onChange(of: fileComments) { _, _ in rebuild() }
         .onChange(of: draftSelection) { _, _ in rebuild() }
         .onChange(of: model.changesGeneration) { _, _ in refreshWorktreeCopy() }
@@ -379,12 +381,43 @@ struct DiffView: View {
         FileHeaderBar(
             model: model, file: file, session: session, diff: source,
             mode: $mode, isEditable: isEditable, onRevert: revert,
-            isCollapsed: isCollapsed, onToggleCollapsed: onToggleCollapsed
+            isCollapsed: isCollapsed, onToggleCollapsed: onToggleCollapsed,
+            showsMarkdownPreview: showsMarkdownPreview,
+            onToggleMarkdownPreview: markdownPreviewAction
         )
+    }
+
+    private var markdownPreviewAction: (() -> Void)? {
+        guard allowsWorktreeActions, Language.detect(path: file.path) == .markdown, !file.isBinary, file.change != .deleted else {
+            return nil
+        }
+        return {
+            if isCollapsed { onToggleCollapsed?() }
+            showsMarkdownPreview.toggle()
+        }
     }
 
     @ViewBuilder
     private var fileContent: some View {
+        if embeddedWidth == nil {
+            MarkdownPreviewContent(
+                path: absolutePath, revision: model.changesGeneration,
+                isPresented: $showsMarkdownPreview
+            ) {
+                sourceContent
+            }
+        } else if showsMarkdownPreview {
+            MarkdownFilePreview(path: absolutePath, revision: model.changesGeneration) {
+                showsMarkdownPreview = false
+            }
+            .frame(height: 480)
+        } else {
+            sourceContent
+        }
+    }
+
+    @ViewBuilder
+    private var sourceContent: some View {
         switch mode {
         case .diff:
             content
