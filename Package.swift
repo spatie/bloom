@@ -11,6 +11,7 @@ let serverTests = [
     "BridgeDrainTests.swift",
     "CodexMcpResultTests.swift",
     "ServerOwnershipTests.swift",
+    "ServerLockWaitTests.swift",
     "ServerConnectionsTests.swift",
     "ServerConnectionProfileTests.swift",
     "ServerReviewLifecycleTests.swift",
