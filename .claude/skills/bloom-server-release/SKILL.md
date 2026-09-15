@@ -31,8 +31,9 @@ the repository root.
    `gh workflow run server.yml --repo spatie/bloom --ref <branch> -f release_build=true`, and wait
    for its `release-package` job. Dispatching is a CI run, not a release, but ask before doing it.
 2. Compare `version = ` in `Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift` with the
-   previous release's tag. If the wire protocol changed, every installed supervisor will refuse the
-   new package with `incompatible_release`. That is not a reason to stop the release, but
+   previous release's tag. Supervisors read `bloom-server-linux-x86_64.json` before offering a
+   release, so if the wire protocol changed, every installed supervisor shows the release as
+   incompatible and does not offer it, and the release workflow's verify step fails on it. That is not a reason to stop the release, but
    `Tools/bloom_maintenance_install.py` must accept the new protocol in the same release, and the
    notes must say that servers need **Update Server…** in the new app.
 3. A patch to an older line is published with `--latest=false`, or every server is pointed at it.
@@ -55,7 +56,8 @@ gh api repos/spatie/bloom/releases/latest --jq .tag_name
 gh release download "$tag" --repo spatie/bloom --pattern 'bloom-server-linux-x86_64*' --dir "$dir"
 (cd "$dir" && shasum -a 256 -c bloom-server-linux-x86_64.tar.gz.sha256)
 gh api "repos/spatie/bloom/releases/tags/$tag" > "$dir/release.json"
-python3 Tools/server-release-assets.py verify "$dir/bloom-server-linux-x86_64.tar.gz" --release "$dir/release.json"
+python3 Tools/server-release-assets.py verify "$dir/bloom-server-linux-x86_64.tar.gz" \
+  --release "$dir/release.json" --description "$dir/bloom-server-linux-x86_64.json"
 cat "$dir/bloom-server-linux-x86_64.json"
 ```
 
@@ -106,7 +108,8 @@ Start with the job's final phase and its error code, which the app shows and cop
 
 | Code or phase | Meaning | Next step |
 | --- | --- | --- |
-| `release_unavailable` | No stable latest release, no server asset in it, no digest, or GitHub unreachable. | Run the asset check above. Check `releases/latest`. |
+| `release_unavailable` | No stable latest release, no server asset in it, no digest, a description whose `name`, `tag` or `sha256` differs from the release, or GitHub unreachable. | Run the asset check above. Check `releases/latest`. |
+| Offered as incompatible | The description names another architecture, wire or maintenance protocol, or a newer glibc than the server. Updates shows the reason; nothing is downloaded. | A protocol change goes through **Update Server…** from the new app; a glibc one needs a newer Ubuntu. |
 | `release_changed` | The latest release changed between inspection and review. | Review again. |
 | `checksum_mismatch` | The downloaded bytes are not the digest in the plan, usually an asset replaced after review. | Check whether the asset was re-uploaded; review again. |
 | `incompatible_release` | Manifest protocol, maintenance protocol or architecture differs from the supervisor's. | Usually a wire protocol change; use **Update Server…** from the new app. |

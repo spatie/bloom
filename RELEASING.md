@@ -137,9 +137,9 @@ downloads it reads GitHub.
 | `bloom-server-linux-x86_64.tar.gz.sha256` | People, and `install-bloom-server.py --sha256`. The format `sha256sum -c` reads. |
 | `bloom-server-linux-x86_64.json` | People and scripts: `tag`, `version`, `protocolVersion`, `maintenanceProtocolVersion`, `architecture`, `glibc`, `sha256` and `size`. |
 
-The supervisor reads neither sidecar. It trusts the SHA-256 digest GitHub computes for the uploaded
-tarball, and reads the version and protocol from the `manifest.json` inside it. The sidecars are
-there so a release can be checked by a person without the API.
+The supervisor trusts the SHA-256 digest GitHub computes for the uploaded tarball. It reads the
+JSON description before offering a release, and the `manifest.json` inside the tarball again after
+downloading it. The checksum file is there so a release can be checked by a person without the API.
 
 ### How it is built
 
@@ -177,6 +177,14 @@ marked latest, never a draft or a prerelease. It offers that release when it car
 It never offers a downgrade. **Prereleases are never offered to servers**; there is no server beta
 channel.
 
+Before offering it, the supervisor downloads `bloom-server-linux-x86_64.json`. A description whose
+`name`, `tag` or `sha256` differs from the release it sits in is a broken release and is refused as
+`release_unavailable`. One naming another architecture, another wire or maintenance protocol, or a
+newer glibc than the server has, is shown with its reason and not offered, so an incompatible
+release is explained in Updates rather than failing after a download. An unreadable description
+falls back to the behaviour of a release without one, because every rule it carries is checked
+again below.
+
 After downloading by asset ID it requires GitHub's digest, plain files and directories under
 `bloom-server-linux-x86_64/`, and a manifest naming the reviewed version, `x86_64`, maintenance
 protocol 1 and the wire protocol the supervisor was installed for. Any mismatch fails the job before
@@ -187,9 +195,10 @@ as `rolledBack`.
 Compatibility is by protocol version, and today the accepted range is one version. The app, the
 gateway, the server and the supervisor all enforce 14, and the administrator installer writes
 `protocol_version=14` into the supervisor's configuration. So a release that raises
-`BloomWire.version` is refused with `incompatible_release` by every supervisor installed for the old
-protocol, and those servers move through **Update Server…** in the new app, which reinstalls the
-supervisor as well. Raising the protocol means changing `Tools/bloom_maintenance_install.py` in the
+`BloomWire.version` is not offered by any supervisor installed for the old protocol, which says why
+in Updates, and those servers move through **Update Server…** in the new app, which reinstalls the
+supervisor as well. The workflow's verify step fails on exactly that, so a protocol change is
+noticed at release time rather than on a server. Raising the protocol means changing `Tools/bloom_maintenance_install.py` in the
 same commit, and saying in the release notes that servers need the administrator update.
 
 `latest` is a flag on GitHub rather than the highest tag. A patch to an older line published with
@@ -208,7 +217,8 @@ gh api repos/spatie/bloom/releases/latest --jq .tag_name
 gh release download "$tag" --repo spatie/bloom --pattern 'bloom-server-linux-x86_64*' --dir "$dir"
 (cd "$dir" && shasum -a 256 -c bloom-server-linux-x86_64.tar.gz.sha256)
 gh api "repos/spatie/bloom/releases/tags/$tag" > "$dir/release.json"
-python3 Tools/server-release-assets.py verify "$dir/bloom-server-linux-x86_64.tar.gz" --release "$dir/release.json"
+python3 Tools/server-release-assets.py verify "$dir/bloom-server-linux-x86_64.tar.gz" \
+  --release "$dir/release.json" --description "$dir/bloom-server-linux-x86_64.json"
 ```
 
 For a stable release `releases/latest` has to print the new tag, or no server is offered it. The

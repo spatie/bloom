@@ -467,7 +467,8 @@ jobs:
           for attempt in 1 2 3 4 5 6; do
             gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
             if python3 Tools/server-release-assets.py verify .build/server-package/bloom-server-linux-x86_64.tar.gz \
-                 --release "$RUNNER_TEMP/release.json"; then
+                 --release "$RUNNER_TEMP/release.json" \
+                 --description .build/server-package/bloom-server-linux-x86_64.json; then
               exit 0
             fi
             echo "Not verified yet, attempt $attempt."

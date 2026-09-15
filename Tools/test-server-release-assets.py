@@ -120,36 +120,99 @@ class VerifyTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='bloom-server-release-test-')
         self.addCleanup(self.temporary.cleanup)
-        self.archive = package(pathlib.Path(self.temporary.name) / assets.ASSET, manifest())
+        self.root = pathlib.Path(self.temporary.name)
+        self.archive = package(self.root / assets.ASSET, manifest())
+        assets.describe(self.archive, 'v1.4.0', self.root)
+        self.description = self.root / assets.METADATA
+        # Verification is handed everything it needs. A download attempt, real or through a
+        # stub left behind, fails the test rather than reaching GitHub or being skipped.
+        original = assets.maintenance.https_open
+
+        def no_network(*arguments, **options):
+            raise AssertionError('https_open was called during verification')
+
+        assets.maintenance.https_open = no_network
+        self.addCleanup(setattr, assets.maintenance, 'https_open', original)
+        self.guard = no_network
+
+    def release(self, **changes):
+        value = release(self.archive, **changes)
+        for item in value['assets']:
+            if item['name'] == assets.METADATA:
+                item.update(size=self.description.stat().st_size,
+                            digest='sha256:' + hashlib.sha256(self.description.read_bytes()).hexdigest())
+        return value
+
+    def rewrite(self, **changes):
+        described = json.loads(self.description.read_text())
+        described.update(changes)
+        self.description.write_text(json.dumps(described, indent=2) + '\n')
 
     def test_a_published_release_is_offered_with_the_built_digest(self):
-        asset, notes = assets.verify(self.archive, release(self.archive))
+        asset, notes = assets.verify(self.archive, self.release(), self.description)
         self.assertEqual(asset['version'], 'v1.4.0')
         self.assertEqual(asset['assetID'], 41)
         self.assertEqual(asset['sha256'], hashlib.sha256(self.archive.read_bytes()).hexdigest())
+        self.assertNotIn('incompatible', asset)
         self.assertEqual(notes, [])
         self.assertEqual(assets.maintenance.fetch_json.__name__, 'fetch_json')
+        self.assertIs(assets.maintenance.https_open, self.guard)
+
+    def test_the_description_reaches_the_supervisor_without_a_download(self):
+        seen = []
+        original = assets.maintenance.release_incompatibility
+
+        def recording(metadata, asset, protocol_version=14, host=None):
+            seen.append((metadata, protocol_version))
+            return original(metadata, asset, protocol_version, host)
+
+        assets.maintenance.release_incompatibility = recording
+        self.addCleanup(setattr, assets.maintenance, 'release_incompatibility', original)
+        assets.verify(self.archive, self.release(), self.description)
+        self.assertEqual(seen, [(json.loads(self.description.read_text()), assets.wire_protocol())])
+
+    def test_an_incompatible_description_fails_with_the_supervisors_reason(self):
+        self.rewrite(protocolVersion=assets.wire_protocol() + 1)
+        with self.assertRaisesRegex(assets.AssetError, 'refuse this release.*protocol'):
+            assets.verify(self.archive, self.release(), self.description)
+
+    def test_a_description_for_another_tag_or_package_is_release_unavailable(self):
+        for change in (dict(tag='v1.4.1'), dict(sha256='e' * 64)):
+            with self.subTest(change=change):
+                assets.describe(self.archive, 'v1.4.0', self.root)
+                self.rewrite(**change)
+                with self.assertRaisesRegex(assets.AssetError, 'release_unavailable'):
+                    assets.verify(self.archive, self.release(), self.description)
+
+    def test_an_uploaded_description_that_is_not_the_built_one_is_refused(self):
+        published = self.release()
+        published['assets'][2]['digest'] = 'sha256:' + 'f' * 64
+        with self.assertRaisesRegex(assets.AssetError, 'not the description that was built'):
+            assets.verify(self.archive, published, self.description)
 
     def test_a_digest_from_another_build_is_refused(self):
-        published = release(self.archive)
+        # A release and description that agree with each other, both from a build other than the
+        # one bundled into the app: the supervisor would offer it, and only this check notices.
+        self.rewrite(sha256='a' * 64)
+        published = self.release()
         published['assets'][0]['digest'] = 'sha256:' + 'a' * 64
         with self.assertRaisesRegex(assets.AssetError, 'built package'):
-            assets.verify(self.archive, published)
+            assets.verify(self.archive, published, self.description)
 
     def test_a_missing_digest_is_what_the_supervisor_refuses(self):
-        published = release(self.archive)
+        published = self.release()
         del published['assets'][0]['digest']
         with self.assertRaisesRegex(assets.AssetError, 'release_unavailable'):
-            assets.verify(self.archive, published)
+            assets.verify(self.archive, published, self.description)
 
     def test_missing_assets_are_named(self):
         with self.assertRaisesRegex(assets.AssetError, 'release_unavailable'):
-            assets.verify(self.archive, release(self.archive, names={assets.CHECKSUM, assets.METADATA}))
+            assets.verify(self.archive, self.release(names={assets.CHECKSUM, assets.METADATA}), self.description)
         with self.assertRaisesRegex(assets.AssetError, re.escape(assets.METADATA)):
-            assets.verify(self.archive, release(self.archive, names={assets.ASSET, assets.CHECKSUM}))
+            assets.verify(self.archive, self.release(names={assets.ASSET, assets.CHECKSUM}), self.description)
 
     def test_a_prerelease_verifies_and_says_it_is_not_offered(self):
-        _, notes = assets.verify(self.archive, release(self.archive, prerelease=True))
+        _, notes = assets.verify(self.archive, self.release(prerelease=True), self.description)
         self.assertTrue(notes)
 
 

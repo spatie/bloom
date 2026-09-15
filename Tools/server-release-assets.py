@@ -8,15 +8,17 @@ workflow accepts is therefore one every current supervisor would accept, and a c
 supervisor's rules changes this check on the same commit rather than on the next failed update.
 
     server-release-assets.py describe <archive> --tag v1.4.0 --output-dir <dir>
-    server-release-assets.py verify <archive> --release <github-release.json>
+    server-release-assets.py verify <archive> --release <github-release.json> --description <json>
 
-`describe` writes the two sidecars published beside the tarball. The supervisor reads neither:
-it trusts the digest GitHub computes for the uploaded asset. They exist for people and for the
-manual installer, which takes `--sha256`, so a server can be checked without the GitHub API.
+`describe` writes the two sidecars published beside the tarball. The supervisor trusts the digest
+GitHub computes for the tarball, and reads the JSON description before offering a release, so an
+incompatible one is refused without a download. The checksum is for people and for the manual
+installer, which takes `--sha256`.
 
 `verify` reads the release JSON after upload (`gh api repos/spatie/bloom/releases/tags/<tag>`)
-and confirms GitHub's digest and size are those of the file that was built, which is the one
-bundled into the Mac app.
+with the description that was built, and confirms GitHub's digests and sizes are those of the
+files that were built, the tarball being the one bundled into the Mac app, and that supervisors
+would offer the release.
 """
 import argparse
 import hashlib
@@ -88,19 +90,36 @@ def describe(archive, tag, output_dir):
     return metadata
 
 
-def verify(archive, release):
+def verify(archive, release, description):
     sha256 = digest(archive)
+    described = json.loads(description.read_bytes())
     offered = dict(release, draft=False, prerelease=False)
-    original = maintenance.fetch_json
-    # The single replaced operation is the HTTPS fetch, so the asset selection, the digest format
-    # and the tag rules below are the supervisor's own.
+    read = []
+
+    def reader(config, asset_id):
+        read.append(asset_id)
+        return described
+
+    replaced = dict(fetch_json=maintenance.fetch_json, https_open=maintenance.https_open, host_glibc=maintenance.host_glibc)
+    # The release JSON and the description are handed in, so the asset selection, the digest
+    # format, the tag rules and the description's compatibility rules below are the supervisor's
+    # own, and nothing here reaches GitHub. Every download raises: a supervisor change that adds a
+    # fetch has to be supplied here too, rather than being skipped as unreadable. The host glibc is
+    # left out because the machine verifying a release is not the server it will run on.
     maintenance.fetch_json = lambda url, maximum=None: offered
+
+    def refuse(*arguments, **options):
+        raise AssetError('Verification tried to download from GitHub: ' + str(arguments[:1]))
+
+    maintenance.https_open = refuse
+    maintenance.host_glibc = lambda: None
     try:
-        asset = maintenance.release_asset({'release_repository': 'spatie/bloom'})
+        asset = maintenance.release_asset({'release_repository': 'spatie/bloom'}, wire_protocol(), metadata_reader=reader)
     except maintenance.MaintenanceError as error:
         raise AssetError(f'The supervisor would not offer this release ({error.code}): {error}') from None
     finally:
-        maintenance.fetch_json = original
+        for name, value in replaced.items():
+            setattr(maintenance, name, value)
     if asset['sha256'] != sha256:
         raise AssetError(f'GitHub publishes sha256:{asset["sha256"]} but the built package is sha256:{sha256}.')
     uploaded = next(item for item in release['assets'] if item.get('name') == ASSET)
@@ -110,6 +129,13 @@ def verify(archive, release):
     missing = sorted({CHECKSUM, METADATA} - names)
     if missing:
         raise AssetError('The release is missing ' + ', '.join(missing) + '.')
+    published = next(item for item in release['assets'] if item.get('name') == METADATA)
+    if published.get('digest') != 'sha256:' + digest(description) or published.get('size') != description.stat().st_size:
+        raise AssetError(f'The published {METADATA} is not the description that was built.')
+    if not read:
+        raise AssetError(f'The supervisor did not read {METADATA}, so its compatibility was not checked.')
+    if asset.get('incompatible'):
+        raise AssetError('Supervisors would refuse this release before downloading it: ' + asset['incompatible'])
     notes = []
     if release.get('draft') or release.get('prerelease'):
         notes.append('This release is a draft or prerelease, so supervisors are not offered it.')
@@ -126,12 +152,13 @@ def main(arguments=None):
     verified = commands.add_parser('verify')
     verified.add_argument('archive', type=pathlib.Path)
     verified.add_argument('--release', type=pathlib.Path, required=True)
+    verified.add_argument('--description', type=pathlib.Path, required=True)
     options = parser.parse_args(arguments)
     try:
         if options.command == 'describe':
             print(json.dumps(describe(options.archive, options.tag, options.output_dir), indent=2))
         else:
-            asset, notes = verify(options.archive, json.loads(options.release.read_text()))
+            asset, notes = verify(options.archive, json.loads(options.release.read_text()), options.description)
             print(f'{ASSET} for {asset["version"]} is asset {asset["assetID"]}, sha256:{asset["sha256"]}')
             for note in notes:
                 print(note)
