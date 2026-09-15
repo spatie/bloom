@@ -176,8 +176,12 @@ struct StartProjectView: View {
         // the window is doing, and a failure's title is what went wrong.
         .navigationTitle(title)
         .onAppear {
-            isRemote = StartProjectOpening.shared.isRemote ?? app.selection.isRemote
+            isRemote = RemoteServerAvailability.shared.isEnabled && (StartProjectOpening.shared.isRemote ?? app.selection.isRemote)
             StartProjectOpening.shared.isRemote = nil
+        }
+        // Remote servers switched off while this window is open. See `CreationDestinationPicker`.
+        .onChange(of: RemoteServerAvailability.shared.isEnabled) { _, isEnabled in
+            if !isEnabled, isRemote { isRemote = false }
         }
         .sheet(isPresented: $showsGitHub) {
             GitHubProjectPicker(isRemote: isRemote) { repo in finishRegistered(repo, opensWorkspace: true) }

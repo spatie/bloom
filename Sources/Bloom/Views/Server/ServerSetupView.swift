@@ -137,7 +137,7 @@ struct ServerSetupView: View {
     private var subtitle: String {
         switch model.phase {
         case .introduction: "Run projects on your server and pick up where you left off on any device."
-        case .address, .checking: "Enter an Ubuntu server with administrator SSH access. This step only checks the server."
+        case .address, .checking: "Enter the SSH login for your Ubuntu 24.04 or 26.04 server. This step only checks the server; nothing is installed yet."
         case .trust: "Check this fingerprint in your server console or with your administrator before continuing."
         case .readyToInstall: model.hasInstalledServer ? "Your installation and sign-ins are preserved. Continue to finish connecting." : "Check what will be installed, then choose Install."
         case .accounts: model.isInstallingOptionalTools || !model.hasChosenAccountMethod ? "" : "Check your accounts below. You can connect more tools later."
@@ -186,6 +186,9 @@ struct ServerSetupView: View {
                 TextField("SSH address", text: $model.host, prompt: Text("root@203.0.113.10"))
                     .labelsHidden().textFieldStyle(.roundedBorder).focused($addressIsFocused)
                     .accessibilityIdentifier("server-setup-address")
+                Text(ServerInstallationSummary.addressHint)
+                    .font(Typo.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text("Server label (optional)").font(Typo.labelEmphasis)
@@ -228,27 +231,15 @@ struct ServerSetupView: View {
 
     private var installationSummary: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
-            ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome, dataDirectory: model.check?.dataDirectory, alreadyInstalled: model.hasInstalledServer)
+            ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome,
+                                   dataDirectory: model.check?.dataDirectory, serviceUser: model.check?.serviceUser,
+                                   alreadyInstalled: model.hasInstalledServer)
             if !model.hasInstalledServer {
                 Divider()
-                Text("Development tools").font(Typo.labelEmphasis)
+                Text("Optional extras").font(Typo.labelEmphasis)
                 VStack(alignment: .leading, spacing: Metrics.gutter) {
-                    VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                        HStack(spacing: Metrics.spacing) {
-                            Toggle("Docker for container projects", isOn: $model.installsDocker).disabled(model.hasInstalledServer)
-                            ServerSetupHelpButton(title: "Docker installation", details: dockerDetails)
-                        }
-                        Text("Run each project’s app and databases together. Starts automatically after a reboot.")
-                            .font(Typo.caption).foregroundStyle(.secondary)
-                    }
-                    VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                        HStack(spacing: Metrics.spacing) {
-                            Toggle("Browser testing tools", isOn: $model.installsBrowserTools).disabled(model.hasInstalledServer)
-                            ServerSetupHelpButton(title: "Browser testing tools", details: "Installs agent-browser, Chrome, browser libraries and fonts. May add a Chrome-specific AppArmor rule. Docker projects need their own browser setup. Website previews in Bloom work without these tools.")
-                        }
-                        Text("Let agents test websites with sandboxed Chrome.")
-                            .font(Typo.caption).foregroundStyle(.secondary)
-                    }
+                    optionalPart(.docker, isOn: $model.installsDocker)
+                    optionalPart(.browser, isOn: $model.installsBrowserTools)
                     swapOption
                 }
             }
@@ -259,22 +250,22 @@ struct ServerSetupView: View {
         }
     }
 
-    private var dockerDetails: String {
-        "Installs Ubuntu’s Docker, Compose and rootless networking packages. Docker runs as the Bloom account, without administrator access."
-            + "\n\nRaises the server’s file-watch limit when needed, so development servers can watch large projects."
-            + "\n\nImages and container data: " + (model.check?.serviceHome ?? "/home/bloom") + "/bloom/docker/data"
-            + "\n\nThe user service and Docker connection settings use the account’s .config folder. Docker projects can run commands and access files as the Bloom account."
+    private func optionalPart(_ part: ServerInstallationSummary.OptionalPart, isOn: Binding<Bool>) -> some View {
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+            HStack(spacing: Metrics.spacing) {
+                Toggle(part.title, isOn: isOn).disabled(model.hasInstalledServer)
+                ServerSetupHelpButton(title: part.title,
+                                      details: part.details(serviceUser: model.check?.serviceUser ?? "bloom", serviceHome: model.check?.serviceHome))
+            }
+            Text(part.summary).font(Typo.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder private var swapOption: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
             if model.check?.shouldOfferSwapInstall == true {
-                HStack {
-                    Toggle("Add 2 GB of swap", isOn: $model.installsSwap).disabled(model.hasInstalledServer)
-                    ServerSetupHelpButton(title: "Swap space", details: "Swap uses disk space when memory is full. Bloom creates /var/lib/bloom/swapfile, protected by root, and enables it after reboots. Setup requires 4 GB free so at least 2 GB remains available. Existing swap is always preserved.")
-                }
-                Text("Helps keep the server responsive during memory spikes. Uses 2 GB of disk space.")
-                    .font(Typo.caption).foregroundStyle(.secondary)
+                optionalPart(.swap, isOn: $model.installsSwap)
             } else if let bytes = model.check?.activeSwapBytes, bytes > 0 {
                 Label("Swap is already active", systemImage: "checkmark.circle")
                     .font(Typo.label).foregroundStyle(Palette.controlAccent)

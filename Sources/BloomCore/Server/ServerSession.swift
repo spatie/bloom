@@ -15,7 +15,17 @@ actor ServerSession {
     private var turnReportClaim = CrewTurnReportClaim()
     private var wasStopped = false
 
-    init(runner: any SessionRunner, onTurnEnded: @escaping @Sendable (CrewTurnEnd) async -> Void = { _ in }) { self.runner = runner; self.onTurnEnded = onTurnEnded }
+    /// How long shutdown waits for a terminated runner to exit. See `shutdown()`.
+    private let runnerExitGrace: Duration
+
+    init(
+        runner: any SessionRunner, runnerExitGrace: Duration = .seconds(6),
+        onTurnEnded: @escaping @Sendable (CrewTurnEnd) async -> Void = { _ in }
+    ) {
+        self.runner = runner
+        self.runnerExitGrace = runnerExitGrace
+        self.onTurnEnded = onTurnEnded
+    }
 
     func send(_ text: String, recording: Data? = nil) async throws {
         guard !isClosed else { throw ServerFailure("This session is closed.") }
@@ -110,7 +120,11 @@ actor ServerSession {
         runner.terminateNow()
         // The runner escalates to SIGKILL on its own budget. Keep the server process alive long
         // enough for that task to run rather than orphaning a CLI that ignored SIGTERM.
-        let deadline = ContinuousClock.now.advanced(by: .seconds(6))
+        //
+        // Wall clock, and bounded, so a runner that never exits cannot hold shutdown for ever.
+        // Injectable for the ownership tests only: they hold a runner alive on purpose, and a
+        // test executor stall longer than six seconds let this deadline end shutdown first.
+        let deadline = ContinuousClock.now.advanced(by: runnerExitGrace)
         while await runner.isProcessAlive, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(25))
         }

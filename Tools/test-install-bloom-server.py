@@ -1089,5 +1089,275 @@ class StopOwnershipTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "database_unavailable")
 
 
+class UninstallTests(unittest.TestCase):
+    """Every system path points into a temporary directory; commands are recorded, never run."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="bloom-uninstall-tests-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = pathlib.Path(self.temporary.name).resolve()
+        self.home = self.root / "home"
+        self.args = self.arguments()
+        self.paths = {"browser_root": self.root / "opt/bloom-browser", "apparmor_profile": self.root / "apparmor/bloom-browser",
+                      "swap_root": self.root / "var/lib/bloom", "swap_unit": self.root / "systemd/var-lib-bloom-swapfile.swap",
+                      "watch_configuration": self.root / "sysctl/90-bloom-docker.conf", "linger": self.root / "linger"}
+        # CI runs this suite as root, and a service account with uid 0 is refused on purpose.
+        uid = os.getuid() or 4242
+        self.account = mock.Mock(pw_uid=uid, pw_gid=uid, pw_dir=str(self.home), pw_name="bloom")
+        self.accounts = {"bloom": self.account}
+        self.commands = []
+        self.swap_active = []
+        helper = installer.MaintenanceInstallation
+        factory = lambda values, protect: helper(values, protect, base=self.root / "maintenance",
+            launcher=self.root / "libexec/bloom-maintenance.py", runtime=self.root / "run", owner_uid=os.getuid())
+        def getpwnam(name):
+            if name not in self.accounts:
+                raise KeyError(name)
+            return self.accounts[name]
+        for patch in [mock.patch.object(installer, "MaintenanceInstallation", side_effect=factory),
+                      mock.patch.dict(installer.UNINSTALL_PATHS, self.paths),
+                      mock.patch.object(installer, "protected_system_path"),
+                      mock.patch.object(installer, "account_operation", side_effect=lambda account, operation: operation()),
+                      mock.patch.object(installer, "command", side_effect=self.fake_command),
+                      mock.patch.object(installer, "read_swap_status", side_effect=lambda: {"activeSwapPaths": list(self.swap_active)}),
+                      mock.patch.object(installer, "emit"),
+                      mock.patch.object(installer.time, "sleep"),
+                      mock.patch.object(installer.os, "geteuid", return_value=0),
+                      mock.patch.object(installer.pwd, "getpwnam", side_effect=getpwnam)]:
+            patch.start(); self.addCleanup(patch.stop)
+
+    def arguments(self, *extra):
+        args = installer.parser().parse_args(["--uninstall", *extra, "--systemd-dir", str(self.root / "systemd"),
+            "--install-root", str(self.home / "bloom/server"), "--data-dir", str(self.home / "bloom/data"),
+            "--service-home", str(self.home)])
+        installer.configuration(args)
+        return args
+
+    def fake_command(self, arguments, **_):
+        self.commands.append(arguments)
+        stdout = b"inactive\n" if arguments[:2] == ["systemctl", "show"] else b""
+        if arguments[:2] == ["swapoff", str(self.paths["swap_root"] / "swapfile")]:
+            self.swap_active.clear()
+        if arguments[:2] == ["loginctl", "disable-linger"]:
+            (self.paths["linger"] / arguments[2]).unlink(missing_ok=True)
+        return subprocess.CompletedProcess(arguments, 0, stdout=stdout)
+
+    def install_fixture(self, supervised=True, browser=True, swap=True, docker=True):
+        self.args.systemd_dir.mkdir(parents=True)
+        installer.save_marker(self.args, {**installer.configuration(self.args), "sha256": "a" * 64, "phase": "installed"})
+        (self.args.install_root / "releases/fixture/bin").mkdir(parents=True)
+        (self.args.install_root / "current").symlink_to(self.args.install_root / "releases/fixture")
+        self.args.data_dir.mkdir(parents=True)
+        with closing(sqlite3.connect(self.args.data_dir / "server.sqlite")) as database, database:
+            database.executescript("CREATE TABLE sessions (state TEXT); CREATE TABLE workspaces (setup_state TEXT);")
+        (self.home / "bloom/workspaces.noindex/project").mkdir(parents=True)
+        for path in (self.home, self.args.install_root, self.args.data_dir):
+            path.chmod(0o700)
+        (self.home / ".ssh").mkdir()
+        (self.home / ".ssh/authorized_keys").write_text("ssh-ed25519 AAAAowner owner@laptop\nssh-ed25519 AAAAclient bloom-client\n")
+        maintenance = installer.MaintenanceInstallation(self.args, installer.protected_system_path)
+        unit = self.args.systemd_dir / "bloom-server.service"
+        if supervised:
+            maintenance.state.mkdir(parents=True)
+            config = dict(service_home=str(self.home), data_dir=str(self.args.data_dir), state_dir=str(maintenance.state),
+                          install_root=str(maintenance.releases), maintenance_socket=str(maintenance.socket_path), access_token_sha256="b" * 64)
+            maintenance.config_path.write_text(json.dumps(config))
+            maintenance.config_path.chmod(0o600)
+            (maintenance.releases / "fixture").mkdir(parents=True)
+            maintenance.launcher.parent.mkdir(parents=True)
+            for path in (maintenance.launcher, maintenance.docker_module, maintenance.process_module):
+                path.write_text("# supervisor\n")
+            maintenance.runtime.mkdir()
+            maintenance.socket_path.write_text("")
+            unit.write_text(maintenance.unit_contents())
+        else:
+            unit.write_text(installer.legacy_unit_contents(self.args))
+        if browser:
+            self.paths["browser_root"].mkdir(parents=True)
+            (self.paths["browser_root"] / ".bloom-managed").write_text("Bloom optional browser installer v1\n")
+            (self.paths["browser_root"] / "configuration.json").write_text(json.dumps({"uid": self.account.pw_uid}))
+            self.paths["apparmor_profile"].parent.mkdir(parents=True)
+            self.paths["apparmor_profile"].write_text("# Bloom managed browser user namespaces\nprofile bloom-browser {}\n")
+        if swap:
+            swap_root = self.paths["swap_root"]
+            swap_root.mkdir(parents=True)
+            (swap_root / "swapfile").write_bytes(b"\0" * 16)
+            (swap_root / ".swap-managed.json").write_text(json.dumps({"path": str(swap_root / "swapfile"), "phase": "active"}))
+            self.paths["swap_unit"].write_text("# Managed by Bloom optional swap setup\n[Swap]\n")
+            self.swap_active.append(str(swap_root / "swapfile"))
+        if docker:
+            self.paths["watch_configuration"].parent.mkdir(parents=True)
+            self.paths["watch_configuration"].write_text("# Managed by Bloom optional Docker setup\nfs.inotify.max_user_watches = 524288\n")
+            self.paths["linger"].mkdir()
+            (self.paths["linger"] / "bloom").write_text("")
+        return maintenance
+
+    def assert_nothing_changed(self, maintenance):
+        self.assertTrue((self.args.systemd_dir / "bloom-server.service").exists())
+        self.assertTrue(maintenance.config_path.exists())
+        self.assertTrue((self.args.install_root / "current").is_symlink())
+        self.assertEqual(json.loads(installer.marker_path(self.args).read_text())["phase"], "installed")
+        self.assertFalse(any(arguments[0] in ("systemctl", "userdel", "pkill") for arguments in self.commands))
+
+    def mark_busy(self):
+        with closing(sqlite3.connect(self.args.data_dir / "server.sqlite")) as database, database:
+            database.execute("INSERT INTO sessions VALUES ('running')")
+
+    def test_default_uninstall_removes_bloom_and_keeps_the_account_and_its_data(self):
+        maintenance = self.install_fixture()
+        result = installer.uninstall(self.args)
+        self.assertFalse(result["unchanged"])
+        self.assertFalse(result["deletedData"])
+        self.assertIn(["systemctl", "disable", "--now", "bloom-server.service"], self.commands)
+        self.assertFalse((self.args.systemd_dir / "bloom-server.service").exists())
+        for path in (maintenance.state, maintenance.launcher, maintenance.docker_module, maintenance.process_module,
+                     maintenance.socket_path, maintenance.base, self.args.install_root, self.paths["browser_root"],
+                     self.paths["apparmor_profile"], self.paths["swap_root"], self.paths["swap_unit"], self.paths["watch_configuration"]):
+            self.assertFalse(path.exists(), path)
+        self.assertIn(["apparmor_parser", "-R", str(self.paths["apparmor_profile"])], self.commands)
+        self.assertIn(["loginctl", "disable-linger", "bloom"], self.commands)
+        self.assertTrue((self.args.data_dir / "server.sqlite").exists())
+        self.assertTrue((self.home / "bloom/workspaces.noindex/project").is_dir())
+        self.assertEqual((self.home / ".ssh/authorized_keys").read_text(), "ssh-ed25519 AAAAowner owner@laptop\n")
+        saved = json.loads(installer.marker_path(self.args).read_text())
+        self.assertEqual((saved["phase"], saved["uninstalled"]), ("prepared", True))
+        self.assertFalse(any(arguments[0] in ("userdel", "pkill", "apt-get", "dpkg") for arguments in self.commands))
+        self.assertTrue(any("Docker" in item and "Git" in item for item in result["kept"]))
+        self.assertTrue(any(str(self.home) in item for item in result["kept"]))
+
+    def test_uninstall_can_be_repeated_without_changing_anything_more(self):
+        self.install_fixture()
+        installer.uninstall(self.args)
+        self.commands.clear()
+        again = installer.uninstall(self.args)
+        self.assertTrue(again["unchanged"])
+        self.assertEqual(again["removed"], [])
+        self.assertFalse(any(arguments[:2] == ["systemctl", "disable"] for arguments in self.commands))
+        self.assertTrue((self.args.data_dir / "server.sqlite").exists())
+
+    def test_kept_data_is_adopted_by_a_later_installation_check(self):
+        self.install_fixture(supervised=False, browser=False, swap=False, docker=False)
+        installer.uninstall(self.args)
+        if os.getuid() == 0:
+            for path in (self.home, self.args.data_dir):
+                os.chown(path, self.account.pw_uid, self.account.pw_gid)
+        existing = installer.marker(self.args)
+        installer.check_ownership(self.args, existing)
+        self.assertEqual(installer.existing_account(self.args, existing), self.account)
+
+    def test_delete_data_removes_the_account_and_the_installation_record(self):
+        self.install_fixture()
+        args = self.arguments("--delete-data")
+        result = installer.uninstall(args)
+        self.assertTrue(result["deletedData"])
+        self.assertIn(["userdel", "--remove", "bloom"], self.commands)
+        self.assertLess(self.commands.index(["systemctl", "disable", "--now", "bloom-server.service"]),
+                        self.commands.index(["userdel", "--remove", "bloom"]))
+        self.assertFalse(installer.marker_path(args).exists())
+        self.assertTrue(any("account" in item and "projects" in item for item in result["removed"]))
+        self.accounts.clear()
+        self.commands.clear()
+        again = installer.uninstall(args)
+        self.assertTrue(again["unchanged"])
+        self.assertEqual(self.commands, [])
+
+    def test_running_agents_refuse_unless_forced(self):
+        maintenance = self.install_fixture()
+        self.mark_busy()
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.uninstall(self.arguments("--delete-data"))
+        self.assertEqual(raised.exception.code, "server_busy")
+        self.assertIn("Uninstall Anyway", raised.exception.recovery)
+        self.assert_nothing_changed(maintenance)
+        self.assertFalse(installer.uninstall(self.arguments("--force"))["unchanged"])
+        self.assertFalse(maintenance.config_path.exists())
+
+    def test_running_update_refuses_unless_forced(self):
+        maintenance = self.install_fixture()
+        with closing(sqlite3.connect(maintenance.state / "maintenance.sqlite")) as database, database:
+            database.executescript("CREATE TABLE jobs (state TEXT); INSERT INTO jobs VALUES ('applying');")
+        (maintenance.state / "maintenance.sqlite").chmod(0o600)
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.uninstall(self.args)
+        self.assertEqual(raised.exception.code, "maintenance_busy")
+        self.assert_nothing_changed(maintenance)
+        installer.uninstall(self.arguments("--force"))
+        self.assertFalse(maintenance.state.exists())
+
+    def test_a_changed_service_or_unmatched_maintenance_is_never_removed_even_when_forced(self):
+        maintenance = self.install_fixture()
+        unit = self.args.systemd_dir / "bloom-server.service"
+        unit.write_text(unit.read_text() + "ExecStartPost=/usr/local/bin/other\n")
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.uninstall(self.arguments("--force"))
+        self.assertEqual(raised.exception.code, "unmanaged_server")
+        unit.write_text(maintenance.unit_contents())
+        maintenance.config_path.write_text(json.dumps({"data_dir": "/elsewhere"}))
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.uninstall(self.arguments("--force"))
+        self.assertEqual(raised.exception.code, "untrusted_maintenance")
+        self.assertTrue(unit.exists())
+        self.assertFalse(any(arguments[0] == "systemctl" for arguments in self.commands))
+
+    def test_a_server_without_bloom_is_left_alone(self):
+        self.args.systemd_dir.mkdir(parents=True)
+        result = installer.uninstall(self.args)
+        self.assertTrue(result["unchanged"])
+        self.assertEqual(self.commands, [])
+        (self.args.systemd_dir / "bloom-server.service").write_text("[Service]\nExecStart=/usr/bin/true\n")
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.uninstall(self.args)
+        self.assertEqual(raised.exception.code, "unmanaged_server")
+
+    def test_shared_programs_and_foreign_optional_tools_are_kept(self):
+        maintenance = self.install_fixture()
+        (maintenance.base / "another-server").mkdir()
+        (self.paths["browser_root"] / "configuration.json").write_text(json.dumps({"uid": self.account.pw_uid + 1}))
+        self.paths["swap_unit"].write_text("[Swap]\nWhat=/swap.img\n")
+        self.paths["watch_configuration"].write_text("fs.inotify.max_user_watches = 1048576\n")
+        result = installer.uninstall(self.args)
+        self.assertTrue(maintenance.launcher.exists())
+        self.assertTrue(self.paths["browser_root"].exists())
+        self.assertTrue(self.paths["apparmor_profile"].exists())
+        self.assertTrue((self.paths["swap_root"] / "swapfile").exists())
+        self.assertTrue(self.paths["watch_configuration"].exists())
+        self.assertFalse(maintenance.state.exists())
+        self.assertTrue(any("another Bloom Server" in item for item in result["kept"]))
+
+    def test_swap_that_cannot_be_turned_off_is_kept_and_reported(self):
+        self.install_fixture(supervised=False, browser=False, docker=False)
+        def refuse_swap(arguments, **keywords):
+            if arguments[:2] == ["systemctl", "disable"] and arguments[-1].endswith(".swap"):
+                self.commands.append(arguments)
+                return subprocess.CompletedProcess(arguments, 1, stdout=b"")
+            return self.fake_command(arguments, **keywords)
+        installer.command.side_effect = refuse_swap
+        result = installer.uninstall(self.args)
+        self.assertTrue((self.paths["swap_root"] / "swapfile").exists())
+        self.assertTrue(any("swap" in item for item in result["kept"]))
+
+    def test_service_that_does_not_stop_keeps_its_files(self):
+        maintenance = self.install_fixture()
+        def still_active(arguments, **keywords):
+            if arguments[:2] == ["systemctl", "show"]:
+                return subprocess.CompletedProcess(arguments, 0, stdout=b"active\n")
+            return self.fake_command(arguments, **keywords)
+        installer.command.side_effect = still_active
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.uninstall(self.args)
+        self.assertEqual(raised.exception.code, "stop_failed")
+        self.assertTrue(maintenance.config_path.exists())
+        self.assertTrue((self.args.systemd_dir / "bloom-server.service").exists())
+
+    def test_uninstall_options_are_refused_without_uninstall_and_require_root(self):
+        with mock.patch.object(installer.sys, "argv", ["installer", "--check", "--delete-data"]):
+            self.assertEqual(installer.main(), 1)
+        self.assertEqual(installer.emit.call_args.kwargs["code"], "invalid_configuration")
+        with mock.patch.object(installer.os, "geteuid", return_value=1000):
+            with self.assertRaises(installer.InstallError) as raised:
+                installer.uninstall(self.args)
+        self.assertEqual(raised.exception.code, "administrator_required")
+
+
 if __name__ == "__main__":
     unittest.main()
