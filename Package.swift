@@ -59,6 +59,7 @@ let serverTests = [
     "CodexTranslationTests.swift",
     "LocalServerIdentityTests.swift",
     "TestSupport.swift",
+    "TestWorkloadLimit.swift",
     "ProcessLaunchTests.swift",
     "WorkspaceFileAccessTests.swift",
     "PaneStateNamespaceTests.swift",
