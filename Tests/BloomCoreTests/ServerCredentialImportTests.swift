@@ -97,16 +97,30 @@ import Testing
         #expect(String(decoding: result.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == fixture.url.path)
     }
 
-    @Test func timeoutStopsBackpressuredInputAndOutputLimitsStayPrivate() async {
+    @Test func timeoutStopsBackpressuredInputAndOutputLimitsStayPrivate() async throws {
+        let fixture = try ImportDirectory()
+        let pidFile = fixture.url.appendingPathComponent("pid")
         let start = ContinuousClock.now
         do {
-            _ = try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "sleep 30"], environment: ["PATH": "/usr/bin:/bin"], input: Data(repeating: 65, count: 131072), timeout: 0.15)
+            _ = try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "echo $$ > \"$1\"; exec sleep 30", "fixture", pidFile.path], environment: ["PATH": "/usr/bin:/bin"], input: Data(repeating: 65, count: 131072), timeout: 0.15)
             Issue.record("Expected the non-reading process to time out")
         } catch {
             #expect(error.localizedDescription.contains("timed out"))
             #expect(!String(reflecting: error).contains(String(repeating: "A", count: 20)))
         }
-        #expect(start.duration(to: .now) < .seconds(3))
+        // What a timeout promises is that the command is stopped and reaped rather than waited
+        // out, so that is what is checked: the process asked to sleep for thirty seconds no longer
+        // exists by the time the error arrives. This was a three second bound around the await,
+        // and that measured the shared test executor as much as the runner: in the full core suite
+        // the 0.15 second timeout came back after 12.7 and 17 seconds on CI. The bound kept only
+        // tells a timeout from a command that ran its whole thirty seconds. No pid file means the
+        // command was stopped before the shell got as far as writing it, which is a pass too.
+        if let written = try? String(contentsOf: pidFile, encoding: .utf8),
+           let pid = Int32(written.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            let stillExists = kill(pid, 0) == 0
+            #expect(!stillExists)
+        }
+        #expect(start.duration(to: .now) < .seconds(25))
         await #expect(throws: ServerCredentialImport.Failure.self) {
             try await ServerCredentialImportProcess.run("/bin/sh", ["-c", "printf fake-secret-output"], environment: [:], limit: 3)
         }
