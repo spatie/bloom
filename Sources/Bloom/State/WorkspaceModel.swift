@@ -992,6 +992,14 @@ final class WorkspaceModel {
         )
     }
 
+    /// Backgrounded shell commands still running in any of this workspace's chats, oldest first.
+    /// Every chat rather than the active one, because archiving stops all of them.
+    var runningCommands: [Subagent] {
+        transcripts.values
+            .flatMap(\.subagents.runningCommands)
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
     /// The ACTIVE chat's subagents, whole.
     ///
     /// A pure lookup over existing transcripts, safe from a view body, and deliberately not a

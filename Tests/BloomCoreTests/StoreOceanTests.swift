@@ -50,14 +50,19 @@ struct StoreOceanTests {
         let raw = try SQLiteDatabase(path: path)
         try raw.run("UPDATE oceans SET used_at = 42 WHERE rowid % 2 = 0")
 
-        var repeats: [OceanPick] = []
+        // Stop at the first repeat and read the count straight away: a discovery drawn after it
+        // lowers the count, and comparing against that is what made this test fail on CI.
+        var repeated: OceanPick?
         for _ in 0..<60 {
             let pick = try #require(try await store.claimOcean())
-            if !pick.isFirstUse { repeats.append(pick) }
+            if !pick.isFirstUse {
+                repeated = pick
+                break
+            }
         }
-        let repeated = try #require(repeats.first)
-        #expect(repeated.notice == nil)
-        #expect(repeated.remainingUndiscovered == (try await store.unusedOceanCount()))
+        let pick = try #require(repeated)
+        #expect(pick.notice == nil)
+        #expect(pick.remainingUndiscovered == (try await store.unusedOceanCount()))
     }
 
     @Test("a repeat keeps the first-use date and says nothing")

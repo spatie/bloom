@@ -53,4 +53,24 @@ import Foundation
         let note = BackgroundWork.note(for: ["A", "B", "C", "D", "E"].map { command($0) })
         #expect(note == "5 background commands are still running: A, B, C and 2 more.")
     }
+
+    @Test func anArchiveThatStoppedNothingSaysNothing() {
+        #expect(BackgroundWork.archived("Docs", stopping: []) == nil)
+    }
+
+    @Test func anArchiveNamesTheCommandsItStopped() {
+        #expect(BackgroundWork.archived("Docs", stopping: [command("Serve the app")])
+            == "Docs was archived. It stopped a background command: Serve the app.")
+        #expect(BackgroundWork.archived("Docs", stopping: [command("Serve the app"), command("Serve docs")])
+            == "Docs was archived. It stopped 2 background commands: Serve the app and Serve docs.")
+    }
+
+    /// The notice draws its first sentence large and the rest small, so the split has to land
+    /// between the archive and what it stopped.
+    @Test func theArchiveNoticeSplitsAfterTheFact() throws {
+        let message = try #require(BackgroundWork.archived("Docs", stopping: [command("Serve on 127.0.0.1:8018")]))
+        let text = NoticeText(message)
+        #expect(text.fact.map(\.text).joined() == "Docs was archived.")
+        #expect(text.reason.map(\.text).joined() == "It stopped a background command: Serve on 127.0.0.1:8018.")
+    }
 }
