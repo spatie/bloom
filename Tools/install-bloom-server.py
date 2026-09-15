@@ -143,6 +143,7 @@ def parser():
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--stop-server", action="store_true")
     mode.add_argument("--start-server", action="store_true")
+    mode.add_argument("--replace-maintenance-key", action="store_true")
     result.add_argument("--package", type=pathlib.Path)
     result.add_argument("--sha256")
     result.add_argument("--maintenance-key-sha256")
@@ -1083,6 +1084,20 @@ def install(args):
     emit("complete", unchanged=False, **({"maintenanceKeyAccepted": supervised.key_accepted} if supervised is not None and getattr(args, "maintenance_key_sha256", None) else {}), **metadata(args))
 
 
+def replace_maintenance_key(args):
+    if os.geteuid() != 0:
+        fail("administrator_required", "Issuing a maintenance key needs administrator access.", "Connect as root or use passwordless sudo.")
+    existing = marker(args)
+    if not existing or existing.get("phase") != "installed":
+        fail("unmanaged_server", "There is no completed managed Bloom installation.", "Inspect the original installation before changing its maintenance key.")
+    check_ownership(args, existing)
+    if not getattr(args, "maintenance_key_sha256", None):
+        fail("maintenance_key_required", "A new maintenance key digest is required.", "Issue the key again from Bloom on your Mac.")
+    installation = MaintenanceInstallation(args, protected_system_path)
+    maintenance_call(installation.replace_key)
+    return {"maintenanceKeyAccepted": installation.key_accepted, **metadata(args)}
+
+
 def open_installation_lock(service_name, directory=pathlib.Path("/run/bloom-installers")):
     protected_system_path(directory)
     directory.mkdir(mode=0o755, exist_ok=True)
@@ -1119,6 +1134,8 @@ def main():
                 emit("check", **stop_server(args))
             elif args.start_server:
                 emit("complete", **start_server(args))
+            elif args.replace_maintenance_key:
+                emit("complete", **replace_maintenance_key(args))
             else:
                 install(args)
         return 0

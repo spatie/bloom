@@ -113,6 +113,26 @@ class MaintenanceInstallation:
             maintenance_refuse('maintenance_key_conflict', 'This server already uses another maintenance access key. Setup will not replace it.')
         return supplied or (existing or {}).get('access_token_sha256')
 
+    def replace_key(self):
+        """Issue a new administrator key for a supervised installation, as an administrator.
+
+        Setup refuses to replace a digest because a second device must not lock the first out by
+        accident. This is the deliberate path for a lost key: it needs the same administrator SSH
+        access installation does, changes nothing but the digest, and never receives the key.
+        The running supervisor notices the rewritten file, so no service restarts.
+        """
+        supplied = getattr(self.args, 'maintenance_key_sha256', None)
+        if supplied is None or re.fullmatch(r'[0-9a-f]{64}', supplied) is None:
+            maintenance_refuse('invalid_maintenance_key', 'The maintenance credential digest must be 64 lowercase hexadecimal characters.')
+        existing = self.existing_config()
+        if existing is None:
+            raise MaintenanceInstallFailure('maintenance_unavailable', 'This server does not have the managed maintenance service.',
+                                            'Set up server updates first. The key is created during that installation.')
+        if existing['access_token_sha256'] != supplied:
+            existing['access_token_sha256'] = supplied
+            self.atomic_write(self.config_path, (json.dumps(existing) + '\n').encode())
+        self.key_accepted = True
+
     def validate_bundle(self, bundle):
         try:
             manifest = json.loads((bundle / 'manifest.json').read_bytes())

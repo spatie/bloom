@@ -62,6 +62,127 @@ class ComponentPresentationTests(Fixture):
         self.assertEqual(component['detail'], 'The stable release does not include a Linux server package.')
 
 
+# Supervisor tests replace `release_asset`; the compatibility fixture still needs the real one.
+RELEASE_ASSET = maintenance.release_asset
+
+
+def published(version='v2.0.0', metadata=True, checksum='c' * 64):
+    assets = [dict(id=7, name='bloom-server-linux-x86_64.tar.gz', digest='sha256:' + checksum)]
+    if metadata:
+        assets.append(dict(id=8, name='bloom-server-linux-x86_64.json', digest='sha256:' + 'd' * 64))
+    return dict(tag_name=version, draft=False, prerelease=False, assets=assets)
+
+
+def description(version='v2.0.0', checksum='c' * 64, **changes):
+    value = dict(name='bloom-server-linux-x86_64.tar.gz', tag=version, version=version, protocolVersion=14,
+                 maintenanceProtocolVersion=1, architecture='x86_64', glibc='glibc 2.39', sha256=checksum, size=1024)
+    value.update(changes)
+    return value
+
+
+class ReleaseCompatibilityTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.config['executable_version'] = 'v1.0.0'
+
+    def asset(self, release, metadata=None, reader_error=None):
+        def reader(config, asset_id):
+            self.assertEqual(asset_id, 8)
+            if reader_error:
+                raise reader_error
+            return metadata
+        with mock.patch.object(maintenance, 'fetch_json', return_value=release):
+            return RELEASE_ASSET(self.config, 14, metadata_reader=reader)
+
+    def components(self, release, metadata=None):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock(), docker=None)
+        with mock.patch.object(maintenance, 'release_asset', lambda config, protocol: self.asset(release, metadata)), \
+                mock.patch.object(supervisor, 'account_command', return_value='{"method":null,"detail":"Not installed"}'):
+            return supervisor, supervisor.components(refresh=True)[0]
+
+    def test_compatible_description_offers_the_release(self):
+        self.assertNotIn('incompatible', self.asset(published(), description(), None))
+        _, component = self.components(published(), description())
+        self.assertTrue(component['canUpdate'])
+        self.assertNotIn('incompatible', component)
+
+    def test_newer_protocol_is_refused_before_download_with_a_reason(self):
+        _, component = self.components(published(), description(protocolVersion=15))
+        self.assertFalse(component['canUpdate'])
+        self.assertTrue(component['incompatible'])
+        self.assertEqual(component['availableVersion'], 'v2.0.0')
+        self.assertIn('protocol 15', component['detail'])
+        self.assertIn('Update Server…', component['detail'])
+
+    def test_other_maintenance_protocol_is_incompatible(self):
+        _, component = self.components(published(), description(maintenanceProtocolVersion=2))
+        self.assertTrue(component['incompatible'])
+        self.assertIn('maintenance service', component['detail'])
+
+    def test_prepare_refuses_an_incompatible_release_without_a_plan(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock(), docker=None)
+        with mock.patch.object(maintenance, 'release_asset', lambda config, protocol: self.asset(published(), description(protocolVersion=15))), \
+                mock.patch.object(supervisor, 'account_command', return_value='{"method":null,"detail":"Not installed"}'), \
+                mock.patch.object(maintenance, 'https_open') as download:
+            response = supervisor.handle(fresh_id(), dict(action='prepare', credential='fixture-admin-credential', component='server'))
+        self.assertEqual(response['error']['code'], 'incompatible_release')
+        self.assertIn('Update Server…', response['error']['recovery'])
+        self.assertIsNone(response.get('plan'))
+        download.assert_not_called()
+        with self.store.lock:
+            self.assertIsNone(self.store.db.execute('SELECT 1 FROM plans').fetchone())
+
+    def test_an_older_incompatible_release_is_not_announced(self):
+        self.config['executable_version'] = 'v3.0.0'
+        supervisor, component = self.components(published(), description(protocolVersion=15))
+        self.assertFalse(component['canUpdate'])
+        self.assertNotIn('incompatible', component)
+
+    def test_missing_or_unreadable_description_keeps_the_previous_behaviour(self):
+        self.assertNotIn('incompatible', self.asset(published(metadata=False)))
+        self.assertNotIn('incompatible', self.asset(published(), reader_error=OSError('offline')))
+        self.assertNotIn('incompatible', self.asset(published(), reader_error=ValueError('not json')))
+
+    def test_description_of_another_package_is_a_broken_release(self):
+        for changes in (dict(sha256='e' * 64), dict(tag='v9'), dict(name='bloom-server-linux-arm64.tar.gz'), dict(protocolVersion='14')):
+            with self.assertRaises(maintenance.MaintenanceError) as raised:
+                self.asset(published(), description(**changes))
+            self.assertEqual(raised.exception.code, 'release_unavailable')
+
+    def test_architecture_and_glibc_requirements(self):
+        asset = dict(version='v2.0.0', sha256='c' * 64)
+        self.assertIn('aarch64', maintenance.release_incompatibility(description(architecture='aarch64'), asset))
+        self.assertIn('glibc 2.43', maintenance.release_incompatibility(description(glibc='glibc 2.43'), asset, host='glibc 2.39'))
+        self.assertIsNone(maintenance.release_incompatibility(description(glibc='glibc 2.39'), asset, host='glibc 2.43'))
+        self.assertIsNone(maintenance.release_incompatibility(description(glibc='unknown'), asset, host='glibc 2.39'))
+
+
+class AccessKeyReplacementTests(Fixture):
+    def test_rewritten_digest_is_adopted_without_restart_and_old_key_stops_working(self):
+        path = self.state / 'config.json'
+        path.write_text(json.dumps(self.config))
+        supervisor = maintenance.Supervisor(dict(self.config), store=self.store, runtime=mock.Mock(), docker=None, config_path=str(path))
+        self.assertTrue(supervisor.authenticated('fixture-admin-credential'))
+        replaced = dict(self.config, access_token_sha256=hashlib.sha256(b'replacement-admin-credential').hexdigest())
+        temporary = path.with_name('.replacement')
+        temporary.write_text(json.dumps(replaced))
+        os.replace(temporary, path)
+        with mock.patch.object(maintenance, 'load_config', side_effect=lambda value: json.loads(pathlib.Path(value).read_text())):
+            self.assertFalse(supervisor.authenticated('fixture-admin-credential'))
+            self.assertTrue(supervisor.authenticated('replacement-admin-credential'))
+        self.assertEqual(supervisor.config['executable'], self.config['executable'])
+
+    def test_unprotected_or_missing_configuration_authorises_nobody(self):
+        path = self.state / 'config.json'
+        path.write_text(json.dumps(self.config))
+        supervisor = maintenance.Supervisor(dict(self.config), store=self.store, runtime=mock.Mock(), docker=None, config_path=str(path))
+        path.write_text(json.dumps(self.config) + ' ')
+        with mock.patch.object(maintenance, 'load_config', side_effect=maintenance.MaintenanceError('unsafe_config', 'Unsafe')):
+            self.assertFalse(supervisor.authenticated('fixture-admin-credential'))
+        path.unlink()
+        self.assertFalse(supervisor.authenticated('fixture-admin-credential'))
+
+
 class StoreTests(Fixture):
     def test_acceptance_is_idempotent_but_rejects_reused_intent(self):
         value, request = job(), fresh_id()

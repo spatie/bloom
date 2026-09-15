@@ -57,7 +57,7 @@ jobs:
       matrix:
         ubuntu: ["24.04", "26.04"]
     container: ubuntu:${{ matrix.ubuntu }}
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -67,7 +67,8 @@ jobs:
       - name: Run on Ubuntu without a Swift installation
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends python3 git
+          # openssl signs the throwaway certificate the maintenance smoke test's local GitHub uses.
+          apt-get install -y --no-install-recommends python3 git openssl
           if command -v swift >/dev/null; then exit 1; fi
           tar -xzf package/bloom-server-linux-x86_64.tar.gz -C package
           python3 Tools/server-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server

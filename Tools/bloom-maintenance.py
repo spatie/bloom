@@ -593,12 +593,19 @@ def https_open(url, accept='application/octet-stream'):
     return opener.open(request, timeout=15)
 
 
-def release_asset(config):
+RELEASE_PACKAGE = 'bloom-server-linux-x86_64.tar.gz'
+RELEASE_METADATA = 'bloom-server-linux-x86_64.json'
+# Replace an incompatible release through the Mac, whose app bundle carries a matching server
+# and supervisor. The supervisor cannot install a runtime its own clients cannot talk to.
+UPDATE_THROUGH_MAC = 'Update Bloom on your Mac, then choose Update Server… in Server Settings > Updates to install the server it includes.'
+
+
+def release_asset(config, protocol_version=14, metadata_reader=None):
     import re
     value = fetch_json('https://api.github.com/repos/' + config['release_repository'] + '/releases/latest')
     require(isinstance(value, dict) and not value.get('draft') and not value.get('prerelease'),
             'release_unavailable', 'A stable server release is not available.')
-    assets = [asset for asset in value.get('assets', []) if asset.get('name') == 'bloom-server-linux-x86_64.tar.gz']
+    assets = [asset for asset in value.get('assets', []) if isinstance(asset, dict) and asset.get('name') == RELEASE_PACKAGE]
     require(len(assets) == 1, 'release_unavailable', 'The stable release does not include a Linux server package.')
     asset = assets[0]
     digest = asset.get('digest', '')
@@ -607,7 +614,76 @@ def release_asset(config):
     version = value.get('tag_name')
     require(isinstance(version, str) and len(version) <= 100 and re.fullmatch(r'[A-Za-z0-9._-]+', version),
             'release_unavailable', 'The release version is invalid.')
-    return dict(version=version, assetID=asset['id'], sha256=digest[7:])
+    result = dict(version=version, assetID=asset['id'], sha256=digest[7:])
+    described = [item for item in value.get('assets', []) if isinstance(item, dict) and item.get('name') == RELEASE_METADATA]
+    if described:
+        require(len(described) == 1 and type(described[0].get('id')) is int and described[0]['id'] > 0,
+                'release_unavailable', 'The release publishes an invalid server description.')
+        try:
+            metadata = (metadata_reader or release_metadata)(config, described[0]['id'])
+        except (OSError, ValueError):
+            # The description only lets a release be refused before its download. Every rule it
+            # carries is enforced again on the downloaded manifest, so an unreadable description
+            # degrades to the behaviour releases without one have, rather than hiding an update.
+            metadata = None
+        if metadata is not None:
+            reason = release_incompatibility(metadata, result, protocol_version)
+            if reason:
+                result['incompatible'] = reason
+    return result
+
+
+def release_metadata(config, asset_id, maximum=MAX_FRAME):
+    url = 'https://api.github.com/repos/' + config['release_repository'] + '/releases/assets/' + str(asset_id)
+    with https_open(url) as response:
+        data = response.read(maximum + 1)
+    require(len(data) <= maximum, 'release_unavailable', 'The server release description is too large.')
+    return json.loads(data)
+
+
+def glibc_version(value):
+    import re
+    match = re.fullmatch(r'(?:glibc\s+)?([0-9]+)\.([0-9]+)(?:\.[0-9]+)?', value.strip()) if isinstance(value, str) else None
+    return (int(match[1]), int(match[2])) if match else None
+
+
+def host_glibc():
+    try:
+        return os.confstr('CS_GNU_LIBC_VERSION')
+    except (AttributeError, ValueError, OSError):
+        return None
+
+
+def release_incompatibility(metadata, asset, protocol_version=14, host=None):
+    """Why this supervisor must not offer a described release, or None when it may.
+
+    A mismatch between the description and GitHub's own release is a broken release rather than an
+    incompatible one, so it is refused outright instead of being explained as a version problem.
+    """
+    require(isinstance(metadata, dict), 'release_unavailable', 'The server release description is invalid.')
+    for key, expected in (('name', RELEASE_PACKAGE), ('tag', asset['version']), ('sha256', asset['sha256'])):
+        require(metadata.get(key) in (None, expected), 'release_unavailable',
+                'The server release description does not match its published package.')
+    version = asset['version']
+    architecture = metadata.get('architecture')
+    if architecture is not None and architecture != 'x86_64':
+        return f'Bloom Server {version} is built for {architecture}, not this x86_64 server.'
+    wire = metadata.get('protocolVersion')
+    require(wire is None or type(wire) is int, 'release_unavailable', 'The server release description is invalid.')
+    if wire is not None and wire != protocol_version:
+        if wire > protocol_version:
+            return (f'Bloom Server {version} uses protocol {wire}, which this installation (protocol {protocol_version}) '
+                    'cannot update to in place. ' + UPDATE_THROUGH_MAC)
+        return f'Bloom Server {version} uses the older protocol {wire} and cannot replace this installation (protocol {protocol_version}).'
+    supervisor = metadata.get('maintenanceProtocolVersion')
+    require(supervisor is None or type(supervisor) is int, 'release_unavailable', 'The server release description is invalid.')
+    if supervisor is not None and supervisor != 1:
+        return f'Bloom Server {version} needs a different maintenance service than the one installed. ' + UPDATE_THROUGH_MAC
+    required, available = glibc_version(metadata.get('glibc')), glibc_version(host if host is not None else host_glibc())
+    if required and available and required > available:
+        return (f'Bloom Server {version} needs glibc {required[0]}.{required[1]}, but this server has '
+                f'{available[0]}.{available[1]}. Upgrade Ubuntu before updating Bloom Server.')
+    return None
 
 
 def fsync_directory(path):
@@ -676,8 +752,10 @@ def validate_release_manifest(bundle, protocol_version=14, expected_version=None
 
 
 class Supervisor:
-    def __init__(self, config, store=None, runtime=None, docker=DOCKER_ADAPTER):
+    def __init__(self, config, store=None, runtime=None, docker=DOCKER_ADAPTER, config_path=None):
         self.config = config
+        self.config_path = config_path
+        self.config_signature = self.signature(config_path)
         self.state = pathlib.Path(config['state_dir'])
         self.store = store or JobStore(self.state)
         self.runtime = runtime or RuntimeProcess(config)
@@ -698,10 +776,40 @@ class Supervisor:
         self.recovery_failed = False
         self.recovery_thread = None
 
+    @staticmethod
+    def signature(path):
+        if path is None:
+            return None
+        with contextlib.suppress(OSError):
+            info = os.lstat(path)
+            return info.st_ino, info.st_mtime_ns, info.st_size
+        return None
+
+    def access_digest(self):
+        """The administrator digest, re-read when an administrator replaced it on disk.
+
+        Issuing a new maintenance key rewrites only this digest. Restarting the supervisor to read
+        it would restart Bloom Server and interrupt agents, so the protected file is checked here
+        instead. Only the digest is adopted: every other setting still needs a supervised restart.
+        """
+        if self.config_path is None:
+            return self.config['access_token_sha256']
+        signature = self.signature(self.config_path)
+        if signature != self.config_signature:
+            try:
+                digest = load_config(self.config_path)['access_token_sha256']
+            except (MaintenanceError, OSError, ValueError, KeyError, TypeError):
+                # A configuration that is missing or no longer protected authorises nobody.
+                return None
+            with self.lock:
+                self.config['access_token_sha256'], self.config_signature = digest, signature
+        return self.config['access_token_sha256']
+
     def authenticated(self, credential):
         value = credential if isinstance(credential, str) and len(credential) <= 4096 else ''
         digest = hashlib.sha256(value.encode()).hexdigest()
-        return bool(value) and hmac.compare_digest(digest, self.config['access_token_sha256'])
+        expected = self.access_digest()
+        return bool(value) and expected is not None and hmac.compare_digest(digest, expected)
 
     def account_command(self, arguments, timeout=40, stdin=None, stdout=subprocess.PIPE, log=None):
         import sys
@@ -788,9 +896,12 @@ class Supervisor:
         server = dict(id='server', title='Bloom Server', installedVersion=self.current.get('version'),
                       availableVersion=None, canUpdate=False, detail='Checking stable server releases.')
         try:
-            asset = release_asset(self.config)
-            server.update(availableVersion=asset['version'], canUpdate=newer_version(asset['version'], self.current.get('version')),
+            asset = release_asset(self.config, self.config.get('protocol_version', 14))
+            newer = newer_version(asset['version'], self.current.get('version'))
+            server.update(availableVersion=asset['version'], canUpdate=newer and not asset.get('incompatible'),
                           detail='Updates use the stable GitHub release and its published SHA-256 digest.')
+            if newer and asset.get('incompatible'):
+                server.update(incompatible=True, detail=asset['incompatible'])
         except MaintenanceError as error:
             server['detail'] = str(error)
         except (OSError, ValueError):
@@ -823,6 +934,8 @@ class Supervisor:
         require(component in ('server', 'claude', 'codex'), 'unsupported', 'This component does not support reviewed updates.')
         values = self.components(refresh=True)
         value = next(item for item in values if item['id'] == component)
+        if value.get('incompatible'):
+            raise MaintenanceError('incompatible_release', value['detail'], UPDATE_THROUGH_MAC)
         require(value['canUpdate'], 'update_unavailable', value['detail'])
         import datetime
         expires = time.time() + 1800
@@ -831,8 +944,10 @@ class Supervisor:
                     restarts=['Bloom Server'], expiresAt=datetime.datetime.fromtimestamp(expires, datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
                     _expires=expires)
         if component == 'server':
-            asset = release_asset(self.config)
+            asset = release_asset(self.config, self.config.get('protocol_version', 14))
             require(asset['version'] == plan['targetVersion'], 'release_changed', 'The stable release changed. Review it again.')
+            if asset.get('incompatible'):
+                raise MaintenanceError('incompatible_release', asset['incompatible'], UPDATE_THROUGH_MAC)
             plan['_asset'] = asset
             plan['summary'] = 'Install this exact server release. Bloom snapshots its database and restores the previous release if startup verification fails.'
         self.store.plan(plan)
@@ -1551,7 +1666,7 @@ def main():
         require(sys.platform == 'linux', 'unsupported_platform', 'The maintenance supervisor requires Linux.')
         require(os.getuid() == 0 and args.config, 'unsafe_account', 'The maintenance supervisor requires its protected administrator configuration.')
         config = load_config(args.config)
-        supervisor = Supervisor(config)
+        supervisor = Supervisor(config, config_path=args.config)
         for signum in (signal.SIGTERM, signal.SIGINT):
             signal.signal(signum, lambda *_: supervisor.stopping.set())
         ControlServer(supervisor).run()
