@@ -15,6 +15,10 @@ struct BloomCommands: Commands {
     /// ungreys because an `@Observable` it reads has moved. See `SoftwareUpdater`.
     private let updater = SoftwareUpdater.shared
 
+    /// Read for the same reason again: the server items come and go with the Settings switch,
+    /// which no `@AppStorage` here would see. See `RemoteServerAvailability`.
+    private let remoteServers = RemoteServerAvailability.shared
+
     /// Nil in every scene but the main window. See `MainWindowFocus`.
     @FocusedValue(\.isMainWindowFocused) private var isMainWindowFocused: Bool?
 
@@ -77,18 +81,20 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
-            Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
-            if model.remoteServer.isConfigured {
-                Button("Server Settings…") { openWindow(id: ServerWindow.id) }
+            if remoteServers.isEnabled {
+                Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
+                if model.remoteServer.isConfigured {
+                    Button("Server Settings…") { openWindow(id: ServerWindow.id) }
+                }
+                Divider()
             }
-            Divider()
             MenuCommand(.newWorkspace) {
                 // `RootView` opens the window, and the sidebar and Home already ask for it this
                 // way. It is not `openWindow` from here because which project is meant depends on
                 // what the main window has selected. See `RootView.openCreateWindow`.
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
             }
-            .disabled(model.repos.isEmpty && !model.remoteServer.isConfigured)
+            .disabled(model.repos.isEmpty && !(remoteServers.isEnabled && model.remoteServer.isConfigured))
 
             // Directly under New Workspace, because it starts one, and at the top level of File
             // rather than nowhere. Opening a workspace on somebody else's pull request was a whole
@@ -664,7 +670,7 @@ struct BloomCommands: Commands {
     /// submenu teaches nothing. See `WorkspaceModel.refreshSettings` for when the list is read.
     @ViewBuilder
     private var runScriptsMenu: some View {
-        if model.selection.isRemote, !model.remoteServer.runScripts.isEmpty {
+        if remoteServers.isEnabled, model.selection.isRemote, !model.remoteServer.runScripts.isEmpty {
             MenuCommandGroup(.runScripts) {
                 ForEach(model.remoteServer.runScripts) { script in
                     Button(script.name) { Task { await model.remoteServer.runScript(script) } }

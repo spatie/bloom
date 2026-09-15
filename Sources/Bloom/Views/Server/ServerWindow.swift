@@ -11,6 +11,7 @@ struct ServerWindow: Scene {
             ServerConnectionContent(server: model.remoteServer)
                 .environment(model)
                 .windowRole(.utility)
+                .closesWhenRemoteServersAreOff()
         }
         .windowResizability(.contentSize)
     }

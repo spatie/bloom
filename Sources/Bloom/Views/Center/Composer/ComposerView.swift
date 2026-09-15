@@ -77,7 +77,7 @@ struct ComposerView: View {
                 )
             }
 
-            if let remote = transcript.remote, let message = remote.signInMessage {
+            if RemoteServerAvailability.shared.isEnabled, let remote = transcript.remote, let message = remote.signInMessage {
                 HStack {
                     Text(message).font(Typo.caption).foregroundStyle(Palette.textSecondary)
                     Spacer()

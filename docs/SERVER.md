@@ -2,6 +2,12 @@
 
 Client implementers: see [the wire protocol guide](SERVER-PROTOCOL.md) and [schemas and Python example](../Protocol/README.md).
 
+Remote servers are off by default in the Mac app. Turn on **Settings > General > Remote servers**
+to show them: the server section of the sidebar, **Add Server…** and **Server Settings…** in the
+File menu and the sidebar footer, and the machine picker in the create windows. With the switch off
+Bloom shows none of these, does not connect or poll, and closes any open server windows. Saved
+servers are kept, and turning the switch back on reconnects as before.
+
 Bloom can connect to a standalone server while its existing local workspaces remain available.
 The server owns its agent processes, worktrees and SQLite database. Closing the server window,
 quitting the Mac client or disconnecting SSH leaves those agents running.
