@@ -29,14 +29,15 @@ public final class ServerDaemon: Sendable {
         gatewayGroupID: UInt32? = nil,
         installedAgents: @escaping ServerRuntime.AgentDiscovery = ServerAgentAvailability.installed,
         makeRunner: ServerRuntime.RunnerFactory? = nil,
-        maintenanceTrial: Bool = false
+        maintenanceTrial: Bool = false,
+        runnerExitGrace: Duration = .seconds(6)
     ) async throws -> ServerDaemon {
         let lock = try ServerLock(directory: directory)
         let database = databasePath(directory: directory)
         let store = try Store(path: database)
         try await store.resetRunningSessions()
         _ = try await store.abandonPendingPermissionAsks()
-        let runtime = ServerRuntime(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner, maintenanceTrial: maintenanceTrial)
+        let runtime = ServerRuntime(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner, maintenanceTrial: maintenanceTrial, runnerExitGrace: runnerExitGrace)
         do {
             let bridge = try await runtime.startBridge(socketPath: mcpSocketPath(directory: directory))
             if !maintenanceTrial { try await runtime.restoreQueuedPrompts() }
@@ -95,6 +96,17 @@ public final class ServerDaemon: Sendable {
     }
 }
 
+extension ServerDaemon {
+    /// Only a held lock is another server. Every errno used to be reported as ownership, so a
+    /// lock the file system could not take told the user to stop a server that did not exist.
+    static func lockRefusal(code: Int32, directory: String) -> ServerFailure {
+        if code == EWOULDBLOCK || code == EAGAIN {
+            return ServerFailure("A Bloom server already owns this data directory.")
+        }
+        return ServerFailure("Cannot lock the server data directory \(directory): \(String(cString: strerror(code))).")
+    }
+}
+
 private final class ServerLock: Sendable {
     private let descriptor: Mutex<Int32?>
 
@@ -112,11 +124,23 @@ private final class ServerLock: Sendable {
         let path = URL(fileURLWithPath: directory).appendingPathComponent("server.lock").path
         let opened = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard opened >= 0 else { throw ServerFailure("Cannot open the server lock in \(directory).") }
-        guard flock(opened, LOCK_EX | LOCK_NB) == 0 else {
+        if let code = Self.lock(opened) {
             close(opened)
-            throw ServerFailure("A Bloom server already owns this data directory.")
+            throw ServerDaemon.lockRefusal(code: code, directory: directory)
         }
         descriptor = Mutex(opened)
+    }
+
+    /// Nil when the lock was taken, otherwise the errno that refused it. A signal can interrupt
+    /// the call even with `LOCK_NB`, and an interrupted attempt says nothing about ownership, so
+    /// it is retried rather than reported: a server the updater restarts would otherwise stay
+    /// down because a signal happened to land during the call.
+    private static func lock(_ opened: Int32) -> Int32? {
+        while flock(opened, LOCK_EX | LOCK_NB) != 0 {
+            let code = errno
+            if code != EINTR { return code }
+        }
+        return nil
     }
 
     func release() {

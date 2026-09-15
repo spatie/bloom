@@ -94,6 +94,19 @@ private struct RPCFixture: Sendable {
         let loop = MultiThreadedEventLoopGroup.singleton.next()
         let rawKey = SSHIdentity.generate()
         let exec = loop.makePromise(of: Void.self), closed = loop.makePromise(of: Void.self)
+        do {
+            return try await open(loop: loop, rawKey: rawKey, exec: exec, closed: closed, reject: reject)
+        } catch {
+            // A fixture that never opened has no `close()` to finish its promises. See `close()`.
+            exec.fail(error)
+            closed.fail(error)
+            throw error
+        }
+    }
+
+    private static func open(
+        loop: any EventLoop, rawKey: Data, exec: EventLoopPromise<Void>, closed: EventLoopPromise<Void>, reject: Bool
+    ) async throws -> Self {
         let state = try await loop.submit { NIOLoopBound(RPCState(exec: exec, closed: closed, reject: reject), eventLoop: loop) }.get()
         let listener = try await ServerBootstrap(group: loop, childGroup: loop).childChannelInitializer { channel in
             channel.eventLoop.makeCompletedFuture {
@@ -117,8 +130,17 @@ private struct RPCFixture: Sendable {
     func close() async {
         try? await loop.submit { state.value.parent?.close(promise: nil) }.get()
         try? await listener.close().get()
+        // Both promises are finished here whatever the test got to. NIO traps on a promise that
+        // is freed unfinished, and `exec` only succeeds when an exec request reaches the
+        // responder: a client that gave up first, as the fifty millisecond deadline and the
+        // rejected terminal can, left it pending, and on CI that took the whole test process
+        // down with "leaking promise". Finishing one that already finished does nothing.
+        exec.fail(FixtureClosed())
+        closed.succeed(())
     }
 }
+
+private struct FixtureClosed: Error {}
 
 private final class RPCState {
     let exec: EventLoopPromise<Void>

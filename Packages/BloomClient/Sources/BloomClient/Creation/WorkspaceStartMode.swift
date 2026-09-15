@@ -43,6 +43,14 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable, Co
 
     public var id: String { rawValue }
 
+    /// What a create picker offers as its segments: the three places a workspace can open.
+    ///
+    /// Not `allCases`. The two CLI modes are a way of running the chat rather than a fourth and
+    /// fifth place to open, so the Mac reaches them through its CLI chat switch and
+    /// `chat(usesCLI:agent:)`, and a client whose workspaces run on a server has no shell on the
+    /// asking machine to launch one in. A picker over `allCases` offered both as segments.
+    public static let pickerModes: [Self] = [.chat, .terminal, .browser]
+
     /// What the workspace's own controls call it, where the word sits beside other one word
     /// labels and the sentence around it has already said what is being chosen.
     public var label: String {

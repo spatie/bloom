@@ -41,7 +41,12 @@ installer.os.setuid = lambda value: None
 installer.os.geteuid = lambda: account.pw_uid
 def work():
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    pathlib.Path(sys.argv[2], "worker.pid").write_text(str(os.getpid()))
+    # Written aside and renamed into place, because the test waits for the file to exist and
+    # `write_text` creates it before it writes: a hangup run on CI read the pid while the
+    # file was still empty and failed on `int('')` with the worker already started.
+    partial = pathlib.Path(sys.argv[2], "worker.pid.partial")
+    partial.write_text(str(os.getpid()))
+    os.replace(partial, pathlib.Path(sys.argv[2], "worker.pid"))
     time.sleep(60)
 try:
     installer.account_operation(account, work)

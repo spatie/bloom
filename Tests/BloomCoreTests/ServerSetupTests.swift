@@ -128,13 +128,12 @@ import Testing
     }
 
     @Test(arguments: ["browser", "docker", "swap"]) func optionalInstallersTreatPathsAsArguments(installer: String) async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-browser-wrapper-" + UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        // Exercise the root branch without obtaining privileges or installing anything.
-        let fakeID = directory.appendingPathComponent("id")
-        try Data("#!/bin/sh\nprintf '0\\n'\n".utf8).write(to: fakeID)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeID.path)
+        // Exercise the root branch without obtaining privileges or installing anything, through a
+        // shell function rather than an `id` written to disk. A freshly written executable can be
+        // briefly unrunnable on Linux while a process spawned beside it still holds it open, and
+        // dash then quietly runs the next `id` on the path: the real one, a non-root uid, and
+        // `sudo: not found` in all three cases at once on the server job.
+        let rootID = "id() { printf '0\\n'; }; "
         let home = "/var/lib/Bloom user's $(printf ignored)"
         let source = "import json,sys\nprint(json.dumps({'source': '__bloom_browser_source' in globals(), 'arguments': sys.argv[1:]}))\n"
         let command = switch installer {
@@ -142,7 +141,7 @@ import Testing
         case "swap": try ServerSetupConnection.swapInstallerCommand(user: "bloom", serviceHome: home)
         default: try ServerSetupConnection.dockerInstallerCommand(user: "bloom", serviceHome: home)
         }
-        let result = try await Shell.run("/bin/sh", ["-c", command], env: ["PATH": directory.path + ":/usr/bin:/bin"], stdin: source, timeout: .seconds(5))
+        let result = try await Shell.run("/bin/sh", ["-c", rootID + command], env: ["PATH": "/usr/bin:/bin"], stdin: source, timeout: .seconds(5))
         #expect(result.ok)
         let decoded = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8))
         #expect(decoded["source"] == .bool(installer == "browser"))

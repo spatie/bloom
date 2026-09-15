@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc
+#endif
 import Synchronization
 import Testing
 @testable import BloomCore
@@ -7,30 +10,32 @@ import Testing
 struct ServerOwnershipTests {
     @Test func concurrentShutdownKeepsOwnershipUntilRunnerCleanupCompletes() async throws {
         let fixture = try await OwnershipFixture()
-        let daemon = try await fixture.start()
+        let daemon = try await fixture.start("initial start")
         _ = await daemon.runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "start fixture")))
         await fixture.runner.gate.waitForStart()
         let first = Task { await daemon.shutdown() }, second = Task { await daemon.shutdown() }
         await fixture.runner.gate.waitForTermination()
-        await #expect(throws: ServerFailure.self) { try await fixture.start() }
+        try await fixture.expectOwnershipRefused()
         fixture.runner.allowExit()
         await first.value; await second.value
         // The stopped daemon value is still alive here. Ownership ends with its awaited cleanup,
         // not an arbitrary later ARC release.
-        let replacement = try await fixture.start()
+        let replacement = try await fixture.start("replacement start")
         await replacement.shutdown()
     }
 
     @Test func droppingADaemonStillRetainsOwnershipWhileCleanupRuns() async throws {
         let fixture = try await OwnershipFixture()
-        var daemon: ServerDaemon? = try await fixture.start()
+        var daemon: ServerDaemon? = try await fixture.start("initial start")
         _ = await daemon?.runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "start fixture")))
         await fixture.runner.gate.waitForStart()
         daemon = nil
         await fixture.runner.gate.waitForTermination()
-        await #expect(throws: ServerFailure.self) { try await fixture.start() }
+        try await fixture.expectOwnershipRefused()
         fixture.runner.allowExit()
-        await waitUntil("daemon deinit releases ownership after cleanup") {
+        // Returns as soon as the replacement starts. The limit is long for the reason the
+        // fixture's runner exit grace is: CI's executor stalls outlast the default six seconds.
+        await waitUntil("daemon deinit releases ownership after cleanup", within: .seconds(600)) {
             do {
                 let replacement = try await fixture.start()
                 await replacement.shutdown()
@@ -40,7 +45,7 @@ struct ServerOwnershipTests {
     }
     @Test func shutdownClosesAnAlreadyAcceptedIdleClient() async throws {
         let fixture = try await OwnershipFixture()
-        let daemon = try await fixture.start()
+        let daemon = try await fixture.start("initial start")
         let connection = try UnixSocketConnection.connect(to: daemon.socketPath)
         defer { connection.close() }
         let request = ServerRequest(.hello)
@@ -59,6 +64,11 @@ struct ServerOwnershipTests {
         await reading.value
     }
 
+    @Test func onlyAHeldLockIsReportedAsAnotherServer() {
+        #expect(ServerDaemon.lockRefusal(code: EWOULDBLOCK, directory: "/data").message == "A Bloom server already owns this data directory.")
+        let other = ServerDaemon.lockRefusal(code: ENOLCK, directory: "/data").message
+        #expect(other == "Cannot lock the server data directory /data: \(String(cString: strerror(ENOLCK))).")
+    }
 }
 
 private struct OwnershipFixture: Sendable {
@@ -74,8 +84,55 @@ private struct OwnershipFixture: Sendable {
         let workspace = try await store.upsert(Workspace(repoID: repo.id, name: "Fixture", branch: "main", path: directory, baseBranch: "main"))
         session = try await store.upsert(Session(workspaceID: workspace.id))
     }
+    /// The runner exit grace is ten minutes here rather than production's six seconds. These
+    /// tests hold the runner alive on purpose until `allowExit()`, and CI's test executor stalls
+    /// for thirty seconds and more, which let the real grace expire first: shutdown finished
+    /// and released ownership while the runner still counted as alive, and the next start failed.
+    /// Only `allowExit()` can end the wait now.
     func start() async throws -> ServerDaemon {
-        try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [.claudeCode] }, makeRunner: { [runner] _, _, _ in runner })
+        try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [.claudeCode] }, makeRunner: { [runner] _, _, _ in runner }, runnerExitGrace: .seconds(600))
+    }
+
+    /// A start that has to succeed, named so a refusal says which one it was. CI has refused a
+    /// start in the drain test three times with every test of the suite reporting at the same
+    /// instant, so neither the line nor the duration could say which start threw or who held
+    /// the lock. The diagnostics answer that on the next failure rather than by inference.
+    func start(_ label: String, sourceLocation: SourceLocation = #_sourceLocation) async throws -> ServerDaemon {
+        do {
+            return try await start()
+        } catch {
+            let diagnostics = await lockDiagnostics()
+            Issue.record("The \(label) was refused: \(error)\n\(diagnostics)", sourceLocation: sourceLocation)
+            throw error
+        }
+    }
+
+    /// Whether the lock file exists, and on macOS which processes hold it open, beside this
+    /// process's pid, so a holder can be told apart as this test process or a child of it.
+    private func lockDiagnostics() async -> String {
+        let path = (directory as NSString).appendingPathComponent("server.lock")
+        var lines = ["test process pid: \(getpid())", "\(path) exists: \(FileManager.default.fileExists(atPath: path))"]
+        #if os(macOS)
+        do {
+            let result = try await Shell.run("/usr/sbin/lsof", ["-n", "-P", "--", path], timeout: .seconds(20), outputLimit: 64 * 1_024)
+            lines.append("lsof exit \(result.status):\n\(result.stdout)\(result.stderr)")
+        } catch {
+            lines.append("lsof failed: \(error)")
+        }
+        #endif
+        return lines.joined(separator: "\n")
+    }
+
+    /// A start refused because this directory is owned, and for no other reason. Checking only
+    /// the error type let a start that failed on something else pass as a refusal.
+    func expectOwnershipRefused(sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        do {
+            let unexpected = try await start()
+            Issue.record("Expected the data directory to still be owned", sourceLocation: sourceLocation)
+            await unexpected.shutdown()
+        } catch let failure as ServerFailure {
+            #expect(failure.message == "A Bloom server already owns this data directory.", sourceLocation: sourceLocation)
+        }
     }
 }
 
