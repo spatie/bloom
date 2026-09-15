@@ -37,7 +37,8 @@ public enum InspectorTab: String, Hashable, CaseIterable, Sendable {
     /// a pedantic one: a repository with no workflows at all has an open pull request and nothing
     /// whatever to put in this pane, and a tab that can only say "No checks" is a tab that can
     /// only disappoint. `GitHub.rollup` answers `.none` exactly when the rollup was empty, so this
-    /// reads as "GitHub reported at least one run".
+    /// reads as "GitHub reported at least one run". `.unavailable` keeps the tab, because there
+    /// may well be runs and the pane is the place that says why they cannot be shown.
     ///
     /// It happens to be true today that the runs can only arrive with a pull request, because
     /// every check Bloom knows about comes out of the `statusCheckRollup` of a single

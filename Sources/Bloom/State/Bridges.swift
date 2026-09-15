@@ -42,8 +42,14 @@ enum GitHubBridge {
         try await GitHub.markReadyForReview(pullRequest, worktree: worktree)
     }
 
-    static func checks(for workspace: Workspace) async -> [CheckRun] {
-        (try? await GitHub.checks(for: workspace)) ?? []
+    /// Nil when GitHub refused this token the check runs. A failed read is still an empty list,
+    /// as it always was, because `try?` would flatten it into that nil.
+    static func checks(for workspace: Workspace) async -> [CheckRun]? {
+        do {
+            return try await GitHub.checks(for: workspace)
+        } catch {
+            return []
+        }
     }
 
     static func open(_ url: String) {
