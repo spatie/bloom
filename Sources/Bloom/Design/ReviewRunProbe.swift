@@ -12,6 +12,9 @@ enum ReviewRunProbe {
     /// reported only which text views existed, which cannot say where the target should have been
     /// or that the files above it were measured at a width the window no longer has.
     static var preparedGeometry: [String: CGSize] = [:]
+    /// Every header, section and diff block the all-files review has realised. See
+    /// `ReviewProbeGeometry` for why the SwiftUI side reports these.
+    static var sections: [String: ReviewProbeGeometry.Record] = [:]
     /// What the all-files review asked its scroller to do, interleaved with the offsets the
     /// navigation probe observed. It is what tells a scroll request that landed on a lazy stack's
     /// estimate apart from a destination that was released or never requested.

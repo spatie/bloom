@@ -68,6 +68,7 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                                 .id(file.id)
                             }
                         }
+                        .reviewProbeDocument()
                         .background {
                             ReviewNavigationInput(armed: pendingDestination != nil) {
                                 trace("input released \(pendingDestination ?? "nothing")")

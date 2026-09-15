@@ -205,7 +205,38 @@ enum ReviewNavigationProbe {
         }
         return "offset \(Int(offset)) of \(Int(limit)) (document \(Int(document)), viewport \(Int(viewport)), width \(Int(width)), "
             + "clamped \(clamped)); target estimate \(Int(estimate)); files [\(files.joined(separator: "; "))]; "
-            + "realised [\(realised.joined(separator: ", "))]; trace [\(ReviewRunProbe.navigationTrace.joined(separator: " | "))]"
+            + "realised [\(realised.joined(separator: ", "))]; \(sectionReport(host: host, scroll: scroll)); "
+            + "trace [\(ReviewRunProbe.navigationTrace.joined(separator: " | "))]"
+    }
+
+    /// Which headers, sections and diff blocks the lazy stack has realised, against the visible rect.
+    /// An empty viewport with no realised entry across it is a stretch the stack left unrealised; one
+    /// with the target's blocks across it, flagged off and marked stale, is a block whose geometry
+    /// callback did not run after a programmatic scroll. Capped, so a failure stays one readable line.
+    private static func sectionReport(host: NSView, scroll: NSScrollView) -> String {
+        let visible = scroll.contentView.bounds
+        let codeFrames = textViews(in: host).map { $0.convert($0.bounds, to: scroll.contentView) }
+        let realised = ReviewRunProbe.sections
+            .filter { $0.value.appeared }
+            .sorted { ($0.value.documentFrame?.minY ?? 0) < ($1.value.documentFrame?.minY ?? 0) }
+        let entries = realised.prefix(30).map { entry -> String in
+            let record = entry.value
+            var line = "\(entry.key) \(record.documentFrame.map(span) ?? "no frame")"
+            if let scrollFrame = record.scrollFrame, let documentFrame = record.documentFrame {
+                let stale = abs(scrollFrame.minY + visible.minY - documentFrame.minY) > 1
+                line += ", last visible-relative \(span(scrollFrame))\(stale ? " stale" : "")"
+            }
+            if let near = record.nearViewport {
+                let drawn = record.documentFrame.map { frame in codeFrames.contains { $0.intersects(frame) } } ?? false
+                line += ", near \(near ? "yes" : "no"), code \(drawn ? "yes" : "no")"
+            }
+            return line
+        }
+        return "visible \(span(visible)); sections \(realised.count) [\(entries.joined(separator: "; "))]"
+    }
+
+    private static func span(_ rect: CGRect) -> String {
+        "\(Int(rect.minY))..\(Int(rect.maxY))"
     }
 
     private static func firstLine(index: Int, in view: NSView) -> WrappedCodeText.TextView? {

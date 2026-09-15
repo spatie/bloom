@@ -285,6 +285,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                 Section {
                     if !isCollapsed {
                         fileContent
+                            .reviewProbeGeometry("\(file.id) content")
                             .onGeometryChange(for: CGRect?.self) { [tracksFile] proxy in
                                 tracksFile ? proxy.frame(in: .scrollView(axis: .vertical)) : nil
                             } action: { frame in
@@ -303,6 +304,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                     }
                 } header: {
                     fileHeader
+                        .reviewProbeGeometry("\(file.id) header")
                         .onGeometryChange(for: Bool.self) { [isCollapsed] proxy in
                             let frame = proxy.frame(in: .scrollView(axis: .vertical))
                             return isCollapsed && frame.minY <= 0 && frame.maxY > 0
@@ -782,7 +784,8 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                         let tracksRow = isDiffDestination(row) && navigationTarget
                         Group {
                             if let heights = prepared.heights[row.id], let embeddedViewportHeight {
-                                ReviewDiffBlock(height: heights.reduce(0, +), viewportHeight: embeddedViewportHeight) {
+                                ReviewDiffBlock(height: heights.reduce(0, +), viewportHeight: embeddedViewportHeight,
+                                                probeName: "\(file.id) block \(row.id.prefix(24))") {
                                     rowView(row, document: prepared.document, width: prepared.width, wrappedHeights: heights)
                                 }
                             } else {
