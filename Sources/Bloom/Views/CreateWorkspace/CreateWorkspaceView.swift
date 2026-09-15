@@ -393,9 +393,7 @@ struct CreateWorkspaceView: View {
                             Label {
                                 Text(candidate.name)
                             } icon: {
-                                if isRemote {
-                                    Image(systemName: "folder")
-                                } else if let mark = RepoIconImage.of(candidate) {
+                                if let mark = RepoIconImage.of(shown(candidate)) {
                                     Image(nsImage: mark).renderingMode(.original)
                                 }
                             }
@@ -411,7 +409,7 @@ struct CreateWorkspaceView: View {
             Button("Start a Project…", action: addProject)
         } label: {
             ComposerControlLabel(text: repo?.name ?? "Choose a project", tint: Palette.textPrimary, showsMenuIndicator: true) {
-                if isRemote { Image(systemName: "folder") } else { RepoIcon(repo: repo, size: Metrics.repoIconSmall) }
+                RepoIcon(repo: repo.map(shown), size: Metrics.repoIconSmall)
             }
         }
         .menuStyle(.button)
@@ -422,6 +420,17 @@ struct CreateWorkspaceView: View {
         .help("Choose the project")
         .accessibilityLabel("Project")
         .accessibilityValue(repo?.name ?? "")
+    }
+
+    /// The project as its tile is drawn. A server project gets the same initials tile in its own
+    /// accent that a local one without artwork has, rather than the bare folder glyph it used to,
+    /// which made the two windows look like different forms. Its artwork path is dropped first,
+    /// because that path is on the server and `RepoIcon` would go and open it on this Mac.
+    private func shown(_ candidate: Repo) -> Repo {
+        guard isRemote else { return candidate }
+        var tile = candidate
+        tile.iconPath = nil
+        return tile
     }
 
     /// Where the work comes from: a new branch cut from a base, an open pull request, or a branch
@@ -790,43 +799,52 @@ struct CreateWorkspaceView: View {
     /// monospaced font.
     @ViewBuilder
     private var hint: some View {
-        if let checkout {
-            // The checkout says everything the branch preview would have: what is being opened,
-            // what the diff will be measured against, and the one sentence a merged or closed
-            // pull request deserves before it is opened and found to be empty.
-            HStack(spacing: Metrics.spacingSmall) {
-                Chip(
-                    text: "\(checkout.preferredLocalBranch) → \(checkout.baseBranch(default: repo?.defaultBranch ?? "main"))",
-                    systemImage: "arrow.triangle.pull",
-                    monospaced: true
-                )
-                .lineLimit(1)
-
-                if let sentence = checkoutNote {
-                    Text(sentence)
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                }
-            }
-        } else if willBeNamedByModel {
-            // Deliberately nothing. See above.
+        switch WorkspaceStartPlan.branchHint(
+            hasCheckout: checkout != nil,
+            isRemote: isRemote,
+            willBeNamedByModel: willBeNamedByModel,
+            isChatWorkspace: mode.runsAnAgent,
+            task: task
+        ) {
+        case .checkout:
+            if let checkout { checkoutHint(checkout) }
+        case .nothing:
+            // Deliberately nothing. See above, and `WorkspaceStartPlan.branchHint` for the server.
             EmptyView()
-        } else if task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        case .namedFromWriting:
             // Only chat mode has anything to say here, and only when no model is going to write
             // the name. The other modes have said it already: the line under the name field says
             // Bloom will name it, and the branch follows the name. A second sentence eight points
             // lower saying the same thing again was the third place this window explained a
             // mechanism nobody had asked about, and the mechanism is the part that was wrong.
-            if mode.runsAnAgent {
-                Text("The branch is named from what you write")
+            Text("The branch is named from what you write")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+        case .preview:
+            Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
+                .lineLimit(1)
+        }
+    }
+
+    /// The checkout says everything the branch preview would have: what is being opened, what the
+    /// diff will be measured against, and the one sentence a merged or closed pull request
+    /// deserves before it is opened and found to be empty.
+    private func checkoutHint(_ checkout: WorkspaceCheckout) -> some View {
+        HStack(spacing: Metrics.spacingSmall) {
+            Chip(
+                text: "\(checkout.preferredLocalBranch) → \(checkout.baseBranch(default: repo?.defaultBranch ?? "main"))",
+                systemImage: "arrow.triangle.pull",
+                monospaced: true
+            )
+            .lineLimit(1)
+
+            if let sentence = checkoutNote {
+                Text(sentence)
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
             }
-        } else {
-            Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
-                .lineLimit(1)
         }
     }
 

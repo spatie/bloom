@@ -44,11 +44,23 @@ struct CreationDestinationPicker: View {
                 Button("Server Settings…") { openWindow(id: ServerWindow.id) }
             }
         } label: {
-            Label(isRemote ? (serverLabel) : "This Mac",
-                systemImage: isRemote ? "server.rack" : "laptopcomputer")
+            // The same label, style and chevron as the project menu beside it. This was a plain
+            // `Label` in a `.borderlessButton` menu, which the system draws in its own control font
+            // with its own small chevron hard against the text, so the two menus in one row read
+            // as two kinds of control: one bolder and larger, one quiet. They are one kind.
+            ComposerControlLabel(
+                systemImage: isRemote ? "server.rack" : "laptopcomputer",
+                text: isRemote ? serverLabel : "This Mac",
+                tint: Palette.textPrimary,
+                showsMenuIndicator: true
+            )
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
+        .help("Choose where the workspace is created")
         .accessibilityLabel("Create on")
+        .accessibilityValue(isRemote ? serverLabel : "This Mac")
     }
 }
