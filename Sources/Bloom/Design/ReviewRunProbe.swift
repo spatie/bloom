@@ -423,8 +423,10 @@ private struct ReviewCollapseFixture: View {
                 DiffView(model: model, file: file, embeddedWidth: 1000, embeddedViewportHeight: 680,
                          isCollapsed: collapsed, onToggleCollapsed: {})
             }
+            .coordinateSpace(.named(ReviewDocument.space))
         }
         .defaultScrollAnchor(.topLeading)
+        .publishesReviewVisibleRect()
     }
 }
 
@@ -439,8 +441,7 @@ private struct EmbeddedReviewFixture: View {
                         ForEach(Array(stride(from: 0, to: 5000, by: 400)), id: \.self) { start in
                             let count = min(400, 5000 - start)
                             if deferred {
-                                ReviewDiffBlock(height: CGFloat(count) * CodeMetrics.rowHeight,
-                                                viewportHeight: 600) {
+                                ReviewDiffBlock(height: CGFloat(count) * CodeMetrics.rowHeight) {
                                     run(start: start, count: count)
                                 }
                             } else {
@@ -453,8 +454,10 @@ private struct EmbeddedReviewFixture: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .defaultScrollAnchor(.topLeading)
             }
+            .coordinateSpace(.named(ReviewDocument.space))
         }
         .defaultScrollAnchor(.topLeading)
+        .publishesReviewVisibleRect()
     }
 
     private func run(start: Int, count: Int) -> some View {
