@@ -14,6 +14,9 @@ struct ChecksView: View {
     @State private var runs: [CheckRun] = []
     @State private var groups: [CheckRunGroup] = []
     @State private var hasLoaded = false
+    /// GitHub answered, and refused this token the check runs. An empty list here would say
+    /// "No checks", which is the one thing that is not known.
+    @State private var checksUnavailable = false
     @State private var hovered: String?
     @State private var github: GitHubAvailability.State = .unknown
     /// Bumped to restart the poll at once, rather than waiting out the twenty seconds, when
@@ -142,6 +145,13 @@ struct ChecksView: View {
                 actionTitle: github == .notInstalled ? "Install the GitHub CLI" : "Connect GitHub",
                 action: { GitHubSignIn.shared.run(directory: model.workspace.path) { reload += 1 } }
             )
+        } else if checksUnavailable {
+            EmptyStateView(
+                glyph: "lock",
+                title: "Checks unavailable",
+                message: "GitHub did not let this token read check runs. A fine-grained personal "
+                    + "access token cannot be given that permission, so their results are unknown."
+            )
         } else if hasLoaded {
             EmptyStateView(
                 glyph: "checkmark.seal",
@@ -183,7 +193,7 @@ struct ChecksView: View {
         case .passing: Palette.positive
         case .failing: Palette.negative
         case .pending: Palette.warning
-        case .none: Palette.textTertiary
+        case .none, .unavailable: Palette.textTertiary
         }
     }
 
@@ -210,8 +220,9 @@ struct ChecksView: View {
 
             if state == .ready {
                 let found = await GitHubBridge.checks(for: model.workspace)
-                runs = found
-                groups = CheckRunGroup.build(from: found)
+                checksUnavailable = found == nil
+                runs = found ?? []
+                groups = CheckRunGroup.build(from: runs)
             }
             hasLoaded = true
             try? await Task.sleep(for: Self.pollInterval)

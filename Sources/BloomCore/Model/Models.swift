@@ -638,6 +638,9 @@ public struct PullRequest: Sendable, Hashable, Codable {
         case pending
         case passing
         case failing
+        /// GitHub would not let this token read them. Not `.none`, which is a fact about the
+        /// repository, and never a kind of passing: see `GitHub.viewPullRequest`.
+        case unavailable
     }
 
     public var number: Int
