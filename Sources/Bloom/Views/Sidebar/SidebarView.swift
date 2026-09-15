@@ -105,8 +105,57 @@ struct SidebarView: View {
         presentCreate(in: repo)
     }
 
+    /// Which servers have had their first project card, closed or outgrown. See
+    /// `ServerFirstProjectNudge`, which owns the encoding.
+    @AppStorage(ServerFirstProjectNudge.retiredKey) private var retiredFirstProjectNudges = ""
+
+    private func firstProjectNudge(_ catalogue: ServerCatalogue) -> ServerFirstProjectNudge? {
+        let server = app.remoteServer
+        // A server with no profile has no identity to remember a dismissal against, so it is
+        // treated as retired rather than offered a close button that would not stay closed.
+        let isRetired = server.connectionProfile.map {
+            ServerFirstProjectNudge.retired(in: retiredFirstProjectNudges).contains($0.id)
+        } ?? true
+        return ServerFirstProjectNudge.resolve(
+            isEnabled: RemoteServerAvailability.shared.isEnabled,
+            isConnected: server.isConnected && !server.isConnecting && !server.isMaintainingServer,
+            projectCount: catalogue.repositories.count,
+            isRetired: isRetired
+        )
+    }
+
+    private func retireFirstProjectNudge() {
+        guard let id = app.remoteServer.connectionProfile?.id else { return }
+        let retired = ServerFirstProjectNudge.retiring(id, in: retiredFirstProjectNudges)
+        guard retired != retiredFirstProjectNudges else { return }
+        withAnimation(workspaceMotion) { retiredFirstProjectNudges = retired }
+    }
+
+    @ViewBuilder private func firstProjectRow(_ catalogue: ServerCatalogue) -> some View {
+        switch firstProjectNudge(catalogue) {
+        case .card:
+            ServerFirstProjectCard(
+                serverName: app.remoteServer.displayName,
+                onStartProject: {
+                    StartProjectOpening.shared.isRemote = true
+                    openWindow(id: StartProjectWindow.id)
+                },
+                onDismiss: retireFirstProjectNudge
+            )
+            .selectionDisabled()
+            .moveDisabled(true)
+        case .notice:
+            SidebarEmptyNoticeRow(isFiltered: false, sentence: "No projects yet")
+                .selectionDisabled()
+                .moveDisabled(true)
+        case nil:
+            EmptyView()
+        }
+    }
+
     private func remoteProjects(_ catalogue: ServerCatalogue) -> some View {
                 Section {
+                    firstProjectRow(catalogue)
                     ForEach(SidebarRepoGroup.build(repos: app.remoteServer.sidebarRepositories,
                         workspaces: catalogue.workspaces, filter: filter, showingHidden: showsHiddenProjects)) { group in
                         RepoHeaderRow(repo: group.repo, remote: app.remoteServer,
@@ -128,6 +177,15 @@ struct SidebarView: View {
                     }
                 } header: {
                     SidebarServerHeader(server: app.remoteServer, trailingInset: SidebarProjectsHeader.buttonTrailingInset)
+                        // A server that has ever had a project has been started with, so its card
+                        // is retired rather than waiting to greet it if its projects are all
+                        // removed. On the heading, because it is the one row always drawn.
+                        // Keyed to the server as well, since switching servers swaps the catalogue.
+                        .onChange(of: [app.remoteServer.connectionProfile?.id ?? "", String(catalogue.repositories.isEmpty)],
+                                  initial: true) { _, _ in
+                            guard !catalogue.repositories.isEmpty, app.remoteServer.isConnected else { return }
+                            retireFirstProjectNudge()
+                        }
                 }
                 .task(id: app.remoteServer.connectionGeneration) { app.remoteServer.loadSidebarPreferences() }
     }

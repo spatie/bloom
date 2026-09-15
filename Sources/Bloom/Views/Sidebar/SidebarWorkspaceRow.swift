@@ -207,6 +207,10 @@ struct SidebarEmptyNoticeRow: View {
     /// Only used to say WHY there is nothing here, which is a different sentence when a filter is
     /// hiding rows than when the project has none.
     var isFiltered: Bool
+    /// A sentence of its own, for the one place this stands under something that is not a
+    /// project: an empty server whose first project card has been retired. The indent and the
+    /// quiet ink are the same, because it is the same kind of line.
+    var sentence: String?
     var body: some View {
         Label {
             // The project's `+` already creates a workspace, so this notice needs no second action.
@@ -214,7 +218,7 @@ struct SidebarEmptyNoticeRow: View {
             // a size smaller than every name above and below it, and in a pane where each project
             // can carry one of these the small type read as a second class of row rather than as
             // a quiet one. The tertiary ink is what makes it quiet.
-            Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
+            Text(sentence ?? (isFiltered ? "Nothing matches the filter" : "No workspaces yet"))
                 .italic()
                 .foregroundStyle(Palette.textTertiary)
         } icon: {
