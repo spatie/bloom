@@ -1,9 +1,14 @@
 #!/bin/bash
 # Resolve before copying notices, so the app ships the licences of its actual dependencies.
 set -euo pipefail
+# Checked as its own input, as every script is, so the source is not followed.
+# shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/ios-build-environment.sh"
 
 bloom_ios_prepare() {
+local project_dir build_dir
+project_dir="$(bloom_ios_path project)"
+build_dir="$(bloom_ios_path build)"
 python3 Tools/ios-project.py "$project_dir"
 xcodebuild -resolvePackageDependencies -project "$project_dir/Bloom.xcodeproj" -scheme Bloom -derivedDataPath "$build_dir"
 python3 Tools/check-ios-build-plugins.py "$build_dir/SourcePackages/checkouts"

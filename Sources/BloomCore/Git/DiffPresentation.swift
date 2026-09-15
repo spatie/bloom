@@ -52,6 +52,8 @@ public struct DiffPresentationCache: Sendable {
         public var worktree: String
         public var base: String
         public var file: String
+        public var layer: ChangeLayer?
+        public var oldPath: String?
         public var change: ChangedFile.Change
         public var scope: DiffScope
         public var ignoresWhitespace: Bool
@@ -66,6 +68,8 @@ public struct DiffPresentationCache: Sendable {
             self.worktree = worktree
             self.base = base
             self.file = file.path
+            self.layer = file.layer
+            self.oldPath = file.oldPath
             self.change = file.change
             self.scope = scope
             self.ignoresWhitespace = ignoresWhitespace

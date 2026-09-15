@@ -4,10 +4,10 @@ import Foundation
 
 @Suite("OceanCatalog")
 struct OceanCatalogTests {
-    @Test("ships exactly 132 seas, every slug a unique valid branch name on a real coordinate")
+    @Test("ships exactly 252 seas, every slug a unique valid branch name on a real coordinate")
     func catalogueIsSound() {
         let all = OceanCatalog.all
-        #expect(all.count == 132)
+        #expect(all.count == 252)
         #expect(Set(all.map(\.slug)).count == all.count)
         for ocean in all {
             #expect(Git.isValidBranchName(ocean.slug), "\(ocean.slug)")

@@ -29,18 +29,18 @@ struct RemoteTerminalView: View {
 
 private struct RemoteTerminalHost: NSViewRepresentable {
     let terminal: BloomTerminalView
-    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
-    @AppStorage(TerminalTextSize.defaultsKey) private var fontSize = 0.0
 
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
         host.attach(terminal)
+        terminal.updateTheme()
         return host
     }
 
     func updateNSView(_ host: TerminalHostView, context: Context) {
-        terminal.usesGhosttyTheme = usesGhosttyTheme
-        terminal.fontSizeOverride = fontSize > 0 ? CGFloat(fontSize) : nil
+        // The same call the local pane makes on every update, so a theme picked in Settings
+        // reaches a server's shell exactly as it reaches one on this Mac.
         host.attach(terminal)
+        terminal.updateTheme()
     }
 }

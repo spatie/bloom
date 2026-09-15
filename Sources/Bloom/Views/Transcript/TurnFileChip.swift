@@ -5,6 +5,8 @@ struct TurnFileChip: View {
     var file: TurnFile
     /// The worktree the path is shown relative to. See `TurnFile.display(in:)`.
     var worktree: String
+    /// Off for a workspace on a server, whose paths name files that are not on this Mac, so the
+    /// hover preview would show whatever happens to sit at the same path here.
     var previewsCurrentFile = true
 
     var body: some View {

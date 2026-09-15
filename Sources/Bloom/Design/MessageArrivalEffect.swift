@@ -16,7 +16,9 @@ private struct MessageArrivalEffect: ViewModifier {
     @State private var finishedArrival: MessageArrival?
 
     func body(content: Content) -> some View {
-        if let arrival {
+        // Sent bubbles enter through the composer's occlusion as the transcript scrolls.
+        // A second fade, scale and offset on the row made that one movement look disconnected.
+        if let arrival, arrival.style == .reply {
             let finished = finishedArrival == arrival
             TimelineView(.animation(paused: finished || reduceMotion)) { context in
                 let pose = finished ? .settled : arrival.pose(at: context.date, reduceMotion: reduceMotion)

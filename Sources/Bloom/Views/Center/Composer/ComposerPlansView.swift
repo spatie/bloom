@@ -71,7 +71,7 @@ struct ComposerPlansView: View {
                     Spacer()
                     if let model, model.sessions.contains(where: { $0.id == plan.sessionID }) {
                         Button("Open Source Chat") {
-                            WorkspaceTabsStore.shared.reveal(.chat(plan.sessionID), in: model)
+                            model.paneStores.tabs.reveal(.chat(plan.sessionID), in: model)
                             preview = nil
                         }
                     }
@@ -141,7 +141,7 @@ struct ComposerPlansView: View {
                 }
                 destination = model.transcript(for: session)
                 await destination.load()
-                WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model)
+                model.paneStores.tabs.reveal(.chat(session.id), in: model)
             } else {
                 destination = origin
             }

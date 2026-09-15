@@ -192,11 +192,25 @@ struct WorkspaceStartModeTests {
 
     /// The one question the rest of the sheet is downstream of: the model, the effort, the output
     /// style, the permission mode and the paperclip all qualify a turn, and only one mode has one.
-    @Test("only a chat runs an agent")
-    func onlyChatRunsAnAgent() {
+    @Test("chat and CLI starts run agents")
+    func agentStartsRunAgents() {
         #expect(WorkspaceStartMode.chat.runsAnAgent)
+        #expect(WorkspaceStartMode.claudeCLI.runsAnAgent)
+        #expect(WorkspaceStartMode.codexCLI.runsAnAgent)
         #expect(!WorkspaceStartMode.terminal.runsAnAgent)
         #expect(!WorkspaceStartMode.browser.runsAnAgent)
+    }
+
+    @Test("CLI starts retain their backend and agent tab")
+    func cliStartsUseAgentTabs() {
+        #expect(WorkspaceStartMode.claudeCLI.cliAgentKind == .claudeCode)
+        #expect(WorkspaceStartMode.codexCLI.cliAgentKind == .codex)
+        for mode in [WorkspaceStartMode.claudeCLI, .codexCLI] {
+            #expect(mode.pane == .chat)
+            #expect(WorkspaceStartMode.remembered(raw: mode.rawValue) == mode)
+        }
+        #expect(WorkspaceStartMode.chat.cliAgentKind == nil)
+        #expect(WorkspaceStartMode.terminal.cliAgentKind == nil)
     }
 
     /// The segmented control is the only thing on the sheet saying what the difference is, and
@@ -213,7 +227,7 @@ struct WorkspaceStartModeTests {
     /// is not a plain noun would read as "Open #12 in a just a terminal".
     @Test("every label is one word the heading can borrow")
     func labelsAreNounsTheHeadingCanUse() {
-        for mode in WorkspaceStartMode.allCases {
+        for mode in [WorkspaceStartMode.chat, .terminal, .browser] {
             #expect(!mode.label.contains(" "))
         }
     }

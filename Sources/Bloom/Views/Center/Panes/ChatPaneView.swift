@@ -39,16 +39,32 @@ struct ChatPaneView: View {
     /// `ComposerRoom`.
     @State private var room = ComposerRoom()
     @State private var sideOrigin: SideConversation.Snapshot?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var isSideConversationVisible: Bool {
+        model?.sideConversations[transcript.session.id]?.isVisible == true
+    }
+
+    /// Grows out of the button it hangs off, a little, as a popover does. Only a fade under Reduce
+    /// Motion, and with the animation dropped there as well, as `ComposerDock` does for its pill.
+    private func sideConversationTransition(_ placement: SideConversationPlacement) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let pivot = UnitPoint(
+            x: placement.frame.width > 0 ? (placement.tailX ?? placement.frame.width) / placement.frame.width : 1,
+            y: 1
+        )
+        return .scale(scale: 0.96, anchor: pivot).combined(with: .opacity)
+    }
 
     /// The conversation's text size, applied here because this pane is exactly what the setting is
     /// scoped to: what was said and what you are about to say. The sidebar, the inspector and the
     /// toolbar are chrome and keep the size macOS gives them.
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
+    private var textSize: ChatTextSize { ColourThemePreference.shared.chatTextSize }
     /// And the face, scoped to exactly the same subtree for exactly the same reason.
-    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
+    private var chatFontID: String { ColourThemePreference.shared.chatFont }
     /// And the line height, which is the third thing the appearance pane moves about the
     /// conversation and is scoped with the other two.
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
+    private var lineHeight: ChatLineHeight { ColourThemePreference.shared.chatLineHeight }
 
     /// What the transcript has nothing to draw for, and nil the moment its rows are on screen.
     ///
@@ -100,20 +116,30 @@ struct ChatPaneView: View {
                 .padding(8)
             }
         }
-        .overlay {
-            if let model, let state = model.sideConversations[transcript.session.id], state.isVisible {
-                GeometryReader { geometry in
-                    let bottom = geometry.size.height - room.clearance >= 360 ? room.clearance + 8 : 8
-                    SideConversationView(parent: transcript, state: state, model: model)
-                        .frame(
-                            width: max(0, min(560, geometry.size.width - 24)),
-                            height: max(0, min(520, geometry.size.height - bottom - 12))
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                        .padding(.trailing, 12)
-                        .padding(.bottom, bottom)
+        // Dressed as a popover off the side conversation button, and deliberately not a
+        // `.popover`. A side conversation is long lived: its turn runs for minutes and stops to ask
+        // for approvals while the owner goes on clicking and selecting text in the main transcript.
+        // A transient popover closes on the first click outside it and takes key focus when it
+        // opens, so it would be dismissed by exactly the work it is meant to sit beside. As an
+        // overlay it stays until Escape or its close button. See `SideConversationPlacement` for
+        // where it goes and where its tail points.
+        .overlayPreferenceValue(SideConversationButtonAnchor.self) { anchor in
+            GeometryReader { geometry in
+                if let model, let state = model.sideConversations[transcript.session.id], state.isVisible {
+                    let placement = SideConversationPlacement(
+                        pane: geometry.size,
+                        anchor: anchor.map { geometry[$0] },
+                        cornerRadius: SideConversationView.corner
+                    )
+                    SideConversationView(parent: transcript, state: state, model: model, tailX: placement.tailX)
+                        .frame(width: placement.frame.width, height: placement.frame.height)
+                        // Before the offset, so the scale pivots on the tail in the card's own
+                        // bounds rather than on a point in the pane's corner.
+                        .transition(sideConversationTransition(placement))
+                        .offset(x: placement.frame.minX, y: placement.frame.minY)
                 }
             }
+            .animation(reduceMotion ? nil : Motion.pane, value: isSideConversationVisible)
         }
         .task(id: transcript.session.id) {
             sideOrigin = nil

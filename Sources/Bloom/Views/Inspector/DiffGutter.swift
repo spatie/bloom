@@ -20,11 +20,10 @@ struct DiffGutter: View {
 
     var line: DiffLine?
     var numbers: Numbers
-    @Environment(\.fontScale) private var fontScale
 
     var body: some View {
-        BloomDiffGutter(line: line, numbers: numbers, font: Typo.codeTiny.resolved(scale: fontScale),
-                        foreground: Palette.textTertiary,
+        BloomDiffGutter(line: line, numbers: numbers, font: Font(CodeMetrics.numberFont),
+                        foreground: Palette.codeGutter,
                         numberWidth: CodeMetrics.numberWidth, padding: CodeMetrics.gutterPadding)
     }
 
@@ -48,17 +47,16 @@ struct DiffGutter: View {
 /// The one character column that says whether a line was added, removed or left alone.
 ///
 /// Beside the code rather than inside the gutter, and that is load bearing for the split layout:
-/// a row with nothing opposite it paints `Palette.surfaceSunken` from HERE to the end of the sheet,
+/// a row with nothing opposite it paints `Palette.codeBackground` from HERE to the end of the sheet,
 /// so a marker moved in with the numbers would leave a stripe of pane colour inside the sunken
 /// band. See `DiffRunView.wash` and `DiffLineView.content`, which both start the fill at this
 /// column's leading edge.
 struct DiffMarker: View {
     var line: DiffLine?
-    @Environment(\.fontScale) private var fontScale
 
     var body: some View {
-        BloomDiffMarker(line: line, font: Typo.codeTiny.resolved(scale: fontScale),
-                        foreground: Palette.textTertiary, width: CodeMetrics.markerWidth)
+        BloomDiffMarker(line: line, font: Font(CodeMetrics.numberFont),
+                        foreground: Palette.codeGutter, width: CodeMetrics.markerWidth)
     }
 
 }

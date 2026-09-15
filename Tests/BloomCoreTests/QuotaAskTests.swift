@@ -130,40 +130,6 @@ struct QuotaMergeTests {
     }
 }
 
-// MARK: - Freshness
-
-@Suite("Quota freshness")
-struct QuotaFreshnessTests {
-    @Test func saysNothingAboutAFigureWithinAPollOrTwo() {
-        #expect(QuotaFreshness.of(now - QuotaPollSchedule.interval, at: now) == .current)
-        #expect(QuotaFreshness.of(now - QuotaPollSchedule.interval, at: now).phrase == nil)
-    }
-
-    @Test func saysHowOldAFigureIsOnceAPollHasBeenMissed() {
-        #expect(QuotaFreshness.of(now - 5400, at: now).phrase == "an hour ago")
-        #expect(QuotaFreshness.of(now - 10_800, at: now).phrase == "3 hours ago")
-        #expect(QuotaFreshness.of(now - 2400, at: now).phrase == "40 min ago")
-        #expect(QuotaFreshness.of(now - 172_800, at: now).phrase == "2 days ago")
-    }
-
-    /// The oldest row is the one the panel has to answer for: a board is only as current as the
-    /// staleset thing on it.
-    @Test func answersForTheOldestRowOnTheBoard() {
-        let board = QuotaBoard.make(
-            from: [
-                quota(.claudeCode, .named("five_hour"), .fraction(0.3), observedAt: now - 60),
-                quota(.codex, .lasting(604_800, key: "primary"), .fraction(0.1), observedAt: now - 7200),
-            ],
-            at: now
-        )
-        #expect(QuotaFreshness.of(board, at: now).phrase == "2 hours ago")
-    }
-
-    @Test func hasNothingToSayAboutAnEmptyBoard() {
-        #expect(QuotaFreshness.of(QuotaBoard.make(from: [], at: now), at: now) == .current)
-    }
-}
-
 // MARK: - The schedule
 
 @Suite("Quota poll schedule")

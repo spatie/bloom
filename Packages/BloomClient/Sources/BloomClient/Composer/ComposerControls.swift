@@ -47,6 +47,8 @@ public struct ComposerControls: Equatable, Sendable, Codable {
     public var interactionMode: InteractionMode
     public var offersInteractionMode: Bool { InteractionMode.supports(agentKind) }
     public var isFastMode: Bool
+    /// Nil inherits Codex configuration. Kept separate from the older Claude thinking preference.
+    public var codexFastMode: Bool?
     /// How the agent is asked to write, by name. `OutputStyle.defaultName` for "leave it alone",
     /// which is what a session is until somebody picks something else.
     public var outputStyle: String
@@ -68,6 +70,7 @@ public struct ComposerControls: Equatable, Sendable, Codable {
         outputStyle: String = OutputStyle.defaultName,
         codexContextWindow: Int = CodexContextWindow.modelDefault,
         hasWorktree: Bool = true,
+        codexFastMode: Bool? = nil,
         interactionMode: InteractionMode = .build
     ) {
         self.model = model
@@ -78,6 +81,7 @@ public struct ComposerControls: Equatable, Sendable, Codable {
         // initialiser, and every value of this type is made here.
         self.permissionMode = permissionMode.nearest(on: agentKind)
         self.isFastMode = isFastMode
+        self.codexFastMode = codexFastMode
         self.outputStyle = outputStyle
         self.codexContextWindow = codexContextWindow
         self.hasWorktree = hasWorktree
@@ -86,6 +90,7 @@ public struct ComposerControls: Equatable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case model, effort, agentKind, permissionMode, isFastMode, outputStyle, codexContextWindow, hasWorktree, interactionMode
+        case codexFastMode
     }
 
     /// Decoding must pass through the same permission invariant as local picker changes.
@@ -100,6 +105,7 @@ public struct ComposerControls: Equatable, Sendable, Codable {
             outputStyle: try values.decode(String.self, forKey: .outputStyle),
             codexContextWindow: try values.decode(Int.self, forKey: .codexContextWindow),
             hasWorktree: try values.decode(Bool.self, forKey: .hasWorktree),
+            codexFastMode: try values.decodeIfPresent(Bool.self, forKey: .codexFastMode),
             interactionMode: try values.decodeIfPresent(InteractionMode.self, forKey: .interactionMode) ?? .build
         )
     }
@@ -148,8 +154,9 @@ public struct ComposerControls: Equatable, Sendable, Codable {
             + "next starts, and then it is back to that."
     }
 
-    /// Codex's paid speed tier is not wired by the current server; a saved flag must not imply it is.
-    public var offersFastMode: Bool { agentKind == .claudeCode }
+    /// Claude Code's thinking switch and Codex's service tier. Codex keeps its own optional flag,
+    /// `codexFastMode`, because an absent value inherits the user's Codex configuration.
+    public var offersFastMode: Bool { agentKind == .claudeCode || agentKind == .codex }
 
     /// Whether this backend has output styles at all.
     ///

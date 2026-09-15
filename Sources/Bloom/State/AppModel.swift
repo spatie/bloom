@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SwiftUI
 import BloomCore
 
 struct BloomAlert: Identifiable {
@@ -408,6 +409,7 @@ final class AppModel {
         Self.probeInstance = self
         remoteServer.onCatalogueChanged = { [weak self] in self?.reconcileRemoteSelection() }
         guard store == nil else { return }
+        Log.launchStep("bootstrap")
         let began = Date()
         do {
             // Off the main actor. Opening the database creates directories, opens the file and
@@ -416,6 +418,7 @@ final class AppModel {
             let store = try await Task.detached(priority: .userInitiated) {
                 try Store(path: try Store.defaultPath())
             }.value
+            Log.launchStep("store open")
             self.store = store
             ComposerModelCatalog.shared.configure(store: store)
             self.manager = WorkspaceManager(store: store)
@@ -456,10 +459,23 @@ final class AppModel {
             // AFTER both migrations above, and that order is load bearing rather than tidy: the
             // sweep kills every session no tab names, and until those tabs have moved into the
             // centre column no tab names any of them.
+            TerminalSessionStore.shared.onAgentActivityChanged = { [weak self] in
+                self?.noteAgentTurnsChanged()
+            }
+            TerminalSessionStore.shared.onAgentTurnFinished = { [weak self] workspaceID in
+                guard let self else { return }
+                try? await store.touch(workspaceID: workspaceID, unread: self.selection.workspaceID != workspaceID)
+                if let model = self.existingModel(for: workspaceID) {
+                    Task { await model.onTurnFinished() }
+                }
+            }
             TerminalSessionStore.shared.useStore(store)
             BottomPanelDefaults.forget()
+            Log.launchStep("recovery done")
             bridge = makeBridge(on: store)
+            Log.launchStep("bridge bound")
             await reload()
+            Log.launchStep("reloaded")
             // After `reload`, because the stored id is only trustworthy once there is a list to
             // check it against. Before `isLoaded`, so the window never paints Home first and then
             // jumps to the workspace.
@@ -467,11 +483,14 @@ final class AppModel {
             isLoaded = true
             let blocking = Int(Date().timeIntervalSince(began) * 1000)
             Log.launch.info("window usable after \(blocking, privacy: .public)ms")
+            Log.launchStep("loaded")
+            DispatchQueue.main.async { Log.launchStep("loaded, next turn") }
             reportFailedDatabaseMigration()
         } catch {
             // `TranscriptStanding.complaint` rather than `readableMessage`: a `SQLiteError`
             // describes itself with the statement that provoked it appended, which is a log's
             // register and not a person's. See its own doc for the modal that made the point.
+            Log.launchStep("bootstrap failed")
             alert = BloomAlert(
                 title: "Could not open the Bloom database",
                 message: TranscriptStanding.complaint(about: error)
@@ -631,6 +650,13 @@ final class AppModel {
             let reconciled = WorkspaceListReconciliation.afterStoreReload(
                 fresh: loadedWorkspaces, archiving: archivingWorkspaceIDs
             )
+            // Read before anything is published, for the reason the two lists above are. This used
+            // to be an `await refreshCrew()` after the assignments below, and that suspension is a
+            // turn the sidebar renders in: on launch, where the membership always moves, the table
+            // diffed every row in, then diffed again for the crew, and `isLoaded` waited a third
+            // turn behind both. Measured at 54ms of the launch's main thread in the row diff alone.
+            let membershipMoved = Set(reconciled.map(\.id)) != known
+            let crew = membershipMoved ? try await store.crewByWorkspace() : nil
             // Each only when it moved. An identical value assigned back is still a mutation as far
             // as the Observation runtime is concerned, so an unconditional pair of writes here
             // invalidates every view in the window that reads either list. This runs on arriving at
@@ -639,7 +665,17 @@ final class AppModel {
             // `refreshDiffStats` has compared before assigning all along; this is the same rule in
             // the other place that publishes.
             if repos != loadedRepos { repos = loadedRepos }
-            if workspaces != reconciled { workspaces = reconciled }
+            if workspaces != reconciled {
+                // A diff stat moving and nothing else is the one reload the figures roll on, and
+                // the curve is on this write because a list row ignores any it starts itself. See
+                // `WorkspaceListReconciliation.changesOnlyDiffStats`.
+                if WorkspaceListReconciliation.changesOnlyDiffStats(from: workspaces, to: reconciled),
+                   !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    withAnimation(Motion.hover) { workspaces = reconciled }
+                } else {
+                    workspaces = reconciled
+                }
+            }
             // The stood-in row goes exactly when the real one arrives, and here rather than at the
             // call site is what makes that true without anybody having to remember an order.
             // `WorkspaceStartRequest` carries the id, so the row the store just answered with IS
@@ -658,6 +694,7 @@ final class AppModel {
             // The models hold a copy of their `Workspace`, and this is where those copies go
             // stale. Refreshing here keeps `model(for:)` out of every view body.
             for workspace in workspaces {
+                CenterTabStore.shared.load(workspaceID: workspace.id)
                 if let existing = workspaceModels[workspace.id], existing.workspace != workspace {
                     existing.workspace = workspace
                 }
@@ -667,7 +704,7 @@ final class AppModel {
             // archive brings the crew members stored under it back into the pane. Only when the
             // membership actually moved, because this method runs after every write anything
             // makes and `refreshCrew` is a query per workspace. See `refreshCrew`.
-            if Set(workspaces.map(\.id)) != known { await refreshCrew() }
+            if let crew { applyCrew(crew) }
         } catch {
             alert = BloomAlert(
                 title: "Could not read workspaces",
@@ -1231,8 +1268,11 @@ final class AppModel {
     /// Each set is written only when it has actually moved. An identical value assigned back is
     /// still a mutation to the Observation runtime, and this runs on every session write.
     private func recomputeAgentTurns() {
+        let terminalTurns = TerminalSessionStore.shared.agentTurns
         let live = workspaceModels.values.flatMap { $0.liveTurns }
+            .filter { terminalTurns[$0.sessionID] == nil } + Array(terminalTurns.values)
         let running = AgentTurns.workspaces(.running, stored: storedActivity, live: live)
+            .union(TerminalSessionStore.shared.runningWorkspaceIDs)
         let waiting = AgentTurns.workspaces(.awaitingPermission, stored: storedActivity, live: live)
         if runningWorkspaceIDs != running { runningWorkspaceIDs = running }
         if waitingWorkspaceIDs != waiting { waitingWorkspaceIDs = waiting }
@@ -1460,7 +1500,12 @@ final class AppModel {
     /// three fields the row draws and none of the ones that move like that.
     func refreshCrew() async {
         guard let store else { return }
-        let grouped = (try? await store.crewByWorkspace()) ?? [:]
+        applyCrew((try? await store.crewByWorkspace()) ?? [:])
+    }
+
+    /// The half of `refreshCrew` that does not wait, so `reload` can read the crew before it
+    /// publishes anything and land the lists and the crew in one update. See `reload`.
+    private func applyCrew(_ grouped: [WorkspaceID: [Session]]) {
         var fresh: [WorkspaceID: [CrewRow]] = [:]
         for workspace in workspaces {
             guard let members = grouped[workspace.id], !members.isEmpty else { continue }

@@ -11,7 +11,7 @@ extension WorkspaceStartMode {
     /// than fall through a `default` in a view. See `NewPane`, which is what makes the pane.
     public var pane: PaneKind {
         switch self {
-        case .chat: .chat
+        case .chat, .claudeCLI, .codexCLI: .chat
         case .terminal: .terminal
         case .browser: .browser
         }

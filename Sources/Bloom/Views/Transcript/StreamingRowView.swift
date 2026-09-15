@@ -83,8 +83,13 @@ struct StreamingRowView: View {
             } else if let tool = transcript.streamingToolName {
                 StreamingStatusView(glyph: "gearshape", text: "Running \(tool)")
                     .transaction { $0.animation = nil }
-            } else if transcript.isRunning, !hasVisibleStream {
-                StreamingStatusView(glyph: nil, text: transcript.statusLabel ?? "Working")
+            } else if transcript.isRunning || transcript.sending != nil, !hasVisibleStream {
+                // Reserve the activity line with the instant echo so starting the agent does
+                // not insert another row underneath a bubble that is still arriving.
+                StreamingStatusView(
+                    glyph: nil,
+                    text: transcript.statusLabel ?? (transcript.isRunning ? "Working" : "Starting")
+                )
                     .transaction { $0.animation = nil }
             }
         }

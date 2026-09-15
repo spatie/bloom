@@ -54,6 +54,9 @@ public struct FolderFacts: Sendable, Equatable {
     /// Direct children that are themselves git repositories, by name. A folder full of these is
     /// somebody's projects directory, not a project.
     public var childRepositories: [String]
+    /// git could not say whether this is a repository. Nil when it answered either way, and on
+    /// every path that never asked it.
+    public var gitProblem: GitRepositoryProblem?
 
     public init(
         path: String,
@@ -66,7 +69,8 @@ public struct FolderFacts: Sendable, Equatable {
         isAbsolute: Bool = true,
         homeDirectory: String,
         workspacesRoot: String = WorkspaceManager.workspacesRoot.path,
-        childRepositories: [String] = []
+        childRepositories: [String] = [],
+        gitProblem: GitRepositoryProblem? = nil
     ) {
         self.path = path
         self.isRepository = isRepository
@@ -79,6 +83,7 @@ public struct FolderFacts: Sendable, Equatable {
         self.homeDirectory = homeDirectory
         self.workspacesRoot = workspacesRoot
         self.childRepositories = childRepositories
+        self.gitProblem = gitProblem
     }
 }
 
@@ -118,6 +123,10 @@ public enum FolderRefusal: Sendable, Equatable {
     /// A container of other people's repositories. Carries what it found so the sentence can name
     /// them rather than assert.
     case containerOfProjects([String])
+    /// git would not answer, so Bloom cannot tell what the folder is. Refused rather than offered,
+    /// because the offer is `git init`, which would fail on a git that does not run and reinitialise
+    /// a repository git merely refused to read.
+    case gitCannotRead(GitRepositoryProblem)
 }
 
 public extension FolderRefusal {
@@ -176,6 +185,8 @@ public extension FolderRefusal {
             This folder holds \(Self.list(names)), which are repositories of their own. It is a \
             folder of projects rather than a project. Pick one of them instead.
             """
+        case .gitCannotRead(let problem):
+            problem.sentence
         }
     }
 
@@ -268,6 +279,9 @@ public extension FolderRefusal {
             of projects rather than a project. Ask again with one of them, and do not run git \
             init here: that would put every project on the machine into one repository.
             """
+
+        case .gitCannotRead(let problem):
+            problem.agentSentence
         }
     }
 
@@ -332,6 +346,7 @@ public extension FolderVerdict {
         guard facts.isAbsolute else { return .refuse(.notAbsolute(facts.path)) }
         guard facts.exists else { return .refuse(.nothingThere(facts.path)) }
         guard facts.isDirectory else { return .refuse(.notADirectory(facts.path)) }
+        if let problem = facts.gitProblem { return .refuse(.gitCannotRead(problem)) }
 
         if facts.isRepository {
             // Git's own answer, carried through untouched. `normalize` strips a `/private` prefix

@@ -68,7 +68,8 @@ struct TranscriptListView: View {
                 remembered,
                 tailStart: TranscriptTail.start(in: rows.lazy.map(\.kind)),
                 rowCount: rows.count
-            )
+            ),
+            rowCount: rows.count
         ))
         _resumed = State(
             initialValue: TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
@@ -154,6 +155,11 @@ struct TranscriptListView: View {
     /// The question whose output is currently under the reader, only while its full bubble has
     /// passed above the viewport.
     @State private var pinnedQuestion: PinnedQuestion?
+    /// The prompt whose turn is at the top of the screen, for the minimap. Written only when the
+    /// reader crosses into another turn, from the same per-frame lookup the pinned question uses.
+    @State private var currentTurnSeq: Int?
+    /// Whether the pane is wide enough for the minimap beside the column. See `TurnMinimap.fits`.
+    @State private var minimapFits = false
     /// Whether the pane is at the live end EXACTLY, which is not `geometry.isNearBottom`.
     ///
     /// **Two different questions, and one number was answering both.** `ScrollEnd.threshold` is 96
@@ -214,6 +220,7 @@ struct TranscriptListView: View {
     private struct Drawn: Equatable {
         var session: SessionID
         var window: TranscriptWindow
+        var rowCount: Int
     }
 
     @State private var drawn: Drawn
@@ -266,8 +273,11 @@ struct TranscriptListView: View {
 
     /// A user bubble takes this share of the pane, and never gets narrower than the floor, so a
     /// long prompt wraps sensibly and a short one still reads as one side of a conversation.
-    private static let bubbleShare: CGFloat = 0.7
-    private static let bubbleFloor: CGFloat = 240
+    /// Not private, because the subagent pane draws a prompt in the same bubble and a copied 0.7
+    /// is a bubble that stops matching the chat the moment this one changes.
+    /// Nonisolated, because it is read inside a geometry closure SwiftUI runs off the main actor.
+    nonisolated static let bubbleShare: CGFloat = 0.7
+    nonisolated static let bubbleFloor: CGFloat = 240
 
     // MARK: - The rows
 
@@ -303,7 +313,7 @@ struct TranscriptListView: View {
                 mustReach: mustReachIndex
             )
         }
-        let held = drawn.window.clamped(rowCount: rows.count)
+        let held = drawn.window.includingAppendedRows(previousCount: drawn.rowCount, rowCount: rows.count)
         guard let mustReach = mustReachIndex, mustReach < held.start || mustReach >= held.end else {
             return held
         }
@@ -433,6 +443,7 @@ struct TranscriptListView: View {
         let home = transcript.home
         let projectName = transcript.projectName
         let rows = transcript.rows
+        let sending = transcript.sending
         let permissionMode = transcript.session.permissionMode
         let agentKind = transcript.session.agentKind
         let recoveredRuns = transcript.recoveredRuns
@@ -458,11 +469,35 @@ struct TranscriptListView: View {
         // and a fold from landing as one edit. See `TranscriptFold.mayAdopt`, which is the rule,
         // and the `onChange` at the foot of `body`, which is the pass.
         let folds = foldsForThisPass(drawn: drawnRange)
-        let lastVisibleSeq = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })?.seq
+        let lastVisibleRow = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })
+        let lastVisibleSeq = lastVisibleRow?.seq
+        let hasCompletedTurn = drawnRange.upperBound == rows.count && sending == nil
+            && lastVisibleRow.map { transcript.isCurrentTurnResult($0) } == true
         // The group the loop is inside, so its line is emitted once, and the indices of its
         // completed rows. Pending rows can sit between hidden ones.
         var foldSeq: Int?
         var hiddenIndices: Set<Int> = []
+
+        // What an Agent call row opens. Built once for the pass, and nil where there is no
+        // workspace for a pane to hang off, which is Ask Bloom. See `SubagentRunActions`.
+        let runActions: SubagentRunActions? = home.workspaceID.map { workspaceID in
+            SubagentRunActions(
+                isLive: { [transcript] in transcript.subagents.subagent(forToolUseID: $0) != nil },
+                open: { [app, transcript] toolUseID, hasRecordedRows, isSettled in
+                    let target = SubagentRunLink.target(
+                        toolUseID: toolUseID,
+                        hasRecordedRows: hasRecordedRows,
+                        isSettled: isSettled,
+                        liveID: { transcript.subagents.subagent(forToolUseID: toolUseID)?.id }
+                    )
+                    switch target {
+                    case .live(let id): app.selection = .subagent(workspaceID, id)
+                    case .recorded(let id): app.selection = .subagentCall(workspaceID, toolUseID: id)
+                    case .unavailable: break
+                    }
+                }
+            )
+        }
 
         var out: [TranscriptTableEntry] = []
         // A workspace's setup script, its worktree events and its opening prompt. All three are
@@ -480,19 +515,30 @@ struct TranscriptListView: View {
                 },
                 content: {
                     AnyView(
-                        WorkspaceEventsView(
-                            workspaceID: workspaceID,
-                            isRunning: isRunningSetup,
-                            // Nothing said yet AND nothing waiting to be said. Once there is a bubble
-                            // on screen, "You can ask for something now" is answered by the bubble.
-                            isFirstThing: transcript.hasNothingToShow,
-                            paneHeight: paneHeight,
-                            onVisibilityChange: { showsSetup = $0 },
-                            onShowLogEnd: { wasAsked in showSetupLogEnd(wasAsked: wasAsked) }
-                        )
-                        // The air the lazy stack got from `.padding(.vertical)` on its content. It
-                        // cannot be a content inset here: see `TranscriptTable.makeNSView`.
-                        .padding(.top, TranscriptLayout.block)
+                        // The opening space so the first bubble clears the fade and the tab bar.
+                        // This cannot be a content inset: see `TranscriptTable.makeNSView`.
+                        //
+                        // **A spacer of its own, and not `.padding(.top)` on the feed.** The feed is
+                        // a `Group` over a `ForEach`, and in a repository with no setup script that
+                        // `ForEach` is empty: padding hung on no views is no view, the cell measured
+                        // nought, and the first message landed six points from the top with its
+                        // upper half under the fade.
+                        VStack(alignment: .leading, spacing: 0) {
+                            Color.clear
+                                .frame(height: TranscriptLayout.topSpace)
+                                .accessibilityHidden(true)
+                            WorkspaceEventsView(
+                                workspaceID: workspaceID,
+                                isRunning: isRunningSetup,
+                                // Nothing said yet AND nothing waiting to be said. Once there is a
+                                // bubble on screen, "You can ask for something now" is answered by
+                                // the bubble.
+                                isFirstThing: transcript.hasNothingToShow,
+                                paneHeight: paneHeight,
+                                onVisibilityChange: { showsSetup = $0 },
+                                onShowLogEnd: { wasAsked in showSetupLogEnd(wasAsked: wasAsked) }
+                            )
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     )
                 }
@@ -504,7 +550,7 @@ struct TranscriptListView: View {
                 id: .setup,
                 contentKey: TranscriptContentKey { $0.combine("ask-top-spacing") },
                 content: {
-                    AnyView(Color.clear.frame(height: Metrics.pane).accessibilityHidden(true))
+                    AnyView(Color.clear.frame(height: TranscriptLayout.topSpace).accessibilityHidden(true))
                 }
             ))
         }
@@ -547,11 +593,24 @@ struct TranscriptListView: View {
                    hiddenIndices.contains(index)
                     || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload) { continue }
             }
+            // A subagent's row, which the call that started it stands for. See "A subagent is one
+            // row" in `TranscriptFold`, which also says what stays.
+            if folds.absorbs(
+                index: index, seq: row.seq, parent: row.parentToolUseID, revealed: revealed
+            ) { continue }
             guard !TranscriptNoise.isHidden(row) else { continue }
+            // How much work the subagent this call started has done. In the key below, so a child
+            // landing redraws this row where it stands instead of putting a row in the list.
+            let subagentActions = row.kind == .toolUse ? folds.actions(underCall: row.refID) : nil
+            // Whether anything is stored under it to open, prose included. In the key for the
+            // count's reason: the row becomes openable where it stands.
+            let subagentHasRun = row.kind == .toolUse && folds.hasRun(underCall: row.refID)
             let isExpanded = expanded.contains(row.seq)
             let wasStopped = row.seq == stoppedTurnSeq
             let recovered = recoveredRuns[row.seq]
-            let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq
+            // The echo already follows this footer. Waiting for its stored row to land added
+            // the inter-turn gap halfway through the send and pushed the travelling bubble down.
+            let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq && sending == nil
             let stillRunning = closesTranscript ? backgroundWork : nil
             // The same fields `TranscriptRowView.==` compared, and for the same reason: the
             // payload is never read, because comparing it is 1.6MB of `Data` per pass.
@@ -571,6 +630,8 @@ struct TranscriptListView: View {
                 $0.combine(row.permissionNote)
                 $0.combine(isExpanded)
                 $0.combine(row.parentToolUseID)
+                $0.combine(subagentActions)
+                $0.combine(subagentHasRun)
                 $0.combine(wasStopped)
                 $0.combine(recovered != nil)
                 $0.combine(closesTranscript)
@@ -621,6 +682,7 @@ struct TranscriptListView: View {
             } else {
                 out.append(TranscriptTableEntry(
                     id: .row(row.seq), contentKey: key, drawsNothing: blank, shape: shape,
+                    sentArrival: row.kind == .user ? transcript.messageArrivals.row(row.seq) : nil,
                     content: {
                         AnyView(
                             TranscriptRowView(
@@ -628,6 +690,9 @@ struct TranscriptListView: View {
                                 home: home,
                                 isExpanded: isExpanded,
                                 isNested: row.parentToolUseID != nil,
+                                subagentActions: subagentActions,
+                                subagentHasRun: subagentHasRun,
+                                runActions: runActions,
                                 projectName: projectName,
                                 onToggle: { toggle(row.seq) },
                                 onSignIn: transcript.remote.map { remote in
@@ -653,7 +718,6 @@ struct TranscriptListView: View {
         // Where the stored row for it will be, which is above the answer to it. The sentence is
         // drawn here from the moment Return is pressed and is replaced by its `messages` row in
         // the same place, at the same measure: see `TranscriptModel.sending`.
-        let sending = transcript.sending
         out.append(TranscriptTableEntry(
             id: .sending,
             // The session is in the key for the reason `streaming` below carries: a pane visits
@@ -663,6 +727,8 @@ struct TranscriptListView: View {
                 $0.combine(transcript.session.id)
                 $0.combine(sending?.id)
             },
+            drawsNothing: sending == nil,
+            sentArrival: sending.flatMap { transcript.messageArrivals.delivery($0.id) },
             content: {
                 guard let sending else { return AnyView(EmptyView()) }
                 let review = ReviewTurn.split(sending.body)
@@ -690,6 +756,10 @@ struct TranscriptListView: View {
             }
         ))
 
+        // The live tail's child can still report its previous empty layout for a pass after
+        // sending starts. Reserve the known status height outside that observed child.
+        let reservesActivity = !hasCompletedTurn && (transcript.isRunning || sending != nil)
+        let activityMinimumHeight = reservesActivity ? TranscriptLayout.rowHeight * fontScale + TranscriptLayout.block : 0
         // The one entry that changes height without anything telling this view so, which is why
         // `TranscriptRowHeights` takes a correction from a drawn row as authoritative.
         out.append(TranscriptTableEntry(
@@ -703,10 +773,17 @@ struct TranscriptListView: View {
             contentKey: TranscriptContentKey {
                 $0.combine("streaming")
                 $0.combine(transcript.session.id)
+                // A late zero-height report from the idle tail must not replace the activity
+                // line measured alongside a newly sent bubble. The key stays stable per turn.
+                $0.combine(reservesActivity)
+                $0.combine(hasCompletedTurn)
             },
+            minimumHeight: activityMinimumHeight,
+            fixedHeight: hasCompletedTurn ? 0 : nil,
             content: {
                 AnyView(
-                    StreamingTailView(transcript: transcript)
+                    StreamingTailView(transcript: transcript, hasCompletedTurn: hasCompletedTurn)
+                        .frame(minHeight: activityMinimumHeight, alignment: .topLeading)
                         .padding(.horizontal, TranscriptLayout.inset)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 )
@@ -737,6 +814,7 @@ struct TranscriptListView: View {
                     // swaps one caption for none. A key that missed it left the old one drawn.
                     $0.combine(holdSentence)
                 },
+                sentArrival: transcript.messageArrivals.delivery(delivery.id),
                 content: {
                     // A message an agent wrote, waiting its turn in the same queue. It is drawn as
                     // itself rather than as the owner's pending bubble: they did not write it,
@@ -873,8 +951,20 @@ struct TranscriptListView: View {
                 // is the worst thing in this file.
                 scroller.stop()
                 follower.seekLiveEnd(false)
-            }
+            },
+            onContentWillChange: { follower.nudge() },
+            quoteSelection: quoteSelection
         )
+        // Text scrolling up used to be cut off hard against the tab strip, a line sliced through
+        // its middle. A short fade into the transcript's own ground softens that edge. Below the
+        // pinned question rather than above it, and it takes no clicks, so a selection or a link
+        // under it still works.
+        .overlay(alignment: .top) {
+            LinearGradient(colors: [Palette.surface, Palette.surface.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: TranscriptLayout.topFade)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .overlay(alignment: .top) {
             if let pinnedQuestion {
                 PinnedQuestionView(
@@ -885,6 +975,10 @@ struct TranscriptListView: View {
             }
         }
         .animation(reduceMotion ? nil : Motion.hover, value: pinnedQuestion?.seq)
+        .overlay { minimap }
+        .onGeometryChange(for: Bool.self) {
+            TurnMinimap.fits(paneWidth: $0.size.width, measure: TranscriptLayout.conversationMeasure)
+        } action: { minimapFits = $0 }
         .overlay { TranscriptHoverOverlay(host: hoverHost) }
         .overlay {
             if showsPlaceholder {
@@ -969,6 +1063,7 @@ struct TranscriptListView: View {
             isLiveScrolling.value = false
             opening = nil
             pinnedQuestion = nil
+            currentTurnSeq = nil
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
             liveEndRequest = TranscriptLiveEndRequest(handled: remembered?.liveEndRequest ?? 0)
@@ -990,7 +1085,8 @@ struct TranscriptListView: View {
                     remembered,
                     tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
                     rowCount: transcript.rows.count
-                )
+                ),
+                rowCount: transcript.rows.count
             )
             writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
             resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
@@ -1026,7 +1122,8 @@ struct TranscriptListView: View {
                     memory?.remembered(session: transcript.session.id),
                     tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
                     rowCount: transcript.rows.count
-                )
+                ),
+                rowCount: transcript.rows.count
             )
             TranscriptDrawn.note(drawn.window.count)
             writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
@@ -1080,7 +1177,7 @@ struct TranscriptListView: View {
             let settled = TranscriptWindow.settling(
                 from: drawn.window, rowCount: transcript.rows.count
             )
-            drawn = Drawn(session: transcript.session.id, window: settled)
+            drawn = Drawn(session: transcript.session.id, window: settled, rowCount: transcript.rows.count)
             TranscriptDrawn.note(settled.count)
             SwitchTrace.mark("transcript.window", workspace: transcript.workspace?.id)
             SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace?.id)
@@ -1267,7 +1364,13 @@ struct TranscriptListView: View {
             transcript.liveEndRequests, isReady: arrivalSession == transcript.session.id
         ) else { return }
         opening = .liveEnd
-        goToLiveEnd()
+        if atLiveEnd.value || controller.holdsEnd || follower.isFollowing {
+            // A send at the bottom extends the existing travel. Jumping to its new destination
+            // first used to race the follower and expose the whole bubble above the composer.
+            follower.nudge()
+        } else {
+            goToLiveEnd()
+        }
     }
 
     /// Takes the reader back to the newest row, which is what the jump pill asks for, and what
@@ -1294,6 +1397,7 @@ struct TranscriptListView: View {
         if drawn.session == transcript.session.id,
            drawn.window.canGrowDown(rowCount: transcript.rows.count) {
             drawn.window = TranscriptWindow.liveEnd(rowCount: transcript.rows.count)
+            drawn.rowCount = transcript.rows.count
             TranscriptDrawn.note(drawn.window.count)
             // **No travel when the window moved.** The rows a glide would pass through are not in
             // the table yet: they go in on the next pass over this body, and a travel aimed at the
@@ -1329,6 +1433,32 @@ struct TranscriptListView: View {
         }
     }
 
+    /// The strip of turns in the margin, clear of the pinned question above and the composer below.
+    @ViewBuilder
+    private var minimap: some View {
+        if minimapFits {
+            let turns = transcript.turns()
+            if turns.count >= TurnMinimap.minimumTurns {
+                TurnMinimapView(
+                    turns: turns,
+                    current: currentTurnSeq.flatMap { seq in turns.firstIndex { $0.seq == seq } },
+                    onOpen: showPinnedQuestion
+                )
+                .padding(.top, PinnedQuestionView.height + Metrics.spacingWide)
+                .padding(.bottom, composerRoom?.clearance ?? 0)
+            }
+        }
+    }
+
+    /// Where a passage selected in this conversation is quoted. Only where there is a composer to
+    /// reply in: the room is what a pane with one puts in the environment, and an archived
+    /// workspace's transcript has none.
+    private var quoteSelection: (@MainActor (String) -> Void)? {
+        guard composerRoom != nil else { return nil }
+        let transcript = transcript
+        return { transcript.appendQuote($0) }
+    }
+
     /// Returns to the full user bubble represented by the compact header.
     private func showPinnedQuestion(_ question: PinnedQuestion) {
         let rows = transcript.rows
@@ -1348,7 +1478,8 @@ struct TranscriptListView: View {
                 session: transcript.session.id,
                 window: TranscriptWindow.opening(
                     rowCount: rows.count, tailStart: tailStart, mustReach: index
-                )
+                ),
+                rowCount: rows.count
             )
             TranscriptDrawn.note(drawn.window.count)
         }
@@ -1373,8 +1504,10 @@ struct TranscriptListView: View {
               let question = transcript.pinnedQuestion(atOrBefore: place.seq)
         else {
             if pinnedQuestion != nil { pinnedQuestion = nil }
+            if currentTurnSeq != nil { currentTurnSeq = nil }
             return
         }
+        if currentTurnSeq != question.seq { currentTurnSeq = question.seq }
 
         // A long user turn can fill most of the pane after its top has scrolled away. Pinning a
         // summary while that real bubble is still visible duplicates the loudest thing on screen.
@@ -1393,7 +1526,7 @@ struct TranscriptListView: View {
         // The window this opening is resolved against, pinned before anything below can take the
         // reason for it away. `drawnWindow` moves to hold a search result or an unread mark, and
         // both of those are gone moments from now.
-        drawn = Drawn(session: transcript.session.id, window: drawnWindow)
+        drawn = Drawn(session: transcript.session.id, window: drawnWindow, rowCount: transcript.rows.count)
         TranscriptDrawn.note(drawn.window.count)
 
         // A pane coming back to a session it has already drawn is put back where the reader left
@@ -1521,7 +1654,8 @@ struct TranscriptListView: View {
         guard drawn.session == transcript.session.id,
               drawn.window.canGrowDown(rowCount: transcript.rows.count)
         else { return }
-        drawn.window = drawn.window.grownDown(rowCount: transcript.rows.count)
+        drawn.window = drawnWindow.grownDown(rowCount: transcript.rows.count)
+        drawn.rowCount = transcript.rows.count
         TranscriptDrawn.note(drawn.window.count)
     }
 

@@ -58,7 +58,7 @@ private struct FileDragModifier: ViewModifier {
 extension View {
     /// Makes the row draggable as the file at `path`, with that file's icon under the cursor.
     @ViewBuilder
-    func fileDrag(path: String, isEnabled: Bool = true) -> some View {
-        if isEnabled { modifier(FileDragModifier(path: path)) } else { self }
+    func fileDrag(path: String, enabled: Bool = true) -> some View {
+        if enabled { modifier(FileDragModifier(path: path)) } else { self }
     }
 }

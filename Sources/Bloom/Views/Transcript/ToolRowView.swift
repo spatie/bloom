@@ -24,6 +24,14 @@ struct ToolRowView: View {
     /// What the CLI said about the refusal, in one line.
     var refusalReason: String = ""
     var durationMS: Int?
+    /// See `ToolRowHeader.subagentActions`.
+    var subagentActions: Int?
+    /// Opens the subagent's run, for an Agent call that has one. When set, the row's title and
+    /// count open the run and the chevron alone expands the brief and result: two things a click
+    /// can mean, so two places to click. See `ToolRowHeader`.
+    var onOpenRun: (() -> Void)?
+    /// An Agent call whose run was not kept, which the row says instead of offering to open it.
+    var runUnavailable = false
     var isExpanded: Bool
     var onToggle: () -> Void
 
@@ -31,17 +39,16 @@ struct ToolRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ExpandableRowHeader(isExpanded: isExpanded, onToggle: onToggle) {
-                ToolRowHeader(
-                    presentation: presentation,
-                    home: home,
-                    isError: isError,
-                    refusal: refusal,
-                    refusalReason: refusalReason,
-                    durationMS: durationMS,
-                    isExpanded: isExpanded,
-                    isHovered: isHovered
-                )
+            if let onOpenRun {
+                // No row-wide button here: the header draws its own two, and a button around them
+                // would take every click for the toggle.
+                header(onOpenRun: onOpenRun)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityAction(named: SubagentRunLink.openActionName, onOpenRun)
+            } else {
+                ExpandableRowHeader(isExpanded: isExpanded, onToggle: onToggle) {
+                    header(onOpenRun: nil)
+                }
             }
 
             if isExpanded {
@@ -59,5 +66,22 @@ struct ToolRowView: View {
         }
         .modifier(ExpandableRow(isHovered: isHovered))
         .onHover { isHovered = $0 }
+    }
+
+    private func header(onOpenRun: (() -> Void)?) -> ToolRowHeader {
+        ToolRowHeader(
+            presentation: presentation,
+            home: home,
+            isError: isError,
+            refusal: refusal,
+            refusalReason: refusalReason,
+            durationMS: durationMS,
+            subagentActions: subagentActions,
+            runUnavailable: runUnavailable,
+            onOpenRun: onOpenRun,
+            onToggle: onOpenRun == nil ? nil : onToggle,
+            isExpanded: isExpanded,
+            isHovered: isHovered
+        )
     }
 }

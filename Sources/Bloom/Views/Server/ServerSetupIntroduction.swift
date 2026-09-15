@@ -27,7 +27,7 @@ struct ServerSetupIntroduction: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 Button("Already running Bloom Server? Connect…", action: showAdvanced)
-                    .buttonStyle(.link).font(Typo.caption)
+                    .linkButton().font(Typo.caption)
             }
             .padding(.vertical, Metrics.spacing)
         }

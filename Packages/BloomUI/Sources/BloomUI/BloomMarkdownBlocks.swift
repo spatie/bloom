@@ -1,13 +1,48 @@
 import SwiftUI
 import BloomClient
 
+/// What a run of inline text contributes when a selection spanning several runs is copied.
+///
+/// The Mac joins every run of an answer into one selection scope, so a copied list has to keep
+/// its markers and a copied table its cell boundaries, neither of which is in the text of a run.
+/// The structure is known here and nowhere else, so it is handed to the platform's inline view
+/// rather than rebuilt by it. A platform that copies one run at a time can ignore it.
+public struct BloomMarkdownCopy: Sendable, Equatable {
+    /// Written before the run's own text: a list marker, or a task's checkbox.
+    public var prefix: String
+    /// Written between the previous run and this one: a paragraph break, a row or a tab.
+    public var separatorBefore: String
+
+    public init(prefix: String = "", separatorBefore: String = "\n\n") {
+        self.prefix = prefix
+        self.separatorBefore = separatorBefore
+    }
+}
+
 /// One structural renderer for desktop and mobile. Inline text retains its platform behaviour.
 public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
     private let blocks: [MarkdownBlock]
     private let style: BloomMarkdownStyle
     private let spacing: CGFloat?
-    private let inline: ([MarkdownInline], BloomMarkdownInlineRole, Color, CGFloat?) -> Inline
+    private let copyPrefix: String
+    private let inline: ([MarkdownInline], BloomMarkdownInlineRole, Color, CGFloat?, BloomMarkdownCopy) -> Inline
     private let code: (String, Language) -> Code
+
+    public init(
+        blocks: [MarkdownBlock],
+        style: BloomMarkdownStyle = BloomMarkdownStyle(),
+        spacing: CGFloat? = nil,
+        copyPrefix: String = "",
+        @ViewBuilder inline: @escaping ([MarkdownInline], BloomMarkdownInlineRole, Color, CGFloat?, BloomMarkdownCopy) -> Inline,
+        @ViewBuilder code: @escaping (String, Language) -> Code
+    ) {
+        self.blocks = blocks
+        self.style = style
+        self.spacing = spacing
+        self.copyPrefix = copyPrefix
+        self.inline = inline
+        self.code = code
+    }
 
     public init(
         blocks: [MarkdownBlock],
@@ -16,11 +51,11 @@ public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
         @ViewBuilder inline: @escaping ([MarkdownInline], BloomMarkdownInlineRole, Color, CGFloat?) -> Inline,
         @ViewBuilder code: @escaping (String, Language) -> Code
     ) {
-        self.blocks = blocks
-        self.style = style
-        self.spacing = spacing
-        self.inline = inline
-        self.code = code
+        self.init(
+            blocks: blocks, style: style, spacing: spacing,
+            inline: { text, role, colour, spacing, _ in inline(text, role, colour, spacing) },
+            code: code
+        )
     }
 
     public var body: some View {
@@ -33,11 +68,12 @@ public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
 
     @ViewBuilder
     private func block(_ value: MarkdownBlock, first: Bool) -> some View {
+        let copy = BloomMarkdownCopy(prefix: first ? copyPrefix : "")
         switch value {
         case let .paragraph(text):
-            inline(text, .body, style.foreground, spacing)
+            inline(text, .body, style.foreground, spacing, copy)
         case let .heading(level, text):
-            inline(text, .heading(level), style.foreground, spacing)
+            inline(text, .heading(level), style.foreground, spacing, copy)
                 .padding(.top, first ? 0 : 10)
                 .accessibilityAddTraits(.isHeader)
         case let .codeBlock(text, language, _):
@@ -55,7 +91,10 @@ public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
                             .foregroundStyle(items[index].checked ? style.positive : style.tertiary)
                             .frame(width: style.markerWidth, alignment: .trailing)
                             .accessibilityLabel(items[index].checked ? "Done" : "Not done")
-                        inline(items[index].inline, .body, style.foreground, style.taskLineSpacing)
+                        inline(
+                            items[index].inline, .body, style.foreground, style.taskLineSpacing,
+                            BloomMarkdownCopy(prefix: items[index].checked ? "[x] " : "[ ] ")
+                        )
                             .lineSpacing(style.taskLineSpacing)
                     }
                 }
@@ -72,11 +111,16 @@ public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
         }
     }
 
-    private func nested(_ children: [MarkdownBlock], foreground: Color, spacing: CGFloat?) -> AnyView {
+    private func nested(
+        _ children: [MarkdownBlock], foreground: Color, spacing: CGFloat?, copyPrefix: String = ""
+    ) -> AnyView {
         var nestedStyle = style
         nestedStyle.foreground = foreground
         // Recursive markdown needs a finite view type. Erasure stays at the recursion boundary.
-        return AnyView(Self(blocks: children, style: nestedStyle, spacing: spacing, inline: inline, code: code))
+        return AnyView(Self(
+            blocks: children, style: nestedStyle, spacing: spacing, copyPrefix: copyPrefix,
+            inline: inline, code: code
+        ))
     }
 
     private func list(_ items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
@@ -88,7 +132,10 @@ public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
                         .foregroundStyle(style.secondary)
                         .monospacedDigit()
                         .frame(width: style.markerWidth, alignment: .trailing)
-                    nested(items[index], foreground: style.foreground, spacing: style.proseListSpacing)
+                    nested(
+                        items[index], foreground: style.foreground, spacing: style.proseListSpacing,
+                        copyPrefix: start.map { "\($0 + index). " } ?? "\u{2022} "
+                    )
                         .lineSpacing(style.proseListSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -117,13 +164,15 @@ public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
         BloomMarkdownTableLayout(columns: headers.count, minimumColumnWidth: style.minimumTableColumnWidth) {
             ForEach(headers.indices, id: \.self) { column in
                 cell(headers[column], role: .tableHeader, alignment: alignment(column, alignments),
-                     lastColumn: column == headers.count - 1, lastRow: rows.isEmpty)
+                     lastColumn: column == headers.count - 1, lastRow: rows.isEmpty,
+                     separatorBefore: column == 0 ? "\n\n" : "\t")
                     .background(style.surface)
             }
             ForEach(rows.indices, id: \.self) { row in
                 ForEach(rows[row].indices, id: \.self) { column in
                     cell(rows[row][column], role: .tableCell, alignment: alignment(column, alignments),
-                         lastColumn: column == rows[row].count - 1, lastRow: row == rows.count - 1)
+                         lastColumn: column == rows[row].count - 1, lastRow: row == rows.count - 1,
+                         separatorBefore: column == 0 ? "\n" : "\t")
                 }
             }
         }
@@ -133,9 +182,9 @@ public struct BloomMarkdownBlocks<Inline: View, Code: View>: View {
 
     private func cell(
         _ text: [MarkdownInline], role: BloomMarkdownInlineRole, alignment: Alignment,
-        lastColumn: Bool, lastRow: Bool
+        lastColumn: Bool, lastRow: Bool, separatorBefore: String
     ) -> some View {
-        inline(text, role, style.foreground, spacing)
+        inline(text, role, style.foreground, spacing, BloomMarkdownCopy(separatorBefore: separatorBefore))
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)

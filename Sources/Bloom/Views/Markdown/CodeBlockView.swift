@@ -12,6 +12,7 @@ public struct CodeBlockView: View {
     private let code: String
     private let language: Language
     @State private var showsAllLines = false
+    @Environment(\.transcriptTextSelection) private var selection
 
     /// Whether the answer this fence belongs to is still arriving, which decides which cache the
     /// preparation goes through. See `CodeBlockPreparationCache`.
@@ -29,21 +30,34 @@ public struct CodeBlockView: View {
         let visibleCount = showsAllLines ? prepared.lines.count : min(prepared.lines.count, Self.lineCap)
 
         BloomCodeBlockFrame(
-            surface: Palette.surfaceSunken,
+            surface: Palette.codeBackground,
             border: Palette.border,
             canFold: prepared.lines.count > Self.lineCap
         ) {
+            // The fence's only label, and the one thing that says what the block is.
             Text(Self.displayName(for: language))
                 .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
+                .foregroundStyle(Palette.codeGutter)
         } copy: {
             CopyButton(text: code, title: "Copy code", size: MarkdownMetrics.iconButton)
         } content: {
-            Text(highlighted(prepared, upTo: visibleCount))
-                .font(Typo.code)
-                .foregroundStyle(Palette.textPrimary)
-                .textSelection(.enabled)
+            // Inside an answer's shared selection scope the fence joins it as native text, so a
+            // drag can run from the prose above into the code and out again.
+            if selection != nil {
+                TranscriptTextView(
+                    text: nativeHighlighted(prepared, upTo: visibleCount),
+                    linkColor: Palette.linkNSColor
+                )
+                .fixedSize(horizontal: true, vertical: false)
+            } else {
+                Text(highlighted(prepared, upTo: visibleCount))
+                    .font(CodeMetrics.measuredFont)
+                    .lineSpacing(CodeMetrics.rowSpacing)
+                    .foregroundStyle(Palette.codeForeground)
+                    .textSelection(.enabled)
+            }
         } fold: {
+            // No `!showsAllLines`: an opened fence keeps the control, now reading the other way.
             Button(TextFold.title(isExpanded: showsAllLines, lines: prepared.lines.count)) {
                 showsAllLines.toggle()
             }
@@ -73,13 +87,46 @@ public struct CodeBlockView: View {
     /// the way `SetupLineHeight` gives the setup log one. Worth writing when something asks for it.
     private func highlighted(_ prepared: CodeBlockPreparation, upTo count: Int) -> AttributedString {
         var output = AttributedString()
+        let scheme = ColourThemePreference.shared.codeScheme
+        let colours = Palette.codeColours
+        let schemeHash = scheme.hashValue
         for offset in 0..<count {
             if offset > 0 { output += AttributedString("\n") }
             output += SyntaxCache.attributed(
                 line: prepared.lines[offset],
                 language: language,
-                carry: prepared.carries[offset]
+                carry: prepared.carries[offset],
+                scheme: scheme, colours: colours, schemeHash: schemeHash
             )
+        }
+        return output
+    }
+
+    private func nativeHighlighted(_ prepared: CodeBlockPreparation, upTo count: Int) -> NSAttributedString {
+        let output = NSMutableAttributedString(string: "")
+        // The theme's code face and row spacing, so a fence reads the same selectable or not.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = CodeMetrics.rowSpacing
+        let attributes: [NSAttributedString.Key: Any] = [.font: CodeMetrics.font, .paragraphStyle: paragraph]
+        let scheme = ColourThemePreference.shared.codeScheme
+        let colours = Palette.codeColours
+        let schemeHash = scheme.hashValue
+        for offset in 0..<count {
+            if offset > 0 { output.append(NSAttributedString(string: "\n", attributes: attributes)) }
+            let value = SyntaxCache.attributed(
+                line: prepared.lines[offset], language: language, carry: prepared.carries[offset],
+                scheme: scheme, colours: colours, schemeHash: schemeHash
+            )
+            let line = NSMutableAttributedString(string: prepared.lines[offset], attributes: attributes)
+            for run in value.runs {
+                let prefix = String(value.characters[..<run.range.lowerBound]).utf16.count
+                let length = String(value.characters[run.range]).utf16.count
+                line.addAttribute(
+                    .foregroundColor, value: NSColor(run.foregroundColor ?? Palette.codeForeground),
+                    range: NSRange(location: prefix, length: length)
+                )
+            }
+            output.append(line)
         }
         return output
     }

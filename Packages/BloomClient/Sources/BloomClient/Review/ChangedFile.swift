@@ -31,7 +31,10 @@ public struct ChangedFile: Identifiable, Sendable, Hashable, Codable {
     public var contentRevision: String?
     public var hasIncompleteStats: Bool
 
-    public var id: String { path }
+    public var layer: ChangeLayer?
+    public var stagingRevision: String?
+
+    public var id: String { layer.map { "\($0.rawValue):\(path)" } ?? path }
 
     public var filename: String { (path as NSString).lastPathComponent }
     public var directory: String { (path as NSString).deletingLastPathComponent }
@@ -43,7 +46,8 @@ public struct ChangedFile: Identifiable, Sendable, Hashable, Codable {
         additions: Int = 0,
         deletions: Int = 0,
         isBinary: Bool = false,
-        hasIncompleteStats: Bool = false
+        hasIncompleteStats: Bool = false,
+        layer: ChangeLayer? = nil
     ) {
         self.path = path
         self.oldPath = oldPath
@@ -52,5 +56,6 @@ public struct ChangedFile: Identifiable, Sendable, Hashable, Codable {
         self.deletions = deletions
         self.isBinary = isBinary
         self.hasIncompleteStats = hasIncompleteStats
+        self.layer = layer
     }
 }

@@ -17,9 +17,15 @@ struct WorkspaceStatusGlyph: View {
     /// is unreadable and the shape has to carry the meaning on its own.
     var isOnSelection = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         content
             .frame(width: Metrics.glyph, height: Metrics.glyph)
+            // A state change used to be a hard cut from one shape to the next in the same box. The
+            // symbol replace is the crossfade Finder and Mail draw in their own sidebars, and it
+            // animates on the status alone, so selecting a row still swaps its ink at once.
+            .animation(reduceMotion ? nil : Motion.pane, value: status)
     }
 
     @ViewBuilder
@@ -58,6 +64,7 @@ struct WorkspaceStatusGlyph: View {
                 // wherever the mark is drawn. Measured off a headless render of the real symbols
                 // at twenty times: `.large` is 1.276 of `.medium` on every one of them.
                 .imageScale(.medium)
+                .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(
                     isOnSelection ? AnyShapeStyle(Palette.textInverted) : Self.tint(for: status)
                 )

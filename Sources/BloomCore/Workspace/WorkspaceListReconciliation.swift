@@ -68,4 +68,33 @@ public enum WorkspaceListReconciliation {
         guard !archiving.isEmpty else { return fresh }
         return fresh.filter { !archiving.contains($0.id) }
     }
+
+    /// Whether a reload moved nothing but the diff stats of rows that were already there, in the
+    /// order they were already in.
+    ///
+    /// `AppModel.reload` rolls the figures on that write and on no other. A `List` row ignores
+    /// every animation it starts itself, and that was measured rather than assumed, in
+    /// `NumericTextProbe`: `.animation(_:value:)` on the label, `.transaction(value:)`, and an
+    /// `onChange` moving the row's own state inside `withAnimation`, at once or a turn later, all
+    /// landed the new figure in a single frame. Only the transaction the list's data was written
+    /// in reaches the row, and it survives the `onChange` the sidebar and Home rebuild their rows
+    /// in, so the curve has to be on the write. And it can only be on the write when the write
+    /// carries nothing else: an insertion, a rename or a reorder played at the length of a figure
+    /// rolling is the whole column moving, which is what `SidebarView` keys each of its own
+    /// animations to a single kind of change to avoid.
+    ///
+    /// A row going from no changes to some, or back, is refused as well. It is more than a figure:
+    /// the label is inserted or removed beside the name, and under the sidebar's "Changed" filter
+    /// the row itself arrives or leaves.
+    public static func changesOnlyDiffStats(from old: [Workspace], to new: [Workspace]) -> Bool {
+        guard old.count == new.count, old != new else { return false }
+        return zip(old, new).allSatisfy { before, after in
+            guard before.hasDiff == after.hasDiff else { return false }
+            var figuresPutBack = after
+            figuresPutBack.additions = before.additions
+            figuresPutBack.deletions = before.deletions
+            figuresPutBack.changedFiles = before.changedFiles
+            return figuresPutBack == before
+        }
+    }
 }

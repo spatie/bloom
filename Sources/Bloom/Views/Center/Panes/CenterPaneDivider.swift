@@ -88,8 +88,8 @@ struct CenterPaneDivider: View {
                 onResize(0.5)
                 onResizeEnded()
             }
-            // A view can disappear while AppKit still owns the mouse. Commit the last ratio and
-            // release TranscriptHoldView just as an ordinary gesture end would.
+            // A view can disappear while AppKit still owns the mouse. Commit the last ratio just as
+            // an ordinary gesture end would.
             .onDisappear { finishResize() }
             .accessibilityElement()
             .accessibilityLabel(axis == .horizontal ? "Pane divider" : "Pane divider, stacked")
@@ -153,10 +153,6 @@ struct CenterPaneDivider: View {
                     carrying = pane(at: local(value.startLocation))
                     if carrying == nil {
                         dragOrigin = ratio
-                        // A transcript in either half holds still until this ends. AppKit calls no
-                        // live resize for a SwiftUI drag, so saying so is the only way it knows.
-                        // See `TranscriptHoldView`.
-                        NotificationCenter.default.post(name: .bloomPaneResizeBegan, object: nil)
                     }
                 }
                 if let carrying {
@@ -178,7 +174,6 @@ struct CenterPaneDivider: View {
     private func finishResize() {
         guard dragOrigin != nil else { return }
         onResizeEnded()
-        NotificationCenter.default.post(name: .bloomPaneResizeEnded, object: nil)
         dragOrigin = nil
     }
 

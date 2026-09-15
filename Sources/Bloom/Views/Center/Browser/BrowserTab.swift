@@ -7,7 +7,7 @@ import BloomCore
 /// transcript should not have to know how the centre column is arranged in order to put something
 /// in it, and every route to a browser tab should produce exactly the tab a browser tab normally
 /// is. This goes through `CenterTabStore.add` and `WorkspaceTabsStore.reveal`, which is the door
-/// the strip's own `+` menu uses.
+/// the title bar's `+` menu uses.
 @MainActor
 enum BrowserTab {
     /// Whether the in-app browser could show this at all.
@@ -72,7 +72,7 @@ enum BrowserTab {
     /// **The workspace's existing browser tab is pointed at the address rather than a second one
     /// being added.** A transcript is full of links, and a tab per press would bury the
     /// conversations the strip is mostly for. It is the same argument `CenterTab` already makes
-    /// for the review tab, and the way to a second browser is unchanged: the strip's `+` menu
+    /// for the review tab, and the way to a second browser is unchanged: the title bar's `+` menu
     /// still adds one, and this reuses whichever browser tab is last in the strip.
     /// Opens the window a page asked for, as a browser tab of the workspace's, in front.
     ///

@@ -8,7 +8,8 @@ import BloomUI
 /// you sent. It replaced a near white plate with a hairline around it, which sat on a near white
 /// transcript and separated from the reply under it by almost nothing: you scrolled past your own
 /// question without noticing it went by. A fill is the cheapest thing that says "this half is
-/// yours" without adding a second border to a column that already has enough lines in it.
+/// yours" without adding a second border to a column that already has enough lines in it. The
+/// theme presets put the plate back once, and the owner asked for the blue again the next day.
 ///
 /// **Only this side is bubbled, and that is deliberate.** The agent's replies stay unbubbled prose
 /// and must not be "finished off" later. iMessage works because both sides are a sentence long. An
@@ -156,7 +157,7 @@ struct UserTurnRowView: View {
                 // `TranscriptTextView` exists: a link inside a selectable `Text` is decoration.
                 // Measured on a real window, the cursor over one was an I-beam and a press routed
                 // nothing at all. See the note on that type.
-                    TranscriptTextView(
+                TranscriptTextView(
                     text: TranscriptLink.attributedString(
                         sent: text,
                         font: font,
@@ -174,7 +175,6 @@ struct UserTurnRowView: View {
                     linkColor: NSColor(Palette.linkInverted),
                     // The measured value from the note above: on the dark ramp the selection is a
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
-                    // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: Palette.bubbleTextSelection,
                     alignsBubbleInk: true,
                     actions: linkActions.opening(

@@ -314,6 +314,7 @@ struct TmuxCommandTests {
         )
         #expect(arguments == [
             "-L", "bloom-deadbeef", "-f", "/cfg/tmux.conf", "-u",
+            "set-environment", "-gr", "NO_COLOR", ";",
             "new-session", "-A", "-D", "-s", "bloom-x", "-c", "/tmp/work",
             "-e", "BLOOM_PORT=3000",
             "-e", "CONDUCTOR_PORT=3000",

@@ -21,6 +21,14 @@ final class UsageMenuModel {
     var showsCup: Bool {
         didSet { defaults.set(showsCup, forKey: UsagePreferenceKey.showsCup) }
     }
+    /// Whether the waiting and finished counts are drawn beside the mark. Off hides one from the
+    /// strip only; see `MenuBarSummary.segments` for what still names it.
+    var showsWaitingCount: Bool {
+        didSet { defaults.set(showsWaitingCount, forKey: UsagePreferenceKey.showsWaitingCount) }
+    }
+    var showsUnreadCount: Bool {
+        didSet { defaults.set(showsUnreadCount, forKey: UsagePreferenceKey.showsUnreadCount) }
+    }
     var meterStyle: UsageMeterStyle {
         didSet { defaults.set(meterStyle.rawValue, forKey: UsagePreferenceKey.meterStyle) }
     }
@@ -37,6 +45,8 @@ final class UsageMenuModel {
         layout = UsageLayout.load(from: defaults)
         showsUsage = defaults.object(forKey: UsagePreferenceKey.showsUsage) as? Bool ?? true
         showsCup = defaults.object(forKey: UsagePreferenceKey.showsCup) as? Bool ?? true
+        showsWaitingCount = defaults.object(forKey: UsagePreferenceKey.showsWaitingCount) as? Bool ?? true
+        showsUnreadCount = defaults.object(forKey: UsagePreferenceKey.showsUnreadCount) as? Bool ?? true
         meterStyle = defaults.string(forKey: UsagePreferenceKey.meterStyle)
             .flatMap(UsageMeterStyle.init(rawValue:)) ?? .left
         iconStyle = defaults.string(forKey: UsagePreferenceKey.iconStyle)

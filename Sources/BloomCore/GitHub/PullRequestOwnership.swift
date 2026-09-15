@@ -218,13 +218,16 @@ public extension GitHub {
     /// same cache key, and `maxAge` is zero for the only caller, which never hits, so the Checks
     /// tab made two identical `gh pr view` round trips every twenty seconds and threw one payload
     /// away.
-    static func checks(for workspace: Workspace, maxAge: Duration = .zero) async throws -> [CheckRun] {
+    ///
+    /// Nil when GitHub would not let this token read them, which is a different answer from an
+    /// empty list and must not be drawn as one. See `GitHub.viewPullRequest`.
+    static func checks(for workspace: Workspace, maxAge: Duration = .zero) async throws -> [CheckRun]? {
         // The same branch both times, or the rollup is read for one branch and gated on another.
         let head = await headBranch(of: workspace)
         guard let found = try await snapshot(
             for: workspace, onBranch: head, maxAge: maxAge
         ) else { return [] }
-        return found.runs
+        return found.pullRequest.checks == .unavailable ? nil : found.runs
     }
 
     /// Whether the pull request gh found under this branch name is this workspace's.

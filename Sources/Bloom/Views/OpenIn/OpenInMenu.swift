@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import BloomCore
+import BloomClient
 
 /// What is being handed to another application, and which it is.
 ///

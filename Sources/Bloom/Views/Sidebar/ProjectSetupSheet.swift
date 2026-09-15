@@ -405,7 +405,9 @@ struct ProjectSetupSheet: View {
         case .idle:
             EmptyView()
         case .checking:
-            ProgressView().controlSize(.small).scaleEffect(0.7)
+            // `.mini` rather than a small spinner scaled down, which rasterises off the pixel grid
+            // and reads as blurred beside the crisp label it stands in for.
+            ProgressView().controlSize(.mini)
         case .available:
             Label("available", systemImage: "checkmark.circle.fill")
                 .font(Typo.micro)

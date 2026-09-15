@@ -18,7 +18,7 @@ struct ServerSetupNoticeView: View {
                 if let stopServer { Button("Stop Server…", action: stopServer) }
                 if notice.code == "service_account_exists" || notice.code == "server_running" || notice.code == "server_busy" {
                     Button("Connect to Existing Server…", action: showAdvanced)
-                        .buttonStyle(.link)
+                        .linkButton()
                 }
             }
         }

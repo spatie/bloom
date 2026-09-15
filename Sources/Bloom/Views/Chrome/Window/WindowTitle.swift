@@ -75,11 +75,40 @@ final class WindowTitleText {
 
     private(set) var text = "Bloom"
 
+    /// The selection whose title tells VoiceOver it is running, because what it shows has a turn
+    /// under way and no tab strip to say so in. See `BusySignalPlacement`.
+    ///
+    /// The column draws that turn as a segment along its top edge, which is decoration and hidden
+    /// from VoiceOver. A tab says "Running" as its own value; with no tab, the title is the name of
+    /// the one there is, so it says it instead. That is the only reader of this now: the title's
+    /// ink is plain.
+    ///
+    /// Here because the column that knows is not the view that draws the title: `WindowTitleControl`
+    /// is a toolbar item, and the answer depends on whether the column's strip is up, which only
+    /// the column can say (a tab being renamed draws the strip for one tab).
+    ///
+    /// A selection rather than a flag, because the view that sets it and the view that clears it
+    /// are not always one view in one order. Switching workspace can bring the next column up
+    /// before the last one has gone, and a flag would let the last one clear what the next one had
+    /// just set.
+    private(set) var busySelection: SidebarSelection?
+
     private init() {}
 
     func set(_ value: String) {
         guard text != value else { return }
         text = value
+    }
+
+    /// Says whether a selection's title reads as running. Clearing only clears that selection's own
+    /// claim.
+    func setBusy(_ isBusy: Bool, for selection: SidebarSelection) {
+        if isBusy {
+            guard busySelection != selection else { return }
+            busySelection = selection
+        } else if busySelection == selection {
+            busySelection = nil
+        }
     }
 }
 

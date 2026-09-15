@@ -93,6 +93,12 @@ public enum MenuBarCatalogue {
 
         // MARK: Edit
 
+        // Always live, because what it acts on is a selection and a selection is not something the
+        // menu bar is told about. See `SelectionToChat`, which asks at the moment it is pressed.
+        //
+        // **A terminal keeps Cmd+L as well, and it is the same action by a shorter road**: the
+        // shell hands its selection over itself, and hands the key back when it has none.
+        MenuBarItem(.addSelectionToChat, in: .edit, "Add to Chat", key: .command("l")),
         MenuBarItem(.find, in: .edit, "Find…", key: .command("f")),
         MenuBarItem(.findNext, in: .edit, "Find Next", key: .command("g")),
         MenuBarItem(.findPrevious, in: .edit, "Find Previous", key: .init("g", .command, .shift)),
@@ -157,7 +163,9 @@ public enum MenuBarCatalogue {
             alternateTitle: UnreadMarkAction.markRead.title, availability: .needsWorkspaceSubject
         ),
         MenuBarItem(.colour, in: .workspace, "Colour", availability: .needsWorkspaceSubject),
-        MenuBarItem(.archive, in: .workspace, "Archive Workspace", key: .init(.delete, .command), availability: .needsWorkspaceSubject),
+        // Plain Command-Backspace belongs to text editing, including fields that do not publish
+        // a focus value to disable Archive. Require Shift so those fields cannot trigger it.
+        MenuBarItem(.archive, in: .workspace, "Archive Workspace", key: .init(.delete, .command, .shift), availability: .needsWorkspaceSubject),
         MenuBarItem(.restore, in: .workspace, "Restore Workspace", availability: .needsWorkspaceSubject),
         MenuBarItem(.openInEditor, in: .workspace, "Open in Editor", key: .init("e", .command, .shift), availability: .needsWorkspaceSubject),
         MenuBarItem(.revealInFinder, in: .workspace, "Reveal in Finder", key: .init("r", .command, .shift), availability: .needsWorkspaceSubject),
@@ -218,6 +226,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case startProject
     case save
 
+    case addSelectionToChat
     case find
     case findNext
     case findPrevious

@@ -2,8 +2,21 @@ import SwiftUI
 import QuartzCore
 import BloomCore
 
-/// The window's shared rule while an agent is working: a lit line with a crest running along it,
-/// towards the edge the next word lands at.
+/// A lit line with a crest running along it, towards the edge the next word lands at, which was
+/// the window's busy signal and is not drawn in the window any more.
+///
+/// # Where it went
+///
+/// **Nowhere live.** It lit the rule under the centre column's tab strip, and then, once the strip
+/// stopped being drawn for a lone tab, the column's top edge and a short crest under each busy tab.
+/// The owner's report on those was that the tab's crest sat underneath the tab rather than being
+/// part of it, and that the top edge read as a hard blue line. A shimmer through the busy name came
+/// next and was too subtle. The signal is Safari's loading sweep now, through a busy tab or along
+/// the column's top edge with no track: see `BusySweep` and `BusySignalPlacement`.
+///
+/// What is kept is the figure, because `ActivityRuleGallery` and `RunningColourGallery` still draw
+/// it and everything below was measured to get it there. The view that decided whether a turn was
+/// running went with its last caller.
 ///
 /// # What this replaced, and why, twice
 ///
@@ -84,57 +97,15 @@ import BloomCore
 /// per display frame. Measured on a 120Hz panel with five agents running, four interleaved passes:
 /// the rule and the sidebar's dots cost a median of 2.96 seconds of CPU every 15, where the same
 /// pair on layers cost 0.13 against a floor of 0.20 with the heartbeat off. Do not put a
-/// `repeatForever` back on this rule.
-struct ActivityRule: View {
-    /// Which figure to draw. The window takes the one the comparison settled on; the gallery is the
-    /// only caller that ever names another.
-    var variant: BusyRuleVariant = .live
-
-    @Environment(AppModel.self) private var app
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var pulse: BusyPulse { .shared }
-
-    /// **This workspace's turn, not anybody's.** It was `!runningWorkspaceIDs.isEmpty`, so one
-    /// agent working anywhere lit the rule over every workspace in the window, and the report was
-    /// that the busy indicator shows on all workspaces if any workspace has a running AI. The rule
-    /// is drawn once per centre column and the centre column shows one workspace, so it answers
-    /// for that one.
-    ///
-    /// The Ask conversation is scoped to no workspace and has a turn of its own, which is why this
-    /// asks the selection rather than a workspace id: reading `runningWorkspaceIDs` alone would
-    /// have left Ask permanently dark.
-    ///
-    /// The clock stays shared. `BusyPulse` still ticks off the whole set, so every rule and dot in
-    /// the app agrees on the phase, and what changes here is only which of them is visible. See
-    /// `AppModel.runningWorkspaceIDs`.
-    private var isRunning: Bool {
-        switch app.selection {
-        case .ask: app.ask.isRunning
-        case .home: false
-        default: app.selection.workspaceID.map(app.runningWorkspaceIDs.contains) ?? false
-        }
-    }
-
-    var body: some View {
-        ActivityRuleFigure(variant: variant, isMoving: pulse.isTicking)
-            // The signal goes out rather than being cut off. An agent's turn can finish at any
-            // moment, including with the crest halfway across, and a lit line vanishing between two
-            // frames is a pop. A fifth of a second is short enough that nothing is being claimed
-            // after it stopped being true, which is the whole point of `runningWorkspaceIDs`.
-            .opacity(isRunning ? 1 : 0)
-            .animation(reduceMotion ? nil : Motion.pane, value: isRunning)
-            .allowsHitTesting(false)
-    }
-}
-
-// MARK: - The figure
-
+/// `repeatForever` back on this rule. `BusySweepView` is drawn on layers for the same reason.
+///
+/// # The figure
+///
 /// One activity rule, moving or held still, with no opinion about whether anything is running.
 ///
-/// Split from `ActivityRule` so the gallery can draw all three variants in both states without an
-/// `AppModel` that has a turn in it, and so the one decision `ActivityRule` makes (is anything
-/// running) stays in one place rather than being a parameter this type has to be trusted with.
+/// It was split from a view that asked `AppModel` whether a turn was running, so the gallery could
+/// draw all three variants in both states without one. That view went when the window stopped
+/// drawing the rule, and the galleries are what draw this now.
 struct ActivityRuleFigure: View {
     var variant: BusyRuleVariant
     /// False for a rule that is present but still: `Reduce Motion`, and an offscreen render.

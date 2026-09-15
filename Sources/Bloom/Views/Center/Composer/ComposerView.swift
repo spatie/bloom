@@ -55,6 +55,7 @@ struct ComposerView: View {
     @State private var caret = 0
     @State private var isFocused = false
     @State private var isFastMode = false
+    @State private var codexFastMode: Bool?
     /// The style name this session is on, mirrored out of the store the way fast mode is. Neither
     /// has a column on `Session`, so neither can be read off the row the footer is drawn from.
     @State private var outputStyle = OutputStyle.defaultName
@@ -93,11 +94,11 @@ struct ComposerView: View {
                 ),
                 bounds: Double(ComposerTextEditor.lineHeight)...Double(maxEditorHeight),
                 reset: Double(automaticEditorHeight),
-                label: "Message height"
+                label: "Message height",
+                color: .clear
             )
             .help("Drag to resize. Double-click to fit the text.")
 
-            TurnHistoryNotice(transcript: transcript)
             ComposerPlansView(transcript: transcript, model: model, controls: controls)
             composer
         }
@@ -160,6 +161,10 @@ struct ComposerView: View {
                 project: transcript.remote == nil ? transcript.cwd : nil,
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
+                // Read off the workspace model, which is where the Workspace menu reads its run
+                // scripts from: one parse of the settings file serves both. Nil model, no project.
+                projectQuickPrompts: model?.settings.quickPrompts ?? [],
+                onOpenQuickPrompts: { [model] in model?.refreshSettings() },
                 onSend: send,
                 onStop: transcript.stop,
                 onSideConversation: canOpenSideConversation ? openSideConversation : nil,
@@ -181,7 +186,9 @@ struct ComposerView: View {
         // just arrived are at the front and are the ones the button was pressed to change.
         .onChange(of: transcript.composerFocusRequests) { _, _ in
             isFocused = true
-            caret = 0
+            caret = transcript.composerFocusCaretAtEnd
+                ? (SlashCommandDraft.parse(transcript.draft).body as NSString).length
+                : 0
         }
         .focusedValue(\.composerTranscript, isFocused ? transcript : nil)
         .onDisappear(perform: saveDraftNow)
@@ -217,7 +224,8 @@ struct ComposerView: View {
             session: transcript.session,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
-            codexContextWindow: codexContextWindow
+            codexContextWindow: codexContextWindow,
+            codexFastMode: codexFastMode
         )
     }
 
@@ -260,9 +268,37 @@ struct ComposerView: View {
         case .escape:
             if let onDismiss { onDismiss() } else { isFocused = false }
             return true
-        case .up, .down, .tab:
+        case .up:
+            return recall(.older)
+        case .down:
+            return recall(.newer)
+        case .tab:
             return false
         }
+    }
+
+    /// Up or Down in an empty composer, or in one still holding a prompt they brought back.
+    ///
+    /// The guard in front is about cost rather than rules, which are `PromptRecall`'s: reading the
+    /// sent prompts decodes every user row in the session, and an arrow key pressed in a draft
+    /// somebody is writing has no business paying for that.
+    private func recall(_ direction: PromptRecall.Direction) -> Bool {
+        let draft = transcript.draft
+        guard draft.isEmpty || transcript.promptRecall.isBrowsing else { return false }
+
+        // The caret counts the body, the draft counts the `/command` in front of it too.
+        let body = SlashCommandDraft.parse(draft).body
+        let lead = (draft as NSString).length - (body as NSString).length
+        let sent = transcript.rows.lazy
+            .filter { $0.kind == .user }
+            .map { UserTurnPrompt.text(in: $0.payload) }
+        guard let text = transcript.promptRecall.step(
+            direction, prompts: PromptRecall.prompts(from: Array(sent)), draft: draft, caret: caret + lead
+        ) else { return false }
+
+        transcript.draft = text
+        caret = (SlashCommandDraft.parse(text).body as NSString).length
+        return true
     }
 
     // MARK: - Actions
@@ -280,6 +316,16 @@ struct ComposerView: View {
             }
             return
         }
+
+        if new.codexFastMode != codexFastMode {
+            codexFastMode = new.codexFastMode
+            if let store = app.store {
+                let key = CodexSpeed.key(sessionID: transcript.session.id)
+                let value = new.codexFastMode.map { $0 ? "1" : "0" }
+                Task { try? await store.setSetting(key, value) }
+            }
+        }
+
         if new.isFastMode != isFastMode {
             isFastMode = new.isFastMode
             if let store = app.store {
@@ -540,10 +586,12 @@ struct ComposerView: View {
     /// `canOpenNewChat` is a real question rather than a constant: this composer is dropped in
     /// wherever a transcript exists, and without the workspace model there is no strip to open a
     /// second chat on. A prompt that asked for one then writes into this box instead.
-    private func fire(_ prompt: QuickPrompt, insert: @MainActor (QuickPrompt) -> Void) {
-        switch QuickPromptDelivery.decided(
-            for: prompt, canSend: true, canOpenNewChat: model != nil || transcript.remote != nil
-        ) {
+    ///
+    /// A project's prompt comes through the same switch and can only ever land on the two compose
+    /// cases, because `QuickPromptPanelRow.delivery` asks `ProjectQuickPrompt` rather than the
+    /// owner's rule, and that one has no send to answer with.
+    private func fire(_ prompt: QuickPromptPanelRow, insert: @MainActor (QuickPromptPanelRow) -> Void) {
+        switch prompt.delivery(canSend: true, canOpenNewChat: model != nil || transcript.remote != nil) {
         case .compose:
             insert(prompt)
         case .send:
@@ -568,7 +616,7 @@ struct ComposerView: View {
     /// store. Written the other way round, the load lands afterwards and puts the empty box back.
     /// Both are written, so a load that had already finished is not left holding nothing, and the
     /// two agree because the store now says the same words.
-    private func openChat(for prompt: QuickPrompt, sending: Bool) {
+    private func openChat(for prompt: QuickPromptPanelRow, sending: Bool) {
         if let remote = transcript.remote {
             Task {
                 guard let session = await remote.newChat() else { return }
@@ -610,19 +658,18 @@ struct ComposerView: View {
                 return
             }
             if let model {
-                let tabs = model.paneStores.tabs
-                let order = tabs.entries(in: model)
-                let owner = order.first { tab in
-                    tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
-                }
-                let pane = owner.flatMap { tab in
-                    tabs.layout(of: tab).panes.first { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
-                }
-                let next = closingPrevious
-                    ? await model.replaceSession(previous.session, controls: controls)
-                    : await model.createSession(controls: controls)
-                guard let next else { return }
-                if closingPrevious {
+                if !closingPrevious {
+                    guard await model.clearConversation(previous.session, controls: controls) != nil else { return }
+                } else {
+                    let tabs = model.paneStores.tabs
+                    let order = tabs.entries(in: model)
+                    let owner = order.first { tab in
+                        tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                    }
+                    let pane = owner.flatMap { tab in
+                        tabs.layout(of: tab).panes.first { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                    }
+                    guard let next = await model.replaceSession(previous.session, controls: controls) else { return }
                     if let owner, let pane {
                         tabs.replace(pane: pane, of: owner, with: .chat(next.id), in: model)
                     }
@@ -630,8 +677,8 @@ struct ComposerView: View {
                     tabs.reorder(order.map { entry in
                         entry == .chat(previous.session.id) ? .chat(next.id) : entry
                     }, in: model)
+                    tabs.reveal(.chat(next.id), in: model, focusing: true)
                 }
-                tabs.reveal(.chat(next.id), in: model, focusing: true)
             } else {
                 await app.ask.startFresh(controls: controls)
                 guard let current = app.ask.session, current.id != previous.session.id else { return }
@@ -757,6 +804,9 @@ struct ComposerView: View {
         let storedFastMode = (try? await store.setting(
             ComposerControls.fastModeKey(sessionID: sessionID)
         )) == "1"
+        let storedCodexSpeed = CodexSpeed.override(stored: try? await store.setting(
+            CodexSpeed.key(sessionID: sessionID)
+        ))
         let storedStyle = (try? await store.setting(
             ComposerControls.outputStyleKey(sessionID: sessionID)
         )) ?? OutputStyle.defaultName
@@ -769,6 +819,7 @@ struct ComposerView: View {
         // the state the NEW session's own preparation had just written.
         guard !Task.isCancelled else { return }
         isFastMode = storedFastMode
+        codexFastMode = storedCodexSpeed
         outputStyle = storedStyle
         codexContextWindow = storedContextWindow
 

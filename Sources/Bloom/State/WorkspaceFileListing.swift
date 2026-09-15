@@ -9,6 +9,10 @@ protocol WorkspaceFileListing: AnyObject {
     var changedFiles: [ChangedFile] { get }
     var reviewFiles: [ChangedFile] { get }
     var selectedFilePath: String? { get set }
+    /// Which of a path's two patches is selected, for a list that can hold the same path staged
+    /// and unstaged at once. Always nil where the listing has no layers.
+    var selectedChangeLayer: ChangeLayer? { get set }
+    func selectedChangedFile(path: String) -> ChangedFile?
     var changesError: String? { get }
     var isLoadingChanges: Bool { get }
     var hasReadChanges: Bool { get }

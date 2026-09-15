@@ -53,4 +53,16 @@ struct TerminalLaunchScriptTests {
         #expect(result.stdout == argument + "\n")
         #expect(result.stderr.isEmpty)
     }
+    @Test("Terminal panes discard inherited headless colour settings")
+    func terminalEnvironment() {
+        let environment = Shell.terminalEnvironment(inheriting: [
+            "NO_COLOR": "1", "TERM": "dumb", "COLORTERM": "", "PATH": "/bin"
+        ], extra: ["BLOOM_PORT": "3000"])
+        #expect(environment["NO_COLOR"] == nil)
+        #expect(environment["TERM"] == "xterm-256color")
+        #expect(environment["COLORTERM"] == "truecolor")
+        #expect(environment["PATH"] == "/bin")
+        #expect(environment["BLOOM_PORT"] == "3000")
+    }
+
 }

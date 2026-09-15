@@ -32,8 +32,8 @@ public struct Ocean: Sendable, Hashable, Identifiable {
 /// core where a test can read it, rather than in whichever view happens to show it.
 public struct OceanPick: Sendable, Hashable {
     public let ocean: Ocean
-    /// Whether this claim is the sea's first. False once every sea has been used and the
-    /// catalogue has started handing out repeats, which is not worth a banner.
+    /// Whether this claim is the sea's first. False when the draw landed on a sea an earlier
+    /// workspace already sailed, which is not worth a banner. See `Store.claimOcean`.
     public let isFirstUse: Bool
     /// How many seas were still unused after this claim.
     public let remainingUndiscovered: Int

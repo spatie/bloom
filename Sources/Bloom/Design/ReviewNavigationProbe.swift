@@ -16,7 +16,8 @@ enum ReviewNavigationProbe {
         )
         await model.refreshChanges()
         check(model.reviewFiles.count == 8, "navigation fixture did not load its eight files")
-        FileReview.open(path: "File00.swift", in: model)
+        model.selectedFilePath = "File00.swift"
+        FileReview.setShowsAllFiles(true, in: model)
         let host = NSHostingView(rootView: Fixture(model: model))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -25,7 +26,8 @@ enum ReviewNavigationProbe {
         // Cold jumps, backward jumps, repeated destinations and previously prepared files.
         for index in [6, 2, 7, 0, 6, 6, 3] {
             let path = String(format: "File%02d.swift", index)
-            FileReview.open(path: path, in: model)
+            model.selectedFilePath = path
+            FileReview.setShowsAllFiles(true, in: model)
             await settle(window)
             check(model.selectedFilePath == path,
                   "requested \(path), but the inspector selected \(model.selectedFilePath ?? "nil")")
@@ -38,7 +40,8 @@ enum ReviewNavigationProbe {
             checkLanding(index: 3, host: host, check: check)
         }
         await checkKeyboardScrolling(host: host, window: window, check: check)
-        FileReview.open(path: "File03.swift", in: model)
+        model.selectedFilePath = "File03.swift"
+        FileReview.setShowsAllFiles(true, in: model)
         await settle(window)
         checkLanding(index: 3, host: host, check: check)
         await checkDefinitionNavigation(model: model, host: host, window: window, check: check)
