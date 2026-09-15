@@ -5,7 +5,7 @@ import Testing
 @Suite("Showing workspace media inline", .scratchDirectory)
 struct MediaShowToolTests {
     private var identity: BridgeIdentity {
-        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .parent)
+        BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .workspace)
     }
 
     @Test("the tool hands a path and caption to its own workspace")

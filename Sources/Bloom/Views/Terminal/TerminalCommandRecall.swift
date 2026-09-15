@@ -46,6 +46,7 @@ final class TerminalCommandRecall {
 
     /// Panes that had something running as of the last poll. See `remember`.
     private var busy: Set<String> = []
+    private var resumeCommands: [String: String] = [:]
 
     // MARK: - What Bloom typed
 
@@ -61,6 +62,15 @@ final class TerminalCommandRecall {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !busy.contains(pane) else { return }
         sent[pane] = trimmed
+    }
+
+    func rememberResume(_ command: String, inPane pane: String, store: Store) async {
+        resumeCommands[pane] = command
+        guard sent[pane] != command else { return }
+        sent[pane] = command
+        recorded[pane] = command
+        if offers[pane] != nil { offers[pane] = command }
+        try? await store.setSetting(TerminalCommandMemory.key(paneID: pane), command)
     }
 
     // MARK: - The offer
@@ -79,9 +89,26 @@ final class TerminalCommandRecall {
     /// The user pressed Start. The offer goes because the command is running again, and it becomes
     /// what Bloom last sent into this pane, so the next poll records it as the pane's own text
     /// rather than as whatever `ps` calls it.
-    func accepted(inPane pane: String) {
-        if let command = offers.removeValue(forKey: pane) { sent[pane] = command }
+    ///
+    /// The command is the one that was typed, which for a run script's tab is what the settings
+    /// file says now rather than the text that was offered. See `RunScriptPaneStrip`.
+    func accepted(_ command: String, inPane pane: String) {
+        if offers.removeValue(forKey: pane) != nil { sent[pane] = command }
     }
+
+    /// The pane is running something again without the offer having been taken, which is a run
+    /// script being typed into its tab by Bloom or started by hand. The offer is no longer true, so
+    /// it goes; the stored row is left to the recorder, which will write what is running now.
+    ///
+    /// Remembered as well, because the offer is read back from the store asynchronously and can
+    /// land after the command it would offer has already been typed.
+    func withdraw(inPane pane: String) {
+        withdrawn.insert(pane)
+        if offers[pane] != nil { offers[pane] = nil }
+    }
+
+    /// Panes whose offer was overtaken by the command running again. See `withdraw`.
+    @ObservationIgnored private var withdrawn: Set<String> = []
 
     /// The user pressed the dismiss button, which is the one way a command is deliberately
     /// forgotten. It goes from the database too: an offer that came back after being waved away
@@ -98,7 +125,9 @@ final class TerminalCommandRecall {
             offers[pane] = nil
             sent[pane] = nil
             recorded[pane] = nil
+            resumeCommands[pane] = nil
             busy.remove(pane)
+            withdrawn.remove(pane)
         }
         guard let store, !panes.isEmpty else { return }
         Task {
@@ -125,7 +154,13 @@ final class TerminalCommandRecall {
     ) async {
         guard let store, offers[pane] == nil else { return }
         let stored = try? await store.setting(TerminalCommandMemory.key(paneID: pane))
-        guard let command = TerminalCommandMemory.offerable(stored) else { return }
+        let isAgent = CenterTabStore.shared.tabsByWorkspace.values.joined().contains {
+            $0.id == pane && $0.agentSessionID != nil
+        }
+        guard let command = TerminalCommandMemory.offerable(
+            stored, maximumLength: isAgent ? 262_144 : TerminalCommandMemory.lengthLimit
+        ) else { return }
+        if isAgent { resumeCommands[pane] = command }
         recorded[pane] = command
 
         if let session, let persistence {
@@ -135,6 +170,7 @@ final class TerminalCommandRecall {
                 return
             }
         }
+        guard !withdrawn.contains(pane) else { return }
         offers[pane] = command
     }
 
@@ -171,10 +207,12 @@ final class TerminalCommandRecall {
                 busy.remove(pane.pane)
                 sent[pane.pane] = nil
                 guard offers[pane.pane] == nil else { continue }
+                resumeCommands[pane.pane] = nil
             } else {
                 busy.insert(pane.pane)
             }
-            let remembered = TerminalCommandMemory.remembered(
+            let resume = table.interactiveAgent(ofShell: shell) == nil ? nil : resumeCommands[pane.pane]
+            let remembered = resume ?? TerminalCommandMemory.remembered(
                 sent: sent[pane.pane], running: running
             )
             guard remembered != recorded[pane.pane] else { continue }

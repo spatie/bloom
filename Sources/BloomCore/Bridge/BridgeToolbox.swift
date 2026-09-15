@@ -25,9 +25,9 @@ public struct BridgeToolbox: Sendable {
     /// `acceptEdits`, calling `whoami` produced an ask for `mcp__bloom-workspace-bridge__whoami`
     /// and the turn stopped until it was answered. That matters because the reason the bridge is
     /// MCP rather than a CLI the agent shells out to was partly that a shell command goes through
-    /// the permission machinery; being an MCP tool does not exempt it. A child that has to file
-    /// `workspace_report` unattended therefore needs an answer of its own, either a grant Bloom
-    /// makes for its own tools or an allow rule in the child's settings. `BridgeToolApproval` is
+    /// the permission machinery; being an MCP tool does not exempt it. An agent that has to call
+    /// a bridge tool unattended therefore needs an answer of its own, either a grant Bloom makes
+    /// for its own tools or an allow rule in that agent's settings. `BridgeToolApproval` is
     /// where that was answered, and its head says which tools Bloom answers for and why the rest
     /// are not on the list. See `LiveBridgeTests`.
     ///
@@ -51,6 +51,9 @@ public struct BridgeToolbox: Sendable {
         WorkspaceListTool(),
         ChatListTool(),
         ChatReadTool(),
+        // A worktree read through git and nothing else, so no seam: the review pane's own
+        // functions, called from here. See `WorkspaceDiffTool`.
+        WorkspaceDiffTool(),
         // A name is one column of one row, so this needs no seam into the window either: the
         // sidebar hears about it through the store's update hook, the way it hears about a rename
         // typed into the row itself. See `WorkspaceRenameTool`.

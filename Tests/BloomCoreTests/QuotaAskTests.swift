@@ -130,40 +130,6 @@ struct QuotaMergeTests {
     }
 }
 
-// MARK: - Freshness
-
-@Suite("Quota freshness")
-struct QuotaFreshnessTests {
-    @Test func saysNothingAboutAFigureWithinAPollOrTwo() {
-        #expect(QuotaFreshness.of(now - QuotaPollSchedule.interval, at: now) == .current)
-        #expect(QuotaFreshness.of(now - QuotaPollSchedule.interval, at: now).phrase == nil)
-    }
-
-    @Test func saysHowOldAFigureIsOnceAPollHasBeenMissed() {
-        #expect(QuotaFreshness.of(now - 5400, at: now).phrase == "an hour ago")
-        #expect(QuotaFreshness.of(now - 10_800, at: now).phrase == "3 hours ago")
-        #expect(QuotaFreshness.of(now - 2400, at: now).phrase == "40 min ago")
-        #expect(QuotaFreshness.of(now - 172_800, at: now).phrase == "2 days ago")
-    }
-
-    /// The oldest row is the one the panel has to answer for: a board is only as current as the
-    /// staleset thing on it.
-    @Test func answersForTheOldestRowOnTheBoard() {
-        let board = QuotaBoard.make(
-            from: [
-                quota(.claudeCode, .named("five_hour"), .fraction(0.3), observedAt: now - 60),
-                quota(.codex, .lasting(604_800, key: "primary"), .fraction(0.1), observedAt: now - 7200),
-            ],
-            at: now
-        )
-        #expect(QuotaFreshness.of(board, at: now).phrase == "2 hours ago")
-    }
-
-    @Test func hasNothingToSayAboutAnEmptyBoard() {
-        #expect(QuotaFreshness.of(QuotaBoard.make(from: [], at: now), at: now) == .current)
-    }
-}
-
 // MARK: - The schedule
 
 @Suite("Quota poll schedule")
@@ -173,9 +139,10 @@ struct QuotaPollScheduleTests {
     }
 
     @Test func declinesUntilTheGapHasPassed() {
-        let last = now - 60
+        let last = now - 10
         #expect(!QuotaPollSchedule.isDue(lastAskedAt: last, at: now, after: QuotaPollSchedule.onDemandFloor))
         #expect(QuotaPollSchedule.isDue(lastAskedAt: now - 300, at: now, after: QuotaPollSchedule.onDemandFloor))
+        #expect(!QuotaPollSchedule.isDue(lastAskedAt: now - 30, at: now, after: QuotaPollSchedule.interval))
     }
 
     /// The menu may ask sooner than the background poll, and never as often as it is opened.
@@ -421,12 +388,19 @@ struct RequestedQuotaPayloadTests {
 
         let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: payload, at: now)
 
-        #expect(quotas.count == 1)
-        #expect(quotas[0].provider == .codex)
-        #expect(quotas[0].window.key == "primary")
-        #expect(quotas[0].window.duration == 604_800)
-        #expect(quotas[0].fraction == 0)
-        #expect(quotas[0].resetsAt == Date(timeIntervalSince1970: 1_787_986_128))
+        // The account's own week, and Spark's two windows out of `rateLimitsByLimitId`. The map
+        // repeats the account's own limit under `codex`, and that copy is not read twice.
+        #expect(quotas.count == 3)
+        let own = try #require(quotas.first { $0.window.key == "primary" })
+        #expect(own.provider == .codex)
+        #expect(own.window.duration == 604_800)
+        #expect(own.fraction == 0)
+        #expect(own.resetsAt == Date(timeIntervalSince1970: 1_787_986_128))
+
+        let spark = try #require(quotas.first { $0.window.key == "codex_bengalfox.primary" })
+        #expect(spark.window.duration == 18_000)
+        #expect(spark.window.label == "5 hours (Spark)")
+        #expect(quotas.contains { $0.window.key == "codex_bengalfox.secondary" })
     }
 
     /// The sparse case, and the reason `CodexQuotaAdapter` no longer requires a length. Only

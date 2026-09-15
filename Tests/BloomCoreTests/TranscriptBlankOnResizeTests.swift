@@ -9,8 +9,8 @@ import Foundation
 /// composer, the sidebar and the inspector all survived, which is what says the rows were still
 /// there and the table was the thing that went dark.
 ///
-/// The divider moves the transcript's HEIGHT and never its width, so this suite pins the three
-/// things a height change must not do, and then the two rules that stop it doing the fourth.
+/// The divider moves the transcript's HEIGHT and never its width, so this suite pins the two
+/// things a height change must not do, and then the two rules that stop it doing the third.
 ///
 /// 1. It must not empty the height cache. `TranscriptRowHeights` has no notion of height at all,
 ///    and these tests are here so that nothing gives it one by handing a height to `reset` or
@@ -18,9 +18,7 @@ import Foundation
 /// 2. It must not silence a row. A row measured at nothing is given no view by the table, and
 ///    nothing ever asks again, so a nought filed by a resize would be a conversation that stays
 ///    gone.
-/// 3. It must not leave a hold on. A hold is armed by a width change and is what draws the pane's
-///    own ground instead of the transcript.
-/// 4. And it must not resolve a placement against a pane that has no height, which is what it was
+/// 3. And it must not resolve a placement against a pane that has no height, which is what it was
 ///    doing. See `TranscriptAnchor.canPlace` for the whole of it: the end of the content measured
 ///    against a viewport of nought is the point BELOW the last row, and a reader put there sees
 ///    no rows, which leaves the table with nothing to anchor to, nothing to count and nothing to
@@ -210,27 +208,5 @@ struct TranscriptBlankOnResizeTests {
         #expect(!TranscriptRowInk.drawsNothing(kind: .system, payload: start))
         let noise = Data(#"{"type":"system","subtype":"compact_boundary"}"#.utf8)
         #expect(TranscriptRowInk.drawsNothing(kind: .system, payload: noise))
-    }
-
-    // MARK: - A height change leaves no hold on
-
-    /// A hold draws the pane's own ground in place of the transcript, so a height change taking
-    /// one would be this bug by another route. `holds` is asked about two widths and nothing else.
-    @Test("a pane that changed only its height is not held")
-    func aHeightChangeIsNotAHold() {
-        #expect(!TranscriptPaneHold.holds(from: 900, to: 900))
-        #expect(!TranscriptPaneHold.holds(from: 900, to: 900.25))
-    }
-
-    /// And every hold that is taken lets go by itself, so no gesture whose end goes missing can
-    /// leave a pane blank for the rest of the session.
-    @Test("every hold has a deadline")
-    func everyHoldLetsGo() {
-        for held in [TranscriptPaneHold.PaneHeld.whatIsDrawn, .nothing] {
-            for hand in [true, false] {
-                #expect(TranscriptPaneHold.letsGo(of: held, underAHand: hand) > .zero)
-                #expect(TranscriptPaneHold.letsGo(of: held, underAHand: hand) < .seconds(5))
-            }
-        }
     }
 }

@@ -33,6 +33,24 @@ struct WorkspaceStartContextTests {
         )
     }
 
+    @Test("Only the primary remote's branches are offered, origin first")
+    func primaryRemoteOnly() {
+        let references = ["origin/HEAD", "origin/main", "origin/idea", "upstream/elsewhere"]
+        #expect(
+            WorkspaceStartContext.primaryRemoteBranches(
+                references: references, remoteNames: ["upstream", "origin"]
+            ) == ["main", "idea"]
+        )
+        #expect(
+            WorkspaceStartContext.primaryRemoteBranches(
+                references: ["github/main"], remoteNames: ["github"]
+            ) == ["main"]
+        )
+        #expect(
+            WorkspaceStartContext.primaryRemoteBranches(references: [], remoteNames: []).isEmpty
+        )
+    }
+
     @Test("No branches on either side still offers the default branch")
     func noBasesFallBackToDefault() {
         #expect(

@@ -171,9 +171,7 @@ struct PullRequestBar: View {
     }
 
     /// Creation is the agent's job: it pushes, writes the description and calls `gh` with the
-    /// project's own conventions in context. Bloom only composes the turn. Reading the pull
-    /// request's status is the one thing left that still goes through `gh` from here, because it
-    /// is a question with one right answer rather than work that needs judgement.
+    /// project's own conventions in context. Bloom only composes the turn.
     private func createPullRequest() {
         isWorking = true
         report = nil
@@ -195,9 +193,12 @@ struct PullRequestBar: View {
 
         Task {
             defer { isWorking = false }
-            if let refusal = await model.requestMarkReadyForReview(pullRequest) {
+            do {
+                try await model.markReadyForReview(pullRequest)
+            } catch {
                 report = PullRequestNotice(
-                    tone: .info, title: "Nothing was sent", message: refusal
+                    tone: .failure, title: "Could not mark ready for review",
+                    message: String(describing: error)
                 )
             }
         }

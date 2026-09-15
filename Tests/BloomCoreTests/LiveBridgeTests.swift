@@ -47,7 +47,8 @@ struct LiveBridgeTests {
         defer { server.stop() }
 
         let handle = try #require(server.register(session: session, workspace: workspace))
-        #expect(handle.attachment.role == .child)
+        // Started by an agent, and still `.workspace`: there is no role narrower than that now.
+        #expect(handle.attachment.role == .workspace)
         let configPath = try #require(handle.mcpConfigPath)
 
         let runner = AgentRunner(

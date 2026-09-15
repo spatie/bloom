@@ -27,6 +27,16 @@ enum ReviewRunProbe {
             if !condition { failures.append(message) }
         }
 
+        if CommandLine.arguments.contains("--changes-review-only"),
+           let directory = ProbeHarness.value(for: "--review-run-probe") {
+            await ChangesReviewProbe.run(directory: directory, check: check)
+            let result: JSONValue = .object([
+                "checks": .integer(checks), "passed": .bool(failures.isEmpty), "failures": .strings(failures),
+            ])
+            if let data = try? JSONEncoder().encode(result) { FileHandle.standardOutput.write(data) }
+            exit(failures.isEmpty ? 0 : 1)
+        }
+
         if let directory = ProbeHarness.value(for: "--review-run-probe") {
             progress("Checking file navigation alignment")
             await ReviewNavigationProbe.run(directory: directory, check: check)
@@ -191,7 +201,11 @@ enum ReviewRunProbe {
             check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == false,
                   "opening an unchanged file switched to all changes")
             FileReview.setShowsAllFiles(true, in: model)
-            FileReview.open(path: model.reviewFiles.first?.path ?? "", in: model)
+            FileReview.open(path: "README.md", in: model)
+            check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == false,
+                  "clicking a changed file kept every other file's diff around it")
+            model.selectedFilePath = model.reviewFiles.first?.path
+            FileReview.setShowsAllFiles(true, in: model)
             let host = NSHostingView(rootView: LinkedReviewFixture(model: model))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
@@ -218,11 +232,11 @@ enum ReviewRunProbe {
             save(host, name: "all-files-split")
             UserDefaults.standard.set(false, forKey: DiffLayoutSetting.storageKey)
             model.selectedFilePath = "Sources/Checkout.swift"
-            FileReview.open(path: "Sources/Checkout.swift", in: model)
+            FileReview.setShowsAllFiles(true, in: model)
             for _ in 0..<5 { await settle(window) }
             save(host, name: "all-files-jump")
             model.selectedFilePath = "Sources/LongReview.swift"
-            FileReview.open(path: "Sources/LongReview.swift", in: model)
+            FileReview.setShowsAllFiles(true, in: model)
             for _ in 0..<40 {
                 await settle(window)
                 if loadedLongReview(in: host) { break }
@@ -409,8 +423,10 @@ private struct ReviewCollapseFixture: View {
                 DiffView(model: model, file: file, embeddedWidth: 1000, embeddedViewportHeight: 680,
                          isCollapsed: collapsed, onToggleCollapsed: {})
             }
+            .coordinateSpace(.named(ReviewDocument.space))
         }
         .defaultScrollAnchor(.topLeading)
+        .publishesReviewVisibleRect()
     }
 }
 
@@ -425,8 +441,7 @@ private struct EmbeddedReviewFixture: View {
                         ForEach(Array(stride(from: 0, to: 5000, by: 400)), id: \.self) { start in
                             let count = min(400, 5000 - start)
                             if deferred {
-                                ReviewDiffBlock(height: CGFloat(count) * CodeMetrics.rowHeight,
-                                                viewportHeight: 600) {
+                                ReviewDiffBlock(height: CGFloat(count) * CodeMetrics.rowHeight) {
                                     run(start: start, count: count)
                                 }
                             } else {
@@ -439,8 +454,10 @@ private struct EmbeddedReviewFixture: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .defaultScrollAnchor(.topLeading)
             }
+            .coordinateSpace(.named(ReviewDocument.space))
         }
         .defaultScrollAnchor(.topLeading)
+        .publishesReviewVisibleRect()
     }
 
     private func run(start: Int, count: Int) -> some View {

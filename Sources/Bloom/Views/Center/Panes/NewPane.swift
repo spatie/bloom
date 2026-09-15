@@ -7,7 +7,7 @@ import BloomCore
 /// menu should not have to know how a session is created or where a tab is stored in order to put
 /// one in front of the user, and every route to a terminal should produce exactly the tab a
 /// terminal normally is. A chat goes through `WorkspaceModel.createSession`, a terminal and a
-/// browser through `CenterTabStore.add`, which is what the strip's own `+` menu already called.
+/// browser through `CenterTabStore.add`, which is what the title bar's `+` menu already called.
 ///
 /// Where the tab goes is the caller's business, not this one's. The `+` shows it in the pane the
 /// user is in; the pane's context menu splits and shows it in the half that opens. That is the
@@ -46,8 +46,8 @@ enum NewPane {
         switch kind {
         case .chat:
             Task {
-                guard let session = await model.createSession(title: title) else { return }
-                place(.chat(session.id))
+                guard let content = await model.createChat(title: title) else { return }
+                place(content)
             }
 
         // The shell itself is not started here. `ToolPaneView` settles the environment and the

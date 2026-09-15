@@ -12,30 +12,11 @@ import SwiftUI
 /// `frame(height:)` on the row, `defaultMinListRowHeight` and `controlSize` were each captured
 /// and each left the pitch at exactly 32 points. The reference draws 28. Reaching it would mean
 /// leaving `.listStyle(.sidebar)`, and with it AppKit selection, keyboard navigation and the
-/// standard insets, which is a far worse trade than four points. What was in reach is the rhythm
-/// being EVEN, and that is what the header's own padding was spent on.
+/// standard insets. Project rows rely on those insets without adding their own vertical padding.
 ///
-/// A project header does NOT get those 32 points to draw in. Measured off a window capture, one
-/// header's 32 point pitch is 13 points of section spacing above a drawing band of 19, and the
-/// band CLIPS: content offset up into the spacing is cut off at the band's top edge, so a header
-/// cannot be nudged away from the row below it. Whatever the header draws has to fit in 19 points
-/// and is centred there, which is why `Metrics.headerButton` is 15 tall rather than 18. Anything
-/// taller than 19 does not overflow, it pushes the whole row taller and breaks the pitch.
+/// Project headers are plain rows in the flat list and use the full 32 points. The old `Section`
+/// headers had only 19 points for content below 13 points of spacing.
 enum SidebarMetrics {
-    /// The space above a project's row that a `Section` header used to be given for nothing.
-    ///
-    /// Measured off a window capture of the sections: one header's 32 point pitch was 13 points of
-    /// section spacing above a drawing band of 19. The pane draws one flat run of rows now (see
-    /// `SidebarView`), so a project header is handed the full 32 points and centres its content in
-    /// them, and without this the gap that says a new project starts here would be gone.
-    ///
-    /// It is a padding INSIDE the row rather than extra height on top of it, and the number is
-    /// what makes that true. Measured on the flat run through the accessibility tree, which
-    /// reports every row's real height: a project header draws 24 points of content, so 8 above it
-    /// is exactly the 32 the row already had. Thirteen made the row 37 and put every project five
-    /// points out of step with the rows above it.
-    static let headerLead: CGFloat = 8
-
     /// The gutter the project's disclosure chevron sits in, at the leading edge of a header.
     ///
     /// Wide enough for the chevron and nothing else. It is what pushes the project's tile clear of
@@ -138,17 +119,6 @@ enum SidebarMetrics {
     /// against the sidebar material in dark mode; higher and the two ranks are not tellable apart
     /// at a glance, which is the one thing this has to do.
     static let hiddenDim: Double = 0.45
-
-    /// How far a selected row's fill is held off each edge of the pane.
-    ///
-    /// The table used to draw its own highlight and inset it for us. The fill is Bloom's now (see
-    /// `SidebarSelectionFill`), and a `listRowBackground` is handed the whole row rect, so the
-    /// inset has to be put back or the selection runs into the window's edge.
-    ///
-    /// Ten points, measured off a capture of the pane as AppKit drew it: the band ran from 10 to
-    /// 249 in a 260 point sidebar. Measured rather than chosen, so the change is a change of
-    /// colour and not of layout.
-    static let selectionInset: CGFloat = 10
 
     /// How large the chevron itself is drawn. Roughly a five point mark: the smallest thing in
     /// the pane, because it is furniture rather than content.

@@ -113,7 +113,7 @@ struct WorkspaceStartTests {
             repo: registered, prompt: "Do the thing", origin: .user,
             controls: ComposerControls(
                 model: "gpt-5-codex", effort: "high", agentKind: .codex,
-                permissionMode: .acceptEdits, isFastMode: true, outputStyle: "Concise"
+                permissionMode: .acceptEdits, isFastMode: true, outputStyle: "Concise", codexFastMode: false
             )
         ))
 
@@ -122,6 +122,7 @@ struct WorkspaceStartTests {
         #expect(session.effort == "high")
         #expect(session.agentKind == .codex)
         #expect(session.permissionMode == .acceptEdits)
+        #expect(try await store.setting(CodexSpeed.key(sessionID: session.id)) == "0")
 
         // The two that have no column, and the marker that stops the composer's first-open
         // defaults overruling all four the moment the workspace is opened.
@@ -457,7 +458,7 @@ struct WorkspaceOpeningTabTests {
     /// for, and the sheet now offers three, so what comes back has to say which.
     @Test("the hint says which tab, not whether")
     func hintSaysWhich() {
-        for mode in [WorkspaceStartMode.terminal, .browser] {
+        for mode in [WorkspaceStartMode.terminal, .browser, .claudeCLI, .codexCLI] {
             let defaults = scratchDefaults()
             let id = WorkspaceID("w1")
             WorkspaceStartMode.record(mode, workspaceID: id, defaults: defaults)

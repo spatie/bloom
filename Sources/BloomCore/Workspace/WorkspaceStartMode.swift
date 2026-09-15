@@ -23,12 +23,23 @@ import Foundation
 public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     /// Describe a task, and the agent starts on it. The branch name is derived from what you typed.
     case chat
+    case claudeCLI
+    case codexCLI
     /// A shell in the worktree, and you run whatever you like in it. You name the branch yourself,
     /// because there is no task to derive one from.
     case terminal
     /// A browser tab beside the worktree, pointed wherever you take it. Named like a terminal one,
     /// and for the same reason: nothing is written that a name could be derived from.
     case browser
+
+    public static func chat(usesCLI: Bool, agent: AgentKind) -> Self {
+        guard usesCLI else { return .chat }
+        switch agent {
+        case .claudeCode: return .claudeCLI
+        case .codex: return .codexCLI
+        case .cursor, .openCode, .grok: return .chat
+        }
+    }
 
     public var id: String { rawValue }
 
@@ -37,6 +48,8 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     public var label: String {
         switch self {
         case .chat: "Chat"
+        case .claudeCLI: "Claude CLI"
+        case .codexCLI: "Codex CLI"
         case .terminal: "Terminal"
         case .browser: "Browser"
         }
@@ -56,6 +69,8 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     public var pickerLabel: String {
         switch self {
         case .chat: "Chat with an agent"
+        case .claudeCLI: "Claude CLI"
+        case .codexCLI: "Codex CLI"
         case .terminal: "Terminal"
         case .browser: "Browser"
         }
@@ -64,7 +79,15 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     /// Whether an agent runs here. The one question the rest of the window is downstream of: the
     /// model, the reasoning effort, the output style, the permission mode and the paperclip all
     /// exist to qualify a turn, and a terminal or browser workspace has no turn to qualify.
-    public var runsAnAgent: Bool { self == .chat }
+    public var runsAnAgent: Bool { self == .chat || cliAgentKind != nil }
+
+    public var cliAgentKind: AgentKind? {
+        switch self {
+        case .claudeCLI: .claudeCode
+        case .codexCLI: .codex
+        case .chat, .terminal, .browser: nil
+        }
+    }
 
     /// The pane this mode opens the workspace on.
     ///
@@ -73,7 +96,7 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     /// than fall through a `default` in a view. See `NewPane`, which is what makes the pane.
     public var pane: PaneKind {
         switch self {
-        case .chat: .chat
+        case .chat, .claudeCLI, .codexCLI: .chat
         case .terminal: .terminal
         case .browser: .browser
         }
@@ -88,6 +111,8 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     public var openingSentence: String {
         switch self {
         case .chat: "the agent starts on it"
+        case .claudeCLI: "Claude opens in a terminal with your task"
+        case .codexCLI: "Codex opens in a terminal with your task"
         case .terminal: "a shell opens in the worktree"
         case .browser: "a browser opens beside it"
         }

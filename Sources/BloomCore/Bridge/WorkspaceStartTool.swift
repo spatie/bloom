@@ -155,23 +155,26 @@ public typealias PullRequestCheckoutResolving =
 /// caller's turn open for as long as the work took, and would hold this connection's serve loop
 /// with it, so every later bridge call from that session would queue behind it.
 ///
-/// ## A child may not call it, and the two who may are not alike
+/// ## A workspace an agent started may not start more
 ///
-/// The role gate is the first lock and it hides the tool from a child's `tools/list` entirely, so
-/// a child is never tempted by a tool it cannot use. The second lock is below: a caller whose own
-/// workspace was started by an agent is refused even if it speaks raw MCP at the socket. One level
-/// of nesting is the limit, and "has a parent" is the whole test, which is why there is no depth
-/// counter to drift.
+/// This is the one limit on nesting, and it is the lock that matters most on the whole bridge,
+/// because it is what stops one runaway agent cutting worktrees without end. It is checked in the
+/// handler, off the caller's own workspace row: a caller whose workspace was started by an agent
+/// is refused. It used to have a role gate in front of it as well, which hid the tool from such a
+/// caller, and that went with the child role (see `BridgeRole`). The tool is listed to every
+/// workspace agent now and the refusal is what holds. One level is the limit, and "has a parent"
+/// is the whole test, which is why there is no depth counter to drift.
 ///
-/// The two roles that may call it differ in two ways, and both follow from one fact: a parent is
-/// a workspace and the owner's client is not. They used to differ in a third, which was that only
-/// a parent's calls were deduplicated, and that one was a gap rather than a distinction.
+/// The two roles that may call it differ in two ways, and both follow from one fact: a workspace
+/// agent is in a workspace and the owner's client is not. They used to differ in a third, which
+/// was that only a workspace agent's calls were deduplicated, and that one was a gap rather than a
+/// distinction.
 ///
-/// A parent cannot name a project, because its own is the only one it may act in, and `project` is
-/// refused rather than ignored if it names one. The owner's client must name a project, because
-/// nothing else says which, and it may only name one Bloom already has.
+/// A workspace agent cannot name a project, because its own is the only one it may act in, and
+/// `project` is refused rather than ignored if it names one. The owner's client must name a
+/// project, because nothing else says which, and it may only name one Bloom already has.
 ///
-/// A parent's workspaces are `.agent` origin and carry its id; the owner's are `.ownerClient`
+/// A workspace agent's workspaces are `.agent` origin and carry its id; the owner's are `.ownerClient`
 /// origin and carry no parent. How many either may start is not decided here: `WorkspaceOrigin`
 /// answers it through `WorkspaceStartAllowance`, which holds all three answers, the sheet's
 /// included, in one switch.
@@ -195,7 +198,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         self.resolvePullRequest = resolvePullRequest
     }
 
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: "workspace_start",
@@ -237,6 +240,11 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             starts on its own and keeps running while you carry on. There is no way to wait for \
             it from here, so do not ask for one and then sit idle: say what you started and get on \
             with your own work.
+
+            Pass notify_when_done: true to have Bloom tell this chat once, by itself, when the new \
+            agent's first turn comes to rest: finished (with its last message), failed (with the \
+            reason), or blocked waiting on the owner for a permission prompt or a question. With \
+            it, there is no need to tell the new agent to report back when it is done.
 
             The task you give it is all it gets. It cannot see this conversation, so write the \
             prompt as if to someone who has just opened the project for the first time.
@@ -309,6 +317,13 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                             + "example gpt-5.6-sol. Do not use a Claude Code model with codex or "
                             + "a Codex model with claudeCode. Leave this out to use the selected "
                             + "agent's default model."
+                    ),
+                ]),
+                WorkspaceDoneWatch.argument: .object([
+                    "type": .string("boolean"),
+                    "description": .string(
+                        "Have Bloom tell this chat once when the new agent's first turn comes to "
+                            + "rest: finished, failed, or waiting on the owner. Defaults to false."
                     ),
                 ]),
             ]),
@@ -431,13 +446,31 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         do {
             let started = try await start(order, project, identity, origin)
 
+            let wantsNotice = WorkspaceDoneWatch.isRequested(request.param(WorkspaceDoneWatch.argument))
+            var note = startedNote(for: identity.role, notifying: false)
+            var notifying = false
+            if wantsNotice {
+                switch await watch(started, from: identity, store: store) {
+                case .watching:
+                    notifying = true
+                    note = startedNote(for: identity.role, notifying: true)
+                case .noChat:
+                    note += " notify_when_done was ignored: this connection is not a chat in a "
+                        + "Bloom workspace, so there is nowhere to deliver the notice."
+                case .failed(let reason):
+                    note += " Bloom could not record notify_when_done, so it will not tell you when "
+                        + "the new agent is done: \(reason)"
+                }
+            }
+
             return .json(.object([
                 "workspace_id": .string(started.workspaceID.rawValue),
                 "name": .string(started.name),
                 "branch": .string(started.branch),
                 "path": .string(started.path),
                 "state": .string("starting"),
-                "note": .string(startedNote(for: identity.role)),
+                WorkspaceDoneWatch.argument: .bool(notifying),
+                "note": .string(note),
             ]))
         } catch {
             let trouble = await WorkspaceStartTrouble.diagnose(
@@ -524,8 +557,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 return .refused("This workspace's project is no longer in Bloom's database.")
             }
 
-            // The second lock. The role gate already hid this tool from a child, so reaching here
-            // as one means something spoke MCP at the socket directly.
+            // The nesting limit, and the only lock there is: no role hides this tool from a
+            // workspace an agent started. See the head of this type.
             if caller.origin.isAgentSpawned {
                 return .refused(
                     "This workspace was itself started by an agent, and those cannot start more. "
@@ -596,11 +629,49 @@ public struct WorkspaceStartTool: BridgeToolHandling {
     /// because without it "you cannot wait for it from here" means "and there is nothing else to
     /// call either". A parent does not, because `workspace_list` is not in its `tools/list` and
     /// naming a tool a caller cannot reach is worse than naming none.
-    private func startedNote(for role: BridgeRole) -> String {
-        let opening = "It is setting up and will start on its own. It does not report back, and "
-            + "you cannot wait for it from here. Carry on with your own work."
+    private func startedNote(for role: BridgeRole, notifying: Bool) -> String {
+        let opening = notifying
+            ? "It is setting up and will start on its own. Bloom will tell this chat once, by "
+                + "itself, when its first turn comes to rest: finished, failed, or waiting on the "
+                + "owner. You cannot wait for it from here, so carry on with your own work."
+            : "It is setting up and will start on its own. It does not report back, and "
+                + "you cannot wait for it from here. Carry on with your own work."
         guard role == .owner else { return opening }
         return opening + " When you want to know what became of it, call workspace_list."
+    }
+
+    enum WatchOutcome {
+        case watching
+        /// The owner's own client, which has no chat for a notice to go into.
+        case noChat
+        case failed(String)
+    }
+
+    /// Records `notify_when_done` for a workspace that has just been started.
+    ///
+    /// The first chat is read now, because the app has written it by the time `start` returns and
+    /// the task goes into that chat; watching every chat would let a second one the owner opens
+    /// spend the watch on the wrong turn. A workspace whose chat cannot be read is watched as a
+    /// whole, subagents aside, which is the next best reading of "its first turn".
+    func watch(_ started: StartedWorkspaceSummary, from identity: BridgeIdentity, store: Store) async -> WatchOutcome {
+        guard let watcher = identity.sessionID, identity.workspaceID != nil else { return .noChat }
+        do {
+            let chat = try await store.sessions(workspaceID: started.workspaceID)
+                .first { $0.parentSessionID == nil }
+            try await store.addWorkspaceDoneWatch(WorkspaceDoneWatch(
+                cause: .start,
+                watcherSessionID: watcher,
+                target: WorkspaceMessageEnd(
+                    workspaceID: started.workspaceID,
+                    workspace: started.name,
+                    sessionID: chat?.id,
+                    chat: chat?.title ?? ""
+                )
+            ))
+            return .watching
+        } catch {
+            return .failed(error.readableMessage)
+        }
     }
 
     /// The workspace an earlier run of this same call produced, if there is one and it is still

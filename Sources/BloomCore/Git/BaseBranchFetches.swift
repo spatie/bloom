@@ -29,10 +29,11 @@ public actor BaseBranchFetches {
     /// over lunch fetches again.
     public static let recent: Duration = .seconds(120)
 
-    typealias Fetch = @Sendable (_ branch: String, _ directory: String) async -> Bool
+    typealias Fetch = @Sendable (_ branch: String, _ directory: String, _ remote: String) async -> Bool
 
     private struct Key: Hashable {
         let directory: String
+        let remote: String
         let branch: String
     }
 
@@ -42,14 +43,26 @@ public actor BaseBranchFetches {
     private var succeededAt: [Key: ContinuousClock.Instant] = [:]
 
     init(
-        fetch: @escaping Fetch = { await Git.fetch($0, in: $1) },
+        fetch: @escaping Fetch = { await Git.fetch($0, in: $1, remote: $2) },
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
     ) {
         self.fetch = fetch
         self.now = now
     }
 
-    /// Whether `origin/<branch>` is as the server has it, fetching only when nobody already has.
+    /// Brings a base up to date ahead of a cut, from the remote the repository's own configuration
+    /// names for it. What the create window calls; the cut reaches the same fetch through
+    /// `Git.baseRevision`, which resolves the same context.
+    public static func prefetch(base: String, in directory: String) async {
+        guard let context = try? await Git.repositoryContext(in: directory, baseBranch: base),
+              let remote = context.baseRemote
+        else { return }
+        _ = await shared.refresh(
+            context.baseBranch, in: directory, remote: remote, acceptingWithin: recent
+        )
+    }
+
+    /// Whether `<remote>/<branch>` is as the server has it, fetching only when nobody already has.
     ///
     /// - Parameter age: how old a remembered success may be and still count. Nil always fetches,
     ///   unless a fetch for the same branch in the same directory is already running.
@@ -58,9 +71,9 @@ public actor BaseBranchFetches {
     /// actor. It also means a caller that is cancelled, which is the create window changing its
     /// base, leaves the fetch running for whoever asks next.
     public func refresh(
-        _ branch: String, in directory: String, acceptingWithin age: Duration? = nil
+        _ branch: String, in directory: String, remote: String, acceptingWithin age: Duration? = nil
     ) async -> Bool {
-        let key = Key(directory: directory, branch: branch)
+        let key = Key(directory: directory, remote: remote, branch: branch)
         if let age, let at = succeededAt[key], now() - at <= age { return true }
         // Nothing is awaited between the read and the write, so two callers cannot both start one.
         if let running = inFlight[key] {
@@ -69,7 +82,9 @@ public actor BaseBranchFetches {
         }
 
         let fetch = self.fetch
-        let task = Task.detached(priority: Task.currentPriority) { await fetch(branch, directory) }
+        let task = Task.detached(priority: Task.currentPriority) {
+            await fetch(branch, directory, remote)
+        }
         inFlight[key] = task
         defer { inFlight[key] = nil }
 

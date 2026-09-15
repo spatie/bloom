@@ -44,7 +44,7 @@ struct CodeText: View {
                 emphasisColor: emphasisColor
             )
         )
-        .font(Typo.code)
+        .font(CodeMetrics.measuredFont)
         .textSelection(.enabled)
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
@@ -61,9 +61,12 @@ struct CodeText: View {
         language: Language,
         carry: LexState,
         emphasis: [Range<String.Index>] = [],
-        emphasisColor: Color = .clear
+        emphasisColor: Color = .clear,
+        scheme: CodeScheme? = nil, colours: [TokenKind: Color]? = nil, schemeHash: Int? = nil
     ) -> AttributedString {
-        var value = SyntaxCache.attributed(line: line, language: language, carry: carry)
+        var value = SyntaxCache.attributed(line: line, language: language, carry: carry,
+                                          scheme: scheme ?? ColourThemePreference.shared.codeScheme,
+                                          colours: colours ?? Palette.codeColours, schemeHash: schemeHash)
         guard !emphasis.isEmpty else { return value }
 
         for range in emphasis {
@@ -73,24 +76,7 @@ struct CodeText: View {
         return value
     }
 
-    /// The single place a `TokenKind` becomes a colour, so retuning the theme is a one-switch edit.
-    nonisolated static func color(for kind: TokenKind) -> Color {
-        switch kind {
-        case .plain: Palette.textPrimary
-        case .keyword: Palette.synKeyword
-        case .type: Palette.synType
-        case .string: Palette.synString
-        case .number: Palette.synNumber
-        case .comment: Palette.synComment
-        case .function: Palette.synFunction
-        case .variable: Palette.synVariable
-        case .attribute: Palette.synAttribute
-        case .operator: Palette.synOperator
-        case .punctuation: Palette.synOperator
-        case .regex: Palette.synString
-        case .constant: Palette.synConstant
-        }
-    }
+    static func color(for kind: TokenKind) -> Color { Palette.codeColours[kind]! }
 
     /// Map a UTF-16 offset range onto `AttributedString` indices.
     ///

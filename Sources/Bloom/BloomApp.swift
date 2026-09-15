@@ -11,7 +11,10 @@ struct BloomApp: App {
         if AppChromeProbe.isRequested { AppChromeProbe.runAndExit() }
         if ComposerInputProbe.isRequested { ComposerInputProbe.runAndExit() }
         if InspectorVisibilityProbe.isRequested { InspectorVisibilityProbe.runAndExit() }
+        if TranscriptSendProbe.isRequested { TranscriptSendProbe.runAndExit() }
+        if TranscriptSelectionProbe.isRequested { TranscriptSelectionProbe.runAndExit() }
         if MarkdownTableProbe.isRequested { MarkdownTableProbe.runAndExit() }
+        if NumericTextProbe.isRequested { NumericTextProbe.runAndExit() }
         #endif
         if BrowserViewportDemo.isRequested { BrowserViewportDemo.schedule() }
         // First, before anything else in the process. Every `@AppStorage` binding in the app
@@ -110,6 +113,7 @@ struct BloomApp: App {
         if MenuProbe.isRequested { MenuProbe.schedule() }
         if MenuActionProbe.isRequested { MenuActionProbe.schedule() }
         #endif
+        Log.launchStep("app initialised")
     }
 
     /// The thicknesses the window's minimum width is built out of.

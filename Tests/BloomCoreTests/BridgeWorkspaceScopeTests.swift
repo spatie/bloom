@@ -45,19 +45,17 @@ struct BridgeWorkspaceScopeTests {
 
     /// **`.owner` must not be on this gate**, which is the mistake the shared constant exists to
     /// stop being made a seventh time: `BridgeIdentity.owner` carries no workspace, so a tool
-    /// advertised to it here could only ever answer with the refusal above. `.child` is off it
-    /// because a subagent moving the reader's panes is something happening to them on behalf of a
-    /// thing they did not address.
-    @Test("only a parent is on the workspace-scoped gate")
-    func onlyAParentIsOnTheGate() {
-        #expect(BridgeWorkspaceScope.roles == [.parent])
+    /// advertised to it here could only ever answer with the refusal above.
+    @Test("only a workspace agent is on the workspace-scoped gate")
+    func onlyAWorkspaceAgentIsOnTheGate() {
+        #expect(BridgeWorkspaceScope.roles == [.workspace])
     }
 
     /// Every tool that refuses a connection with no workspace is gated the same way, asked of the
     /// listing rather than of the constant: a role that can see a tool it can only ever be refused
     /// is a tool advertised to a caller it can never serve, which is exactly what four of these
     /// were when they were gated one at a time.
-    @Test("every workspace-scoped tool is listed to a parent and to nobody else")
+    @Test("every workspace-scoped tool is listed to a workspace agent and to nobody else")
     func theGateIsOnAllOfThem() {
         let handlers: [any BridgeToolHandling] = [
             PaneOpenTool { _, _ in .opened("") },
@@ -65,8 +63,6 @@ struct BridgeWorkspaceScopeTests {
             PaneCloseTool { _, _ in .opened("") },
             PaneRenameTool { _, _, _ in .opened("") },
             PaneListTool { _ in nil },
-            ChatListTool(),
-            ChatReadTool(),
             WorkspaceTabsTool { _ in nil },
             WorkspaceTabSelectTool { _, _ in .refused("") },
             MediaShowTool { _, _ in .refused("") },
@@ -82,8 +78,7 @@ struct BridgeWorkspaceScopeTests {
             BrowserTextTool { _, _ in .refused("") },
         ]
         let toolbox = BridgeToolbox(handlers: handlers)
-        #expect(toolbox.tools(for: .parent).count == handlers.count)
-        #expect(toolbox.tools(for: .child).isEmpty)
+        #expect(toolbox.tools(for: .workspace).count == handlers.count)
         #expect(toolbox.tools(for: .owner).isEmpty)
     }
 }

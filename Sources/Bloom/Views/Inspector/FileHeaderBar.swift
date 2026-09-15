@@ -45,6 +45,8 @@ struct FileHeaderBar: View {
     var onRevert: () -> Void
     var isCollapsed = false
     var onToggleCollapsed: (() -> Void)?
+    var showsMarkdownPreview = false
+    var onToggleMarkdownPreview: (() -> Void)?
 
     @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
     @AppStorage(DiffWhitespaceSetting.storageKey) private var ignoresWhitespace = false
@@ -62,6 +64,8 @@ struct FileHeaderBar: View {
 
     /// Whether this file is holding unsaved edits. Read where the dialog below is built, never
     /// from `body`: see `UnsavedEditsDot` for what reading it here used to cost.
+    private var allowsWorktreeActions: Bool { model.diffScope.allowsWorktreeActions(for: file) }
+
     private var isDirty: Bool { session.isDirty(absolutePath) }
 
     private var absolutePath: String {
@@ -87,7 +91,13 @@ struct FileHeaderBar: View {
             // Whether Edit mode is holding changes that are not on disk yet. Asked by
             // `UnsavedEditsDot` rather than answered here, so a keystroke invalidates the dot
             // instead of the bar it sits in.
-            UnsavedEditsDot(session: session, path: absolutePath)
+            if allowsWorktreeActions {
+                UnsavedEditsDot(session: session, path: absolutePath)
+            }
+            if let layer = file.layer {
+                Text(layer.title).font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                    .help(layer.comparison)
+            }
 
             // Lower priority than the name beside it, so a wide bar spends its slack on
             // the gap rather than on squeezing the path that has room to spare.
@@ -115,6 +125,9 @@ struct FileHeaderBar: View {
                     compact
                     collapsed
                 }
+            }
+            if let onToggleMarkdownPreview {
+                MarkdownPreviewButton(isPresented: showsMarkdownPreview, action: onToggleMarkdownPreview)
             }
         }
         .padding(.horizontal, InspectorLayout.inset)
@@ -149,13 +162,13 @@ struct FileHeaderBar: View {
     private var controls: some View {
         HStack(spacing: InspectorLayout.gap) {
             viewedToggle(labelled: true)
-            revertButton(labelled: true)
+            if allowsWorktreeActions { revertButton(labelled: true) }
             layoutPicker(labelled: true)
             if mode == .diff {
                 whitespaceToggle(labelled: true)
             }
             copyButton(labelled: true)
-            modePicker
+            if allowsWorktreeActions { modePicker }
         }
     }
 
@@ -186,8 +199,10 @@ struct FileHeaderBar: View {
                 }
                 Button(FileBarControls.copy(mode: mode).title, action: copy)
                 Divider()
-                Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
-                    isConfirmingRevert = true
+                if allowsWorktreeActions {
+                    Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
+                        isConfirmingRevert = true
+                    }
                 }
             } label: {
                 Label("File actions", systemImage: "ellipsis.circle")
@@ -208,13 +223,13 @@ struct FileHeaderBar: View {
     private var compact: some View {
         HStack(spacing: InspectorLayout.gap) {
             viewedToggle(labelled: false)
-            revertButton(labelled: false)
+            if allowsWorktreeActions { revertButton(labelled: false) }
             layoutPicker(labelled: false)
             if mode == .diff {
                 whitespaceToggle(labelled: false)
             }
             copyButton(labelled: false)
-            modePicker
+            if allowsWorktreeActions { modePicker }
         }
     }
 
@@ -222,7 +237,7 @@ struct FileHeaderBar: View {
     private var collapsed: some View {
         HStack(spacing: InspectorLayout.gap) {
             overflowMenu
-            modePicker
+            if allowsWorktreeActions { modePicker }
         }
     }
 
@@ -245,8 +260,10 @@ struct FileHeaderBar: View {
             }
             Divider()
             Button(FileBarControls.copy(mode: mode).title, action: copy)
-            Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
-                isConfirmingRevert = true
+            if allowsWorktreeActions {
+                Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
+                    isConfirmingRevert = true
+                }
             }
         } label: {
             Label(FileBarControls.more.title, systemImage: "ellipsis.circle")

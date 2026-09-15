@@ -154,6 +154,14 @@ public struct TranscriptWindow: Equatable, Sendable {
         return Self(start: min(Self.clamp(start, rowCount: rowCount), end), end: end)
     }
 
+    /// Keep a window already showing the live end inclusive on the first pass of an append.
+    /// Waiting for an onChange drops the temporary bubble before its saved row is in the window.
+    public func includingAppendedRows(previousCount: Int, rowCount: Int) -> Self {
+        let held = clamped(rowCount: rowCount)
+        guard end >= previousCount else { return held }
+        return Self(start: held.start, end: max(0, rowCount))
+    }
+
     private static func clamp(_ index: Int, rowCount: Int) -> Int {
         min(max(0, index), max(0, rowCount))
     }

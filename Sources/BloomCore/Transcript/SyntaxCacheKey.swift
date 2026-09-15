@@ -7,10 +7,12 @@ import Foundation
 public final class SyntaxCacheKey: NSObject {
     private let line: String
     private let language: Language
+    private let scheme: CodeScheme?
     private let carry: LexState
     private let cachedHash: Int
 
-    public init(line: String, language: Language, carry: LexState) {
+    public init(line: String, language: Language, carry: LexState, scheme: CodeScheme? = nil, schemeHash: Int? = nil) {
+        self.scheme = scheme
         self.line = line
         self.language = language
         self.carry = carry
@@ -18,6 +20,7 @@ public final class SyntaxCacheKey: NSObject {
         hasher.combine(line)
         hasher.combine(language)
         hasher.combine(carry)
+        hasher.combine(schemeHash ?? scheme?.hashValue)
         self.cachedHash = hasher.finalize()
     }
 
@@ -29,5 +32,6 @@ public final class SyntaxCacheKey: NSObject {
             && line.utf8.elementsEqual(other.line.utf8)
             && language == other.language
             && carry == other.carry
+            && scheme == other.scheme
     }
 }

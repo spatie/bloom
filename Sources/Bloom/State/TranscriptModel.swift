@@ -34,6 +34,9 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
     /// draws live buttons, and a row that offers buttons for a question already answered would
     /// write into a pipe nobody is reading.
     var permissionDecision: String?
+    /// Questions and their answers are conversation content, even after their controls settle.
+    /// Decoded when the row arrives so folding never reparses the question on a render pass.
+    var isQuestion = false
     /// What the transcript should say about how it was settled, when that is not obvious. Only
     /// ever set for a question a rule answered rather than a person.
     var permissionNote = ""
@@ -46,6 +49,39 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
         createdAt = message.createdAt
         durationMS = message.durationMS
         refID = message.refID
+    }
+
+    /// This row in the only terms `TranscriptFold` cares about.
+    ///
+    /// Here rather than inside `TranscriptModel.presentationFolds`, where it was written, because
+    /// the subagent pane folds its rows too and a second copy of what counts as settled or featured
+    /// is a subagent pane that folds differently from the chat the day one of them changes.
+    ///
+    /// - Parameters:
+    ///   - seq: the identity the fold names a run by. The row's own `seq` for a stored row; the
+    ///     subagent pane passes its payload derived id, because its positions move on a re-read.
+    ///   - isFresh: a tool call made moments ago. Only the live chat knows, so it is handed in.
+    nonisolated func foldFact(seq: Int? = nil, isFresh: Bool = false) -> TranscriptFold.Fact {
+        let settled: Bool
+        switch kind {
+        case .toolUse: settled = resultPayload != nil
+        case .permissionAsk: settled = permissionDecision != nil
+        default: settled = true
+        }
+        return TranscriptFold.Fact(
+            seq: seq ?? self.seq,
+            kind: kind,
+            failed: isError || refusal != nil,
+            featured: isQuestion
+                || MediaShowRow.isCall(payload) || CodexImageViewRow.isCall(payload),
+            drawsNothing: TranscriptNoise.isHidden(self)
+                || TranscriptRowInk.drawsNothing(kind: kind, payload: payload),
+            settled: settled,
+            isFresh: isFresh,
+            toolUseID: kind == .toolUse ? refID : nil,
+            parentToolUseID: parentToolUseID,
+            opensTurn: BackgroundWake.isRow(kind: kind, payload: payload)
+        )
     }
 }
 
@@ -69,6 +105,7 @@ final class TranscriptModel {
     }
 
     var session: Session
+    let history = TranscriptHistory()
     /// The workspace as it was when this model was made, or nil for a chat that is in none.
     ///
     /// **Nil is Ask Bloom and nothing else today.** Its id and path are stable and are what most
@@ -102,30 +139,26 @@ final class TranscriptModel {
     private(set) var presentationRevision = 0
     @ObservationIgnored private var foldCache = TranscriptFoldCache()
     @ObservationIgnored private var questionIndex = PinnedQuestionIndex()
+    /// Tool calls that arrived moments ago, by call id, which fold before their result is back.
+    /// See `TranscriptFold.freshCall`. Told through `presentationRevision`, like the cache above.
+    @ObservationIgnored private var freshCalls: Set<String> = []
 
     /// These caches write no observable state and are safe to consult during a render pass.
     /// Each belongs to this session, including when its pane is displaying another workspace.
     func presentationFolds() -> TranscriptFold.Folds {
-        foldCache.resolve(rows.lazy.map { row in
-            let settled: Bool
-            switch row.kind {
-            case .toolUse: settled = row.resultPayload != nil
-            case .permissionAsk: settled = row.permissionDecision != nil
-            default: settled = true
-            }
-            return TranscriptFold.Fact(
-                seq: row.seq,
-                kind: row.kind,
-                failed: row.isError || row.refusal != nil,
-                featured: MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
-                drawsNothing: TranscriptNoise.isHidden(row)
-                    || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
-                settled: settled,
-                toolUseID: row.kind == .toolUse ? row.refID : nil,
-                parentToolUseID: row.parentToolUseID,
-                opensTurn: BackgroundWake.isRow(kind: row.kind, payload: row.payload)
+        let freshCalls = freshCalls
+        return foldCache.resolve(rows.lazy.map { row in
+            row.foldFact(
+                isFresh: row.kind == .toolUse && row.refID.map(freshCalls.contains) == true
             )
         })
+    }
+
+    /// Every prompt in the session, for the turn minimap. The same incremental index the pinned
+    /// question reads, so a body asking for this on each pass pays only for rows that are new.
+    func turns() -> [PinnedQuestion] {
+        questionIndex.update(session: session.id, rows: rows)
+        return questionIndex.all
     }
 
     func pinnedQuestion(atOrBefore seq: Int) -> PinnedQuestion? {
@@ -215,6 +248,11 @@ final class TranscriptModel {
 
     var draft = ""
 
+    /// How far Up and Down have walked back through this session's sent prompts. On the session
+    /// rather than in the composer's state, because one composer is handed from session to session
+    /// as a pane changes what it shows. See `PromptRecall`.
+    @ObservationIgnored var promptRecall = PromptRecall()
+
     /// What has been asked for on this session and has not gone yet, oldest first.
     ///
     /// Read by the transcript to draw the pending bubbles and by the drain to decide what goes
@@ -297,15 +335,35 @@ final class TranscriptModel {
     /// meant to carry on writing. A counter for `liveEndRequests`'s reason: two requests in a row
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
+    /// Where the last of those requests wants the caret. See `focusComposer(caretAtEnd:)`.
+    @ObservationIgnored private(set) var composerFocusCaretAtEnd = false
+
+    /// A passage of an answer, quoted at the end of the draft with the caret left under it.
+    func appendQuote(_ selection: String) {
+        guard let quoted = ReplyQuote.appending(selection, to: draft) else { return }
+        draft = quoted
+        focusComposer(caretAtEnd: true)
+    }
 
     func appendSourceContext(_ context: String) {
         draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
         focusComposer()
     }
 
-    func focusComposer() { composerFocusRequests += 1 }
+    /// - Parameter caretAtEnd: whether the caret goes after what arrived rather than before it. A
+    ///   queued message brought back to edit wants the start, a quote wants the line under it.
+    func focusComposer(caretAtEnd: Bool = false) {
+        composerFocusCaretAtEnd = caretAtEnd
+        composerFocusRequests += 1
+    }
 
+    private var isReconcilingPresentation = false
+    private var isReplayingPastTurn = false
+    private var presentationMessageSeq: Int?
+    private var dispatchingDeliveryID: DeliveryID?
+    private var activeInteractionMode: InteractionMode?
     private var runner: (any SessionRunner)?
+    @ObservationIgnored private var idleEvictionTask: Task<Void, Never>?
 
     func codexSubagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
         guard let codex = runner as? CodexRunner else { return nil }
@@ -334,11 +392,17 @@ final class TranscriptModel {
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
 
+    /// An old result must not hide the live tail of a turn the agent has just started itself.
+    func isCurrentTurnResult(_ row: TranscriptRow) -> Bool {
+        row.kind == .result && (!isRunning || turnStartedAt.map { row.createdAt >= $0 } ?? true)
+    }
+
     init(session: Session, workspace: Workspace, app: AppModel) {
         self.session = session
         self.workspace = workspace
         self.cwd = workspace.path
         self.app = app
+        history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
     /// The conversation that belongs to Bloom rather than to a workspace.
@@ -351,6 +415,7 @@ final class TranscriptModel {
         self.workspace = nil
         self.cwd = directory
         self.app = app
+        history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
     private var store: Store? { app.store }
@@ -410,6 +475,7 @@ final class TranscriptModel {
         }.value
 
         foldCache.reset()
+        freshCalls = []
         questionIndex = PinnedQuestionIndex()
         rows = built.rows
         presentationRevision += 1
@@ -440,6 +506,7 @@ final class TranscriptModel {
         // start a paid turn on a Mac nobody is sitting at, so it is shown as pending and goes with
         // the owner's next message. See `DeliveryHold.none`.
         await refreshQueue()
+        await history.load(store: store, sessionID: session.id)
         isLoaded = true
     }
 
@@ -472,6 +539,7 @@ final class TranscriptModel {
         if message.kind == .permissionAsk,
            let ask = PermissionAsk.decode(payload: message.payload) {
             row.permissionDecision = decisions[ask.requestID]
+            row.isQuestion = ask.isQuestion
         }
         rows.append(row)
         if message.kind == .toolUse, let refID = message.refID {
@@ -510,7 +578,16 @@ final class TranscriptModel {
         // drawn twice. Retired here rather than after the send returns, because the pump can read
         // the row first: only one turn is ever in flight, so a user row landing while something is
         // sending is that sentence. See `sending`.
-        if message.kind == .user { sending = nil }
+        //
+        // A crew row is the same retirement for a message an agent wrote: the runner records it
+        // as `.crew` instead of `.user`. Checking only `.user` left a message from another
+        // workspace drawn a second time, as the owner's teal bubble under the turn it started,
+        // until something else cleared the slot. Only when what is sending IS a crew message,
+        // because Bloom writes some crew rows directly, and one of those landing mid send must not
+        // take the owner's own sentence off the screen early.
+        if message.kind == .user || (message.kind == .crew && sending?.crewMessage != nil) {
+            sending = nil
+        }
     }
 
     /// The turn somebody stopped, named by the `seq` of the row that closed it.
@@ -566,6 +643,7 @@ final class TranscriptModel {
         model: String? = nil,
         effort: String? = nil,
         permissionMode: PermissionMode? = nil,
+        interactionMode: InteractionMode? = nil,
         implementationMode: PermissionMode? = nil,
         agentKind: AgentKind? = nil
     ) async {
@@ -576,6 +654,7 @@ final class TranscriptModel {
             model: model,
             effort: effort,
             permissionMode: permissionMode,
+            interactionMode: interactionMode,
             implementationMode: implementationMode,
             agentKind: agentKind
         )
@@ -615,10 +694,19 @@ final class TranscriptModel {
     /// screen from the frame the key went down, in the state `Delivery.goesImmediately` says it is
     /// in: as a sent bubble if nothing is holding the queue, as a pending one if something is. See
     /// `sending`.
-    func submit(_ text: String, clearingDraft sourceDraft: String? = nil) async {
-        guard !isWorkspaceArchiving else { return }
+    @discardableResult
+    func submit(_ text: String, clearingDraft sourceDraft: String? = nil,
+                interactionMode: InteractionMode? = nil, sourcePlan: PlanArtefact? = nil) async -> Bool {
+        guard !isWorkspaceArchiving else { return false }
+        if usesInteractiveTerminal {
+            app.alert = BloomAlert(
+                title: "This agent runs in a terminal",
+                message: "Open its agent tab and enter the prompt in the CLI."
+            )
+            return false
+        }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty, let store else { return }
+        guard !body.isEmpty, let store else { return false }
 
         // Review payloads expand compact chips into comments. Clear the source draft, while
         // retaining anything the reader typed after that payload began being prepared.
@@ -628,9 +716,9 @@ final class TranscriptModel {
         // Built here rather than inside the enqueue, so the row that goes in the table and the
         // bubble that goes on screen are one object with one id. Drawn twice under two ids is the
         // duplicate that would appear the moment the queue was read back.
-        let delivery = Delivery(targetSessionID: session.id, body: body)
+        let delivery = Delivery(targetSessionID: session.id, body: body, interactionMode: interactionMode ?? session.interactionMode)
         messageArrivals.sent(delivery.id)
-        if queuesNextMessage {
+        if queuesNextMessage || (isRunning && delivery.interactionMode != activeInteractionMode) {
             pendingDeliveries.append(delivery)
         } else {
             sending = delivery
@@ -654,7 +742,7 @@ final class TranscriptModel {
         jumpToLiveEnd()
 
         do {
-            _ = try await store.enqueueDelivery(delivery, clearingDraftMatching: submittedDraft)
+            _ = try await store.enqueueDelivery(delivery, clearingDraftMatching: submittedDraft, sourcePlan: sourcePlan)
         } catch {
             // The bubble was drawn on the promise that this would be queued. It was not, so the
             // promise is taken back rather than left on screen next to a message that is never
@@ -671,7 +759,7 @@ final class TranscriptModel {
                 title: "Could not queue the message",
                 message: TranscriptStanding.complaint(about: error)
             )
-            return
+            return false
         }
 
         // Not from `drain`, and not before the enqueue. The owner saying something is the moment a
@@ -679,6 +767,7 @@ final class TranscriptModel {
         // moves from the front rather than from what was just typed.
         wasStoppedByHand = false
         await drain()
+        return true
     }
 
     /// Why the queue in front of this chat is not moving, which is both the drain's condition and
@@ -707,7 +796,9 @@ final class TranscriptModel {
     /// question the moment a running turn stopped holding the queue on two of the four backends:
     /// the tooltip went on offering to queue a message that was about to go straight out.
     var queuesNextMessage: Bool {
-        !Delivery.goesImmediately(
+        if history.isCapturing || history.isFinalisingTurn || (history.hasActiveTurn && !isRunning) { return true }
+        if isRunning, session.interactionMode != activeInteractionMode { return true }
+        return !Delivery.goesImmediately(
             behind: pendingDeliveries, hold: deliveryHold, on: session.agentKind
         )
     }
@@ -717,7 +808,16 @@ final class TranscriptModel {
     /// Here rather than in the row because it needs the chat's backend, which the row has no
     /// business knowing, and because a caption that disagrees with the drain is the one thing this
     /// queue may not do: both read `DeliveryHold`. See `DeliveryHold.sentence(on:)`.
-    var holdSentence: String? { deliveryHold.sentence(on: session.agentKind) }
+    var holdSentence: String? {
+        if history.isCapturing || history.isFinalisingTurn { return "Saving this turn's file changes." }
+        if pendingDeliveries.first?.state == .uncertain {
+            return "Bloom could not confirm delivery. Check the conversation before sending again."
+        }
+        if isRunning, let mode = pendingDeliveries.first?.interactionMode, mode != activeInteractionMode {
+            return "Goes when this turn ends."
+        }
+        return deliveryHold.sentence(on: session.agentKind)
+    }
 
     /// Hands the queue to the agent, from the front, for as long as it is allowed to go.
     ///
@@ -737,6 +837,9 @@ final class TranscriptModel {
     /// for at that moment, and both are covered by the queue simply sitting there, visibly, until
     /// somebody says something.
     func drain() async {
+        guard !usesInteractiveTerminal else { return }
+        guard !isReconcilingPresentation else { return }
+        guard !history.isCapturing, !history.isFinalisingTurn, !(history.hasActiveTurn && !isRunning) else { return }
         guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
         guard drainState.begin() else { return }
         var allowRepeat = true
@@ -751,6 +854,7 @@ final class TranscriptModel {
         ) {
             guard !isWorkspaceArchiving, !wasStoppedByHand,
                   deliveryHold.allowsDelivery(on: session.agentKind) else { return }
+            if isRunning, let mode = next.interactionMode, mode != activeInteractionMode { return }
             // Deleted, or steered out, since the list was taken.
             guard pendingDeliveries.contains(where: { $0.id == next.id }) else { continue }
 
@@ -789,7 +893,7 @@ final class TranscriptModel {
     private func claimForDelivery(_ delivery: Delivery) async -> Bool {
         guard let store else { return false }
         do {
-            let claimed = try await store.markDelivered(id: delivery.id)
+            let claimed = try await store.claimDelivery(id: delivery.id)
             guard claimed else {
                 if sending?.id == delivery.id { sending = nil }
                 await refreshQueue()
@@ -815,13 +919,18 @@ final class TranscriptModel {
 
     /// Whether this delivery is at the front of an idle queue and can be attempted now.
     func canRetry(_ delivery: Delivery) -> Bool {
-        Delivery.next(
-            from: pendingDeliveries, hold: deliveryHold, on: session.agentKind
-        )?.id == delivery.id
+        pendingDeliveries.first?.id == delivery.id
+            && dispatchingDeliveryID != delivery.id && drainState == .idle
+            && deliveryHold.allowsDelivery(on: session.agentKind)
     }
 
     /// Attempts the front of the queue again without changing its order or duplicating its text.
     func retryPending() async {
+        guard let candidate = pendingDeliveries.first, canRetry(candidate) else { return }
+        if let first = pendingDeliveries.first, first.state == .uncertain {
+            do { try await store?.restoreDelivery(id: first.id) } catch { return }
+            await refreshQueue()
+        }
         wasStoppedByHand = false
         await drain()
     }
@@ -839,7 +948,7 @@ final class TranscriptModel {
     /// The words are `PendingMessageDiscard`'s, including the promise about where the sentence
     /// ends up, so the dialog cannot promise something this object then does not do.
     func askToDiscard(_ delivery: Delivery) {
-        guard PendingMessageDiscard.canDiscard(delivery) else { return }
+        guard dispatchingDeliveryID != delivery.id, PendingMessageDiscard.canDiscard(delivery) else { return }
         discarding = delivery
     }
 
@@ -850,6 +959,7 @@ final class TranscriptModel {
     /// whether the sentence can go back into it.
     func confirmDiscard(_ delivery: Delivery) async {
         discarding = nil
+        guard dispatchingDeliveryID != delivery.id else { return }
         guard let store else { return }
         let recovery = PendingMessageDiscard.recovery(of: delivery, composerDraft: draft)
         let removed = (try? await store.cancelDelivery(id: delivery.id)) ?? false
@@ -860,6 +970,12 @@ final class TranscriptModel {
         guard removed else {
             app.notice = BloomNotice(message: PendingMessageDiscard.alreadySentSentence)
             return
+        }
+
+        // A message from another workspace: the chat that sent it is waiting on an answer, and
+        // has to be told there will not be one.
+        if delivery.crewMessage?.event == .relayed {
+            await app.noteDeliveryCancelled(delivery.id)
         }
 
         if case .toComposer(let text) = recovery {
@@ -877,7 +993,7 @@ final class TranscriptModel {
     /// The join is worked out after the row is gone rather than before, so the words go in front
     /// of whatever the box holds by then rather than in front of what it held a round trip ago.
     func editPending(_ delivery: Delivery) async {
-        guard PendingMessageEdit.canEdit(delivery), let store else { return }
+        guard dispatchingDeliveryID != delivery.id, PendingMessageEdit.canEdit(delivery), let store else { return }
         let removed = (try? await store.cancelDelivery(id: delivery.id)) ?? false
         await refreshQueue()
 
@@ -1009,6 +1125,8 @@ final class TranscriptModel {
     /// on a backend that takes a message mid turn and must stop at the first that did not.
     @discardableResult
     private func deliver(_ delivery: Delivery) async -> Bool {
+        dispatchingDeliveryID = delivery.id
+        defer { if dispatchingDeliveryID == delivery.id { dispatchingDeliveryID = nil } }
         guard !isWorkspaceArchiving else {
             await abandon(delivery, saying: "The workspace is being archived.")
             return false
@@ -1034,6 +1152,7 @@ final class TranscriptModel {
         // `Delivery.deliverable(from:hold:on:)` for why a send arrives here at all.
         let startsATurn = !isRunning
         if startsATurn {
+            activeInteractionMode = delivery.interactionMode ?? session.interactionMode
             turnStartedAt = Date()
             hasReportedTurnEnded = false
             // **The clearing rule.** The last turn's FINISHED subagents go here, at the one place
@@ -1047,6 +1166,12 @@ final class TranscriptModel {
             subagents.turnStarted()
             setRunning(true)
             statusLabel = "Starting"
+            if let store, workspace != nil { await history.begin(delivery: delivery, store: store, cwd: cwd) }
+            guard !wasStoppedByHand else {
+                await abandon(delivery, saying: "Stopped before the message was sent.")
+                if let store { await history.finish(store: store, cwd: cwd, endSeq: highestSeenMessageSeq) }
+                return false
+            }
         }
 
         do {
@@ -1054,7 +1179,7 @@ final class TranscriptModel {
             // anything the owner typed and two different strings for a crew message: what the
             // model is handed is the envelope, and what the transcript draws is the words. See
             // `Delivery.sent` and `SessionRunner.send(_:recording:)`.
-            try await runner.send(delivery.sent, recording: delivery.crewPayload)
+            try await runner.sendDelivery(delivery)
             // The runner writes the user row as part of the send, and until this line nothing read
             // it back: the transcript only pulled rows on an agent event, so the owner's own
             // message did not appear until the answer did. Reading it here is what retires the
@@ -1062,10 +1187,19 @@ final class TranscriptModel {
             // of the sentence swap inside one synchronous pass and nothing on screen moves.
             await appendLatestMessages()
             return true
+        } catch ProviderIdleError.retired {
+            if self.runner === runner {
+                pumpTask?.cancel()
+                pumpTask = nil
+                self.runner = nil
+                runnerPreferences = nil
+            }
+            return await deliver(delivery)
         } catch {
             // Only what this call turned on. A send that failed into a turn somebody else started
             // must not report that turn as over: it is still running and still writing rows.
             if startsATurn {
+                if let store { await history.finish(store: store, cwd: cwd, endSeq: highestSeenMessageSeq) }
                 setRunning(false)
                 statusLabel = nil
             }
@@ -1105,7 +1239,7 @@ final class TranscriptModel {
             return
         }
 
-        try? await store.restoreDelivery(id: delivery.id)
+        try? await store.releaseDeliveryClaim(id: delivery.id)
         await refreshQueue()
 
         let row = AgentError.notStarted(message: complaint)
@@ -1232,6 +1366,8 @@ final class TranscriptModel {
     /// The session itself is going away, so the pump goes with it. The event stream never ends on
     /// its own, and a pump left iterating one holds its runner alive for the rest of the launch.
     func teardown() {
+        idleEvictionTask?.cancel()
+        idleEvictionTask = nil
         terminateNow()
         pumpTask?.cancel()
         pumpTask = nil
@@ -1244,6 +1380,8 @@ final class TranscriptModel {
     /// return happily on a Codex chat whose server was still very much alive: the interrupt landed,
     /// the turn closed, and nothing had ever been signalled.
     func shutdown() async {
+        idleEvictionTask?.cancel()
+        idleEvictionTask = nil
         guard let runner else { return }
         terminateNow()
 
@@ -1276,6 +1414,7 @@ final class TranscriptModel {
     /// second caller of this would take the app down. There is no reason for the guarantee to be
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
+        guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
         let preferences = RunnerPreferences(session: session)
@@ -1306,8 +1445,15 @@ final class TranscriptModel {
         )
         self.runner = runner
         runnerPreferences = preferences
+        startIdleEviction()
         if pumpTask == nil { startPump(on: runner) }
         return runner
+    }
+
+    private var usesInteractiveTerminal: Bool {
+        guard let workspaceID = session.workspaceID else { return false }
+        CenterTabStore.shared.load(workspaceID: workspaceID)
+        return CenterTabStore.shared.terminal(for: session.id, in: workspaceID) != nil
     }
 
     /// The one place a backend becomes a process. Static and taking only values, so which runner a
@@ -1353,13 +1499,162 @@ final class TranscriptModel {
         }
     }
 
+    private func startIdleEviction() {
+        guard idleEvictionTask == nil else { return }
+        idleEvictionTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                guard let self else { return }
+                await evictIdleProvider()
+            }
+        }
+    }
+
+    private func evictIdleProvider() async {
+        guard let store, let current = runner, !isRunning, !isAwaitingPermission,
+              sending == nil, pendingDeliveries.isEmpty, !subagents.isAnythingRunning else { return }
+        let stored = try? await store.setting(ProviderIdlePolicy.settingKey)
+        guard let duration = ProviderIdlePolicy.duration(stored: stored),
+              let waiting = try? await store.pendingDeliveries(sessionID: session.id), waiting.isEmpty,
+              !isRunning, sending == nil else { return }
+        guard await current.evictIfIdle(for: duration), runner === current else { return }
+        pumpTask?.cancel()
+        pumpTask = nil
+        runner = nil
+        runnerPreferences = nil
+    }
+
     private func startPump(on runner: any SessionRunner) {
+        if let feed = runner.presentationFeed {
+            let baseline = feed.snapshot()
+            let subscriber = UUID()
+            let notifications = feed.notifications(id: subscriber, after: baseline.revision)
+            pumpTask = Task { [weak self] in
+                defer { feed.unsubscribe(subscriber) }
+                var cursor = baseline.revision
+                var pendingResult: AgentResult?
+                if baseline.revision > 0, let recovery = baseline.recovery, let self {
+                    await recoverPresentation(recovery, after: baseline.revision)
+                    setRunning(session.state.isMidTurn)
+                }
+                for await _ in notifications {
+                    guard let self, !Task.isCancelled else { return }
+                    let batch = feed.read(after: cursor)
+                    do {
+                        if let failure = batch.failure { throw PresentationFailure(message: failure) }
+                        let result = try await consumePresentation(batch, from: feed, after: cursor)
+                        pendingResult = result ?? pendingResult
+                        cursor = batch.revision
+                        await feed.acknowledgePage(subscriber: subscriber, through: cursor)
+                        // New lifecycle events may have arrived while checkpoints were saved.
+                        // Catch up before allowing any queued message to cross a turn boundary.
+                        let latest = feed.snapshot()
+                        guard latest.revision == cursor else { continue }
+                        if let event = latest.recovery?.stateEvent, case .error = event { pendingResult = nil }
+                        if AgentPresentationReconciliation.permitsAutomaticDrain(
+                            isCatchingUp: isReconcilingPresentation, isTurnRunning: isRunning || feed.isTurnRunning
+                        ), let result = pendingResult {
+                            pendingResult = nil
+                            await finishPresentationTurn(result)
+                        }
+                    } catch {
+                        runner.terminateNow()
+                        await handle(.error(AgentError(message: error.localizedDescription)))
+                        return
+                    }
+                }
+            }
+            return
+        }
         pumpTask = Task { [weak self] in
             for await event in runner.events {
                 guard let self else { return }
                 await self.handle(event)
             }
         }
+    }
+
+    private struct PresentationFailure: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    private func consumePresentation(
+        _ batch: AgentPresentationBatch, from feed: AgentPresentationFeed, after cursor: UInt64
+    ) async throws -> AgentResult? {
+        isReconcilingPresentation = true
+        defer {
+            isReconcilingPresentation = false
+            isReplayingPastTurn = false
+            presentationMessageSeq = nil
+        }
+        var result: AgentResult?
+        if let recovery = batch.recovery {
+            var lifecycleCursor = cursor
+            while true {
+                let page = try await feed.lifecyclePage(after: lifecycleCursor, through: batch.revision)
+                guard !page.isEmpty else { break }
+                for entry in page {
+                    isReplayingPastTurn = feed.hasLaterTurn(than: entry.revision)
+                    presentationMessageSeq = entry.messageSeq
+                    await handle(entry.event)
+                    if case .result(let terminal) = entry.event { result = terminal }
+                    lifecycleCursor = entry.revision
+                }
+            }
+            // Boundaries were replayed independently; never apply the latest boundary twice.
+            await recoverPresentation(recovery, after: batch.revision)
+        } else {
+            for index in batch.events.indices {
+                isReplayingPastTurn = feed.hasLaterTurn(than: batch.eventRevisions[index])
+                presentationMessageSeq = batch.messageSequences[index]
+                let event = batch.events[index]
+                await handle(event)
+                if case .result(let terminal) = event { result = terminal }
+            }
+        }
+        return result
+    }
+
+    private func finishPresentationTurn(_ result: AgentResult) async {
+        if let steered = steering {
+            steering = nil
+            wasStoppedByHand = false
+            await sendSteered(steered)
+        } else if !wasStoppedByHand { await drain() }
+        if !isRunning {
+            await reportToOrchestrator(CrewMessage.stopped(name: session.title, lastMessage: result.summary))
+            await app.noteWorkspaceTurnEnded(
+                WorkspaceTurnEnding.ofResult(result, stoppedByOwner: wasStoppedByHand), in: session
+            )
+        }
+    }
+
+    private func recoverPresentation(_ recovery: AgentPresentationRecovery, after cursor: UInt64) async {
+        // Rows and permission decisions are durable. Reload those first; the current live tail
+        // is a snapshot, so assigning it never loses or repeats individual text chunks.
+        await appendLatestMessages()
+        await refreshSession()
+        if let store {
+            let decisions = (try? await store.permissionAskDecisions(sessionID: session.id)) ?? [:]
+            for (id, decision) in decisions {
+                settle(PermissionResolution(requestID: id, decision: decision))
+            }
+        }
+        refreshAwaitingPermission()
+        subagents = recovery.subagents
+        if recovery.stateRevision > cursor, let event = recovery.stateEvent {
+            await handle(event)
+        }
+        clearStreaming()
+        streamingText = recovery.text
+        streamingThinking = recovery.thinking
+        streamingToolName = recovery.toolName
+        thinkingTokens = recovery.thinkingTokens
+        if let status = recovery.status { await handle(.status(status)) }
+        if let retry = recovery.retry { absorb(retry) }
+        if let quota = recovery.quota { await app.recordQuotas(AgentQuotaAdapters.quotas(fromRateLimitEvent: quota)) }
+        if isAwaitingPermission { statusLabel = "Waiting on you" }
     }
 
     // MARK: - Event handling
@@ -1424,12 +1719,21 @@ final class TranscriptModel {
             // through. That is the only signal there is: the CLI announces a retry and never
             // announces a recovery, so the recovery is the next event of any kind.
             settleRetryRun()
+            let runningTool = streamingToolName
+            let callsBefore = freshCalls
             await appendLatestMessages()
             // Keep the live drawing while the store is awaited. Clearing first leaves an empty
             // frame between the stream and its saved row, interrupting the shared arrival.
             clearStreaming()
+            // A call that just arrived is folded out of sight for a moment, so the tail goes on
+            // naming it rather than saying the model is being waited on while a tool runs. Its
+            // result clears this like any other arrival. See `TranscriptFold.freshCall`.
+            if case .toolUse = event, !freshCalls.isSubset(of: callsBefore) {
+                streamingToolName = runningTool
+            }
 
         case .error(let failure):
+            history.isFinalisingTurn = true
             // The agent died without ever producing a result: a model it does not know, expired
             // credentials, a crash. Nothing else will arrive, so the turn ends here or the composer
             // stays locked for the rest of the launch.
@@ -1445,6 +1749,7 @@ final class TranscriptModel {
             abandonRetryRun()
             clearStreaming()
             await appendLatestMessages()
+            if let store { await history.finish(store: store, cwd: cwd, endSeq: presentationMessageSeq ?? highestSeenMessageSeq, captureFiles: !isReplayingPastTurn) }
             setRunning(false)
             statusLabel = nil
             // The process is gone, so every subagent under it went with it and nothing is left to
@@ -1467,6 +1772,7 @@ final class TranscriptModel {
             await reportToOrchestrator(
                 CrewMessage.failed(name: session.title, reason: failure.message)
             )
+            await app.noteWorkspaceTurnEnded(.failed(reason: failure.message), in: session)
             // An agent that died is an agent whose turn has ended, so a workspace it had asked to
             // archive is due now. `notifyFinished` is not on this path and never was: it is about
             // a result, and there is none. The recheck decides as it does everywhere else.
@@ -1476,7 +1782,10 @@ final class TranscriptModel {
                 )
             }
 
+            history.isFinalisingTurn = false
+
         case .result(let result):
+            history.isFinalisingTurn = true
             // A turn that recovered leaves its sentence on the row that closes it; one that failed
             // leaves nothing, for the same reason as `.error` above.
             if result.succeeded { settleRetryRun() } else { abandonRetryRun() }
@@ -1485,6 +1794,7 @@ final class TranscriptModel {
             // After the append, deliberately: the row the sentence hangs under is the result row,
             // and it is not in `rows` until the read above has brought it back from the store.
             fileRecoveredRun()
+            if let store { await history.finish(store: store, cwd: cwd, endSeq: presentationMessageSeq ?? highestSeenMessageSeq, captureFiles: !isReplayingPastTurn) }
             setRunning(false)
             statusLabel = nil
             // **A result is not news about a subagent, and assuming it was is what hid them.**
@@ -1509,11 +1819,12 @@ final class TranscriptModel {
             // stopped in order to say this, so this is what goes, and the rest of the queue waits
             // as it was. Stop's own answer is not here at all, because it has already run: the
             // queue was handed back to the composer on the frame the button was pressed.
-            if let steered = steering {
+            history.isFinalisingTurn = false
+            if !isReconcilingPresentation, let steered = steering {
                 steering = nil
                 wasStoppedByHand = false
                 await sendSteered(steered)
-            } else if !wasStoppedByHand {
+            } else if !isReconcilingPresentation, !wasStoppedByHand {
                 await drain()
             }
             // After the drain, and only if nothing moved: a crew member whose orchestrator said
@@ -1522,9 +1833,14 @@ final class TranscriptModel {
             // is about to be superseded. `drain` is awaited to completion above, `runner.send` and
             // all, and `deliver` sets `isRunning` before that send, so by this line the flag is
             // already describing the turn that has just begun rather than the one that ended.
-            if !isRunning {
+            if !isReconcilingPresentation, !isRunning {
                 await reportToOrchestrator(
                     CrewMessage.stopped(name: session.title, lastMessage: result.summary)
+                )
+                // The same moment, one workspace further out: a chat elsewhere that asked
+                // `workspace_say` or `workspace_start` to tell it when this came to rest.
+                await app.noteWorkspaceTurnEnded(
+                    WorkspaceTurnEnding.ofResult(result, stoppedByOwner: wasStoppedByHand), in: session
                 )
             }
 
@@ -1538,6 +1854,12 @@ final class TranscriptModel {
             await refreshSession()
             if let workspaceNow {
                 NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
+            }
+            // A turn stuck on the owner looks, from another workspace, exactly like one still
+            // working. Not while replaying: an ask read back after a relaunch may have been
+            // answered long ago, and the watch is spent by whatever it says.
+            if !isReconcilingPresentation, !isReplayingPastTurn, let ask = pendingPermissionAsks.last {
+                await app.noteWorkspaceTurnEnded(WorkspaceTurnEnding.ofAsk(ask), in: session)
             }
 
         case .permissionDecided(let resolution):
@@ -1676,6 +1998,7 @@ final class TranscriptModel {
         ) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
+        var calls: [String] = []
         // **Filtered against the cursor again, having already been queried against it.** The read
         // above is a suspension point, so two calls can both ask for everything after `n` and both
         // come back with the same rows: the cursor only moves in the loop below, which neither of
@@ -1689,12 +2012,46 @@ final class TranscriptModel {
             // Before folding, because a tool result changes an old row rather than appending one.
             // The cursor belongs to stored messages, not to their presentation.
             highestSeenMessageSeq = max(highestSeenMessageSeq, message.seq)
+            if message.kind == .toolUse, let id = message.refID { calls.append(id) }
             absorb(message)
+        }
+        // A question stops the turn on a person, and a running call drawn in above it a moment
+        // later would move the buttons they are reaching for. So it is drawn now, with the question.
+        if fresh.contains(where: { $0.kind == .permissionAsk }) {
+            endFreshCalls(Array(freshCalls))
+        } else if !calls.isEmpty {
+            beginFreshCalls(calls)
         }
         // Over what actually arrived, not over the transcript. A tool result folds onto a row that
         // is already there rather than appending, so the slice can be empty, and an empty one
         // leaves the held reading exactly where it was.
         noteContextWindow(in: rows[min(appendedFrom, rows.count)...])
+    }
+
+    /// Lets calls that have just arrived fold straight away, and draws any still running once
+    /// `TranscriptFold.freshCall` has passed.
+    ///
+    /// **A timer rather than waiting for the result, because a call can run for minutes.** Held out
+    /// of sight until its result, a test run would be a count and a status line and nothing else.
+    private func beginFreshCalls(_ calls: [String]) {
+        freshCalls.formUnion(calls)
+        Task { [weak self] in
+            try? await Task.sleep(for: TranscriptFold.freshCall)
+            self?.endFreshCalls(calls)
+        }
+    }
+
+    private func endFreshCalls(_ calls: [String]) {
+        var revealed = false
+        for id in calls where freshCalls.remove(id) != nil {
+            // A call that settled while fresh folds either way, so only a running one changes what
+            // the fold says.
+            guard let index = indexByRefID[id], rows.indices.contains(index),
+                  rows[index].resultPayload == nil else { continue }
+            foldCache.invalidate(row: index)
+            revealed = true
+        }
+        if revealed { presentationRevision += 1 }
     }
 
     /// Folds what the newest rows say about the context window into the held reading.

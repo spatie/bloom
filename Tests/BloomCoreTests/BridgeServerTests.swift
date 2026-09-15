@@ -18,7 +18,7 @@ struct BridgeServerTests {
         let token = owner ? "test-owner-token" : sessionToken
         if owner { server.registry.admit(ownerToken: token) }
         var caller = try Caller(socketPath: server.socketPath)
-        let welcome = try await caller.hello(BridgeHello(token: token, role: owner ? "owner" : "parent", shim: "test"))
+        let welcome = try await caller.hello(BridgeHello(token: token, role: owner ? "owner" : "workspace", shim: "test"))
         #expect(welcome.accepted)
         _ = try await caller.call(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
         if owner {
@@ -84,7 +84,7 @@ struct BridgeServerTests {
         defer { server.stop() }
 
         var caller = try Caller(socketPath: server.socketPath)
-        let welcome = try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test"))
+        let welcome = try await caller.hello(BridgeHello(token: token, role: "workspace", shim: "test"))
         #expect(welcome.accepted)
         #expect(welcome.version == BridgeProtocol.version)
 
@@ -100,17 +100,18 @@ struct BridgeServerTests {
         let listed = try await caller.call(#"{"jsonrpc":"2.0","id":"two","method":"tools/list"}"#)
         #expect(listed["id"] == .string("two"))
         let names = listed["result"]?["tools"]?.arrayValue?.compactMap { $0["name"]?.stringValue }
-        // What a parent sees from a server built without the app, sorted by name because
-        // `tools/list` is. The rest of a parent's surface (`workspace_start` and the four pane
+        // What a workspace agent sees from a server built without the app, sorted by name because
+        // `tools/list` is. The rest of its surface (`workspace_start` and the four pane
         // tools) needs a seam into the window and is added by `AppModel.bridgeToolbox()`, which
         // there is none of here. The two quick prompt tools are on this list because a quick
         // prompt is a row in the store and nothing else, and `workspace_rename` is on it because
         // a workspace's name is one column of one row. `agent_list` is on it for the same reason
         // again: a crew is rows in `sessions` joined by `parent_session_id`, so listing one
         // reaches nothing but the store, while starting, saying and stopping all need the window.
+        // `workspace_diff` reads a worktree through git, which needs no window either.
         #expect(names == [
             "agent_list", "chat_list", "chat_read", "quick_prompt_create", "quick_prompt_list", "whoami",
-            "workspace_rename",
+            "workspace_diff", "workspace_rename",
         ])
 
         let called = try await caller.call(
@@ -126,7 +127,7 @@ struct BridgeServerTests {
         #expect(answer["project"]?["name"]?.stringValue == "billing")
         #expect(answer["session"]?["id"]?.stringValue == session.id.rawValue)
         #expect(answer["created_by"]?.stringValue == "owner")
-        #expect(answer["role"]?.stringValue == "parent")
+        #expect(answer["role"]?.stringValue == "workspace")
 
         let readChat = try await caller.call(
             #"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chat_read","arguments":{"chat":"First chat"}}}"#
@@ -140,8 +141,10 @@ struct BridgeServerTests {
         caller.connection.close()
     }
 
-    @Test("a spawned workspace answers as a child, with the parent that asked for it")
-    func aChildKnowsItsParent() async throws {
+    /// There is no narrower role for a workspace an agent started; what it may not do is decided
+    /// by the tools that care, off its row. The parentage is still there to be read.
+    @Test("a spawned workspace answers as a workspace, with the workspace that asked for it")
+    func aSpawnedWorkspaceKnowsItsStarter() async throws {
         let parent = WorkspaceID("parent-1")
         let (server, token, _, _) = try await makeBridge(
             origin: .agent(parentWorkspaceID: parent, spawnToolUseID: "toolu_01")
@@ -149,15 +152,15 @@ struct BridgeServerTests {
         defer { server.stop() }
 
         var caller = try Caller(socketPath: server.socketPath)
-        // The claimed role is a lie and is ignored: the answer comes off the workspace row.
-        _ = try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test"))
+        // A role from an older shim is stale and is ignored: the answer comes off the token.
+        _ = try await caller.hello(BridgeHello(token: token, role: "child", shim: "test"))
         let called = try await caller.call(
             #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whoami"}}"#
         )
         let text = try #require(called["result"]?["content"]?.arrayValue?.first?["text"]?.stringValue)
         let answer = try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
 
-        #expect(answer["role"]?.stringValue == "child")
+        #expect(answer["role"]?.stringValue == "workspace")
         #expect(answer["created_by"]?["agent_in_workspace"]?.stringValue == parent.rawValue)
         #expect(answer["created_by"]?["spawn_tool_use_id"]?.stringValue == "toolu_01")
         caller.connection.close()
@@ -175,7 +178,7 @@ struct BridgeServerTests {
         let welcome = try await caller.hello(BridgeHello(
             version: BridgeProtocol.version + 7,
             token: token,
-            role: "parent",
+            role: "workspace",
             shim: "/tmp/bloom-bridge"
         ))
 
@@ -187,6 +190,40 @@ struct BridgeServerTests {
 
         // And the connection really is over, rather than left open for a caller to wait on.
         #expect(await caller.iterator.next() == nil)
+    }
+
+    /// The owner's own registration is applied to every `claude` on the machine, the ones Bloom
+    /// starts in a worktree included, so an agent held the owner's tools as well as its own. This
+    /// process is the peer on the socket, so a workspace at its own directory stands in for a shim
+    /// a workspace agent launched.
+    @Test("the owner's token is refused from a shim running inside a live workspace, and welcome once it is archived")
+    func ownerTokenInsideAWorkspace() async throws {
+        let directory = try #require(ProcessWorkingDirectory.of(getpid()))
+        let store = try makeTestStore("bridge-owner-placement")
+        let repo = try await store.upsert(Repo(name: "billing", path: "/tmp/billing", defaultBranch: "main"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "standing here", branch: "bloom/standing-here", path: directory, baseBranch: "main"
+        ))
+        let server = try BridgeServer(store: store)
+        try server.start()
+        defer { server.stop() }
+        server.registry.admit(ownerToken: "test-owner-token")
+
+        var inside = try Caller(socketPath: server.socketPath)
+        let refused = try await inside.hello(BridgeHello(
+            token: "test-owner-token", role: BridgeRole.owner.rawValue, shim: "test"
+        ))
+        #expect(!refused.accepted)
+        #expect(try #require(refused.problem).contains("'standing here'"))
+        #expect(await inside.iterator.next() == nil)
+
+        try await store.update(workspaceID: workspace.id) { $0.archive() }
+        var afterwards = try Caller(socketPath: server.socketPath)
+        let welcome = try await afterwards.hello(BridgeHello(
+            token: "test-owner-token", role: BridgeRole.owner.rawValue, shim: "test"
+        ))
+        #expect(welcome.accepted, "\(welcome.problem ?? "")")
+        afterwards.connection.close()
     }
 
     @Test("a session token this launch did not mint is told to quit and reopen Bloom")
@@ -247,8 +284,9 @@ struct BridgeServerTests {
         #expect(!owner.lowercased().contains("same name"))
 
         // Every role that is not the owner's is a session token, including one this build does not
-        // know, because a claim is a string off the shim's environment and not an enum.
-        for role in [BridgeRole.parent.rawValue, BridgeRole.child.rawValue, "", "something else"] {
+        // know, because a claim is a string off the shim's environment and not an enum. `parent`
+        // and `child` are what a shim from before the roles were merged still says.
+        for role in [BridgeRole.workspace.rawValue, "parent", "child", "", "something else"] {
             let session = BridgeProtocol.unrecognisedToken(claiming: role)
             #expect(session.contains("previous launch"))
             #expect(session.lowercased().contains("quit and reopen bloom"))
@@ -276,7 +314,7 @@ struct BridgeServerTests {
         defer { server.stop() }
 
         var caller = try Caller(socketPath: server.socketPath)
-        _ = try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test"))
+        _ = try await caller.hello(BridgeHello(token: token, role: "workspace", shim: "test"))
 
         let reply = try await caller.call(#"{"jsonrpc":"2.0","id":9,"method":"resources/list"}"#)
         #expect(reply["error"]?["code"] == .integer(MCPErrorCode.methodNotFound))
@@ -297,7 +335,7 @@ struct BridgeServerTests {
         defer { server.stop() }
 
         var caller = try Caller(socketPath: server.socketPath)
-        _ = try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test"))
+        _ = try await caller.hello(BridgeHello(token: token, role: "workspace", shim: "test"))
 
         caller.connection.writeLine(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
         // The next line to arrive is the answer to the ping behind it, not an answer to the
@@ -488,14 +526,14 @@ struct BridgeWorkspaceStartTests {
         return (server, attachment.token)
     }
 
-    @Test("a parent lists the tool and calling it starts a workspace")
-    func parentCanStartOne() async throws {
+    @Test("a workspace agent lists the tool and calling it starts a workspace")
+    func workspaceAgentCanStartOne() async throws {
         let orders = Orders()
         let (server, token) = try await makeBridge(orders: orders, label: "bridge-start-parent")
         defer { server.stop() }
 
         var caller = try Caller(socketPath: server.socketPath)
-        #expect(try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test")).accepted)
+        #expect(try await caller.hello(BridgeHello(token: token, role: "workspace", shim: "test")).accepted)
 
         let listing = try await caller.call(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
         let names = (listing["result"]?["tools"]?.arrayValue ?? []).compactMap { $0["name"]?.stringValue }
@@ -513,30 +551,31 @@ struct BridgeWorkspaceStartTests {
         #expect(text.contains("claude/sentry-importer"))
     }
 
-    /// A child is told the tool does not exist, in the same words an unknown name gets. A refusal
-    /// that reads differently from "no such tool" tells the caller something is there.
-    @Test("a child cannot see the tool and cannot call it either")
-    func childIsRefusedTwice() async throws {
+    /// No role hides the tool from a workspace an agent started any more, so the refusal in the
+    /// handler is the whole of the nesting limit, and this is it holding over a real socket.
+    @Test("a workspace an agent started sees the tool, and calling it is refused")
+    func agentStartedWorkspaceIsRefused() async throws {
         let orders = Orders()
         let (server, token) = try await makeBridge(
             origin: .agent(parentWorkspaceID: WorkspaceID(rawValue: "w-parent"), spawnToolUseID: "t1"),
             orders: orders,
-            label: "bridge-start-child"
+            label: "bridge-start-spawned"
         )
         defer { server.stop() }
 
         var caller = try Caller(socketPath: server.socketPath)
-        #expect(try await caller.hello(BridgeHello(token: token, role: "child", shim: "test")).accepted)
+        #expect(try await caller.hello(BridgeHello(token: token, role: "workspace", shim: "test")).accepted)
 
         let listing = try await caller.call(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
         let names = (listing["result"]?["tools"]?.arrayValue ?? []).compactMap { $0["name"]?.stringValue }
-        #expect(!names.contains("workspace_start"))
+        #expect(names.contains("workspace_start"))
 
         let call = try await caller.call(#"""
             {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"workspace_start","arguments":{"prompt":"Import from Sentry"}}}
             """#)
 
-        #expect(call["error"]?["code"]?.intValue == MCPErrorCode.methodNotFound)
+        #expect(call["result"]?["isError"]?.boolValue == true)
+        #expect(call["result"]?["content"]?[0]?["text"]?.stringValue?.contains("itself started by an agent") == true)
         #expect(orders.prompts.isEmpty)
     }
 
@@ -549,7 +588,7 @@ struct BridgeWorkspaceStartTests {
         defer { server.stop() }
 
         var caller = try Caller(socketPath: server.socketPath)
-        #expect(try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test")).accepted)
+        #expect(try await caller.hello(BridgeHello(token: token, role: "workspace", shim: "test")).accepted)
 
         for (index, prompt) in ["Import from Sentry", "Group by release", "Faster search"].enumerated() {
             let call = try await caller.call(#"""

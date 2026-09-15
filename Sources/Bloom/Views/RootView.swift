@@ -27,24 +27,37 @@ struct RootView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
+    private var sidebarTintOpacity: Double {
+        let preference = ColourThemePreference.shared
+        return preference.glass.tintOpacity(maximum: preference.choice.surfaces.glassTintOpacity ?? 0.4)
+    }
+
     var body: some View {
         @Bindable var app = app
 
         return windowWiring(
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView()
-                // The system toggle offers an irrelevant label-style context menu on macOS 26.
-                // BloomWindowToolbar replaces it with the same image-only action.
-                .toolbar(removing: .sidebarToggle)
-                // Leave the native source-list background in place so the sidebar and unified
-                // title bar share the system's appearance and accessibility treatment.
+                .scrollContentBackground(.hidden)
+                .background {
+                    Group {
+                        if ColourThemePreference.shared.glass == .off {
+                            Palette.surfaceSunken
+                        } else {
+                            SidebarMaterial(tint: Palette.sidebarGlassTint, opacity: sidebarTintOpacity)
+                        }
+                    }
+                    .ignoresSafeArea()
+                }
                 // The rule down the sidebar's trailing edge.
                 //
                 // `NavigationSplitView` draws none: measured across the boundary, the sidebar's last
                 // pixel is followed directly by the centre column's first, in both appearances. That
                 // is survivable while both columns are the system's own white, and it is not once
                 // they are two steps of a ramp, because then the two panes simply run into each other.
-                .overlay(alignment: .trailing) { Hairline(axis: .vertical) }
+                .overlay(alignment: .trailing) {
+                    Hairline(axis: .vertical).ignoresSafeArea(edges: .top)
+                }
                 // The ceiling is not always the reserve. On a display too narrow to hold all
                 // three panes at their minimums, the sidebar is the one that gives, because it is
                 // a list of rows that truncate where the other two hold a transcript and a diff
@@ -75,11 +88,10 @@ struct RootView: View {
                     isInspectorPresented: isInspectorPresented,
                     animated: !reduceMotion
                 )
+                    .background { Palette.sidebar.ignoresSafeArea() }
                     .toolbar {
                         BloomWindowToolbar(
                             app: app,
-                            isSidebarVisible: columnVisibility != .detailOnly,
-                            toggleSidebar: toggleSidebar,
                             startFreshAskConversation: { Task { await app.ask.newConversation() } }
                         )
                     }
@@ -103,10 +115,7 @@ struct RootView: View {
                     // glass in the title bar, and it moves nothing: no selection, no scroll, no
                     // column. Nothing it could reach was taken away with the field, which is the
                     // whole point of relocating it rather than replacing it. See `SearchPanelView`
-                    // for the card and `SearchToolbarButton` for the glyph.
-                    .onChange(of: app.selectedWorkspace != nil, initial: true) { _, available in
-                        InspectorGeometry.shared.setWorkspaceAvailable(available)
-                    }
+                    // for the card and `BloomWindowToolbar` for its button.
             }
             // As well as heading the toolbar (see BloomApp), the title names the window in the
             // Window menu and in Mission Control, so it is worth setting.
@@ -118,6 +127,7 @@ struct RootView: View {
             // `menuWorkspace` rather than `selectedWorkspace`, so an archived workspace being read
             // names the window as well. It is still not what the inspector keys on, below: naming a
             // window costs nothing, and showing a diff for a worktree that is gone does not.
+            .containerBackground(.clear, for: .window)
             .navigationTitle(app.menuWorkspace?.name ?? "Bloom")
 
             // And then removed from the toolbar again, because `WindowTitleControl` draws the name

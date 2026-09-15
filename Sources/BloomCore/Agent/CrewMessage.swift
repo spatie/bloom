@@ -26,6 +26,14 @@ public struct CrewMessage: Sendable, Equatable, Codable {
         case stopped
         /// Bloom reporting that an agent did not finish.
         case failed
+        /// An agent in another workspace said something to this one, through `workspace_say`.
+        case relayed
+        /// Bloom reporting that the owner cancelled a message this agent sent another workspace.
+        case cancelled
+        /// Bloom reporting that the turn a `workspace_say` or `workspace_start` asked to hear
+        /// about has come to rest in the other workspace: finished, failed, stuck on the owner,
+        /// or archived. A fact, like `.stopped`. See `WorkspaceDoneNotice`.
+        case workspaceDone = "workspace_done"
     }
 
     /// Who is speaking, which is what the rule down the left is coloured by. A fact is Bloom's own
@@ -35,6 +43,8 @@ public struct CrewMessage: Sendable, Equatable, Codable {
         case orchestrator
         case subagent
         case bloom
+        /// An agent in another workspace. `route` says which.
+        case otherWorkspace = "other_workspace"
     }
 
     public var event: Event
@@ -47,13 +57,20 @@ public struct CrewMessage: Sendable, Equatable, Codable {
     /// and the same string as `text` for a brief or a fact, since neither is somebody else's
     /// writing arriving in a context.
     public var sent: String
+    /// The workspace, project and chat a message from another workspace came from. Nil for every
+    /// message from inside this one.
+    public var route: WorkspaceMessageEnd?
 
-    public init(event: Event, sender: Sender, from: String, text: String, sent: String) {
+    public init(
+        event: Event, sender: Sender, from: String, text: String, sent: String,
+        route: WorkspaceMessageEnd? = nil
+    ) {
         self.event = event
         self.sender = sender
         self.from = from
         self.text = text
         self.sent = sent
+        self.route = route
     }
 
     // MARK: - The four rows
@@ -119,6 +136,23 @@ public struct CrewMessage: Sendable, Equatable, Codable {
         )
     }
 
+    /// The owner took a message this agent sent another workspace back out of the queue.
+    ///
+    /// Told rather than left for the agent to discover, because `workspace_say` answered "sent",
+    /// and an agent never told otherwise waits for an answer that is not coming or sends it again.
+    public static func cancelled(to workspace: String, text: String) -> CrewMessage {
+        let excerpt = text.count > 120 ? String(text.prefix(120)) + "…" : text
+        return CrewMessage(
+            event: .cancelled, sender: .bloom, from: workspace,
+            text: "The owner cancelled your message to \(workspace)",
+            sent: """
+                The owner cancelled the message you sent to the workspace "\(workspace)" with \
+                workspace_say before it was delivered, so its agent never saw it. It began: \
+                '\(excerpt)'. Do not send it again unless the owner asks you to.
+                """
+        )
+    }
+
     // MARK: - The payload
 
     /// The marker every payload carries, so a reader can tell one of these from the stream's own
@@ -147,6 +181,8 @@ public struct CrewMessage: Sendable, Equatable, Codable {
         var from: String
         var text: String
         var sent: String
+        /// Optional, so every row written before it existed still decodes.
+        var route: WorkspaceMessageEnd?
 
         init(_ message: CrewMessage) {
             type = CrewMessage.type
@@ -155,10 +191,11 @@ public struct CrewMessage: Sendable, Equatable, Codable {
             from = message.from
             text = message.text
             sent = message.sent
+            route = message.route
         }
 
         var message: CrewMessage {
-            CrewMessage(event: event, sender: sender, from: from, text: text, sent: sent)
+            CrewMessage(event: event, sender: sender, from: from, text: text, sent: sent, route: route)
         }
     }
 }

@@ -131,6 +131,7 @@ private actor GitHubCache {
     struct Key: Hashable, Sendable {
         let worktree: String
         let lookup: Lookup
+        let repository: String?
     }
 
     struct Entry: Sendable {
@@ -154,6 +155,26 @@ private actor GitHubCache {
     }
 }
 
+/// The worktrees whose token GitHub has refused the check runs. See `GitHub.viewPullRequest`.
+private actor UnreadableChecks {
+    /// Long enough that polling does not ask twice, short enough that a changed token is seen.
+    private static let lifetime = Duration.seconds(600)
+    private var recorded: [String: ContinuousClock.Instant] = [:]
+
+    func contains(_ worktree: String) -> Bool {
+        guard let at = recorded[worktree] else { return false }
+        guard at.duration(to: .now) <= Self.lifetime else {
+            recorded[worktree] = nil
+            return false
+        }
+        return true
+    }
+
+    func record(_ worktree: String) {
+        recorded[worktree] = .now
+    }
+}
+
 /// The gh boundary centralizes JSON normalization, timeouts, and short-lived polling state.
 public enum GitHub {
     /// Merge methods mirror gh flags so callers cannot construct an unsupported strategy.
@@ -164,13 +185,30 @@ public enum GitHub {
     }
 
     private static let cache = GitHubCache()
-    private static let fields = [
+    private static let unreadableChecks = UnreadableChecks()
+    private static let fieldList = [
         "number", "title", "url", "state", "isDraft", "mergeable",
         "mergeStateStatus", "reviewDecision", "headRefName", "statusCheckRollup",
         // Read for one reason: telling a pull request that ended before this workspace was
         // started apart from this workspace's own. See `PullRequestOwnership`.
         "closedAt",
-    ].joined(separator: ",")
+    ]
+    private static let fields = fieldList.joined(separator: ",")
+    /// Everything but the rollup, for a token GitHub will not show check runs. See `viewPullRequest`.
+    private static let fieldsWithoutChecks = fieldList.filter { $0 != "statusCheckRollup" }
+        .joined(separator: ",")
+
+    /// What a pull request whose checks could not be read says about them, wherever a rollup
+    /// summary would otherwise go.
+    public static let checksUnavailableSummary = "Checks unavailable"
+
+    /// Target the displayed pull request, even if the worktree's current branch has changed.
+    public static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
+        guard pullRequest.isOpen, pullRequest.isDraft else {
+            throw GitHubError("This pull request is no longer an open draft.")
+        }
+        try await checkGH(["pr", "ready", pullRequest.url], worktree: worktree)
+    }
 
     public static func isAvailable() async -> Bool {
         await access() == .ready
@@ -187,6 +225,8 @@ public enum GitHub {
     /// itself. None of that output is stored, logged or shown anywhere.
     public static func access() async -> GitHubAccess {
         guard Shell.which("gh") != nil else { return .notInstalled }
+        // Availability owns its own coalescing. A PR refresh cooldown is not evidence that
+        // credentials disappeared, and must not turn a forced auth check into signedOut.
         guard let result = try? await Shell.run(
             "gh", ["auth", "status"], timeout: .seconds(20)
         ) else {
@@ -263,10 +303,13 @@ public enum GitHub {
         if draft { arguments.append("--draft") }
         try await checkGH(arguments, worktree: worktree)
 
-        let result = try await checkGH(
-            ["pr", "view", "--json", fields], worktree: worktree
-        )
-        return try decodePullRequest(from: Data(result.stdout.utf8))
+        // Through the same retry as every other read, or a token that cannot see check runs opens
+        // the pull request and is then told the create failed.
+        let view = try await viewPullRequest([], worktree: worktree)
+        guard view.result.ok else { throw shellError(arguments: view.arguments, result: view.result) }
+        return try decodeSnapshot(
+            from: Data(view.result.stdout.utf8), checksReadable: view.checksReadable
+        ).pullRequest
     }
 
     /// The log of a failed check run, as gh prints it.
@@ -291,13 +334,13 @@ public enum GitHub {
         var selector = [target.runID]
         if let jobID = target.jobID { selector = ["--job", jobID] }
 
-        let failed = try await Shell.run(
+        let failed = try await run(
             "gh", ["run", "view"] + selector + ["--log-failed"], cwd: worktree, timeout: timeout
         )
         let trimmed = failed.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         if failed.ok, !trimmed.isEmpty { return failed.stdout }
 
-        let whole = try await Shell.run(
+        let whole = try await run(
             "gh", ["run", "view"] + selector + ["--log"], cwd: worktree, timeout: timeout
         )
         guard whole.ok, !whole.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -320,7 +363,7 @@ public enum GitHub {
     // agent, and everything that was known about them here is written down there. There is one
     // way to merge a pull request in this app and it goes through the transcript.
 
-    /// Pushes the current HEAD to `branch` on origin.
+    /// Pushes the current HEAD to `branch` on its configured publication remote.
     ///
     /// The branch never travels as a bare argument. Git will happily create a branch called
     /// `--mirror`, and `git push origin --mirror` is not a push: it makes the remote match the
@@ -341,11 +384,16 @@ public enum GitHub {
             throw GitHubError("refusing to push to '\(branch)': not a valid branch name")
         }
 
+        let context = try await Git.repositoryContext(in: worktree, branch: branch)
+        guard let remote = context.publishRemote else {
+            throw GitHubError("No publication remote is configured. For a pull request checkout, set branch.\(branch).pushRemote or remote.pushDefault before pushing directly.")
+        }
+        if setUpstream { try await Git.recordBase(context, for: branch, in: worktree) }
         var arguments = ["push"]
         if setUpstream { arguments.append("--set-upstream") }
-        arguments += ["--", "origin", "HEAD:refs/heads/\(branch)"]
+        arguments += ["--", remote, "HEAD:refs/heads/\(context.publishBranch)"]
 
-        let result = try await Shell.run("git", arguments, cwd: worktree, timeout: timeout)
+        let result = try await run("git", arguments, cwd: worktree, timeout: timeout)
         guard result.ok else {
             throw ShellError(
                 command: "git " + arguments.joined(separator: " "),
@@ -357,8 +405,10 @@ public enum GitHub {
 
     public static func hasRemoteBranch(_ branch: String, worktree: String) async -> Bool {
         guard Git.isValidBranchName(branch) else { return false }
-        guard let result = try? await Shell.run(
-            "git", ["ls-remote", "--exit-code", "--heads", "--", "origin", "refs/heads/\(branch)"],
+        guard let context = try? await Git.repositoryContext(in: worktree, branch: branch),
+              let remote = context.publishRemote else { return false }
+        guard let result = try? await run(
+            "git", ["ls-remote", "--exit-code", "--heads", "--", remote, "refs/heads/\(context.publishBranch)"],
             cwd: worktree,
             timeout: .seconds(20)
         ) else { return false }
@@ -368,6 +418,72 @@ public enum GitHub {
     /// gh has no structured error code for a branch without a pull request.
     public static func indicatesNoPullRequest(stderr: String) -> Bool {
         stderr.localizedCaseInsensitiveContains("no pull requests found")
+            || stderr.localizedCaseInsensitiveContains("could not resolve to a pullrequest")
+    }
+
+    /// Whether an unnamed `gh pr view` failed because the worktree is on no branch at all.
+    ///
+    /// gh resolves "the current branch" itself and gives up on a detached HEAD with "could not
+    /// determine current branch: failed to run git: not on any branch". A rebase that stops part
+    /// way leaves a worktree exactly there, and the inspector put that sentence up as "GitHub could
+    /// not refresh" on every poll. A HEAD with no branch has no pull request to find, so it is the
+    /// same answer as none rather than a failure.
+    public static func indicatesDetachedHead(stderr: String) -> Bool {
+        stderr.localizedCaseInsensitiveContains("not on any branch")
+            || stderr.localizedCaseInsensitiveContains("could not determine current branch")
+    }
+
+    /// Whether a `gh pr view` failed only because this token may not read the check runs.
+    ///
+    /// GitHub names each refused node by its path, so the rollup is in the message whenever the
+    /// rollup is the reason. A refusal that does not mention it is about something else and stays
+    /// a failure.
+    public static func indicatesUnreadableChecks(stderr: String) -> Bool {
+        stderr.localizedCaseInsensitiveContains("resource not accessible")
+            && stderr.localizedCaseInsensitiveContains("statusCheckRollup")
+    }
+
+    struct PullRequestView {
+        let result: ShellResult
+        let arguments: [String]
+        let checksReadable: Bool
+    }
+
+    /// One `gh pr view`, with the checks when this token may read them and without them when not.
+    ///
+    /// **A fine-grained personal access token cannot read check runs, and there is no permission
+    /// to give it.** GitHub's token editor has no Checks entry, and GraphQL fails the whole query
+    /// over one refused node rather than leaving that node out. From the report, on a private
+    /// organisation repository: `gh pr view <branch> --json ...,statusCheckRollup` exited 1 with
+    /// "Resource not accessible by personal access token (repository.pullRequests.nodes.0
+    /// .statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)", and the same
+    /// command without that one field answered the number, state, mergeability and review. Every
+    /// route in `PullRequestOwnership` asks for the rollup, so the strip said "No pull request
+    /// yet" beside a banner and offered to open a second one. Only check runs are refused, commit
+    /// statuses read, which is how a pull request whose head had no runs yet showed once and then
+    /// vanished when Actions picked the push up. gh itself has the same gap (cli/cli#12597).
+    ///
+    /// So the refusal is asked again without the rollup, and the pull request comes back with
+    /// `checks` set to `.unavailable`. Not the combined commit status in its place, which this
+    /// token can read: statuses with the runs taken out would be a complete looking, possibly
+    /// green, answer that is not.
+    ///
+    /// Remembered per worktree for a while, so a poll every few seconds does not spend two
+    /// processes each time, and forgotten after it, so a token that gains access is noticed.
+    static func viewPullRequest(
+        _ selector: [String], worktree: String, repositoryContext: GitRepositoryContext? = nil
+    ) async throws -> PullRequestView {
+        let knownUnreadable = await unreadableChecks.contains(worktree)
+        let arguments = ["pr", "view"] + selector + ["--json", knownUnreadable ? fieldsWithoutChecks : fields]
+        let result = try await run("gh", arguments, cwd: worktree, repositoryContext: repositoryContext)
+        guard !knownUnreadable, !result.ok, indicatesUnreadableChecks(stderr: result.stderr) else {
+            return PullRequestView(result: result, arguments: arguments, checksReadable: !knownUnreadable)
+        }
+
+        await unreadableChecks.record(worktree)
+        let bare = ["pr", "view"] + selector + ["--json", fieldsWithoutChecks]
+        let retried = try await run("gh", bare, cwd: worktree, repositoryContext: repositoryContext)
+        return PullRequestView(result: retried, arguments: bare, checksReadable: false)
     }
 
     static func snapshot(
@@ -381,14 +497,16 @@ public enum GitHub {
             throw GitHubError("refusing to look up '\(branch)': not a valid branch name")
         }
 
-        let key = GitHubCache.Key(worktree: worktree, lookup: .branch(branch))
+        try Task.checkCancellation()
+        let context = try? await Git.repositoryContext(in: worktree, branch: branch)
+        let key = GitHubCache.Key(
+            worktree: worktree, lookup: .branch(branch),
+            repository: [context?.baseRemoteURL, context?.publishRemoteURL].compactMap { $0 }.joined(separator: "\n")
+        )
         if let cached = await cache.value(for: key, maxAge: maxAge) { return cached }
 
-        let result = try await Shell.run(
-            "gh", ["pr", "view", branch, "--json", fields],
-            cwd: worktree,
-            timeout: .seconds(20)
-        )
+        let view = try await viewPullRequest([branch], worktree: worktree, repositoryContext: context)
+        let result = view.result
         guard result.ok else {
             if indicatesNoPullRequest(stderr: result.stderr) {
                 if let fallback = try await snapshotOfCheckedOutBranch(branch, worktree: worktree) {
@@ -398,10 +516,10 @@ public enum GitHub {
                 await cache.store(nil, for: key)
                 return nil
             }
-            throw shellError(arguments: ["pr", "view", branch, "--json", fields], result: result)
+            throw shellError(arguments: view.arguments, result: result)
         }
 
-        let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8))
+        let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8), checksReadable: view.checksReadable)
         await cache.store(snapshot, for: key)
         return snapshot
     }
@@ -422,29 +540,28 @@ public enum GitHub {
     /// than a hypothetical, because `decodeSnapshot` reads a missing `number` as 0 and that 0 can
     /// be written down.
     ///
-    /// Nothing here throws. The branch route has already run and did not throw by the time this is
-    /// reached, so gh is working and a refusal means this repository has no such pull request,
-    /// which is an answer rather than a failure. Cached as nil so a wrong number is asked about
-    /// once rather than on every poll.
+    /// A failed request stays a failure. A preceding branch lookup may have succeeded just
+    /// before a rate limit, timeout or malformed response on this independent request.
     static func snapshot(
         forNumber number: Int,
         worktree: String,
         maxAge: Duration
-    ) async -> PullRequestSnapshot? {
+    ) async throws -> PullRequestSnapshot? {
         guard number > 0 else { return nil }
-
-        let key = GitHubCache.Key(worktree: worktree, lookup: .number(number))
+        try Task.checkCancellation()
+        let context = try? await Git.repositoryContext(in: worktree)
+        let key = GitHubCache.Key(worktree: worktree, lookup: .number(number), repository: context?.baseRemoteURL)
         if let cached = await cache.value(for: key, maxAge: maxAge) { return cached }
-
-        guard let result = try? await Shell.run(
-            "gh", ["pr", "view", String(number), "--json", fields],
-            cwd: worktree,
-            timeout: .seconds(20)
-        ), result.ok, let snapshot = try? decodeSnapshot(from: Data(result.stdout.utf8)) else {
-            await cache.store(nil, for: key)
-            return nil
+        let view = try await viewPullRequest([String(number)], worktree: worktree, repositoryContext: context)
+        let result = view.result
+        guard result.ok else {
+            if indicatesNoPullRequest(stderr: result.stderr) {
+                await cache.store(nil, for: key)
+                return nil
+            }
+            throw shellError(arguments: view.arguments, result: result)
         }
-
+        let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8), checksReadable: view.checksReadable)
         await cache.store(snapshot, for: key)
         return snapshot
     }
@@ -473,9 +590,9 @@ public enum GitHub {
     /// an empty list where `--head patch-2` finds the fork's pull request.
     static func pullRequestsWithHead(
         _ branch: String, worktree: String
-    ) async -> [PullRequestHeadMatch] {
+    ) async throws -> [PullRequestHeadMatch] {
         guard Git.isValidBranchName(branch) else { return [] }
-        guard let result = try? await Shell.run(
+        let result = try await run(
             "gh",
             [
                 "pr", "list", "--head", branch, "--state", "all", "--limit", "20",
@@ -483,11 +600,9 @@ public enum GitHub {
             ],
             cwd: worktree,
             timeout: .seconds(20)
-        ), result.ok else { return [] }
-
-        guard let payloads = try? JSONDecoder().decode(
-            [HeadPayload].self, from: Data(result.stdout.utf8)
-        ) else { return [] }
+        )
+        guard result.ok else { throw shellError(arguments: ["pr", "list", "--head", branch], result: result) }
+        let payloads = try JSONDecoder().decode([HeadPayload].self, from: Data(result.stdout.utf8))
 
         return payloads
             .compactMap { payload in
@@ -513,16 +628,21 @@ public enum GitHub {
     private static func snapshotOfCheckedOutBranch(
         _ branch: String, worktree: String
     ) async throws -> PullRequestSnapshot? {
-        guard let result = try? await Shell.run(
-            "gh", ["pr", "view", "--json", fields], cwd: worktree, timeout: .seconds(20)
-        ), result.ok else { return nil }
+        let view = try await viewPullRequest([], worktree: worktree)
+        let result = view.result
+        guard result.ok else {
+            if indicatesNoPullRequest(stderr: result.stderr) || indicatesDetachedHead(stderr: result.stderr) {
+                return nil
+            }
+            throw shellError(arguments: view.arguments, result: result)
+        }
 
-        let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8))
+        let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8), checksReadable: view.checksReadable)
         guard snapshot.pullRequest.branch == branch else { return nil }
         return snapshot
     }
 
-    private static func decodeSnapshot(from data: Data) throws -> PullRequestSnapshot {
+    private static func decodeSnapshot(from data: Data, checksReadable: Bool = true) throws -> PullRequestSnapshot {
         let payload: PullRequestPayload
         do {
             payload = try JSONDecoder().decode(PullRequestPayload.self, from: data)
@@ -531,8 +651,11 @@ public enum GitHub {
             throw GitHubError("Could not decode gh JSON: \(error). Raw JSON tail: \(raw)")
         }
 
-        let runs = (payload.statusCheckRollup ?? []).map(normalize)
-        let (checks, summary) = rollup(runs)
+        // Not `rollup([])` when the rollup was never read: that answers "No checks", and a
+        // pull request with unknown checks is not a pull request without any.
+        let runs = checksReadable ? (payload.statusCheckRollup ?? []).map(normalize) : []
+        let (checks, summary) = checksReadable
+            ? rollup(runs) : (.unavailable, checksUnavailableSummary)
         return PullRequestSnapshot(
             pullRequest: PullRequest(
                 number: payload.number ?? 0,
@@ -597,7 +720,7 @@ public enum GitHub {
 
     @discardableResult
     private static func checkGH(_ arguments: [String], worktree: String) async throws -> ShellResult {
-        let result = try await Shell.run(
+        let result = try await run(
             "gh", arguments, cwd: worktree, timeout: .seconds(20)
         )
         guard result.ok else { throw shellError(arguments: arguments, result: result) }
@@ -688,7 +811,7 @@ public extension GitHub {
         guard GitHubRepositoryName.isValid(name), isPlausibleLogin(owner) else {
             return .unknown("Bloom did not check that name.")
         }
-        guard let result = try? await Shell.run(
+        guard let result = try? await run(
             "gh", ["api", "--silent", "repos/\(owner)/\(name)"], timeout: .seconds(15)
         ) else {
             return .unknown("Bloom could not reach GitHub to check that name.")
@@ -723,7 +846,7 @@ public extension GitHub {
         let arguments = [
             "repo", "create", "\(owner)/\(name)", isPrivate ? "--private" : "--public",
         ]
-        let result = try await Shell.run("gh", arguments, timeout: .seconds(60))
+        let result = try await run("gh", arguments, timeout: .seconds(60))
         guard result.ok else {
             throw ShellError(
                 command: "gh " + arguments.joined(separator: " "),
@@ -737,7 +860,7 @@ public extension GitHub {
     /// The address to give `origin`, in whichever protocol the user has told gh they prefer.
     /// Somebody who clones over SSH everywhere should not get one HTTPS remote from Bloom.
     static func remoteURL(owner: String, name: String) async -> String {
-        let configured = try? await Shell.run(
+        let configured = try? await run(
             "gh", ["config", "get", "git_protocol"], timeout: .seconds(10)
         )
         let usesSSH = (configured?.ok ?? false) && configured?.trimmed == "ssh"
@@ -762,7 +885,7 @@ public extension GitHub {
 
     private static func api(_ path: [String], timeout: Duration) async throws -> String {
         let arguments = ["api"] + path
-        let result = try await Shell.run("gh", arguments, timeout: timeout)
+        let result = try await run("gh", arguments, timeout: timeout)
         guard result.ok else {
             throw ShellError(
                 command: "gh " + arguments.joined(separator: " "),

@@ -36,6 +36,7 @@ struct FileTreeView: View {
     /// Likewise: this used to be a computed `Set` read once per row, so it was rebuilt from the
     /// whole changed file list for every visible row on every pass.
     @State private var changedPaths: Set<String> = []
+    @State private var highlightedPaths: Set<String> = []
     /// Resolved when the selection moves rather than in `body`, which runs again on every hover.
     @State private var previewURL: URL?
     /// Bumped whenever the keyboard should be on the tree: every row activation, which is what
@@ -137,6 +138,7 @@ struct FileTreeView: View {
         }
         .onChange(of: model.changedFiles, initial: true) { _, files in
             changedPaths = Set(files.map(\.path))
+            highlightedPaths = FileTreeChanges.highlightedPaths(for: changedPaths)
         }
     }
 
@@ -186,6 +188,7 @@ struct FileTreeView: View {
                 item: item,
                 isExpanded: openFolders.contains(path),
                 isChanged: changedPaths.contains(path),
+                containsChanges: highlightedPaths.contains(path),
                 fullPath: fullPath(path),
                 action: { activate(item.node) },
                 onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) },
@@ -193,6 +196,12 @@ struct FileTreeView: View {
                 onSplitPage: { BrowserTab.splitFile(fullPath(path), in: model, axis: $0) }
             )
             .equatable()
+        }
+        .background {
+            if highlightedPaths.contains(path), selection != path {
+                RoundedRectangle(cornerRadius: Metrics.corner)
+                    .fill(Palette.positive.opacity(0.10))
+            }
         }
         .padding(.horizontal, Metrics.spacingSmall)
     }

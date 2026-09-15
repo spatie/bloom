@@ -137,10 +137,13 @@ final class CenterTabStore {
     ///
     /// `directory` is a terminal's, and only a folder row in the inspector passes one. See
     /// `FolderTerminal`.
+    ///
+    /// `runScriptID` is passed by a run script opening its tab, so picking the script again can
+    /// find it. See `CenterTab.runScriptID`.
     @discardableResult
     func add(
         kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil,
-        directory: String = ""
+        directory: String = "", agentSessionID: SessionID? = nil, runScriptID: String? = nil
     ) -> CenterTab {
         var tabs = tabs(for: workspaceID)
         let tab = CenterTab(
@@ -149,11 +152,17 @@ final class CenterTabStore {
             title: title ?? Self.nextTitle(for: kind, in: tabs),
             url: url,
             isNamed: title != nil,
-            directory: directory
+            directory: directory,
+            agentSessionID: agentSessionID,
+            runScriptID: runScriptID
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)
         return tab
+    }
+
+    func terminal(for sessionID: SessionID, in workspaceID: WorkspaceID) -> CenterTab? {
+        tabs(for: workspaceID).first { $0.kind == .terminal && $0.agentSessionID == sessionID }
     }
 
     /// Every terminal tab of a workspace, by id, without loading the workspace into the cache.
@@ -388,7 +397,8 @@ final class CenterTabStore {
 
     /// Closes a tab and stops whatever it was running. Any pane showing it goes with it, and the
     /// tab it was a pane of settles around the gap. See `TabSurgery`.
-    func close(_ tab: CenterTab) async {
+    func close(_ tab: CenterTab, in model: WorkspaceModel) async {
+        WorkspaceTabsStore.shared.prepareToClose(.tool(tab.id), in: model)
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
         WorkspaceTabsStore.shared.forget(.tool(tab.id), workspaceID: tab.workspaceID)
 
@@ -448,6 +458,9 @@ final class CenterTabStore {
     /// workspace whose panel had not loaded yet.
     private func stopShell(for tab: CenterTab) {
         TerminalSessionStore.shared.closePanes(of: tab.id)
+        if let sessionID = tab.agentSessionID {
+            try? AgentKind.removeInteractiveLaunch(sessionID: sessionID)
+        }
     }
 
     // MARK: - Persistence
@@ -464,6 +477,7 @@ final class CenterTabStore {
         // it: from here the list in hand is the list on disk.
         unreadable.remove(workspaceID)
         tabsByWorkspace[workspaceID] = tabs
+        WorkspaceTabsStore.shared.updateOrder(tools: tabs.map(\.id), workspaceID: workspaceID)
         Self.persist(tabs, workspaceID: workspaceID)
     }
 

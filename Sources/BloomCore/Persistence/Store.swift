@@ -125,6 +125,27 @@ public actor Store {
         self.path = path
         self.db = try SQLiteDatabase(path: path)
         try Self.migrate(db)
+        try db.transaction { try Self.seedOceans(db) }
+    }
+
+    /// Adds every catalogue sea the table does not have yet, and touches nothing it does.
+    ///
+    /// On every open rather than only in the migration that made the table, because the seeding
+    /// migration has already run on every real database and a sea added to the catalogue later
+    /// would otherwise never reach one. A migration step of its own per catalogue change would
+    /// work until two branches each appended one, which is the numbering race `repairSchema`
+    /// describes. `INSERT OR IGNORE` leaves a claimed row's `used_at` exactly where it was, and
+    /// inside one transaction the few hundred inserts cost nothing worth measuring.
+    private nonisolated static func seedOceans(_ db: SQLiteDatabase) throws {
+        for ocean in OceanCatalog.all {
+            try db.run(
+                "INSERT OR IGNORE INTO oceans (slug, name, latitude, longitude) VALUES (?, ?, ?, ?)",
+                [
+                    .text(ocean.slug), .text(ocean.name),
+                    .double(ocean.latitude), .double(ocean.longitude),
+                ]
+            )
+        }
     }
 
     public static func inMemory() throws -> Store {
@@ -610,15 +631,7 @@ public actor Store {
                         used_at REAL
                     );
                     """)
-                for ocean in OceanCatalog.all {
-                    try db.run(
-                        "INSERT OR IGNORE INTO oceans (slug, name, latitude, longitude) VALUES (?, ?, ?, ?)",
-                        [
-                            .text(ocean.slug), .text(ocean.name),
-                            .double(ocean.latitude), .double(ocean.longitude),
-                        ]
-                    )
-                }
+                try seedOceans(db)
             },
 
             // The catalogue shipped with 268 islands mixed into what is meant to be a list of
@@ -1064,6 +1077,97 @@ public actor Store {
                 END;
                 """)
             },
+            { db in
+                for (table, column, definition) in [
+                    ("sessions", "interaction_mode", "TEXT NOT NULL DEFAULT 'build'"),
+                    ("deliveries", "interaction_mode", "TEXT"),
+                    ("deliveries", "delivery_state", "TEXT NOT NULL DEFAULT 'pending'"),
+                    ("deliveries", "provider_turn_id", "TEXT"),
+                ] {
+                    let columns = Set(try db.query("PRAGMA table_info(\(table));").compactMap { $0.string("name") })
+                    if !columns.contains(column) {
+                        try db.execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
+                        if column == "delivery_state" {
+                            try db.execute("UPDATE deliveries SET delivery_state = 'accepted' WHERE delivered_at IS NOT NULL;")
+                        }
+                    }
+                }
+            },
+
+            // Messages one workspace's agent sent another through `workspace_say`. See
+            // `WorkspaceMessage`.
+            //
+            // Beside `deliveries` rather than a column on it, because the delivery is addressed to
+            // a chat and drained, and this is what the SENDING chat reads to draw its call: queued,
+            // delivered or cancelled. `state` follows the delivery, moved in the same statements
+            // that move it: see `markDelivered`, `cancelDelivery` and `restoreDelivery`.
+            //
+            // No foreign keys, following `deliveries`: a reply finds its chat through this row, and
+            // it should outlive either workspace being archived. The names are copied in for the
+            // same reason, so a bubble still says where a message came from afterwards.
+            sql("""
+            CREATE TABLE IF NOT EXISTS workspace_messages (
+                id TEXT PRIMARY KEY,
+                source_workspace_id TEXT,
+                source_workspace_name TEXT NOT NULL DEFAULT '',
+                source_project_name TEXT NOT NULL DEFAULT '',
+                source_session_id TEXT,
+                source_chat TEXT NOT NULL DEFAULT '',
+                target_workspace_id TEXT,
+                target_workspace_name TEXT NOT NULL DEFAULT '',
+                target_project_name TEXT NOT NULL DEFAULT '',
+                target_session_id TEXT,
+                target_chat TEXT NOT NULL DEFAULT '',
+                reply_session_id TEXT,
+                body TEXT NOT NULL,
+                delivery_id TEXT,
+                state TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                delivered_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS workspace_messages_delivery ON workspace_messages(delivery_id);
+            CREATE INDEX IF NOT EXISTS workspace_messages_route
+                ON workspace_messages(source_workspace_id, target_workspace_id, state);
+            """),
+
+            // A chat that asked `workspace_say` or `workspace_start` to tell it when the other
+            // workspace's turn comes to rest. See `WorkspaceDoneWatch`.
+            //
+            // A table of its own rather than two columns on `workspace_messages`, because a start
+            // has no message row and both kinds are looked up the same way: by the workspace whose
+            // turn just ended, unspent. `notified_at` is the whole of "at most once": the notice
+            // goes only when the `UPDATE` setting it changed a row. `notify_when_done` on the
+            // message is the record of what was asked, for a reader of that row.
+            //
+            // The column is added only when missing, because `ALTER TABLE ADD COLUMN` has no `IF
+            // NOT EXISTS` and the store's own tests rewind `user_version` to reproduce an old
+            // schema, which would otherwise take the migration transaction with it.
+            { db in
+                let columns = Set(
+                    try db.query("PRAGMA table_info(workspace_messages);").compactMap { $0.string("name") }
+                )
+                if !columns.contains("notify_when_done") {
+                    try db.execute(
+                        "ALTER TABLE workspace_messages ADD COLUMN notify_when_done INTEGER NOT NULL DEFAULT 0;"
+                    )
+                }
+                try db.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_done_watches (
+                    id TEXT PRIMARY KEY,
+                    message_id TEXT,
+                    watcher_session_id TEXT NOT NULL,
+                    target_workspace_id TEXT NOT NULL,
+                    target_workspace_name TEXT NOT NULL DEFAULT '',
+                    target_project_name TEXT NOT NULL DEFAULT '',
+                    target_session_id TEXT,
+                    target_chat TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    notified_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS workspace_done_watches_target
+                    ON workspace_done_watches(target_workspace_id, notified_at);
+                """)
+            },
         ]
 
         let current = Int(try db.readUserVersion())
@@ -1474,6 +1578,19 @@ public actor Store {
                 try db.run(
                     "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
                     [.text(id)]
+                )
+                // A message between workspaces still queued into or out of this one will now never
+                // go, so the bubble in the other chat has to stop saying "queued" and offering Cancel.
+                try db.run(
+                    """
+                    UPDATE workspace_messages SET state = 'cancelled'
+                    WHERE state = 'queued' AND delivery_id IN (
+                        SELECT id FROM deliveries
+                        WHERE source_workspace_id = ?
+                           OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
+                    )
+                    """,
+                    [.text(id), .text(id)]
                 )
                 try db.run(
                     """
@@ -1937,9 +2054,9 @@ public actor Store {
             """
             INSERT INTO sessions (
                 id, workspace_id, parent_session_id, side_conversation_parent_id, title, agent_session_id, model, effort,
-                agent_kind, permission_mode, state, sort_order, created_at, updated_at,
+                agent_kind, permission_mode, interaction_mode, state, sort_order, created_at, updated_at,
                 archived_at, last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 side_conversation_parent_id = excluded.side_conversation_parent_id,
                 title = excluded.title,
@@ -1948,6 +2065,7 @@ public actor Store {
                 effort = excluded.effort,
                 agent_kind = excluded.agent_kind,
                 permission_mode = excluded.permission_mode,
+                interaction_mode = excluded.interaction_mode,
                 state = excluded.state,
                 sort_order = excluded.sort_order,
                 updated_at = excluded.updated_at,
@@ -1965,7 +2083,7 @@ public actor Store {
                 .text(session.title),
                 session.agentSessionID.map { .text($0) } ?? .null,
                 .text(session.model), .text(session.effort), .text(session.agentKind.rawValue),
-                .text(session.permissionMode.rawValue),
+                .text(session.permissionMode.rawValue), .text(session.interactionMode.rawValue),
                 .text(session.state.rawValue), .int(Int64(session.sortOrder)),
                 .double(session.createdAt.timeIntervalSince1970),
                 .double(session.updatedAt.timeIntervalSince1970),
@@ -2021,6 +2139,7 @@ public actor Store {
         model: String? = nil,
         effort: String? = nil,
         permissionMode: PermissionMode? = nil,
+        interactionMode: InteractionMode? = nil,
         implementationMode: PermissionMode? = nil,
         /// Only ever set on a chat that has not spoken yet. Changing the backend of a chat that
         /// already has a message strands its transcript half in one vocabulary and half in the
@@ -2044,6 +2163,7 @@ public actor Store {
                 model = COALESCE(?, model),
                 effort = COALESCE(?, effort),
                 permission_mode = COALESCE(?, permission_mode),
+                interaction_mode = COALESCE(?, interaction_mode),
                 agent_kind = COALESCE(?, agent_kind),
                 updated_at = ?
             WHERE id = ?
@@ -2053,6 +2173,7 @@ public actor Store {
                 model.map { .text($0) } ?? .null,
                 effort.map { .text($0) } ?? .null,
                 permissionMode.map { .text($0.rawValue) } ?? .null,
+                interactionMode.map { .text($0.rawValue) } ?? .null,
                 agentKind.map { .text($0.rawValue) } ?? .null,
                 .double(Date().timeIntervalSince1970),
                 .text(id),
@@ -2651,9 +2772,12 @@ public actor Store {
     /// Queue acceptance and draft removal either both commit or neither does. A newer saved
     /// draft belongs to the next message and must survive an earlier submission completing.
     @discardableResult
-    public func enqueueDelivery(_ delivery: Delivery, clearingDraftMatching draft: String?) throws -> Delivery {
+    public func enqueueDelivery(
+        _ delivery: Delivery, clearingDraftMatching draft: String?, sourcePlan: PlanArtefact? = nil
+    ) throws -> Delivery {
         try db.transaction {
             let queued = try enqueueDelivery(delivery)
+            if let sourcePlan { try queuePlanSource(sourcePlan, delivery: queued) }
             if let draft, try self.draft(sessionID: delivery.targetSessionID) == draft {
                 try saveDraft(sessionID: delivery.targetSessionID, body: "")
             }
@@ -2670,7 +2794,7 @@ public actor Store {
         try db.query(
             """
             SELECT * FROM deliveries
-            WHERE target_session_id = ? AND delivered_at IS NULL
+            WHERE target_session_id = ? AND delivery_state IN ('pending', 'uncertain')
             ORDER BY created_at, rowid
             """,
             [.text(sessionID)]
@@ -2683,12 +2807,16 @@ public actor Store {
     /// the ones on disk. Callers hold that id to cancel the row again.
     @discardableResult
     public func enqueueDelivery(_ delivery: Delivery) throws -> Delivery {
+        var delivery = delivery
+        if delivery.kind == .owner, delivery.interactionMode == nil {
+            delivery.interactionMode = try session(id: delivery.targetSessionID)?.interactionMode
+        }
         try db.run(
             """
             INSERT INTO deliveries
                 (id, target_session_id, source_workspace_id, kind, verdict, body, crew_payload,
-                 created_at, delivered_at, delivered_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 created_at, delivered_at, delivered_seq, delivery_state, interaction_mode, provider_turn_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 .text(delivery.id),
@@ -2701,9 +2829,78 @@ public actor Store {
                 .double(delivery.createdAt.timeIntervalSince1970),
                 delivery.deliveredAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 delivery.deliveredSeq.map { .int(Int64($0)) } ?? .null,
+                .text(delivery.state.rawValue),
+                delivery.interactionMode.map { .text($0.rawValue) } ?? .null,
+                delivery.providerTurnID.map { .text($0) } ?? .null,
             ]
         )
         return delivery
+    }
+
+    /// Claim and transcript insertion share a transaction. Retrying the same delivery reuses
+    /// its message, so a crash or a lost acknowledgement cannot duplicate the user's words.
+    public func claimDelivery(id: DeliveryID) throws -> Bool {
+        try db.transaction {
+            guard let row = try db.query("SELECT * FROM deliveries WHERE id = ?", [.text(id)]).first,
+                  row.string("delivery_state") == "pending" else { return false }
+            let delivery = Self.delivery(from: row)
+            var seq = delivery.deliveredSeq
+            if seq == nil {
+                let payload = delivery.crewPayload ?? Data(JSONValue.object([
+                    "type": .string("user"),
+                    "message": .object(["role": .string("user"), "content": .array([
+                        .object(["type": .string("text"), "text": .string(delivery.body)]),
+                    ])]),
+                ]).compactJSON.utf8)
+                let next = try nextSeqLocked(sessionID: delivery.targetSessionID)
+                _ = try insert(Message(sessionID: delivery.targetSessionID, seq: next,
+                    kind: delivery.crewPayload == nil ? .user : .crew, payload: payload,
+                    createdAt: delivery.createdAt))
+                seq = next
+            }
+            try db.run("UPDATE deliveries SET delivery_state = 'claimed', delivered_seq = ? WHERE id = ?", [
+                seq.map { .int(Int64($0)) } ?? .null, .text(id),
+            ])
+            return true
+        }
+    }
+
+    /// Written before touching the provider. A crash from here on has an unknown outcome;
+    /// neither a timeout nor a restart is evidence that it is safe to send again.
+    public func beginDeliveryDispatch(id: DeliveryID) throws {
+        try db.run("UPDATE deliveries SET delivery_state = 'uncertain' WHERE id = ? AND delivery_state = 'claimed'", [.text(id)])
+        guard db.changedRowCount == 1 else { throw DeliveryDispatchError.notClaimed }
+    }
+
+    public func acceptDelivery(id: DeliveryID, providerTurnID: String? = nil) throws {
+        try db.transaction {
+            try db.run("UPDATE deliveries SET delivery_state = 'accepted', delivered_at = ?, provider_turn_id = ? WHERE id = ? AND delivery_state = 'uncertain'", [
+                .double(Date().timeIntervalSince1970), providerTurnID.map { .text($0) } ?? .null, .text(id),
+            ])
+            if db.changedRowCount == 1, let accepted = try delivery(id: id) {
+                try acceptPlanSource(delivery: accepted)
+                // The agent has it, so the bubble in the sending chat stops saying "queued". See
+                // `markDelivered`, the other door a delivery goes out through.
+                try db.run(
+                    "UPDATE workspace_messages SET state = 'delivered', delivered_at = ? WHERE delivery_id = ? AND state = 'queued'",
+                    [.double(accepted.deliveredAt?.timeIntervalSince1970 ?? Date().timeIntervalSince1970), .text(id)]
+                )
+            }
+        }
+    }
+
+    public func delivery(id: DeliveryID) throws -> Delivery? {
+        try db.query("SELECT * FROM deliveries WHERE id = ?", [.text(id)]).first.map(Self.delivery(from:))
+    }
+
+    /// Only claims known not to have reached dispatch are automatically made pending again.
+    /// Uncertain attempts remain visible and require an explicit resend.
+    public func recoverDeliveryClaims() throws {
+        try db.run("UPDATE deliveries SET delivery_state = 'pending' WHERE delivery_state = 'claimed'")
+    }
+
+    public func releaseDeliveryClaim(id: DeliveryID) throws {
+        try db.run("UPDATE deliveries SET delivery_state = 'pending' WHERE id = ? AND delivery_state = 'claimed'", [.text(id)])
     }
 
     /// Marks one as gone.
@@ -2718,10 +2915,19 @@ public actor Store {
     @discardableResult
     public func markDelivered(id: DeliveryID, seq: Int? = nil, at date: Date = Date()) throws -> Bool {
         try db.run(
-            "UPDATE deliveries SET delivered_at = ?, delivered_seq = ? WHERE id = ? AND delivered_at IS NULL",
+            "UPDATE deliveries SET delivered_at = ?, delivered_seq = ?, delivery_state = 'accepted' WHERE id = ? AND delivery_state = 'pending'",
             [.double(date.timeIntervalSince1970), seq.map { .int(Int64($0)) } ?? .null, .text(id)]
         )
-        return db.changedRowCount == 1
+        let marked = db.changedRowCount == 1
+        // A message from another workspace follows its delivery, here rather than in the drain, so
+        // the bubble in the sending chat cannot say "queued" about a turn that is already running.
+        if marked {
+            try db.run(
+                "UPDATE workspace_messages SET state = 'delivered', delivered_at = ? WHERE delivery_id = ? AND state = 'queued'",
+                [.double(date.timeIntervalSince1970), .text(id)]
+            )
+        }
+        return marked
     }
 
     /// Takes one back out of the queue, because whoever asked for it changed their mind.
@@ -2740,8 +2946,16 @@ public actor Store {
     /// in the gap, because there is no gap.
     @discardableResult
     public func cancelDelivery(id: DeliveryID) throws -> Bool {
-        try db.run("DELETE FROM deliveries WHERE id = ? AND delivered_at IS NULL", [.text(id)])
-        return db.changedRowCount == 1
+        try db.run("DELETE FROM deliveries WHERE id = ? AND delivery_state IN ('pending', 'uncertain')", [.text(id)])
+        let removed = db.changedRowCount == 1
+        // Whichever end cancelled it, the other end's bubble has to say so. See `markDelivered`.
+        if removed {
+            try db.run(
+                "UPDATE workspace_messages SET state = 'cancelled' WHERE delivery_id = ? AND state = 'queued'",
+                [.text(id)]
+            )
+        }
+        return removed
     }
 
     /// Puts one back in the queue after a send that never started a turn.
@@ -2752,9 +2966,222 @@ public actor Store {
     /// than reading as sent.
     public func restoreDelivery(id: DeliveryID) throws {
         try db.run(
-            "UPDATE deliveries SET delivered_at = NULL, delivered_seq = NULL WHERE id = ?",
+            "UPDATE deliveries SET delivered_at = NULL, delivery_state = 'pending', provider_turn_id = NULL WHERE id = ?",
             [.text(id)]
         )
+        try db.run(
+            "UPDATE workspace_messages SET state = 'queued', delivered_at = NULL WHERE delivery_id = ? AND state = 'delivered'",
+            [.text(id)]
+        )
+    }
+
+    // MARK: - Workspace messages
+
+    /// Puts a message from another workspace in a chat's queue, and records it, in one transaction.
+    ///
+    /// One transaction because the two rows describe one thing from two ends: the delivery is what
+    /// the receiving chat drains, and this row is what the sending chat draws. A delivery with no
+    /// row would be a message its sender could never see the fate of; a row with no delivery would
+    /// be a bubble saying "queued" for ever.
+    @discardableResult
+    public func enqueueWorkspaceMessage(
+        _ message: WorkspaceMessage, into chat: Session
+    ) throws -> WorkspaceMessage {
+        try db.transaction {
+            let delivery = try enqueueDelivery(Delivery(
+                targetSessionID: chat.id,
+                sourceWorkspaceID: message.source.workspaceID,
+                kind: .message,
+                crew: message.crewMessage,
+                createdAt: message.createdAt
+            ))
+            try db.run(
+                """
+                INSERT INTO workspace_messages
+                    (id, source_workspace_id, source_workspace_name, source_project_name,
+                     source_session_id, source_chat, target_workspace_id, target_workspace_name,
+                     target_project_name, target_session_id, target_chat, reply_session_id, body,
+                     delivery_id, state, created_at, delivered_at, notify_when_done)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, NULL, ?)
+                """,
+                [
+                    .text(message.id),
+                    message.source.workspaceID.map { .text($0) } ?? .null,
+                    .text(message.source.workspace),
+                    .text(message.source.project),
+                    message.source.sessionID.map { .text($0) } ?? .null,
+                    .text(message.source.chat),
+                    message.target.workspaceID.map { .text($0) } ?? .null,
+                    .text(message.target.workspace),
+                    .text(message.target.project),
+                    .text(chat.id),
+                    .text(chat.title),
+                    message.replySessionID.map { .text($0) } ?? .null,
+                    .text(message.text),
+                    .text(delivery.id),
+                    .double(message.createdAt.timeIntervalSince1970),
+                    .int(message.notifyWhenDone ? 1 : 0),
+                ]
+            )
+            // In the same transaction, so a message that asked to be told about is never in a
+            // queue without the promise, and a promise never outlives a message that failed to go
+            // in. A sender with no chat has nowhere to be told, and the tool has already said so.
+            if message.notifyWhenDone, let watcher = message.source.sessionID,
+               let targetWorkspaceID = message.target.workspaceID {
+                try insert(WorkspaceDoneWatch(
+                    cause: .message(message.id, state: .queued),
+                    watcherSessionID: watcher,
+                    target: WorkspaceMessageEnd(
+                        workspaceID: targetWorkspaceID,
+                        workspace: message.target.workspace,
+                        project: message.target.project,
+                        sessionID: chat.id,
+                        chat: chat.title
+                    ),
+                    createdAt: message.createdAt
+                ))
+            }
+            return try workspaceMessage(id: message.id) ?? message
+        }
+    }
+
+    /// What one workspace has sent another since a moment, cancelled messages left out, newest
+    /// first. The count `WorkspaceSayThrottle` brakes on.
+    public func workspaceMessages(
+        from source: WorkspaceID, to target: WorkspaceID, since: Date
+    ) throws -> [WorkspaceMessage] {
+        try db.query(
+            """
+            SELECT * FROM workspace_messages
+            WHERE source_workspace_id = ? AND target_workspace_id = ? AND state != 'cancelled'
+              AND created_at >= ?
+            ORDER BY created_at DESC, rowid DESC
+            """,
+            [.text(source), .text(target), .double(since.timeIntervalSince1970)]
+        ).map(Self.workspaceMessage(from:))
+    }
+
+    // MARK: - Workspace done watches
+
+    /// Records a chat's request to hear when a workspace it started comes to rest. A message's
+    /// watch is written by `enqueueWorkspaceMessage` instead, inside its transaction.
+    public func addWorkspaceDoneWatch(_ watch: WorkspaceDoneWatch) throws {
+        try insert(watch)
+    }
+
+    private func insert(_ watch: WorkspaceDoneWatch) throws {
+        let messageID: SQLValue = if case .message(let id, _) = watch.cause { .text(id) } else { .null }
+        try db.run(
+            """
+            INSERT INTO workspace_done_watches
+                (id, message_id, watcher_session_id, target_workspace_id, target_workspace_name,
+                 target_project_name, target_session_id, target_chat, created_at, notified_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            [
+                .text(watch.id),
+                messageID,
+                .text(watch.watcherSessionID),
+                watch.target.workspaceID.map { .text($0) } ?? .null,
+                .text(watch.target.workspace),
+                .text(watch.target.project),
+                watch.target.sessionID.map { .text($0) } ?? .null,
+                .text(watch.target.chat),
+                .double(watch.createdAt.timeIntervalSince1970),
+            ]
+        )
+    }
+
+    /// Every watch on a workspace that has not been spent, oldest first, each with its message's
+    /// state as it is now. A watch whose message row has gone reads as cancelled, which spends it
+    /// with nothing said.
+    public func unspentWorkspaceDoneWatches(targetWorkspaceID: WorkspaceID) throws -> [WorkspaceDoneWatch] {
+        try db.query(
+            """
+            SELECT w.*, m.state AS message_state FROM workspace_done_watches w
+            LEFT JOIN workspace_messages m ON m.id = w.message_id
+            WHERE w.target_workspace_id = ? AND w.notified_at IS NULL
+            ORDER BY w.created_at, w.rowid
+            """,
+            [.text(targetWorkspaceID)]
+        ).map(Self.workspaceDoneWatch(from:))
+    }
+
+    public func workspaceDoneWatch(id: WorkspaceDoneWatchID) throws -> WorkspaceDoneWatch? {
+        try db.query(
+            """
+            SELECT w.*, m.state AS message_state FROM workspace_done_watches w
+            LEFT JOIN workspace_messages m ON m.id = w.message_id
+            WHERE w.id = ?
+            """,
+            [.text(id)]
+        ).first.map(Self.workspaceDoneWatch(from:))
+    }
+
+    /// Spends a watch. True only for the call that spent it, which is what makes a notice go at
+    /// most once: two endings arriving together both ask, and one of them changes the row.
+    @discardableResult
+    public func claimWorkspaceDoneWatch(id: WorkspaceDoneWatchID, at date: Date = Date()) throws -> Bool {
+        try db.run(
+            "UPDATE workspace_done_watches SET notified_at = ? WHERE id = ? AND notified_at IS NULL",
+            [.double(date.timeIntervalSince1970), .text(id)]
+        )
+        return db.changedRowCount == 1
+    }
+
+    public func workspaceMessage(id: WorkspaceMessageID) throws -> WorkspaceMessage? {
+        try db.query("SELECT * FROM workspace_messages WHERE id = ?", [.text(id)])
+            .first.map(Self.workspaceMessage(from:))
+    }
+
+    public func workspaceMessage(deliveryID: DeliveryID) throws -> WorkspaceMessage? {
+        try db.query("SELECT * FROM workspace_messages WHERE delivery_id = ?", [.text(deliveryID)])
+            .first.map(Self.workspaceMessage(from:))
+    }
+
+    /// The last message from one workspace that reached another's agent.
+    ///
+    /// The reply path turns on this: its source chat is the chat an answer should land in.
+    /// Delivered only, because a message still queued has not been read, so nothing can be
+    /// answering it, and it may yet be cancelled.
+    public func latestWorkspaceMessage(
+        from source: WorkspaceID, to target: WorkspaceID
+    ) throws -> WorkspaceMessage? {
+        try db.query(
+            """
+            SELECT * FROM workspace_messages
+            WHERE source_workspace_id = ? AND target_workspace_id = ? AND state = 'delivered'
+            ORDER BY created_at DESC, rowid DESC LIMIT 1
+            """,
+            [.text(source), .text(target)]
+        ).first.map(Self.workspaceMessage(from:))
+    }
+
+    /// Takes a queued message back out, from the chat that sent it. Nil when it had already gone,
+    /// or is going.
+    ///
+    /// **Pending only, where the receiving chat's own Delete also takes `uncertain`.** A delivery is
+    /// uncertain while its turn is being started: the crew row is already in the receiving
+    /// transcript and the runner is waiting on the CLI. That chat's Delete is held off for exactly
+    /// that window by the transcript that is dispatching it, and this side cannot see that
+    /// transcript. Deleting here would tell the sender "its agent never saw it" about a turn that
+    /// then starts, so a message that far along is treated as gone.
+    @discardableResult
+    public func cancelWorkspaceMessage(id: WorkspaceMessageID) throws -> WorkspaceMessage? {
+        try db.transaction {
+            guard let message = try workspaceMessage(id: id), message.state == .queued,
+                  let deliveryID = message.deliveryID
+            else { return nil }
+            try db.run(
+                "DELETE FROM deliveries WHERE id = ? AND delivery_state = 'pending'", [.text(deliveryID)]
+            )
+            guard db.changedRowCount == 1 else { return nil }
+            try db.run(
+                "UPDATE workspace_messages SET state = 'cancelled' WHERE id = ? AND state = 'queued'",
+                [.text(id)]
+            )
+            return try workspaceMessage(id: id)
+        }
     }
 
     // MARK: - Review comments
@@ -3204,6 +3631,7 @@ public actor Store {
             next.effort = controls.effort
             next.agentKind = controls.agentKind
             next.permissionMode = controls.permissionMode
+            next.interactionMode = controls.interactionMode
             try upsert(next)
             for (key, value) in controls.settings(sessionID: next.id) {
                 try setSetting(key, value)
@@ -3227,6 +3655,7 @@ public actor Store {
             next.effort = controls.effort
             next.agentKind = controls.agentKind
             next.permissionMode = controls.permissionMode
+            next.interactionMode = controls.interactionMode
             try upsert(next)
             for (key, value) in controls.settings(sessionID: next.id) {
                 try setSetting(key, value)
@@ -3253,6 +3682,7 @@ public actor Store {
                 next.effort = controls.effort
                 next.agentKind = controls.agentKind
                 next.permissionMode = controls.permissionMode
+            next.interactionMode = controls.interactionMode
             }
             try upsert(next)
             if let controls {
@@ -3331,31 +3761,41 @@ public actor Store {
         Int(try db.query("SELECT COUNT(*) AS n FROM oceans WHERE used_at IS NULL").first?.int("n") ?? 0)
     }
 
-    /// Spends a sea, or repeats one once the catalogue has run dry.
+    /// Draws a sea from the whole catalogue, and spends it if nobody has sailed it yet.
     ///
-    /// The random pick and the write happen inside the actor with no suspension between them, so
-    /// two workspaces created back to back cannot draw the same sea as a first use. A repeat
-    /// comes back with its stored `used_at` untouched, because that date records the discovery
-    /// and a repeat is not one. Nil only when the table is empty, which seeding makes impossible,
-    /// but a defensive nil beats a crash in the middle of creating a workspace.
+    /// The draw is over every sea, used or not. It used to be over the unused ones only, which
+    /// made every new workspace a discovery and filled the map in exactly as many workspaces as
+    /// there are seas. Drawn from all of them, the early voyages are nearly all discoveries and
+    /// the last few seas take a long time to turn up, which is what makes a full chart worth having.
+    ///
+    /// Drawn from `OceanCatalog.all` rather than from the table, because the table still holds
+    /// the islands the first catalogue shipped with wherever one was claimed, and those are kept
+    /// for the map, not to be handed out as a name again.
+    ///
+    /// The draw and the write happen inside the actor with no suspension between them, so two
+    /// workspaces created back to back cannot both discover the same sea. A repeat comes back with
+    /// its stored `used_at` untouched, because that date records the discovery and a repeat is not
+    /// one. Nil only when the drawn sea has no row, which seeding makes impossible, but a
+    /// defensive nil beats a crash in the middle of creating a workspace.
     public func claimOcean(now: Date = Date()) throws -> OceanPick? {
-        if let row = try db.query(
-            "SELECT * FROM oceans WHERE used_at IS NULL ORDER BY RANDOM() LIMIT 1"
-        ).first {
-            var ocean = Self.ocean(from: row)
-            ocean.usedAt = now
-            try db.run(
-                "UPDATE oceans SET used_at = ? WHERE slug = ?",
-                [.double(now.timeIntervalSince1970), .text(ocean.slug)]
-            )
-            return OceanPick(
-                ocean: ocean, isFirstUse: true, remainingUndiscovered: try unusedOceanCount()
-            )
-        }
-        guard let row = try db.query("SELECT * FROM oceans ORDER BY RANDOM() LIMIT 1").first else {
+        guard let slug = OceanCatalog.all.randomElement()?.slug,
+              let row = try db.query("SELECT * FROM oceans WHERE slug = ?", [.text(slug)]).first else {
             return nil
         }
-        return OceanPick(ocean: Self.ocean(from: row), isFirstUse: false, remainingUndiscovered: 0)
+        var ocean = Self.ocean(from: row)
+        guard ocean.usedAt == nil else {
+            return OceanPick(
+                ocean: ocean, isFirstUse: false, remainingUndiscovered: try unusedOceanCount()
+            )
+        }
+        ocean.usedAt = now
+        try db.run(
+            "UPDATE oceans SET used_at = ? WHERE slug = ?",
+            [.double(now.timeIntervalSince1970), .text(ocean.slug)]
+        )
+        return OceanPick(
+            ocean: ocean, isFirstUse: true, remainingUndiscovered: try unusedOceanCount()
+        )
     }
 
     // MARK: - Row mapping
@@ -3419,7 +3859,65 @@ public actor Store {
             crewPayload: row.data("crew_payload"),
             createdAt: row.date("created_at") ?? Date(),
             deliveredAt: row.date("delivered_at"),
-            deliveredSeq: row.int("delivered_seq").map(Int.init)
+            deliveredSeq: row.int("delivered_seq").map(Int.init),
+            state: Delivery.State(rawValue: row.string("delivery_state") ?? ""),
+            interactionMode: row.string("interaction_mode").flatMap(InteractionMode.init(rawValue:)),
+            providerTurnID: row.string("provider_turn_id")
+        )
+    }
+
+    private static func workspaceMessage(from row: Row) -> WorkspaceMessage {
+        WorkspaceMessage(
+            stored: WorkspaceMessageID(row.string("id") ?? newID()),
+            source: WorkspaceMessageEnd(
+                workspaceID: row.string("source_workspace_id").map(WorkspaceID.init),
+                workspace: row.string("source_workspace_name") ?? "",
+                project: row.string("source_project_name") ?? "",
+                sessionID: row.string("source_session_id").map(SessionID.init),
+                chat: row.string("source_chat") ?? ""
+            ),
+            target: WorkspaceMessageEnd(
+                workspaceID: row.string("target_workspace_id").map(WorkspaceID.init),
+                workspace: row.string("target_workspace_name") ?? "",
+                project: row.string("target_project_name") ?? "",
+                sessionID: row.string("target_session_id").map(SessionID.init),
+                chat: row.string("target_chat") ?? ""
+            ),
+            replySessionID: row.string("reply_session_id").map(SessionID.init),
+            text: row.string("body") ?? "",
+            deliveryID: row.string("delivery_id").map(DeliveryID.init),
+            // A word this build does not know is read as cancelled, which offers nothing to press.
+            state: WorkspaceMessage.State(rawValue: row.string("state") ?? "") ?? .cancelled,
+            createdAt: row.date("created_at") ?? Date(),
+            deliveredAt: row.date("delivered_at"),
+            notifyWhenDone: (row.int("notify_when_done") ?? 0) != 0
+        )
+    }
+
+    private static func workspaceDoneWatch(from row: Row) -> WorkspaceDoneWatch {
+        let cause: WorkspaceDoneWatch.Cause = if let messageID = row.string("message_id") {
+            // A message row that has gone, or a state this build does not know, reads as
+            // cancelled, which spends the watch with nothing said.
+            .message(
+                WorkspaceMessageID(messageID),
+                state: WorkspaceMessage.State(rawValue: row.string("message_state") ?? "") ?? .cancelled
+            )
+        } else {
+            .start
+        }
+        return WorkspaceDoneWatch(
+            id: WorkspaceDoneWatchID(row.string("id") ?? newID()),
+            cause: cause,
+            watcherSessionID: SessionID(row.string("watcher_session_id") ?? ""),
+            target: WorkspaceMessageEnd(
+                workspaceID: row.string("target_workspace_id").map(WorkspaceID.init),
+                workspace: row.string("target_workspace_name") ?? "",
+                project: row.string("target_project_name") ?? "",
+                sessionID: row.string("target_session_id").map(SessionID.init),
+                chat: row.string("target_chat") ?? ""
+            ),
+            createdAt: row.date("created_at") ?? Date(),
+            notifiedAt: row.date("notified_at")
         )
     }
 
@@ -3472,6 +3970,7 @@ public actor Store {
             // A row written before the column existed reads as Claude Code, which is what it was.
             agentKind: AgentKind(rawValue: row.string("agent_kind") ?? "") ?? .claudeCode,
             permissionMode: PermissionMode(rawValue: row.string("permission_mode") ?? "") ?? .acceptEdits,
+            interactionMode: InteractionMode(rawValue: row.string("interaction_mode") ?? "") ?? .build,
             state: SessionState(rawValue: row.string("state") ?? "idle") ?? .idle,
             sortOrder: Int(row.int("sort_order") ?? 0),
             createdAt: row.date("created_at") ?? Date(),

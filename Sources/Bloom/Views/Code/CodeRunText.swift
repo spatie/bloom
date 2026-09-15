@@ -62,6 +62,9 @@ struct CodeRunText: View, Equatable {
 
     private var joined: AttributedString {
         var output = AttributedString()
+        let scheme = ColourThemePreference.shared.codeScheme
+        let colours = Palette.codeColours
+        let schemeHash = scheme.hashValue
         for (offset, line) in lines.enumerated() {
             if offset > 0 { output += AttributedString("\n") }
             output += CodeText.attributed(
@@ -69,7 +72,7 @@ struct CodeRunText: View, Equatable {
                 language: language,
                 carry: line.carry,
                 emphasis: line.emphasis,
-                emphasisColor: line.emphasisColor
+                emphasisColor: line.emphasisColor, scheme: scheme, colours: colours, schemeHash: schemeHash
             )
         }
         return output

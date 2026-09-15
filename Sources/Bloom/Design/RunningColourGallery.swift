@@ -136,75 +136,96 @@ struct RunningColourGallery: View {
         }
     }
 
-    // MARK: The other two places the window says it
+    // MARK: The other place the window says it
 
-    /// The tab's dot and the tab strip's rule, which are the other two marks the report named, with
-    /// a passing tick beside the dot so the pair can be judged rather than admired on its own, and
-    /// the fill the rule has to survive being drawn above.
+    /// Busy tabs on the strip, beside a tab wearing a passing tick so the pair can be judged rather
+    /// than admired on its own, and the column's segment with no strip.
+    ///
+    /// The report named a dot on the tab and a rule under the strip. Neither is drawn any more, nor
+    /// the crest and the shimmer that followed: a band sweeps through a busy tab's capsule and a
+    /// segment along a column's top edge (`BusySweep`). So the rows are the sweep at one point in
+    /// its crossing, on the selected capsule and on a background tab's wash, then what Reduce Motion
+    /// draws in each place instead.
     private var elsewhere: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("On a tab, on the rule under the strip, and above a user's own message")
+            Text("On busy tabs, and along a column with no strip")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
-            Text("Held still: what Reduce Motion draws, and the only figure a render can photograph.")
+            Text("Held still: one frame of the sweep, then what Reduce Motion draws.")
                 .font(Typo.micro)
                 .foregroundStyle(Palette.textSecondary)
 
-            HStack(spacing: 10) {
-                tab { ActivityDot(isActive: true) }
-                tab { WorkspaceStatusGlyph(status: .checksPassed) }
-                Spacer(minLength: 0)
-            }
+            ForEach([false, true], id: \.self) { isStill in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 0) {
+                        tab(isSelected: true, isBusy: true, isStill: isStill) {
+                            Image(systemName: PaneGlyph.chat).font(Typo.caption)
+                        }
+                        tab(isSelected: false, isBusy: true, isStill: isStill) {
+                            Image(systemName: PaneGlyph.chat).font(Typo.caption)
+                        }
+                        tab(isSelected: false, isBusy: false, isStill: isStill) {
+                            WorkspaceStatusGlyph(status: .checksPassed)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 4)
+                    .frame(width: Self.columnWidth, height: 32)
+                    .background(Palette.sidebar)
 
-            ZStack(alignment: .bottom) {
-                Palette.sidebar
-                Hairline()
-                ActivityRuleFigure(variant: .crest, isMoving: false)
-            }
-            .frame(width: Self.ruleWidth, height: 26)
+                    ZStack(alignment: .top) {
+                        Palette.windowBackground
+                        if isStill {
+                            LinearGradient(
+                                colors: [Palette.busyColumnStill, Palette.busyColumnStill.opacity(0)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                            .frame(height: BusySweep.columnStillHeight)
+                        } else {
+                            BusySweepStill(figure: .column, width: Self.columnWidth, progress: 0.45)
+                                .frame(height: BusySweep.columnThickness)
+                        }
+                    }
+                    .frame(width: Self.columnWidth, height: 44)
 
-            bubble
+                    Text(isStill ? "Reduce Motion" : "Working, 45 per cent through a crossing")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
         }
     }
 
-    /// The rule with the house fill directly under it, which is the case a blue rule has and an
-    /// orange one did not.
-    ///
-    /// A user's own message is drawn in `Palette.accentFill`, `#197593`, and the busy rule is now
-    /// a blue 12.9 from it. `ActivityRuleGallery` has carried this row since the rule was the
-    /// accent, on the argument that a mark in the accent an inch above a block of the accent is the
-    /// one place a lit line can be lit and still not be seen. That argument came back the moment
-    /// the mark went blue, so the row is here too rather than one page away: the claim is that
-    /// twelve degrees round the wheel and a step up in lightness are enough, and this is where it
-    /// is either true or not.
-    private var bubble: some View {
-        HStack {
-            Spacer(minLength: 0)
-            Text("Have another look at the transcript stutter")
-                .font(Typo.body)
-                .foregroundStyle(Palette.textInverted)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Palette.accentFill, in: RoundedRectangle(cornerRadius: 12))
-        }
-        .frame(width: Self.ruleWidth)
-    }
+    /// The centre column at a window somebody would work in. `ActivityRuleGallery` uses the same
+    /// number and for the same reason.
+    private static let columnWidth: CGFloat = 760
+    /// One tab of a strip at that width, which is `TabItemView`'s widest.
+    private static let tabWidth: CGFloat = 160
 
-    /// The centre column at a window somebody would work in, which is the width the rule was tuned
-    /// at. `ActivityRuleGallery` uses the same number and for the same reason.
-    private static let ruleWidth: CGFloat = 760
-
-    private func tab<Content: View>(@ViewBuilder mark: () -> Content) -> some View {
-        HStack(spacing: Metrics.spacingSmall) {
+    private func tab<Content: View>(
+        isSelected: Bool, isBusy: Bool, isStill: Bool, @ViewBuilder mark: () -> Content
+    ) -> some View {
+        HStack(spacing: 6) {
             mark()
             Text("Chat")
-                .font(Typo.label)
+                .font(Typo.caption)
                 .foregroundStyle(Palette.textPrimary)
         }
-        .padding(.horizontal, 10)
-        .frame(height: 26)
-        .background(Palette.surfaceSunken)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .frame(width: Self.tabWidth, height: TabItemView.tabHeight)
+        .background {
+            ZStack {
+                if isSelected {
+                    Capsule().fill(Palette.surface)
+                    if isBusy && isStill { Capsule().fill(Palette.busyTabStill) }
+                } else if isBusy {
+                    Capsule().fill(Palette.busyTabWash)
+                }
+                if isBusy && !isStill {
+                    BusySweepStill(figure: .tab, width: Self.tabWidth, progress: 0.45)
+                        .clipShape(Capsule())
+                }
+            }
+        }
     }
 
     // MARK: The numbers

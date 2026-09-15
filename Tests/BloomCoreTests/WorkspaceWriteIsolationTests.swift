@@ -389,7 +389,6 @@ struct WorkspaceParentageTests {
         )
         // The line that matters: it grants nothing an agent could use, exactly as `.user` does.
         #expect(WorkspaceOrigin.ownerClient(spawnToolUseID: "toolu_e").isAgentSpawned == false)
-        #expect(BridgeRole(origin: .ownerClient(spawnToolUseID: "toolu_e")) == .parent)
     }
 }
 

@@ -8,50 +8,49 @@ import BloomCore
 /// share the worktree too, and share the strip for the same reason, so the thing you look at next
 /// is always one click along the same row.
 ///
-/// The strip used to disappear while a workspace had a single session, on the grounds that a lone
-/// tab repeats the workspace name already in the toolbar. It cannot any more: the `+` that opens a
-/// terminal or a browser is part of the strip, and a control nobody can reach is not a control.
+/// Whether the strip is drawn at all is `CenterColumnView`'s to decide, by `TabStripVisibility`:
+/// a workspace with one tab has no strip, however that tab is split, the way a Safari window with
+/// one tab has no tab bar. The `+` that used to end this row is `NewTabMenu`, in the title bar,
+/// which is what lets the row go.
 struct SessionTabsView: View {
     @Bindable var model: WorkspaceModel
+    /// The tab whose name field is open. Owned by the column rather than by this view, because
+    /// Rename Tab has to be able to open a field on a strip that is not drawn yet: the column
+    /// hears the request, sets this, and the strip appears with the field already open.
+    @Binding var renamingID: String?
+
+    /// The tab being carried, if any. Owned by the column, because the column draws where a tab
+    /// taken out of the strip would land. See `TabCarry`.
+    var carry: TabCarry
+    /// Which tabs sweep. The column's to resolve, because the column's top edge carries the other
+    /// half of the same answer when this strip is not drawn.
+    var busy: BusySignalPlacement<PaneContent>
+    /// Which part of which pane a tab carried to a point in `CenterColumnView.space` would land in,
+    /// or nil for anywhere that would not take it. The column's to answer, because the panes are
+    /// the column's.
+    var landing: (PaneContent, CGPoint) -> PaneLanding?
+    /// Lets a carried tab go over that landing.
+    var drop: (PaneContent, PaneLanding) -> Void
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    @State private var renamingID: String?
-    /// A tab being dragged along the strip, and the order the strip is showing because of it.
-    ///
-    /// The tabs move out from under the pointer while the drag is happening, so letting go changes
-    /// nothing anyone can see and the write behind it is never something they wait for. Before
-    /// this, a drop was the first moment anything moved: whatever the system spent tearing the
-    /// drag down was a wait, with the gesture apparently ignored until it ended, which is what the
-    /// owner reported as "swapping takes a second".
-    @State private var drag: StripDrag?
-    /// Where each tab is centred along the strip. Written continuously, read only as a snapshot at
-    /// the start of a drag.
+    /// Where each tab sits along the strip. Written continuously, read only as a snapshot at the
+    /// start of a drag.
     ///
     /// In a box rather than in `@State`, for the reason `GeometryBox` sets out and because the
     /// sentence above is the whole argument: nothing draws these numbers. Every tab's probe wrote
     /// one on every frame of a window resize, and each of those writes rebuilt this strip and
     /// every tab in it.
-    @State private var centres = GeometryBox([PaneContent: Double]())
+    @State private var spans = GeometryBox([PaneContent: TabStripDrag.Span]())
+    /// The strip's own vertical extent in `CenterColumnView.space`, which is how a carried tab
+    /// knows it has left the strip. A box for the same reason as `spans`.
+    @State private var band = GeometryBox(0.0...0.0)
     /// The namespace the selection fill matches across, so moving the selection slides one
     /// capsule between tabs instead of fading one out and another in. See `TabItemView`, which
     /// hangs its `matchedGeometryEffect` off this.
     @Namespace private var selection
-
-    /// One tab being dragged, and everything needed to say where it has got to.
-    private struct StripDrag: Equatable {
-        /// The tab under the pointer.
-        var tab: PaneContent
-        /// Its run, in the order it was stored when the drag began.
-        var run: [PaneContent]
-        /// Where each tab of that run was centred when the drag began. A snapshot on purpose:
-        /// measuring them again while they are moving would feed the answer back into itself and
-        /// the run would judder.
-        var centres: [PaneContent: Double]
-        /// What the strip is showing now.
-        var order: [PaneContent]
-    }
+    /// Which tab the pointer is over, read by the dividers alone. See `TabStripHover`.
+    @State private var hover = TabStripHover()
 
     /// The space the tabs are measured in and the pointer is reported in. It is the row of tabs
     /// itself, so it scrolls with them and the two sets of numbers cannot drift apart.
@@ -72,38 +71,23 @@ struct SessionTabsView: View {
         store.entries(in: model)
     }
 
-    /// The strip in the order it is DRAWING, which is the live order while a tab is being dragged
-    /// along it and the stored one otherwise.
-    ///
-    /// **One list, not two runs.** The strip used to be conversations and then tools, because they
-    /// are two kinds of thing kept in two stores; `TabSet` still says so and is still the fallback,
-    /// but a user who has arranged their tabs is arranging one row and that is what this is. The
-    /// owner has one conversation and one terminal, so under the old rule every drag he could make
-    /// was one that could not be honoured.
-    ///
-    /// Reordering the `ForEach` rather than offsetting the tabs by hand, because the ids are stable
-    /// and SwiftUI MOVES a view whose identity it already has rather than building a new one. That
-    /// is safe here in a way it would not be a row lower: a tab in this strip is a label and a close
-    /// button, and the live shell or web view it stands for lives in `CenterPaneView`, which this
-    /// does not touch at all.
-    private var entries: [PaneContent] {
-        guard let drag, Set(drag.order) == Set(stored) else { return stored }
-        return drag.order
-    }
-
     var body: some View {
         // Derived once, at the top, and threaded down to everything that needs it.
         //
         // `entries` is not a stored list: it maps the sessions, reads the tool tab list, works out
         // what the tabs have absorbed and lays the user's own order over the result. It used to be
         // asked for again by the separator between every pair of tabs (twice each), by the scroll
-        // target, by the rule before the `+`, by every split menu, and once more inside the store
-        // on the way to the selection. That is about six full
+        // target, by every split menu, and once more inside the store on the way to the
+        // selection. That is about six full
         // derivations per tab per pass for a list that cannot change while the pass is running.
         //
         // This is `SidebarRepoGroup`'s bug and `SidebarRepoGroup`'s fix: derive it once, pass it
         // as a parameter, and let the helpers say what they need rather than reach for it.
-        let entries = self.entries
+        let entries = stored
+        // Nothing about the drag is read here. Where the carried tab has got to is read by each
+        // tab's own `StripDragTracking` and by each `StripDivider`, so the pointer moving does not
+        // rebuild this body. See `TabCarry`.
+        //
         // **One** answer, where `CenterPaneStore.isShowing` gave the strip as many marks as the
         // column had panes: a tab owns the panes now, so being in a tab is a single fact about the
         // workspace again.
@@ -114,94 +98,51 @@ struct SessionTabsView: View {
         // is the moment after a tab is closed: aiming a scroll at an id that is no longer laid out
         // does nothing, and this says so rather than relying on that.
         let selectedID = selected.flatMap { entries.contains($0) ? AnyHashable($0.id) : nil }
-        return TabStrip(pane: Self.pane, selection: selectedID) {
-            // Keep the first tab clear of the sidebar rule so it has the same rounded leading
-            // corner as every other tab. Outside the scroller, the gutter stays visible when
-            // tabs overflow and leaves the row's drag coordinates unchanged.
-            Color.clear.frame(width: Metrics.spacingWide)
+        return TabStrip(tabCount: entries.count, pane: Self.pane, selection: selectedID) {
+            EmptyView()
         } tabs: {
             HStack(spacing: 0) {
-                // One run over one list. A conversation and a terminal are two kinds of thing kept
-                // in two stores, which is why they used to be drawn by two `ForEach`es in that
-                // order, and it is still what the strip falls back to. It is not what the user is
-                // arranging, though: they are arranging one row, and drawing it as two made the one
-                // drag the owner could actually make into a drag that could not be honoured.
+                // Stable identities let conversations and tools move through the same row.
                 ForEach(Array(entries.enumerated()), id: \.element) { index, entry in
                     if index > 0 {
-                        TabStripSeparator(
-                            isHidden: !isSeparated(at: index, in: entries, selected: selected)
+                        StripDivider(
+                            slot: index - 1, entries: entries, selected: selected,
+                            carry: carry, hover: hover, busy: busy
                         )
                     }
 
                     switch entry {
                     case .chat(let id):
                         if let session = session(id) {
-                            sessionTab(session, selected: selected)
+                            sessionTab(session, selected: selected, entries: entries)
                                 .id(id)
                         }
                     case .tool(let id):
                         if let tab = tool(id) {
-                            toolTab(tab, selected: selected)
+                            toolTab(tab, selected: selected, entries: entries)
                                 .id(id)
                         }
                     }
                 }
             }
             .coordinateSpace(.named(Self.stripSpace))
-            // Where the pointer is, continuously, for as long as a drag is over the strip. This is
-            // what moves the tabs out of the way: `onDropSessionUpdated` carries a live location
-            // where `isTargeted` only says in or out.
-            .onDropSessionUpdated { session in
-                switch session.phase {
-                case .entering, .active: follow(session.location.x)
-                default: return
-                }
-            }
-            // One destination for the whole row rather than one per tab. By the time a drag is let
-            // go the strip has been showing the answer for as long as the user has been dragging,
-            // so which tab it happens to land on decides nothing.
-            .dropDestination(for: String.self) { items, session in
-                commit(items.first, at: session.location.x)
-            }
-            // Only when a drag moves the tabs. A reload that came from anywhere else, a session
-            // arriving or a tab being renamed, must not make the strip slide about.
-            //
-            // `Motion.pane` rather than the `.snappy(duration: 0.18)` this was written as. The
-            // length was already `pane`'s; what differed was the curve, and `.snappy` is a spring
-            // that overshoots, against the argument at the head of `Motion` that a pane is
-            // furniture and furniture that springs is a toy. Tabs moving out from under a dragged
-            // tab are the strip relaying out, not an event of their own.
-            .animation(reduceMotion ? nil : Motion.pane, value: drag?.order)
         } append: {
-            // The rule between the last tab and the `+`, which is the same rule the tabs have
-            // between each other and goes the same way: hidden against the selected tab, whose
-            // own fill is its edge, and hidden again when there is no tab for it to come after.
-            // A workspace whose conversations have all been closed would otherwise open with a
-            // hairline standing against the rule down the edge of the pane.
-            TabStripSeparator(isHidden: entries.last.map { $0 == selected } ?? true)
-
-            newTabMenu
         } trailing: {}
-        // The list, and nothing else. Reconciling used to be here too, right after this line, and
-        // it was wrong by exactly one await: this body has no suspension point in it, so it ran
-        // while `WorkspaceModel` was still on the `Store` actor and judged real tool tabs against
-        // an empty session list. It is `CenterColumnView`'s task now, after `onAppear`.
-        // Rename Tab from the File menu, which reaches the one field this strip owns. It renames
-        // the selected tab, which is the tab the menu item was greyed against.
-        .onReceive(NotificationCenter.default.publisher(for: .bloomRenameTab)) { _ in
-            guard let selected = store.selectedTab(in: model) else { return }
-            // `PaneContent.id` is the same string this strip files an open field under, for both
-            // kinds, which is what lets one notification carry no id of its own.
-            renamingID = selected.id
+        .onGeometryChange(for: ClosedRange<Double>.self) { proxy in
+            let frame = proxy.frame(in: .named(CenterColumnView.space))
+            return Double(frame.minY)...Double(frame.maxY)
+        } action: {
+            band.value = $0
         }
-        .task(id: model.workspace.id) {
-            tabs.load(workspaceID: model.workspace.id)
-            // The icons this Mac has already seen, read back once per launch. Here rather than at
-            // startup because this is what needs them: a workspace reopening on a browser tab
-            // should draw its icon on the first frame instead of asking the page for something
-            // that is already on disk.
-            await BrowserFaviconStore.shared.warm()
-        }
+        // A strip taken away mid drag, which a workspace switch does, must not leave a tab in the
+        // air or an Escape monitor installed.
+        .onDisappear { carry.end() }
+        // The list, and nothing else. Reconciling used to be here too, and it was wrong by exactly
+        // one await: this body has no suspension point in it, so it ran while `WorkspaceModel` was
+        // still on the `Store` actor and judged real tool tabs against an empty session list. It is
+        // `CenterColumnView`'s task now, after `onAppear`. So are hearing Rename Tab and loading
+        // the stored tabs, because this view is not in the hierarchy while the strip is hidden and
+        // neither may wait for it to be.
     }
 
     /// The centre column opens onto the reading ground, which settles both what a selected tab is
@@ -219,67 +160,68 @@ struct SessionTabsView: View {
         tabs.tabs(for: model.workspace.id).first { $0.id == id }
     }
 
-    /// Whether the rule between two tabs is drawn.
-    ///
-    /// Hidden against the selected tab on either side, whose own fill is its edge. One rule for the
-    /// whole strip now that the strip is one list: the pair of cases this used to need, "the last
-    /// conversation before the first tool" and "the tool before this one", were the seam between
-    /// two runs and there is no seam any more.
-    ///
-    /// Handed the strip and the selection rather than reaching for either. It is asked once per
-    /// gap, so a version that derived the strip itself derived it twice per gap.
-    private func isSeparated(
-        at index: Int, in entries: [PaneContent], selected: PaneContent?
-    ) -> Bool {
-        guard index > 0 else { return false }
-        return entries[index - 1] != selected && entries[index] != selected
-    }
-
     // MARK: - Tabs
 
     private func sessionTab(
-        _ session: Session, selected: PaneContent?
+        _ session: Session, selected: PaneContent?, entries: [PaneContent]
     ) -> some View {
-        SessionTabView(
+        let content = PaneContent.chat(session.id)
+        return SessionTabView(
             session: session,
-            agentGlyph: PaneGlyph.agentMark(
-                for: session.agentKind, among: model.sessions.map(\.agentKind)
-            ),
+            agentGlyph: sessionGlyph(for: session),
             isActive: selected == .chat(session.id),
-            isRunning: model.isRunning(session),
-            isAtPaneEdge: false,
+            isRunning: busy.showsInTab(content),
             isRenaming: renamingID == session.id.rawValue,
             // Always. The workspace's last conversation IS closable, and hiding the cross was the
             // only thing pretending otherwise: "Close Session" in the File menu holds Cmd+W and has
             // never had such a guard. What closing costs is asked about instead of drawn around.
             // See `SessionClosure`.
             canClose: true,
-            onSelect: { select(session) },
+            onSelect: {
+                guard !carry.swallowsSelect else { return }
+                select(session)
+            },
             onStartRename: { renamingID = session.id.rawValue },
             onCommitRename: { commitRename(session, to: $0) },
             onCancelRename: { renamingID = nil },
             onClose: { close(session) },
             onSplitRight: splitAction(.chat(session.id), axis: .horizontal, selected: selected),
             onSplitDown: splitAction(.chat(session.id), axis: .vertical, selected: selected),
+            onMoveLeft: moveAction(content, by: -1, in: entries),
+            onMoveRight: moveAction(content, by: 1, in: entries),
+            onHover: { hover.set(content, isHovered: $0) },
             namespace: selection
         )
-        .draggable(session.id.rawValue)
-        .modifier(StripDragTracking(
-            content: .chat(session.id),
-            space: Self.stripSpace,
-            onMeasure: { centres.value[.chat(session.id)] = $0 },
-            onBegin: { begin(.chat(session.id)) },
-            onEnd: { finish(taken: $0) }
+        .modifier(tracking(
+            content,
+            isEnabled: renamingID != session.id.rawValue,
+            title: session.title.isEmpty ? PaneNaming.untitledChat : session.title,
+            symbol: PaneGlyph.chatTab(agentMark: sessionGlyph(for: session))
         ))
     }
 
+    private func sessionGlyph(for session: Session) -> String? {
+        if let turn = TerminalSessionStore.shared.agentTurns[session.id], turn.isAwaitingPermission {
+            return "questionmark.circle"
+        }
+        if CenterTabStore.shared.terminal(for: session.id, in: model.workspace.id) != nil {
+            return PaneGlyph.agentMark(for: session.agentKind)
+        }
+        return PaneGlyph.agentMark(for: session.agentKind, among: model.sessions.map(\.agentKind))
+    }
+
     private func toolTab(
-        _ tab: CenterTab, selected: PaneContent?
+        _ tab: CenterTab, selected: PaneContent?, entries: [PaneContent]
     ) -> some View {
-        TabItemView(
+        let content = PaneContent.tool(tab.id)
+        return TabItemView(
             title: tabs.displayTitle(of: tab, in: model),
             icon: icon(for: tab),
             isActive: selected == .tool(tab.id),
+            // A run script's tab sweeps the way a working conversation's does while its command
+            // is going. An ordinary terminal never does: nothing polls it, and a shell somebody ran
+            // `ls` in is not a thing anybody is waiting on. See `WorkspaceTabsStore.busySignal`.
+            isRunning: busy.showsInTab(content),
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             // What is on the tab, not what the tab is filed under. A browser showing "Spatie"
@@ -290,25 +232,29 @@ struct SessionTabsView: View {
             canClose: true,
             canRename: TabRenaming.canRename(.tool(tab.id), tabKind: tab.kind),
             closeTitle: closeTitle(for: tab),
-            onSelect: { store.select(.tool(tab.id), in: model) },
+            onSelect: {
+                guard !carry.swallowsSelect else { return }
+                store.select(.tool(tab.id), in: model)
+            },
             onStartRename: { renamingID = tab.id },
             onCommitRename: {
                 renamingID = nil
                 tabs.rename(tab, to: $0)
             },
             onCancelRename: { renamingID = nil },
-            onClose: { Task { await tabs.close(tab) } },
+            onClose: { Task { await tabs.close(tab, in: model) } },
             onSplitRight: splitAction(.tool(tab.id), axis: .horizontal, selected: selected),
             onSplitDown: splitAction(.tool(tab.id), axis: .vertical, selected: selected),
+            onMoveLeft: moveAction(content, by: -1, in: entries),
+            onMoveRight: moveAction(content, by: 1, in: entries),
+            onHover: { hover.set(content, isHovered: $0) },
             namespace: selection
         )
-        .draggable(tab.id)
-        .modifier(StripDragTracking(
-            content: .tool(tab.id),
-            space: Self.stripSpace,
-            onMeasure: { centres.value[.tool(tab.id)] = $0 },
-            onBegin: { begin(.tool(tab.id)) },
-            onEnd: { finish(taken: $0) }
+        .modifier(tracking(
+            content,
+            isEnabled: renamingID != tab.id,
+            title: tabs.displayTitle(of: tab, in: model),
+            symbol: tab.icon
         ))
     }
 
@@ -318,8 +264,21 @@ struct SessionTabsView: View {
     /// A dictionary lookup behind one address parse, which is what it costs to ask this from a
     /// body that redraws on a window resize. See `BrowserFaviconStore`.
     private func icon(for tab: CenterTab) -> TabItemIcon {
+        if tab.kind == .terminal,
+           let agent = TerminalSessionStore.shared.detectedAgent(inTab: tab.id) {
+            return .symbol(PaneGlyph.agentMark(for: agent))
+        }
+        if tab.kind == .terminal, let script = runScript(of: tab) {
+            return .symbol(RunScriptGlyph.symbol(for: script.icon))
+        }
         guard tab.kind == .browser else { return .symbol(tab.icon) }
         return .page(BrowserFaviconStore.shared.icon(for: tab.url))
+    }
+
+    /// The run script a terminal tab was opened for, as the settings file states it now.
+    private func runScript(of tab: CenterTab) -> RunScript? {
+        guard let id = tab.runScriptID else { return nil }
+        return model.settings.runScripts.first { $0.id == id }
     }
 
     private func closeTitle(for tab: CenterTab) -> String {
@@ -329,52 +288,6 @@ struct SessionTabsView: View {
         case .review: "Close the review"
         case .notes: "Close the notes"
         }
-    }
-
-    /// One control for all four kinds, because they differ in what they open and in nothing else.
-    ///
-    /// The shortcuts are drawn here and fired from the File menu. A `Menu` in a view becomes an
-    /// `NSMenu` hanging off a button, and key equivalents are only offered to the menu bar and to
-    /// the view hierarchy, neither of which that menu is in, so what is written here is a label.
-    /// This used to be backed by an invisible `ZStack` of buttons that registered the same keys in
-    /// the view hierarchy; the menu bar carries them now, and it has to be one or the other. A view
-    /// hierarchy button and a menu item bound to the same key are not a tie: the button wins and
-    /// the item never fires, measured.
-    ///
-    /// The first three take their name and their glyph from `PaneKind` rather than spelling them
-    /// out, because the pane's split submenus offer the same three and the two lists have to keep
-    /// saying the same words.
-    private var newTabMenu: some View {
-        Menu {
-            Button(PaneKind.chat.title, systemImage: PaneKind.chat.symbol, action: newChat)
-                .keyboardShortcut("t", modifiers: .command)
-            Button(PaneKind.terminal.title, systemImage: PaneKind.terminal.symbol, action: newTerminal)
-                .keyboardShortcut("t", modifiers: [.command, .shift])
-            Button(PaneKind.browser.title, systemImage: PaneKind.browser.symbol, action: newBrowser)
-                .keyboardShortcut("b", modifiers: [.command, .shift])
-            Divider()
-            // **Never disabled, and it used to be**, on the argument that an empty review has
-            // nothing to show. It has: the pane says what the worktree is being compared against
-            // and that nothing differs from it yet, which is an answer, and it is the answer
-            // somebody who picked this row was asking for. Greyed out it read as a broken menu
-            // item, which is how it was reported. The File menu's own Show Changes has been
-            // enabled on any workspace all along, and the two saying different things about the
-            // same tab was the other half of the confusion.
-            Button("Changes", systemImage: "doc.text") { FileReview.open(in: model) }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
-            // An empty note is exactly what somebody opening this is about to fix.
-            Button(CenterTab.notesTitle, systemImage: "note.text") { WorkspaceNotes.open(in: model) }
-        } label: {
-            Label("New tab", systemImage: "plus")
-                .labelStyle(.iconOnly)
-                .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textSecondary)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: Metrics.barHeight, height: Metrics.barHeight)
-        .contentShape(Rectangle())
-        .help("New tab in this workspace")
     }
 
     /// Whether this tab can be opened beside the one the user is in. The pair of menu items is
@@ -427,26 +340,6 @@ struct SessionTabsView: View {
         store.split(tab: tab, pane: pane, axis: axis, showing: content)
     }
 
-    /// All three go through `NewPane`, which is the same door the pane's split submenus use, so a
-    /// tab made from the `+` and a tab made by splitting are the same tab.
-    private func newChat() {
-        NewPane.open(.chat, in: model) { store.select($0, in: model) }
-    }
-
-    private func newTerminal() {
-        NewPane.open(.terminal, in: model) { store.select($0, in: model) }
-    }
-
-    /// The `+` opens a browser on the workspace's own dev server, where a split opens one on
-    /// nothing. That is not drift: this item is the one that means "look at what this workspace is
-    /// running", and it is the only route that knows where that is.
-    private func newBrowser() {
-        Task {
-            let address = await model.browserAddress()
-            NewPane.open(.browser, in: model, url: address) { store.select($0, in: model) }
-        }
-    }
-
     // MARK: - Reordering
     //
     // The strip is one list and a tab goes anywhere in it. It was two runs, conversations and then
@@ -458,76 +351,108 @@ struct SessionTabsView: View {
     // workspace is one conversation and one terminal, with no drag he could make that would be
     // honoured. See `StripOrder`, which holds the interleaving and what losing it costs.
     //
-    // Every drag writes three times. The strip's own order is one key in defaults; the
-    // conversations' order among themselves goes back to `sessions.sort_order` and the tools' to
-    // their own list, so a workspace that loses the strip key keeps each kind in the order the user
-    // put it in and loses only the mixing of the two.
+    // A tab is carried by a `DragGesture` rather than handed to AppKit as a system drag, so the tab
+    // itself follows the pointer and its neighbours slide out of its way. See `TabCarry` for why,
+    // and `TabStripDrag` for the arithmetic.
     //
-    // What is still refused here is refused for a reason rather than by leftover. Something from
-    // another app names nothing the workspace has. A strip of one tab has no order to change. A
-    // tab absorbed into a pane of another tab is not in the strip to be dragged. There is nothing
-    // left that a drag inside the strip cannot ask for.
-    //
-    // The payload is the id rather than a `Transferable` of our own, matching the workspace rows in
-    // the sidebar. It only has to name which tab is being carried: the ORDER comes from where the
-    // pointer is, which is `TabDragOrder`, and by the time the drop arrives the strip has been
-    // showing the answer for as long as the drag has lasted.
-    //
-    // The drop does not answer with a Bool. `dropDestination`'s action used to be asked whether it
-    // had taken the drop; the macOS 26 one returns Void and is not asked.
+    // **The order is written once, when the tab is let go, and never while it is moving.** Every
+    // write is three writes, one of them a SQLite row per conversation, and the strip does not
+    // need the store to tell it where the tabs are mid drag: each tab's offset is drawn from the
+    // snapshot. Writing live would mean a write per slot crossed, and every one of them re-derives
+    // the strip under a gesture whose geometry was measured against the order before it.
+
+    private var motion: Animation? {
+        reduceMotion ? nil : Motion.pane
+    }
+
+    private func tracking(
+        _ content: PaneContent, isEnabled: Bool, title: String, symbol: String
+    ) -> StripDragTracking {
+        StripDragTracking(
+            content: content,
+            carry: carry,
+            stripSpace: Self.stripSpace,
+            columnSpace: CenterColumnView.space,
+            isEnabled: isEnabled,
+            onMeasure: { spans.value[content] = $0 },
+            onChanged: { carried(content, $0, title: title, symbol: symbol) },
+            onEnded: { letGo(content) }
+        )
+    }
+
+    /// The pointer has moved with the button down on `content`.
+    private func carried(_ content: PaneContent, _ value: DragGesture.Value, title: String, symbol: String) {
+        guard !carry.isCancelled else { return }
+        if carry.lift == nil, !pickUp(content, title: title, symbol: symbol) { return }
+        guard let lift = carry.lift, lift.content == content else { return }
+        // A tab opened or closed while this one was in the air, by an agent or a run script, means
+        // the snapshot describes a strip that is no longer there. Putting the tab back is honest;
+        // carrying on would commit an order computed against the wrong list.
+        guard stored == lift.run else { return carry.cancel(animation: motion) }
+
+        let isInStrip = TabStripDrag.isInStrip(Double(value.location.y), band: band.value)
+        carry.move(
+            travel: Double(value.translation.width),
+            pointer: value.location,
+            isInStrip: isInStrip,
+            landing: isInStrip ? nil : landing(content, value.location),
+            animation: motion
+        )
+    }
 
     /// A drag of this tab has begun. The strip and where its tabs are now are frozen here, so the
-    /// answer cannot chase its own tail once they start moving.
-    private func begin(_ tab: PaneContent) {
-        guard drag?.tab != tab else { return }
+    /// answer cannot chase its own tail once they start moving. False when there is nothing to
+    /// carry: a strip of one tab, or one whose tabs have not all been measured yet.
+    private func pickUp(_ content: PaneContent, title: String, symbol: String) -> Bool {
         let run = stored
-        guard run.count > 1, run.contains(tab) else { return }
-        drag = StripDrag(tab: tab, run: run, centres: centres.value, order: run)
-    }
-
-    /// The pointer has moved. Nothing else about the strip is touched: this is the only thing that
-    /// writes the live order, and it writes it only when it has actually changed, because assigning
-    /// an equal value is still a mutation as far as Observation is concerned.
-    private func follow(_ pointer: Double) {
-        guard var current = drag else { return }
-        let order = TabDragOrder.live(
-            current.run, moving: current.tab, centres: current.centres, to: pointer
+        guard let index = run.firstIndex(of: content) else { return false }
+        let measured = run.compactMap { spans.value[$0] }
+        guard measured.count == run.count,
+              let geometry = TabStripDrag(spans: measured, dragged: index) else { return false }
+        carry.begin(
+            TabCarry.Lift(content: content, run: run, geometry: geometry, title: title, symbol: symbol),
+            cancelAnimation: motion
         )
-        guard order != current.order else { return }
-        current.order = order
-        drag = current
+        return true
     }
 
-    /// The drag has been let go over the strip. What is written is the order the strip has been
-    /// SHOWING, never a rule about which tab it happened to land on: a live preview that commits
-    /// something else is the one thing worse than no preview at all.
+    /// The button has come up.
     ///
-    /// It falls back to working the order out here, from the payload and where the pointer was,
-    /// when there is no live drag to read. That is not a leftover. `onDragSessionUpdated` is what
-    /// says a drag has begun, and if it were ever not to fire, reordering would stop working
-    /// altogether rather than merely stop animating. The fallback is the same computation done once
-    /// instead of continuously.
-    private func commit(_ droppedID: String?, at pointer: Double) {
-        guard let tab = drag?.tab ?? droppedID.flatMap(content(named:)) else { return }
-        let run = drag?.run ?? stored
-        guard run.count > 1, run.contains(tab) else { return drag = nil }
+    /// Inside the strip, the order it has been showing is written, in the same transaction that
+    /// takes the offsets away. That is what makes the tab settle rather than jump: every neighbour
+    /// is already drawn at its new slot, so moving it there in the layout and removing its offset
+    /// cancel out and it does not move, while the carried tab slides the rest of the way from the
+    /// pointer into its slot. Out over a pane, it is the column's to place. Anywhere else it goes
+    /// back where it was.
+    private func letGo(_ content: PaneContent) {
+        defer { carry.gestureEnded() }
+        guard let lift = carry.lift, lift.content == content else { return }
 
-        settle(drag?.order ?? TabDragOrder.live(
-            run, moving: tab, centres: drag?.centres ?? centres.value, to: pointer
-        ))
+        if carry.isInStrip, let target = carry.target {
+            let order = lift.geometry.order(lift.run, target: target)
+            withAnimation(motion) {
+                carry.end()
+                if order != lift.run { settle(order) }
+            }
+        } else if let landing = carry.landing {
+            carry.end()
+            drop(content, landing)
+        } else {
+            withAnimation(motion) { carry.end() }
+        }
     }
 
-    /// The other end of the same gesture. A tab let go over a PANE is taken by the pane and the
-    /// strip's own drop never runs, so the preview would sit there for good; a drag thrown away
-    /// outside the window has to spring back rather than be written.
-    private func finish(taken: Bool) {
-        guard let current = drag else { return }
-        guard taken else { return drag = nil }
-        settle(current.order)
+    /// Moving a tab one place along without a pointer, for the accessibility actions. Nil at the
+    /// end it cannot move past, so the action is not offered there.
+    private func moveAction(
+        _ content: PaneContent, by step: Int, in entries: [PaneContent]
+    ) -> (@MainActor () -> Void)? {
+        guard let index = entries.firstIndex(of: content),
+              let order = TabStripDrag.moved(entries, from: index, by: step) else { return nil }
+        return { withAnimation(motion) { settle(order) } }
     }
 
-    /// Writes the order the strip has been showing, and clears the preview. Whichever end of the
-    /// drag gets here first does the work, and the other finds nothing pending.
+    /// Writes the order the strip has been showing.
     ///
     /// Three writes, and the two after the first are what make a lost defaults file cost only the
     /// interleaving. The strip's own order is one key in user defaults; the conversations' order
@@ -536,18 +461,9 @@ struct SessionTabsView: View {
     /// kind in the order the user put it in and only the mixing of the two undone. See
     /// `StripOrder`, where that cost is written out.
     private func settle(_ order: [PaneContent]) {
-        drag = nil
         store.reorder(order, in: model)
         reorderSessions(within: order)
         reorderTools(within: order)
-    }
-
-    /// What a dragged id names. The payload is a bare id, because that is what the strip has always
-    /// sent, so which of the two kinds it is is recovered by looking it up.
-    private func content(named id: String) -> PaneContent? {
-        if model.sessions.contains(where: { $0.id.rawValue == id }) { return .chat(SessionID(id)) }
-        if tabs.tabs(for: model.workspace.id).contains(where: { $0.id == id }) { return .tool(id) }
-        return nil
     }
 
     private func reorderSessions(within strip: [PaneContent]) {

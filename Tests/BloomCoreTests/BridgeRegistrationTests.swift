@@ -43,12 +43,12 @@ struct BridgeRegistryTests {
         let registry = BridgeRegistry()
         let session = SessionID("s1")
         let workspace = WorkspaceID("w1")
-        let token = registry.mint(sessionID: session, workspaceID: workspace, role: .child)
+        let token = registry.mint(sessionID: session, workspaceID: workspace, role: .workspace)
 
         let identity = registry.identity(forToken: token)
         #expect(identity?.sessionID == session)
         #expect(identity?.workspaceID == workspace)
-        #expect(identity?.role == .child)
+        #expect(identity?.role == .workspace)
         #expect(registry.identity(forToken: "something else") == nil)
     }
 
@@ -56,19 +56,13 @@ struct BridgeRegistryTests {
     func reminting() {
         let registry = BridgeRegistry()
         let session = SessionID("s1")
-        let first = registry.mint(sessionID: session, workspaceID: WorkspaceID("w1"), role: .parent)
-        let second = registry.mint(sessionID: session, workspaceID: WorkspaceID("w1"), role: .parent)
+        let first = registry.mint(sessionID: session, workspaceID: WorkspaceID("w1"), role: .workspace)
+        let second = registry.mint(sessionID: session, workspaceID: WorkspaceID("w1"), role: .workspace)
 
         #expect(first != second)
         #expect(registry.identity(forToken: first) == nil)
         #expect(registry.identity(forToken: second) != nil)
         #expect(registry.count == 1)
-    }
-
-    @Test("a role is read off the workspace, not off what a caller says")
-    func roleComesFromParentage() {
-        #expect(BridgeRole(origin: .user) == .parent)
-        #expect(BridgeRole(origin: .agent(parentWorkspaceID: WorkspaceID("p"), spawnToolUseID: "t")) == .child)
     }
 }
 
@@ -78,7 +72,7 @@ struct BridgeRegistrationTests {
         shimPath: "/Applications/Bloom.app/Contents/MacOS/bloom-bridge",
         socketPath: "/var/folders/xx/T/bloom-bridge-1a2b3c4d.sock",
         token: "t0ken",
-        role: .child
+        role: .workspace
     )
 
     /// The finding this test exists for, measured on codex-cli 0.147.0: a `-c` override of
@@ -150,7 +144,7 @@ struct BridgeRegistrationTests {
             shimPath: #"/tmp/a"b\c"#,
             socketPath: "/tmp/s.sock",
             token: "t",
-            role: .parent
+            role: .workspace
         )
         let arguments = BridgeRegistration.codexArguments(hostile)
         let command = arguments.first { $0.contains(".command=") }

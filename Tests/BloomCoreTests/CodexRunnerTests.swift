@@ -71,14 +71,10 @@ private func scriptedBox(onWrite: @escaping @Sendable (String) -> Void = { _ in 
 private func eventually(
     _ description: String,
     within seconds: Double = 2,
+    sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @Sendable () async -> Bool
 ) async {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
-    while ContinuousClock.now < deadline {
-        if await condition() { return }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    Issue.record("timed out waiting for \(description)")
+    await waitUntil(Comment(rawValue: description), within: .seconds(seconds), sourceLocation: sourceLocation, condition)
 }
 
 // MARK: - Tests
@@ -348,6 +344,41 @@ private func eventually(
         let json = try #require(JSONValue.parse(row.payload))
         #expect(json["type"]?.stringValue == "user")
         #expect(json["message"]?["content"]?[0]?["text"]?.stringValue == "write the tests first")
+    }
+
+    @Test(arguments: ["0", "1"], [InteractionMode.build, .plan])
+    func sendsExplicitCodexSpeedChoice(value: String, mode: InteractionMode) async throws {
+        let store = try Store(path: ":memory:")
+        let (original, _) = try await makeCodexSession(store)
+        var session = original
+        session.interactionMode = mode
+        try await store.setSetting("session.\(session.id).codexFastMode", value)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("hello")
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        #expect(turn["params"]?["serviceTier"]?.stringValue == (value == "1" ? "priority" : "default"))
+        #expect(turn["params"]?["collaborationMode"]?["mode"]?.stringValue == (mode == .plan ? "plan" : "default"))
+        runner.cancelNow()
+        try await store.setSetting("session.\(session.id).codexFastMode", value == "1" ? "0" : "1")
+        try await runner.send("next turn")
+        let turns = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/start" }
+        #expect(turns.count == 2)
+        #expect(turns.last?["params"]?["serviceTier"]?.stringValue == (value == "1" ? "default" : "priority"))
+        #expect(turns.last?["params"]?["collaborationMode"]?["mode"]?.stringValue == (mode == .plan ? "plan" : "default"))
+        await runner.shutdown()
+    }
+
+    @Test func oldClaudeSpeedPreferenceDoesNotOverrideCodexConfiguration() async throws {
+        let store = try Store(path: ":memory:")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(ComposerControls.fastModeKey(sessionID: session.id), "1")
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("hello")
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        #expect(turn["params"]?["serviceTier"] == nil)
+        await runner.shutdown()
     }
 
     /// Model, effort, approval policy and sandbox all travel with the turn, which is what lets a
@@ -893,5 +924,91 @@ struct SideConversationCodexRunnerTests {
         #expect(messages.allSatisfy { UserTurnPrompt.text(in: $0.payload) == "Why?" })
         #expect(try await store.session(id: parent.id) == parent)
         await retryRunner.shutdown()
+    }
+}
+
+extension CodexRunnerTests {
+    @Test func deliveryAcceptanceLinksTheExistingPromptToTheProviderTurn() async throws {
+        let store = try makeTestStore("codex-delivery-acceptance")
+        let (session, _) = try await makeCodexSession(store)
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "Only once"))
+        let claimed = try await store.claimDelivery(id: delivery.id)
+        #expect(claimed)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.sendDelivery(delivery)
+        #expect(try await store.delivery(id: delivery.id)?.state == .accepted)
+        #expect(try await store.delivery(id: delivery.id)?.providerTurnID == "01a02144-3bab-7fe3-a92c-6eec594d84fd")
+        #expect(try await store.messages(sessionID: session.id).filter { $0.kind == .user }.count == 1)
+        await runner.shutdown()
+    }
+
+    @Test func stopInterruptsOwnedChildrenAsWellAsTheParent() async throws {
+        let store = try makeTestStore("codex-family-stop")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("Start a child")
+        box.process.emit(#"{"method":"turn/started","params":{"threadId":"child","turn":{"id":"child-turn","status":"inProgress","items":[]}}}"#)
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"01a02144-3bab-7fe3-a92c-6eec594d84fd","item":{"id":"spawn-child","type":"subAgentActivity","agentPath":"/root/child","agentThreadId":"child","kind":"started"}}}"#)
+        await eventually("registered child") { runner.presentationFeed?.hasBackgroundWork == true }
+        runner.cancelNow()
+        await eventually("family interrupts") {
+            let frames = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/interrupt" }
+            return frames.contains { $0["params"]?["threadId"]?.stringValue == "child" }
+                && frames.contains { $0["params"]?["threadId"]?.stringValue == "01a02144-3b7e-7233-97f2-73ebd5105085" }
+        }
+        await runner.shutdown()
+    }
+
+    @Test func idleEvictionPreservesRunningTurnsAndPendingDeliveries() async throws {
+        let store = try makeTestStore("codex-idle-guard")
+        let (session, _) = try await makeCodexSession(store, agentSessionID: "resumable")
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "waiting"))
+        let queuedEviction = await runner.evictIfIdle(for: .zero)
+        #expect(!queuedEviction)
+        _ = try await store.cancelDelivery(id: delivery.id)
+        try await runner.send("working")
+        let activeEviction = await runner.evictIfIdle(for: .zero)
+        #expect(!activeEviction)
+        box.process.emit(#"{"method":"turn/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turn":{"id":"01a02144-3bab-7fe3-a92c-6eec594d84fd","status":"completed","items":[]}}}"#)
+        await eventually("idle turn") { await runner.currentSession.state == .idle }
+        let idleEviction = await runner.evictIfIdle(for: .zero)
+        #expect(idleEviction)
+        await #expect(throws: ProviderIdleError.self) { try await runner.send("must use a new runner") }
+        await runner.shutdown()
+    }
+}
+
+extension CodexRunnerTests {
+    @Test func anAmbiguousSteerFailureDoesNotStartTheSameMessageAgain() async throws {
+        let store = try makeTestStore("codex-ambiguous-steer")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("first")
+        box.fail("turn/steer", code: -32603, message: "internal failure after dispatch")
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "follow up"))
+        _ = try await store.claimDelivery(id: delivery.id)
+        await #expect(throws: CodexRPCError.self) { try await runner.sendDelivery(delivery) }
+        #expect(box.process.sentMethods.filter { $0 == "turn/start" }.count == 1)
+        #expect(try await store.delivery(id: delivery.id)?.state == .uncertain)
+        await runner.shutdown()
+    }
+
+    @Test func anExplicitTurnRejectionReturnsThePromptToPending() async throws {
+        let store = try makeTestStore("codex-definitive-rejection")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        box.fail("turn/start", code: -32602, message: "invalid model parameter")
+        let runner = makeRunner(store: store, session: session, box: box)
+        let delivery = try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "safe to retry"))
+        _ = try await store.claimDelivery(id: delivery.id)
+        await #expect(throws: CodexRPCError.self) { try await runner.sendDelivery(delivery) }
+        #expect(try await store.delivery(id: delivery.id)?.state == .pending)
+        #expect(try await store.messages(sessionID: session.id).filter { $0.kind == .user }.count == 1)
+        await runner.shutdown()
     }
 }

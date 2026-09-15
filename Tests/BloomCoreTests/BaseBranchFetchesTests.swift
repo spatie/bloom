@@ -50,14 +50,14 @@ struct BaseBranchFetchesTests {
     @Test("a fetch already running is joined rather than started twice")
     func joinsTheRunningFetch() async {
         let gate = Gate()
-        let fetches = BaseBranchFetches { _, _ in
+        let fetches = BaseBranchFetches { _, _, _ in
             await gate.arrive()
             return true
         }
 
-        async let first = fetches.refresh("main", in: "/repo")
+        async let first = fetches.refresh("main", in: "/repo", remote: "origin")
         await gate.waitForFirstArrival()
-        async let second = fetches.refresh("main", in: "/repo")
+        async let second = fetches.refresh("main", in: "/repo", remote: "origin")
         // The second caller has to be waiting on the flight before the fetch is let go, or it
         // would arrive after it and fetch again.
         while await fetches.joined < 1 { await Task.yield() }
@@ -74,51 +74,56 @@ struct BaseBranchFetchesTests {
         let counter = Counter()
         let clock = Clock()
         let fetches = BaseBranchFetches(
-            fetch: { _, _ in
+            fetch: { _, _, _ in
                 await counter.count()
                 return true
             },
             now: { clock.now }
         )
 
-        _ = await fetches.refresh("main", in: "/repo", acceptingWithin: .seconds(120))
-        _ = await fetches.refresh("main", in: "/repo", acceptingWithin: .seconds(120))
+        _ = await fetches.refresh("main", in: "/repo", remote: "origin", acceptingWithin: .seconds(120))
+        _ = await fetches.refresh("main", in: "/repo", remote: "origin", acceptingWithin: .seconds(120))
         #expect(await counter.calls == 1)
 
-        _ = await fetches.refresh("main", in: "/repo")
+        _ = await fetches.refresh("main", in: "/repo", remote: "origin")
         #expect(await counter.calls == 2)
 
         clock.advance(by: .seconds(121))
-        _ = await fetches.refresh("main", in: "/repo", acceptingWithin: .seconds(120))
+        _ = await fetches.refresh("main", in: "/repo", remote: "origin", acceptingWithin: .seconds(120))
         #expect(await counter.calls == 3)
     }
 
     @Test("a failed fetch is never remembered")
     func failureIsNotRemembered() async {
         let counter = Counter()
-        let fetches = BaseBranchFetches { _, _ in
+        let fetches = BaseBranchFetches { _, _, _ in
             await counter.count()
             return false
         }
 
-        let first = await fetches.refresh("main", in: "/repo", acceptingWithin: .seconds(120))
-        let second = await fetches.refresh("main", in: "/repo", acceptingWithin: .seconds(120))
+        let first = await fetches.refresh(
+            "main", in: "/repo", remote: "origin", acceptingWithin: .seconds(120)
+        )
+        let second = await fetches.refresh(
+            "main", in: "/repo", remote: "origin", acceptingWithin: .seconds(120)
+        )
         #expect(first == false)
         #expect(second == false)
         #expect(await counter.calls == 2)
     }
 
-    @Test("another branch or another directory is another fetch")
-    func keyedOnBranchAndDirectory() async {
+    @Test("another branch, directory or remote is another fetch")
+    func keyedOnBranchDirectoryAndRemote() async {
         let counter = Counter()
-        let fetches = BaseBranchFetches { _, _ in
+        let fetches = BaseBranchFetches { _, _, _ in
             await counter.count()
             return true
         }
 
-        _ = await fetches.refresh("main", in: "/repo", acceptingWithin: .seconds(120))
-        _ = await fetches.refresh("develop", in: "/repo", acceptingWithin: .seconds(120))
-        _ = await fetches.refresh("main", in: "/other", acceptingWithin: .seconds(120))
-        #expect(await counter.calls == 3)
+        _ = await fetches.refresh("main", in: "/repo", remote: "origin", acceptingWithin: .seconds(120))
+        _ = await fetches.refresh("develop", in: "/repo", remote: "origin", acceptingWithin: .seconds(120))
+        _ = await fetches.refresh("main", in: "/other", remote: "origin", acceptingWithin: .seconds(120))
+        _ = await fetches.refresh("main", in: "/repo", remote: "upstream", acceptingWithin: .seconds(120))
+        #expect(await counter.calls == 4)
     }
 }

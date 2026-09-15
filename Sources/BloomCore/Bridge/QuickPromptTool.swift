@@ -195,7 +195,7 @@ enum QuickPromptCall {
 /// `quick_prompt_list`: the owner's library, and the ids the other three take.
 ///
 /// **Self-approved, and the only one of the four that is.** `BridgeToolApproval`'s test is whether
-/// a tool has to work while nobody is watching, and this one is offered to `.parent`, which is an
+/// a tool has to work while nobody is watching, and this one is offered to `.workspace`, which is an
 /// agent that runs for ten minutes on its own. A permission question on a call that reads is the
 /// worst kind of ask: there is nothing for a person to weigh, and an unanswered one hangs the turn.
 ///
@@ -205,20 +205,17 @@ enum QuickPromptCall {
 public struct QuickPromptListTool: BridgeToolHandling {
     public init() {}
 
-    /// A parent and the owner's own client.
+    /// A workspace agent and the owner's own client.
     ///
     /// The pane tools were taken away from `.owner` because they are scoped to a worktree the
     /// owner's client is not standing in. The opposite holds here: a quick prompt belongs to no
     /// workspace and no project, so there is nothing for this caller to be missing, and it is the
     /// owner's own library that is being read.
     ///
-    /// `.parent` because an agent asked to save a prompt has to be able to see the ones that are
-    /// already there, and because a parent that could create without reading would write a second
+    /// `.workspace` because an agent asked to save a prompt has to be able to see the ones that are
+    /// already there, and because an agent that could create without reading would write a second
     /// copy of a prompt the owner already has.
-    ///
-    /// Not `.child`. A child sees `whoami` and nothing else, because it is an agent another agent
-    /// asked for and nobody weighed.
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: "quick_prompt_list",
@@ -281,14 +278,14 @@ public struct QuickPromptListTool: BridgeToolHandling {
 public struct QuickPromptCreateTool: BridgeToolHandling {
     public init() {}
 
-    /// A parent and the owner's own client, matching `quick_prompt_list`.
+    /// A workspace agent and the owner's own client, matching `quick_prompt_list`.
     ///
-    /// `.parent` is the case worth defending. The owner mostly talks to Bloom from inside Bloom,
+    /// `.workspace` is the case worth defending. The owner mostly talks to Bloom from inside Bloom,
     /// so "save that as a quick prompt" is a sentence typed into a workspace chat, and a tool the
     /// owner cannot reach from where they are is a tool that does not exist. Creating adds a row
     /// and changes nothing that is there, and the panel it lands in is one click away in the same
     /// composer.
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    public let roles: Set<BridgeRole> = [.workspace, .owner]
 
     public let tool = BridgeTool(
         name: "quick_prompt_create",
@@ -386,8 +383,8 @@ public struct QuickPromptCreateTool: BridgeToolHandling {
 /// library that belongs to no workspace, and Bloom keeps no copy of what was there before. Two
 /// things follow from that.
 ///
-/// It is not offered to `.parent`, although listing and creating are, and the difference is who is
-/// in the room. A parent is a workspace agent that runs for ten minutes at a time with nobody
+/// It is not offered to `.workspace`, although listing and creating are, and the difference is who
+/// is in the room. That role is a workspace agent that runs for ten minutes at a time with nobody
 /// looking, and a global overwrite decided in the middle of one of those is a change the owner
 /// finds weeks later in a project this workspace has nothing to do with. The owner's own client is
 /// a conversation the owner is typing into, which is also why the ask below is answerable.

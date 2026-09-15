@@ -13,9 +13,8 @@ import Foundation
 /// ## Why answering it is not a shortcut round consent
 ///
 /// Bloom is on both ends of this question. It wrote the tool, it minted the token the caller is
-/// using, it knows which workspace is asking, and it enforces every limit itself: the role gate
-/// hides `workspace_start` from a child, the handler refuses a caller that was itself
-/// agent-started, and eight running children is the ceiling. There is nothing for a person to
+/// using, it knows which workspace is asking, and it enforces every limit itself: the handler refuses
+/// a caller whose workspace was itself agent-started, and eight running children is the ceiling. There is nothing for a person to
 /// weigh that Bloom has not already decided, and the ask carries no information a person could
 /// act on beyond "an agent would like to use Bloom".
 ///
@@ -166,10 +165,22 @@ public enum BridgeToolApproval {
         // already, none of it is the contents of a page, a diff or a note, and it is the first
         // call of any turn that then does something useful.
         "workspace_tabs",
-        // Stored conversations inside the caller's own workspace. Reading one does not select
-        // a tab, start a turn or reach another workspace, and both handlers enforce that scope.
+        // Stored conversations, in the caller's own workspace or in another it names. Reading one
+        // does not select a tab, start a turn or write a row. Reaching another workspace is not a
+        // reason to ask: every agent here works for the same owner, `workspace_say` already puts
+        // a turn in another workspace's chat without an ask, and a read is lighter than that by
+        // the whole of the turn. What another workspace's chat can do to this one is be believed,
+        // so the answer says it is quoted history and not instructions, in `BridgeUntrustedText`'s
+        // words.
         "chat_list",
         "chat_read",
+        // What a workspace has changed, read the way the review pane reads it. It is `chat_read`
+        // for a worktree: it writes no file, moves no ref and touches no index, since every git
+        // call under it runs with `GIT_OPTIONAL_LOCKS=0`, so there is nothing to weigh, and an ask
+        // on a read an unattended parent makes before reviewing another branch is the hang this
+        // file is about for no gain. Its content is file text somebody else wrote, and the answer
+        // says so. See `WorkspaceDiffTool`.
+        "workspace_diff",
         // Clicking a tab, which is `pane_open` with less in it: that one makes a tab AND brings it
         // to the front and is on this list, so a rule that asked before an agent could bring an
         // existing tab forward would cost a hung turn and protect nothing. What it changes is
@@ -182,6 +193,12 @@ public enum BridgeToolApproval {
         // question in front of somebody who has just said out loud "show me those", and a hung ask
         // is a hung turn. See `RevealTool`.
         "reveal",
+        // A message to another workspace's agent. It carries the owner's authority, which is the
+        // owner's own decision, and what holds it is not an ask: it arrives queued in a chat he
+        // can see, headed with where it came from, and can be cancelled from either end until it
+        // goes. An ask in front of it would hang a turn that may be running with nobody watching,
+        // for a message that is already in front of a person. See `WorkspaceSayTool`.
+        "workspace_say",
     ]
 
     /// Whether this ask is Bloom answering itself.

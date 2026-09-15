@@ -70,6 +70,7 @@ struct PaletteContrastTests {
             ("warning", PaletteInk.warning),
             ("running", PaletteInk.running),
             ("merged", PaletteInk.merged),
+            ("workspaceMessage", PaletteInk.workspaceMessage),
         ]
 
         for (inkName, ink) in inks {
@@ -127,6 +128,35 @@ struct PaletteContrastTests {
                     "white on \(name), \(appearance): \(ratio.rounded(to: 2)) to 1"
                 )
             }
+        }
+    }
+
+    /// A message from another workspace is the reverse of the owner's bubble: a light fill with dark
+    /// ink rather than a dark fill with white, so its ink is a pair of its own and is checked here
+    /// rather than in the white-on-fill table above.
+    ///
+    /// The second half is the report the colour was changed for. A filled periwinkle beside the
+    /// owner's teal read as a second blue, so the fill is held as far from `accentFill` as the two
+    /// meaning colours this app most deliberately draws apart are from each other.
+    @Test("a message from another workspace is readable, and is not the owner's bubble in another blue")
+    func workspaceMessagesAreTheirOwnBubble() {
+        for (appearance, isDark) in Self.appearances {
+            let fill = PaletteInk.workspaceMessageFill.member(dark: isDark)
+            let ratio = Contrast.ratio(PaletteInk.workspaceMessageInk.member(dark: isDark), fill)
+            #expect(
+                ratio >= Contrast.textFloor,
+                "ink on workspaceMessageFill, \(appearance): \(ratio.rounded(to: 2)) to 1"
+            )
+
+            let owner = PaletteInk.accentFill.member(dark: isDark)
+            let bar = Contrast.deltaE(
+                PaletteInk.warning.member(dark: isDark), PaletteInk.negative.member(dark: isDark)
+            )
+            let apart = Contrast.deltaE(fill, owner)
+            #expect(
+                apart >= bar,
+                "workspaceMessageFill against accentFill, \(appearance): \(apart.rounded(to: 1)) against \(bar.rounded(to: 1))"
+            )
         }
     }
 
@@ -412,6 +442,80 @@ struct PaletteContrastTests {
             Contrast.deltaE(running, PaletteInk.accentFill.light) < quiet,
             "running sits \(Contrast.deltaE(running, PaletteInk.accentFill.light).rounded(to: 1)) from the house fill"
         )
+    }
+
+    /// Safari's loading sweep, on every ground it is drawn on, in both appearances.
+    ///
+    /// The house fill is one value in both appearances, and a blue at some opacity over dark chrome
+    /// is a far smaller step than the same opacity over white: the mockup's 34 per cent band measured
+    /// 16.0 from the white capsule and 10.7 from the dark one. So the claim is not a fixed number but
+    /// a parity. **Every tint is at least as far from its ground in dark as it is in light**, by
+    /// CIEDE2000, which is what "looks right in dark" means when the light member is the one the
+    /// owner chose. And the label drawn over each tint still holds the text floor, because the band
+    /// passes behind the name rather than beside it.
+    ///
+    /// The grounds are the selected capsule (`surface`), the strip (`sidebar`) under a busy tab's
+    /// wash, and the column's own ground (`windowBackground`) for the segment and its still wash. The
+    /// ink is `labelColor`, black at 85 per cent in light and white at 85 in dark.
+    @Test("the busy sweep reads as well in dark as in light, and never costs the label its floor")
+    func theSweepReads() {
+        let fill = PaletteInk.accentFill.light
+        func tint(_ strength: BusySweep.Strength, dark isDark: Bool, over ground: UInt32) -> UInt32 {
+            Contrast.composited(fill, over: ground, at: strength.member(dark: isDark))
+        }
+        func label(over ground: UInt32, dark isDark: Bool) -> Double {
+            Contrast.ratio(Contrast.composited(isDark ? 0xFFFFFF : 0x000000, over: ground, at: 0.85), ground)
+        }
+
+        // Each case: a name, and how far the tint sits from its ground, with the ground it was
+        // composited over so the label can be measured on it.
+        func cases(dark isDark: Bool) -> [(String, distance: Double, onto: UInt32)] {
+            let capsule = PaletteInk.surface.member(dark: isDark)
+            let strip = PaletteInk.sidebar.member(dark: isDark)
+            let window = PaletteInk.windowBackground.member(dark: isDark)
+            let washed = tint(BusySweep.tabWash, dark: isDark, over: strip)
+            let bandOnCapsule = tint(BusySweep.tabBand, dark: isDark, over: capsule)
+            let bandOnWash = tint(BusySweep.tabBand, dark: isDark, over: washed)
+            let still = tint(BusySweep.tabStill, dark: isDark, over: capsule)
+            let columnStill = tint(BusySweep.columnStill, dark: isDark, over: window)
+            return [
+                ("the band on the selected capsule", Contrast.deltaE(bandOnCapsule, capsule), bandOnCapsule),
+                ("the band on a busy background tab", Contrast.deltaE(bandOnWash, strip), bandOnWash),
+                ("a busy background tab's wash", Contrast.deltaE(washed, strip), washed),
+                ("Reduce Motion's selected tint", Contrast.deltaE(still, capsule), still),
+                ("Reduce Motion's column wash", Contrast.deltaE(columnStill, window), columnStill),
+            ]
+        }
+
+        let light = cases(dark: false)
+        let dark = cases(dark: true)
+        for (lit, unlit) in zip(light, dark) {
+            #expect(
+                unlit.distance >= lit.distance,
+                "\(lit.0): \(unlit.distance.rounded(to: 1)) in dark against \(lit.distance.rounded(to: 1)) in light"
+            )
+        }
+        for (appearance, isDark) in Self.appearances {
+            for (name, distance, onto) in cases(dark: isDark) {
+                // Something a glance can find, not a tint only a colorimeter would.
+                #expect(distance >= 3, "\(name) in \(appearance) is \(distance.rounded(to: 1)) from its ground")
+                if name.contains("column") { continue }
+                let ratio = label(over: onto, dark: isDark)
+                #expect(
+                    ratio >= Contrast.textFloor,
+                    "the label over \(name), \(appearance): \(ratio.rounded(to: 2)) to 1"
+                )
+            }
+
+            // The segment is the house fill undiluted at its middle, on the column's ground, and it
+            // carries meaning without being read.
+            let window = PaletteInk.windowBackground.member(dark: isDark)
+            let segment = Contrast.ratio(fill, window)
+            #expect(
+                segment >= Contrast.nonTextFloor,
+                "the column's segment in \(appearance): \(segment.rounded(to: 2)) to 1"
+            )
+        }
     }
 
     /// A boundary is not read, so it holds the non-text floor rather than the text one. `border`

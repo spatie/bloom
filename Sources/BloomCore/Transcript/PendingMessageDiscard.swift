@@ -40,6 +40,9 @@ public enum PendingMessageDiscard {
             /// the composer cannot be handed back as text. Putting the rendered prompt in there
             /// would be putting a machine's writing in the owner's box.
             case notPlainText
+            /// Another agent wrote it, through `agent_say` or `workspace_say`. Its words are not
+            /// the owner's, and handing them to his composer would make them his next message.
+            case notTheOwners
         }
     }
 
@@ -48,6 +51,7 @@ public enum PendingMessageDiscard {
     /// `composerDraft` is what is in the box at that moment, and blank counts as empty: a box
     /// holding three newlines is not something anybody is in the middle of writing.
     public static func recovery(of delivery: Delivery, composerDraft: String) -> Recovery {
+        guard delivery.crewPayload == nil else { return .discarded(.notTheOwners) }
         guard isPlainText(delivery.body) else { return .discarded(.notPlainText) }
         guard composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .discarded(.composerInUse)
@@ -90,6 +94,17 @@ public enum PendingMessageDiscard {
     /// which of the two it is decides the answer: handing the sentence back to the composer is a
     /// tidy-up, and losing minutes of thought is not, and a dialog that read the same either way
     /// would be teaching the owner to click through it.
+    public static func question(for delivery: Delivery, composerDraft: String) -> Question {
+        guard delivery.deliveredSeq != nil else {
+            return question(for: recovery(of: delivery, composerDraft: composerDraft))
+        }
+        return Question(
+            title: "Remove this retry reminder?",
+            message: "The message stays in the conversation. Removing this reminder does not stop any work the agent may already have started.",
+            confirmLabel: "Remove Reminder", cancelLabel: "Keep"
+        )
+    }
+
     public static func question(for recovery: Recovery) -> Question {
         let message =
             switch recovery {

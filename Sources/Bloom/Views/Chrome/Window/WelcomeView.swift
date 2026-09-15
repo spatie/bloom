@@ -72,6 +72,8 @@ struct WelcomeView: View {
                 )
             case .checks:
                 checksStep
+            case .keepAwake:
+                keepAwakeStep
             case .commandLine:
                 commandLineStep
             case .promptSubmission:
@@ -88,6 +90,10 @@ struct WelcomeView: View {
         // asked would be asking on every redraw of a screen with four probes settling on it.
         .onChange(of: registration.isOffered, initial: true) { _, isOffered in
             flow.offerCommandLine(isOffered)
+        }
+        // A Mac with no lid is never asked, and neither is one whose helper is already approved.
+        .onAppear {
+            flow.offerKeepAwake(Machine.isPortable && SleepSwitch.shared.standing != .ready)
         }
         .onAppear {
             inspection.revealsInstantly = reduceMotion
@@ -131,6 +137,18 @@ struct WelcomeView: View {
     /// this screen, which nothing produces: `AppModel.bridge` is cleared during the quit sequence
     /// and nowhere else. There is no consolation copy for it, because the footer is still drawn
     /// and its button still moves the window on.
+    /// The lid step, in the same three bands as the rest.
+    private var keepAwakeStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            WelcomeKeepAwake()
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
+    }
+
     private var commandLineStep: some View {
         VStack(spacing: 0) {
             plinth

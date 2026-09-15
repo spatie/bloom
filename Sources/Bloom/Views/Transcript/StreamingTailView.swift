@@ -7,12 +7,17 @@ import SwiftUI
 /// rebuilding every visible stored row.
 struct StreamingTailView: View {
     let transcript: TranscriptModel
+    var hasCompletedTurn = false
 
     var body: some View {
         Group {
-            if transcript.isRunning || transcript.isStreaming {
+            // The result footer replaces the activity slot in the same pass. Waiting for the
+            // runner to stop briefly draws both and then collapses the transcript a second time.
+            if !hasCompletedTurn, transcript.isStreaming || transcript.sending != nil || transcript.isRunning {
                 StreamingRowView(transcript: transcript)
                     .padding(.bottom, TranscriptLayout.block)
+            } else {
+                Color.clear.frame(height: 0).accessibilityHidden(true)
             }
         }
     }

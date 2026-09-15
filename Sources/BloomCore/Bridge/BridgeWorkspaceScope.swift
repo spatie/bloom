@@ -13,7 +13,7 @@ import Foundation
 /// copied is a rule that is edited in one place, and the edit nobody notices here is a role
 /// quietly widened on one tool of six.
 ///
-/// The reasoning, once. **`.parent` and nothing else.**
+/// The reasoning, once. **`.workspace` and nothing else.**
 ///
 /// Not `.owner`, and this is the mistake that was made once already and must not be made again.
 /// Every tool on this gate is scoped to the workspace the caller is standing in, and
@@ -23,9 +23,10 @@ import Foundation
 /// had to be taken away again. `BridgeRole.owner` says as much in its own doc comment: not
 /// anything scoped to a workspace, because it has none to be scoped to.
 ///
-/// Not `.child`. A subagent moving panes, tabs or terminals in its parent's window is something
-/// happening to the reader on behalf of a thing they did not address, and the parent can do it for
-/// the child if it really is wanted.
+/// A workspace another agent started is on this gate too. It used to be kept off, as a child that
+/// reports and does no more, and what that meant in practice was an agent that could not open a
+/// terminal in its own worktree. Every tool here acts on the caller's own window, which is the
+/// window of the workspace that agent was started to work in. See `BridgeRole`.
 ///
 /// ## Why the refusal is composed rather than written out
 ///
@@ -43,7 +44,7 @@ import Foundation
 /// worth keeping.
 public enum BridgeWorkspaceScope {
     /// The gate every tool scoped to the caller's own workspace shares. See the head of this file.
-    public static let roles: Set<BridgeRole> = [.parent]
+    public static let roles: Set<BridgeRole> = [.workspace]
 
     /// The sentence a workspace-scoped tool refuses a connection that is speaking for no workspace
     /// with. `doing` is the tool's own half: "opens a pane in", "lists the panes of", "renames".

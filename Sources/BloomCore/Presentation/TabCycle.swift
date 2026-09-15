@@ -31,6 +31,19 @@ public enum TabCycle {
         return moved == index ? nil : tabs[moved]
     }
 
+    /// Which way a press of Tab moves the strip: Option+Tab forwards, Shift+Option+Tab back, and
+    /// nil for every other Tab, which belongs to a text field, a terminal or focus.
+    ///
+    /// Exact rather than "contains Option", because Cmd+Option+Tab is aimed past the app and a
+    /// Control+Option+Tab swallowed here would be a key taken from a terminal for no reason.
+    public static func offset(forTabWith modifiers: MenuShortcut.Modifiers) -> Int? {
+        switch modifiers {
+        case [.option]: 1
+        case [.option, .shift]: -1
+        default: nil
+        }
+    }
+
     /// The tab a number reaches: Cmd+1 to Cmd+8 are the first eight, and Cmd+9 is the last one
     /// whatever the count.
     ///

@@ -104,13 +104,17 @@ struct FileChipHover: Equatable, Sendable {
 /// laying out an attributed string that someone else composed.
 struct TranscriptTextView: NSViewRepresentable {
     var text: NSAttributedString
+    @Environment(\.transcriptTextSelection) private var selection
     /// The ink a link is drawn in when the pointer is elsewhere. The underline is not part of it:
     /// see `LinkTextView.hovered`.
     var linkColor: NSColor
-    /// What paints behind a selection. Handed in because the bubble is a dark surface whatever
-    /// the page around it is doing, and AppKit cannot read the SwiftUI environment that says so.
-    var selectionColor: NSColor
+    /// What paints behind a selection. Handed in because the user's bubble is a dark surface
+    /// whatever the page around it is doing, and AppKit cannot read the SwiftUI environment that
+    /// says so.
+    var selectionColor: NSColor = .selectedTextBackgroundColor
     var alignsBubbleInk = false
+    var copyPrefix = ""
+    var copySeparatorBefore = "\n\n"
     var actions = TranscriptLinkActions()
 
     func makeCoordinator() -> Coordinator { Coordinator(actions: actions) }
@@ -177,7 +181,18 @@ struct TranscriptTextView: NSViewRepresentable {
         apply(to: view)
     }
 
+    static func dismantleNSView(_ view: LinkTextView, coordinator: Coordinator) {
+        view.answerSelection?.unregister(view)
+    }
+
     private func apply(to view: LinkTextView) {
+        view.copyPrefix = copyPrefix
+        view.copySeparatorBefore = copySeparatorBefore
+        if view.answerSelection !== selection {
+            view.answerSelection?.unregister(view)
+            view.answerSelection = selection
+            selection?.register(view)
+        }
         if view.textStorage?.isEqual(to: text) != true {
             view.textStorage?.setAttributedString(text)
             view.bubbleAlignmentWidth = nil
@@ -243,6 +258,19 @@ struct TranscriptTextView: NSViewRepresentable {
         return CGSize(width: size.width, height: size.height)
     }
 
+    /// How far below the top the first line's baseline sits, for a caller aligning something
+    /// beside this view on `.firstTextBaseline`. The first font's default offset, which is what
+    /// the layout manager above sets the first line at: `textContainerInset` is zero and paragraph
+    /// spacing is added below a line, never above the first.
+    @MainActor
+    static func firstBaseline(of text: NSAttributedString) -> CGFloat {
+        let font = text.length > 0 ? text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil
+        return baselineLayout.defaultBaselineOffset(for: font ?? .systemFont(ofSize: NSFont.systemFontSize))
+    }
+
+    /// Asked about fonts only, never handed text, so one serves every row.
+    @MainActor private static let baselineLayout = NSLayoutManager()
+
     /// One line of whatever this run is set in, which is the height a run that measured nothing
     /// falls back on. The first font in the string rather than the view's, which for a string
     /// carrying a span of code in a second face answers nil.
@@ -283,6 +311,11 @@ struct TranscriptTextView: NSViewRepresentable {
 
         init(actions: TranscriptLinkActions) { self.actions = actions }
 
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let view = notification.object as? LinkTextView else { return }
+            view.answerSelection?.nativeSelectionChanged(in: view)
+        }
+
         func textView(_ view: NSTextView, clickedOnLink link: Any, at index: Int) -> Bool {
             guard let url = Self.url(from: link) else { return false }
             // A plain click goes to the system's browser, which is what the owner asked for. The
@@ -301,6 +334,63 @@ struct TranscriptTextView: NSViewRepresentable {
 
 /// The text view itself: hover, and the menu over a link.
 final class LinkTextView: NSTextView, HoverQuickLookSource {
+    weak var answerSelection: TranscriptTextSelection?
+    var copyPrefix = ""
+    var copySeparatorBefore = "\n\n"
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        // AppKit highlights only the first responder in the active colour. The other paragraphs
+        // in one answer looked deselected even though Copy included them. Draw their selection
+        // with the same ink while the answer owns the keyboard.
+        guard let answerSelection, let window, window.isKeyWindow,
+              let owner = window.firstResponder as? LinkTextView,
+              owner !== self, owner.answerSelection === answerSelection,
+              let layout = layoutManager, let container = textContainer else { return }
+        let range = selectedRange()
+        guard range.length > 0 else { return }
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let origin = textContainerOrigin
+        NSColor.selectedTextBackgroundColor.setFill()
+        layout.enumerateEnclosingRects(
+            forGlyphRange: glyphs, withinSelectedGlyphRange: glyphs, in: container
+        ) { rect, _ in
+            NSBezierPath(rect: rect.offsetBy(dx: origin.x, dy: origin.y)).fill()
+        }
+        layout.drawGlyphs(forGlyphRange: glyphs, at: origin)
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned, let selection = answerSelection {
+            // Resignation happens before AppKit installs the next responder. A click in another
+            // block of this answer keeps the selection; leaving the answer clears every block.
+            Task { @MainActor [weak self, weak selection] in
+                guard let self, let selection,
+                      (window?.firstResponder as? LinkTextView)?.answerSelection !== selection else { return }
+                selection.clear()
+            }
+        }
+        return resigned
+    }
+
+    override func selectAll(_ sender: Any?) {
+        guard let answerSelection else { super.selectAll(sender); return }
+        answerSelection.selectAll()
+    }
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)), let answerSelection {
+            return !answerSelection.selectedText.isEmpty
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    override func copy(_ sender: Any?) {
+        guard let answerSelection else { super.copy(sender); return }
+        TranscriptLink.copy(answerSelection.selectedText)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         HoverQuickLookController.shared.update(self)
@@ -421,6 +511,15 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         guard let chip = fileChip(at: convert(event.locationInWindow, from: nil)),
               let path = chip.subject.path
         else {
+            if let answerSelection {
+                let point = convert(event.locationInWindow, from: nil)
+                let url = link(at: point)
+                let dragged = trackAnswerSelection(with: event, selection: answerSelection)
+                if !dragged, event.clickCount == 1, !event.modifierFlags.contains(.shift), let url {
+                    actions.open(url, .externalBrowser)
+                }
+                return
+            }
             super.mouseDown(with: event)
             return
         }
@@ -530,6 +629,10 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         guard type == .string, let storage = textStorage else {
             return super.writeSelection(to: pasteboard, type: type)
         }
+        if let answerSelection {
+            pasteboard.setString(answerSelection.selectedText, forType: .string)
+            return true
+        }
         let text = selectedRanges
             .map { TranscriptLink.selectedText(in: storage, range: $0.rangeValue) }
             .joined(separator: "\n")
@@ -548,7 +651,20 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     /// here. This draws them.
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
-        guard let url = link(at: point) else { return super.menu(for: event) }
+        guard let url = link(at: point) else {
+            // Over a selection, the reply is what somebody is most likely to want to do with it,
+            // so it leads, above Copy.
+            let menu = super.menu(for: event)
+            if let menu, SelectionToChat.canQuote(from: self) {
+                let quote = NSMenuItem(
+                    title: "Add to Chat", action: #selector(quoteSelection(_:)), keyEquivalent: ""
+                )
+                quote.target = self
+                menu.insertItem(.separator(), at: 0)
+                menu.insertItem(quote, at: 0)
+            }
+            return menu
+        }
 
         let menu = NSMenu()
         for offered in actions.items(url) {
@@ -578,6 +694,10 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     private struct LinkChoice {
         let url: URL
         let target: TranscriptLinkTarget
+    }
+
+    @objc private func quoteSelection(_ sender: NSMenuItem) {
+        _ = SelectionToChat.quote(from: self)
     }
 
     @objc private func openLink(_ sender: NSMenuItem) {

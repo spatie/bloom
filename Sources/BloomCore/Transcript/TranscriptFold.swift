@@ -12,7 +12,7 @@ import Foundation
 /// # The unit is consecutive activity
 ///
 /// Grey activity rows are the implementation log: tool calls, thinking, notices and settled
-/// questions. Consecutive rows of that kind fold into one line. Black assistant prose is the
+/// permissions. Consecutive rows of that kind fold into one line. Black assistant prose is the
 /// useful account of what the agent found or intends to do, so every prose row remains visible and
 /// divides the activity before and after it into separate groups.
 ///
@@ -24,25 +24,41 @@ import Foundation
 /// live group. This distinction lets a live group refold when another log row arrives without ever
 /// taking prose away from the reader.
 ///
-/// # A subagent's rows are their own working
+/// # A subagent is one row
 ///
-/// A row from inside a subagent carries the id of the call that started it, and it is drawn
-/// indented under that call. A change of that id closes the group, so a subagent's children fold
-/// among themselves and a fold can never span two of them or reach out to the work around one.
-/// The call itself is held out of the fold the moment a child of it appears, because an indented
-/// "16 actions" line hanging under a fold that swallowed the row saying which agent it was is
-/// worse than not folding at all.
+/// A row from inside a subagent carries the id of the call that started it. Once that call is
+/// found, every row of the subagent leaves the list: its tool calls, its thinking, its notices and
+/// its prose. The call stays where it is and stands for all of it, saying how many actions the
+/// subagent has taken (`Folds.actions(underCall:)`). A subagent a subagent started is counted
+/// into the call at the top of the chain, because that is the only one of them still on screen.
+/// The whole run is in the subagent's own pane, which is where a reader goes for it.
 ///
-/// **This is a bug rather than a feature that was missing.** Nested rows were scanned exactly like
-/// any other, so they were in a group with the call that started them, and that call has no result
-/// until the subagent has finished. Rule 1 then pinned the whole group open: a subagent that ran
-/// for four minutes drew every one of its sixteen or sixty rows in full, at the one moment folding
-/// them was worth most, and only folded once it was over. Grouping by the id fixes the cause
-/// rather than the symptom, since the children settle one by one as their own results land.
+/// **This replaced folding a subagent's rows among themselves, and the owner's report is why.**
+/// That rule closed a group whenever the parent id changed, and running several subagents at once
+/// is now the ordinary way of working, so their rows interleave: A, B, A, B. Every group was a row
+/// or two long, and the transcript came out as a ragged mix of "5 actions", "3 actions", a lone
+/// Edit, a Thinking row, and nothing properly grouped. One line per subagent does not care what
+/// order the rows arrived in.
 ///
-/// Two subagents running at once interleave their rows, so every group is a row or two long and
-/// nothing folds. That is the honest answer for a transcript whose next line is from a different
-/// agent, and it is what the old code did for the whole run anyway.
+/// Leaving the list costs nothing in `TranscriptEntryChange` terms, and that is by construction
+/// rather than luck. A nested row is never inserted in the first place: `Folds.absorbs` holds a
+/// row the scan has not seen yet back for the one pass before it has, so the only edit a new
+/// child makes is to the count, which is in the call row's content key and moves no entry.
+///
+/// The call is held out of any fold the moment a child of it turns up, because a count hanging on
+/// a row that a fold has swallowed is a count nobody can read. A call whose children arrive in a
+/// later turn, which is a subagent sent into the background, may already sit inside a settled
+/// fold, and it keeps its count there: reaching back into a finished turn to split its fold would
+/// be history this type deliberately does not keep.
+///
+/// The main agent's own work around the call folds as it always did, and it is no longer cut into
+/// fragments, because the rows that used to interrupt it are not in the list to interrupt it.
+///
+/// What still surfaces from inside a subagent is drawn where it happened, indented under the
+/// hairline that says whose it is, rather than gathered under the call: a question the subagent is
+/// stopped on, a card or media it put in front of the reader, the agent dying, and any row the
+/// reader navigated to or opened. See `Fact.surfaces` and rule 4. A row whose parent call cannot
+/// be found anywhere is drawn as before, since there is no line to stand for it.
 ///
 /// # What is never hidden
 ///
@@ -53,10 +69,19 @@ import Foundation
 ///    that had to reveal a row it had hidden is a transcript rearranging itself under somebody who
 ///    is reading it. A tool call with no result yet, and a permission question nobody has answered
 ///    yet, are the same fact here. Completed actions after them can still join the fold.
+///
+///    **Except a call that has only just been made.** Most calls are a file read or a `sed` that
+///    comes back in tens of milliseconds, and holding every one of those out drew the call as a
+///    row of its own for a few frames and then pulled it into the count: a line appearing under
+///    the fold and jumping into it, on every action of a turn. So a call younger than
+///    `freshCall` folds as though it had settled, the live tail says what is running meanwhile,
+///    and only a call still running once that has passed is drawn on its own. That reveal is
+///    the one place a fold gives a row back, and it is an insertion at the live end of the work
+///    rather than a rearrangement: the call was never on screen to be moved.
 /// 2. **The agent stopping, and a row carrying content of its own.** An `error` row is the agent
-///    exiting in a way it did not choose, and inline media is deliberate content wearing an
-///    activity row's clothes. Both remain visible and divide the ordinary activity before and
-///    after them into separate compact groups.
+///    exiting in a way it did not choose. Inline media and agent question cards are conversation
+///    content wearing activity rows' clothes. They remain visible, including answered questions,
+///    and divide the ordinary activity before and after them into separate compact groups.
 ///
 ///    **A failed tool call is not one of these, and it used to be.** This rule said that a failed
 ///    command is the one you are scrolling to find, which read well and drew badly: an errored
@@ -74,7 +99,8 @@ import Foundation
 ///    an ordinary session, which teaches a reader nothing except to stop reading it.
 /// 3. **A permission question nobody has answered.** It is covered by 1, and it is written down
 ///    separately because burying a question the turn is stopped on would be the worst fault this
-///    file could have. Answered, it folds away with the rest.
+///    file could have. Settled tool permissions fold away; agent question cards stay visible
+///    under rule 2 so the reader can always see the questions and their answers.
 /// 4. **A row something has asked to be visible**: a tool result the reader opened, and the row
 ///    this session was opened on. The last of those is worse than cosmetic, because a scroll can
 ///    only find a row the table is DRAWING, so a search hit or an unread mark inside a fold is not
@@ -83,6 +109,14 @@ import Foundation
 /// Settling an action only adds it to the hidden rows. It never reveals completed work that
 /// was already folded, and the group keeps its identity while results arrive out of order.
 public enum TranscriptFold {
+    /// How long a tool call with no result may stay folded before it is drawn as running.
+    ///
+    /// Long enough to cover the calls that come back almost at once, which is most of them, and
+    /// short enough that a test run or a build is on screen by the time anybody wonders what the
+    /// turn is doing. A call that settles just after this still appears and folds, but it has been
+    /// on screen long enough to be read rather than flickering past.
+    public static let freshCall: Duration = .seconds(1)
+
     /// The fewest rows worth hiding.
     ///
     /// A fold costs one line for itself, so hiding N rows saves N minus one: at one it saves
@@ -197,8 +231,8 @@ public enum TranscriptFold {
         /// **This settles a row rather than holding it out of the fold.** A failed call folds
         /// away with the ordinary work around it; see rule 2 for why it stopped being a boundary.
         public var failed: Bool
-        /// Deliberate content carried by an activity-shaped row, such as inline media. It remains
-        /// visible and separates the ordinary implementation log on either side.
+        /// Deliberate content carried by an activity-shaped row, such as inline media or an agent
+        /// question card. It stays visible after settling and separates the log on either side.
         public var featured: Bool
         /// What `TranscriptRowInk` says, which is that most `system` rows draw no view at all.
         public var drawsNothing: Bool
@@ -211,6 +245,10 @@ public enum TranscriptFold {
         /// than trusting the caller: a result writes `is_error` and the payload in one go, so a
         /// call that could fail after being hidden would be a fold that has to unfold.
         public var settled: Bool
+        /// A tool call made less than `freshCall` ago, so it may fold before it has settled. See
+        /// the exception under rule 1. Ignored for every other kind: a permission question nobody
+        /// has answered is never hidden, however new it is.
+        public var isFresh: Bool
         /// This row's own call id, for a tool call, and what a child of it carries as its
         /// `parentToolUseID`. Nil for every other kind.
         public var toolUseID: String?
@@ -232,6 +270,7 @@ public enum TranscriptFold {
             featured: Bool = false,
             drawsNothing: Bool = false,
             settled: Bool = true,
+            isFresh: Bool = false,
             toolUseID: String? = nil,
             parentToolUseID: String? = nil,
             opensTurn: Bool = false
@@ -242,6 +281,7 @@ public enum TranscriptFold {
             self.featured = featured
             self.drawsNothing = drawsNothing
             self.settled = settled
+            self.isFresh = isFresh
             self.toolUseID = toolUseID
             self.parentToolUseID = parentToolUseID
             self.opensTurn = opensTurn
@@ -260,6 +300,31 @@ public enum TranscriptFold {
 
         /// Whether this row has to stay on screen once it is reached. See rule 2 in the header.
         var mustShow: Bool { featured || kind == .error }
+
+        /// Whether this row stays in the list when it comes from inside a subagent whose call
+        /// stands for the rest. Rules 2 and 3 of the header, asked of a nested row: a card, media
+        /// or the agent dying, and a question nobody has answered.
+        var surfaces: Bool {
+            guard !drawsNothing else { return false }
+            return mustShow || (kind == .permissionAsk && !settled)
+        }
+    }
+
+    /// A subagent, as the call that started it stands for it in the list.
+    public struct Subagent: Equatable, Sendable {
+        /// Where the call that started it is, as an index into the session's rows.
+        public var callIndex: Int
+        /// How many activity rows it has produced, counted exactly as a fold counts them.
+        public var actions: Int
+        /// The part of `actions` below the scan's resume index, which is what a rescan starts from
+        /// rather than counting a finished turn's rows again.
+        var settledActions: Int
+
+        public init(callIndex: Int, actions: Int = 0, settledActions: Int = 0) {
+            self.callIndex = callIndex
+            self.actions = actions
+            self.settledActions = settledActions
+        }
     }
 
     /// One row of a turn's working: where it is, and what it is called.
@@ -293,7 +358,6 @@ public enum TranscriptFold {
         /// Set as the scan runs as well as read off the row, because a call becomes the header of
         /// a subagent only when a child of it turns up, which is after it was collected.
         var mustShow: Bool
-        var toolUseID: String?
         var parentToolUseID: String?
     }
 
@@ -309,8 +373,9 @@ public enum TranscriptFold {
         public var ready: Set<Int>
         /// Whether the turn has said its answer, so nothing of the working need stay on screen.
         public var hasAnswer: Bool
-        /// Whether this is a subagent's own work, so the line that stands for it is drawn indented
-        /// under the call that started it rather than at the transcript's margin.
+        /// Whether this is nested work whose call could not be found, so the line that stands for
+        /// it is drawn indented like the rows it hides. A subagent whose call is found has no
+        /// working at all: see "A subagent is one row" in the header.
         public var isNested: Bool
 
         /// The fold's identity, which is the sequence number of the FIRST row of the working.
@@ -363,13 +428,74 @@ public enum TranscriptFold {
         /// about to grow, so it is rescanned in full every time a row lands. A turn is a few
         /// hundred rows at worst and the facts are read off the row rather than out of its payload.
         public var resumeIndex: Int
+        /// Every subagent whose call was found, by that call's id.
+        public var subagents: [String: Subagent]
+        /// Which subagent's call stands for a nested row, by the parent id the row carries. A
+        /// subagent's own subagents resolve to the call at the top of the chain.
+        var roots: [String: String]
+        /// Parent ids no call was found for, so a rescan does not search the session for them
+        /// again. Rows are appended in order, so a call that was not before its child never will be.
+        var orphans: Set<String>
+        /// Nested rows that stay in the list although their subagent's call stands for them. See
+        /// `Fact.surfaces`.
+        var surfaced: Set<Int>
 
         public static let none = Folds(all: [], scannedRows: 0, resumeIndex: 0)
 
-        public init(all: [Work], scannedRows: Int, resumeIndex: Int) {
+        public init(
+            all: [Work],
+            scannedRows: Int,
+            resumeIndex: Int,
+            subagents: [String: Subagent] = [:],
+            roots: [String: String] = [:],
+            orphans: Set<String> = [],
+            surfaced: Set<Int> = []
+        ) {
             self.all = all
             self.scannedRows = scannedRows
             self.resumeIndex = resumeIndex
+            self.subagents = subagents
+            self.roots = roots
+            self.orphans = orphans
+            self.surfaced = surfaced
+        }
+
+        /// Whether this row leaves the list because a subagent's call stands for it.
+        ///
+        /// Asked once per nested row of the window on every pass, so it reads what is on the row
+        /// already and makes one lookup. A top level row answers at the first line.
+        ///
+        /// **A nested row the scan has not reached yet is held back for a pass, and that is what
+        /// keeps a subagent's work from ever touching the list's shape.** The scan runs one pass
+        /// behind the rows (see `Folds`), so without this a subagent's first child would be drawn
+        /// for a frame as an insertion and taken away on the next pass as a removal: a row
+        /// flickering under the call, on every subagent. Held back, it never arrives, and the one
+        /// row this delays that should be drawn (a question, or a child whose call cannot be
+        /// found) is an insertion one pass later, which is what an arrival already is.
+        ///
+        /// - Parameter revealed: the rows something has asked to see, by sequence number. See rule
+        ///   4 in the header: a search hit inside a subagent is a scroll that has to land.
+        public func absorbs(index: Int, seq: Int, parent: String?, revealed: Set<Int>) -> Bool {
+            guard parent != nil, !revealed.contains(seq) else { return false }
+            guard index < scannedRows else { return true }
+            guard let parent, roots[parent] != nil else { return false }
+            return !surfaced.contains(index)
+        }
+
+        /// Whether any row at all is stored under this call, prose included, which is what the
+        /// call row needs to know to open the run once the roster has forgotten it. See
+        /// `SubagentRunLink`.
+        public func hasRun(underCall toolUseID: String?) -> Bool {
+            guard !subagents.isEmpty, let toolUseID else { return false }
+            return subagents[toolUseID] != nil
+        }
+
+        /// How many actions the subagent this call started has taken, or nothing for a call that
+        /// started no subagent or one that has not done anything yet.
+        public func actions(underCall toolUseID: String?) -> Int? {
+            guard !subagents.isEmpty, let toolUseID, let subagent = subagents[toolUseID],
+                  subagent.actions > 0 else { return nil }
+            return subagent.actions
         }
 
         /// Where in `all` the working holding this row index is, or nothing.
@@ -414,11 +540,35 @@ public enum TranscriptFold {
         let count = facts.count
         var start = previous.resumeIndex
         var found: [Work] = []
+        var subagents: [String: Subagent] = [:]
+        var roots: [String: String] = [:]
+        var orphans: Set<String> = []
+        var surfaced: Set<Int> = []
         if count < previous.scannedRows || start > count {
             start = 0
         } else {
             found = previous.all.filter { $0.span.upperBound <= start }
+            // Only subagents whose call is in the settled prefix are carried. One whose call is
+            // in the turn being rescanned is found again by the rescan, which is what marks its
+            // call as a boundary in the fold being rebuilt, exactly as a scan from nothing does.
+            for (id, subagent) in previous.subagents where subagent.callIndex < start {
+                subagents[id] = Subagent(
+                    callIndex: subagent.callIndex,
+                    actions: subagent.settledActions,
+                    settledActions: subagent.settledActions
+                )
+            }
+            roots = previous.roots.filter { subagents[$0.value] != nil }
+            orphans = previous.orphans
+            surfaced = previous.surfaced.filter { $0 < start }
         }
+        // Tool calls in the part being scanned, by id, with the parent each was made under. What a
+        // nested row is resolved against; the settled prefix is searched only for a parent that is
+        // not here, and only once, because the answer is carried.
+        var calls: [String: (index: Int, parent: String?)] = [:]
+        // The nested activity rows counted on this scan, so those below the resume index can be
+        // written down as settled once the scan knows where that is.
+        var counted: [(root: String, index: Int)] = []
 
         // The consecutive activity being built. Black prose and structural turn rows close it.
         var items: [Item] = []
@@ -451,22 +601,59 @@ public enum TranscriptFold {
             appendSegment(endingAt: items.endIndex)
         }
 
-        /// The call that started a subagent stops being foldable the moment a child of it turns
-        /// up, and that is asked of every kind rather than only of activity: a subagent's first
-        /// row is often its own prose, which closes the group two lines below before the parent
-        /// check there could ever see it, leaving the header inside a group that goes on to fold.
+        /// The call at the top of the chain a nested row belongs to, or nil when no call is found.
         ///
-        /// Only asked at a change of parent, so it costs one comparison per row rather than a
-        /// walk of the buffer.
-        func markHeader(of fact: Fact) {
-            guard let parent = fact.parentToolUseID, items.last?.parentToolUseID != parent,
-                  let header = items.lastIndex(where: { $0.toolUseID == parent }) else { return }
-            items[header].mustShow = true
+        /// Found once per subagent rather than once per row: every answer is written into `roots`
+        /// or `orphans`. A call found for the first time is held out of the fold it is in, because
+        /// from now on it is the row that stands for the subagent, and that is asked of every
+        /// kind: a subagent's first row is often its own prose.
+        func root(of parent: String) -> String? {
+            if let known = roots[parent] { return known }
+            if orphans.contains(parent) { return nil }
+            var call = calls[parent]
+            if call == nil {
+                var at = start - 1
+                while at >= 0 {
+                    let earlier = facts[facts.index(facts.startIndex, offsetBy: at)]
+                    if earlier.kind == .toolUse, earlier.toolUseID == parent {
+                        call = (at, earlier.parentToolUseID)
+                        break
+                    }
+                    at -= 1
+                }
+            }
+            guard let call else {
+                orphans.insert(parent)
+                return nil
+            }
+            let top = call.parent.flatMap { root(of: $0) } ?? parent
+            roots[parent] = top
+            if top == parent {
+                subagents[parent] = Subagent(callIndex: call.index)
+                if let header = items.lastIndex(where: { $0.row.index == call.index }) {
+                    items[header].mustShow = true
+                }
+            }
+            return top
         }
 
         for offset in start..<count {
             let fact = facts[facts.index(facts.startIndex, offsetBy: offset)]
-            markHeader(of: fact)
+            // A subagent's row, whose call stands for it. It leaves the scan here, before any of
+            // the boundaries below can see it: its prose closes nothing and its rows split no
+            // fold, which is the whole of what stopped the main agent's work being cut up.
+            if let parent = fact.parentToolUseID, let top = root(of: parent) {
+                if fact.surfaces { surfaced.insert(offset) }
+                if fact.isActivity {
+                    subagents[top]?.actions += 1
+                    counted.append((top, offset))
+                }
+                if fact.kind == .toolUse, let id = fact.toolUseID { calls[id] = (offset, parent) }
+                continue
+            }
+            if fact.kind == .toolUse, let id = fact.toolUseID {
+                calls[id] = (offset, fact.parentToolUseID)
+            }
             // A message and the footer settle everything above them. Neither belongs to an
             // activity group, and a crew row is a message: it is what another agent said to start
             // this turn, in the place a user row sits when a person started it. A background
@@ -486,8 +673,8 @@ public enum TranscriptFold {
             // whatever is folded around it and counted as nothing. See `TranscriptRowInk`.
             if fact.drawsNothing { continue }
             guard fact.isActivity else { continue }
-            // A subagent's rows are its own working. See the section above: the id changing is
-            // what ends a group, so a fold never spans two subagents or reaches out of one.
+            // Only a nested row whose call was never found gets this far, and it is drawn indented
+            // like one, so a fold of it must not reach out to the work around it.
             if let last = items.last, last.parentToolUseID != fact.parentToolUseID {
                 close(hasAnswer: false)
             }
@@ -497,10 +684,10 @@ public enum TranscriptFold {
                 // the monotonicity rests on.** A result writes `is_error` and the payload in one
                 // go, so a call cannot have failed without having settled; read the other way
                 // round, a row that is hidden has already settled and can therefore never turn into
-                // a failure afterwards.
-                ready: fact.settled || fact.failed,
+                // a failure afterwards. A fresh call is the exception, and it costs nothing: a
+                // failed call folds like any other, so failing while hidden reveals nothing.
+                ready: fact.settled || fact.failed || (fact.isFresh && fact.kind == .toolUse),
                 mustShow: fact.mustShow,
-                toolUseID: fact.toolUseID,
                 parentToolUseID: fact.parentToolUseID
             ))
         }
@@ -508,6 +695,18 @@ public enum TranscriptFold {
         // entry has to be in the list before it folds.
         close(hasAnswer: false)
 
-        return Folds(all: found, scannedRows: count, resumeIndex: min(resume, count))
+        let resumeIndex = min(resume, count)
+        for child in counted where child.index < resumeIndex {
+            subagents[child.root]?.settledActions += 1
+        }
+        return Folds(
+            all: found,
+            scannedRows: count,
+            resumeIndex: resumeIndex,
+            subagents: subagents,
+            roots: roots,
+            orphans: orphans,
+            surfaced: surfaced
+        )
     }
 }

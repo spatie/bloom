@@ -73,18 +73,51 @@ public enum BridgeUntrustedText {
             """
     }
 
+    /// The fence around a message from another workspace. See `WorkspaceMessage`.
+    ///
+    /// Here rather than beside that type, because the escaping below has to know it: a web page
+    /// holding this line would otherwise read, to a model, as a message carrying the owner's
+    /// authority. Every text that goes through either envelope has all four markers quoted.
+    public static let workspaceMessageOpening = "----- BEGIN MESSAGE FROM ANOTHER WORKSPACE -----"
+    public static let workspaceMessageClosing = "----- END MESSAGE FROM ANOTHER WORKSPACE -----"
+
+    static let markers: Set<String> = [opening, closing, workspaceMessageOpening, workspaceMessageClosing]
+
     /// A page cannot close the fence early.
     ///
     /// Compared on the trimmed line, because HTML rendering produces leading whitespace by the
     /// yard and a plain equality check would let a marker in behind two spaces. A line that would
-    /// read as either marker is quoted with a `>` instead, which keeps the words the page wrote
+    /// read as any marker is quoted with a `>` instead, which keeps the words the page wrote
     /// where a reader can see them while making the line something no parser reads as the fence.
+    ///
+    /// **Every line break becomes a newline first, and that is the fix for a real escape.** Swift
+    /// splits on Characters, and `"\r\n"` is ONE Character, so a split on `"\n"` never saw it: a
+    /// text written with CRLF, or with a lone CR or a Unicode line separator, was a single "line",
+    /// no marker inside it was quoted, and a message could close its fence and open a forged
+    /// envelope under it. The comparison also folds case and runs of spaces, so a marker typed in
+    /// lowercase or with a doubled space is quoted too.
     static func escaping(_ text: String) -> String {
-        text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed == opening || trimmed == closing else { return String(line) }
+        normalisingLineBreaks(text).split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+            guard isMarker(line) else { return String(line) }
             return "> " + line
         }
         .joined(separator: "\n")
+    }
+
+    /// Every way of breaking a line, as `\n`. CRLF first, so it does not become two.
+    static func normalisingLineBreaks(_ text: String) -> String {
+        var normalised = text.replacingOccurrences(of: "\r\n", with: "\n")
+        for breaker in ["\r", "\u{2028}", "\u{2029}", "\u{0085}", "\u{000B}", "\u{000C}"] {
+            normalised = normalised.replacingOccurrences(of: breaker, with: "\n")
+        }
+        return normalised
+    }
+
+    private static let foldedMarkers = Set(markers.map { $0.uppercased() })
+
+    /// Whether a line reads as a fence, whatever its case and however it is spaced.
+    static func isMarker(_ line: Substring) -> Bool {
+        let folded = line.split(whereSeparator: \.isWhitespace).joined(separator: " ").uppercased()
+        return foldedMarkers.contains(folded)
     }
 }
