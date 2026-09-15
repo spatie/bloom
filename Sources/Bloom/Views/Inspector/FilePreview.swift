@@ -7,6 +7,7 @@ struct FilePreview<Model: WorkspacePaneModel>: View {
     let path: String
     var absolutePathOverride: String?
     var canEditInBloom = true
+    @State private var showsMarkdownPreview = false
     @State private var width: CGFloat = 0
     private var session: FileEditSession { model.fileEdits }
 
@@ -40,6 +41,11 @@ struct FilePreview<Model: WorkspacePaneModel>: View {
                         Text("Edit").tag(true)
                     }.pickerStyle(.segmented).labelsHidden().fixedSize()
                 }
+                if Language.detect(path: path) == .markdown {
+                    MarkdownPreviewButton(isPresented: showsMarkdownPreview) {
+                        showsMarkdownPreview.toggle()
+                    }
+                }
             }
             .controlSize(.small)
             .padding(.horizontal, InspectorLayout.inset)
@@ -47,9 +53,15 @@ struct FilePreview<Model: WorkspacePaneModel>: View {
             .background(Palette.surfaceSunken)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             Hairline()
-            FileEditPane(model: model, path: path, session: session,
-                         isEditable: canEditInBloom && state.prefersEditing, absolutePathOverride: absolutePathOverride)
+            MarkdownPreviewContent(
+                path: absolutePath, revision: model.changesGeneration,
+                isPresented: $showsMarkdownPreview
+            ) {
+                FileEditPane(model: model, path: path, session: session,
+                             isEditable: canEditInBloom && state.prefersEditing, absolutePathOverride: absolutePathOverride)
+            }
         }
+        .onChange(of: state.prefersEditing) { _, _ in showsMarkdownPreview = false }
         .background(Palette.surface)
         .environment(\.openInRepoID, model.repo?.id)
         .onAppear { if session.isDirty(absolutePath) { state.prefersEditing = true } }
