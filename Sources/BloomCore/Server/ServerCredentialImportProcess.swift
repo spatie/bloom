@@ -25,9 +25,17 @@ enum ServerCredentialImportProcess {
         let cancelled = Cancellation()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
+                // A thread of its own rather than a block on a global queue. The deadline is not
+                // computed until the loop below starts, and a global queue holds a block back while
+                // its CPU-bound work already uses the cores: measured with three blocks per core
+                // spinning on `userInitiated`, a new block waited 11.8 seconds and a new thread
+                // started at once. That is how a 0.15 second timeout in the core suite, which runs
+                // its tests in parallel, came back after 17 seconds on a CI runner.
+                let worker = Thread {
                     do { continuation.resume(returning: try execute(executable, arguments, environment: environment, input: input, limit: limit, timeout: timeout, cancelled: cancelled, workingDirectory: workingDirectory, captureStderr: captureStderr)) } catch { continuation.resume(throwing: error) }
                 }
+                worker.qualityOfService = .userInitiated
+                worker.start()
             }
         } onCancel: { cancelled.value.withLock { $0 = true } }
     }
