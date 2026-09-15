@@ -85,12 +85,23 @@ public final class UnixSocketConnection: Sendable {
     public var peerProcessID: pid_t? {
         closed.withLock { closed -> pid_t? in
             guard !closed else { return nil }
+            #if os(Linux)
+            // Linux has no LOCAL_PEERPID; the kernel records the peer's credentials instead, and
+            // Bloom Server's bridge asks the same question there. Without this the linux job
+            // failed to compile on SOL_LOCAL.
+            var credentials = ucred()
+            var length = socklen_t(MemoryLayout<ucred>.size)
+            guard getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &credentials, &length) == 0,
+                  credentials.pid > 0 else { return nil }
+            return credentials.pid
+            #else
             var pid: pid_t = 0
             var length = socklen_t(MemoryLayout<pid_t>.size)
             guard getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0, pid > 0 else {
                 return nil
             }
             return pid
+            #endif
         }
     }
 
