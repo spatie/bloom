@@ -6,6 +6,8 @@ import SwiftUI
 struct ReviewDiffBlock<Content: View>: View {
     var height: CGFloat
     var viewportHeight: CGFloat
+    /// Names the block for the review probe's section report, and does nothing otherwise.
+    var probeName: String?
     @ViewBuilder var content: () -> Content
 
     @State private var isNearViewport = false
@@ -25,5 +27,6 @@ struct ReviewDiffBlock<Content: View>: View {
             } action: {
                 isNearViewport = $0
             }
+            .reviewProbeGeometry(probeName, nearViewport: isNearViewport)
     }
 }

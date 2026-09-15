@@ -42,19 +42,23 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                                     isCollapsed: collapsedPaths.contains(file.id),
                                     onScrollFocus: {
                                         guard hasNavigated, pendingDestination == nil else { return }
-                                        if model.selectedFilePath != file.path { model.selectedFilePath = file.path }
+                                        if model.selectedFilePath != file.path {
+                                            trace("scroll focus selected \(file.path)")
+                                            model.selectedFilePath = file.path
+                                        }
                                         if model.selectedChangeLayer != file.layer { model.selectedChangeLayer = file.layer }
                                     },
                                     navigationTarget: pendingDestination == file.id,
                                     onNavigationLayout: {
                                         guard pendingDestination == file.id else { return }
-                                        follow(file.id, using: reader)
+                                        follow(file.id, using: reader, because: "destination moved")
                                     },
                                     onPrepared: {
                                         if pendingDestination == file.id { destinationPrepared = true }
                                         layoutRevision += 1
                                     },
                                     onToggleCollapsed: {
+                                        trace("collapse of \(file.id) released \(pendingDestination ?? "nothing")")
                                         pendingDestination = nil
                                         if !collapsedPaths.insert(file.id).inserted {
                                             collapsedPaths.remove(file.id)
@@ -64,8 +68,10 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                                 .id(file.id)
                             }
                         }
+                        .reviewProbeDocument()
                         .background {
                             ReviewNavigationInput(armed: pendingDestination != nil) {
+                                trace("input released \(pendingDestination ?? "nothing")")
                                 pendingDestination = nil
                             }
                         }
@@ -73,6 +79,7 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                     .defaultScrollAnchor(.topLeading)
                     .onScrollPhaseChange { _, phase in
                         if phase == .tracking || phase == .interacting || phase == .decelerating {
+                            if let pendingDestination { trace("scroll phase \(phase) released \(pendingDestination)") }
                             pendingDestination = nil
                         }
                     }
@@ -96,35 +103,44 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
                         pendingDestination = path
                         model.selectedFilePath = file.path
                         model.selectedChangeLayer = file.layer
+                        trace("navigate to \(path), revision \(navigationRevision), width \(Int(geometry.size.width))")
                         reader.scrollTo(path, anchor: .top)
                         restartSettleTimer()
                     }
                     .onScrollGeometryChange(for: CGSize.self) { geometry in
                         geometry.contentSize
-                    } action: { _, _ in
-                        if let path = pendingDestination { follow(path, using: reader) }
+                    } action: { _, size in
+                        trace("content height \(Int(size.height))")
+                        if let path = pendingDestination { follow(path, using: reader, because: "content resized") }
                     }
                     .onChange(of: layoutRevision) { _, _ in
-                        if let path = pendingDestination { follow(path, using: reader) }
+                        if let path = pendingDestination { follow(path, using: reader, because: "a file was prepared") }
                     }
-                    .onChange(of: geometry.size.width) { _, _ in
+                    .onChange(of: geometry.size.width) { _, width in
                         // Rewrapping moves every line above the destination, which the reader did not ask for.
                         guard let path = pendingDestination else { return }
+                        trace("width \(Int(width)) re-armed \(path)")
                         destinationSettled = false
-                        follow(path, using: reader)
+                        follow(path, using: reader, because: "width changed")
                     }
                     .onChange(of: model.reviewFiles.map(\.id)) { _, paths in
                         collapsedPaths.formIntersection(paths)
-                        if let pendingDestination, !paths.contains(pendingDestination) { self.pendingDestination = nil }
+                        if let pendingDestination, !paths.contains(pendingDestination) {
+                            trace("file list change released \(pendingDestination)")
+                            self.pendingDestination = nil
+                        }
                     }
                 }
             }
         }
     }
 
-    private func follow(_ path: String, using reader: ScrollViewProxy) {
-        guard !destinationSettled else { return }
-        scroll(to: path, using: reader)
+    private func follow(_ path: String, using reader: ScrollViewProxy, because reason: String) {
+        guard !destinationSettled else {
+            trace("settled, not following \(path), \(reason)")
+            return
+        }
+        scroll(to: path, using: reader, because: reason)
         restartSettleTimer()
     }
 
@@ -133,17 +149,29 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
         settleTask = Task {
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
+            trace("destination \(pendingDestination ?? "nothing") settled")
             destinationSettled = true
         }
     }
 
-    private func scroll(to path: String, using reader: ScrollViewProxy) {
+    private func scroll(to path: String, using reader: ScrollViewProxy, because reason: String) {
         let relative = model.reviewFiles.first { $0.id == path }?.path ?? path
         let absolute = (model.workspace.path as NSString).appendingPathComponent(relative)
         if destinationPrepared, model.diffScope == .all, let destination = model.paneStores.sourceFile(absolute).diffRequest {
+            trace("scroll to \(path) line \(destination.line), \(reason)")
             reader.scrollTo("\(path):definition:\(destination.line)", anchor: .center)
         } else {
+            trace("scroll to \(path) top, \(reason)")
             reader.scrollTo(path, anchor: .top)
         }
+    }
+
+    /// Only the review probe records. The navigation probe has failed intermittently on CI with the
+    /// scroller sitting on files six and seven after being asked for file three, and a list of the
+    /// text views that happened to exist could not say whether a scroll was requested at all.
+    private func trace(_ event: @autoclosure () -> String) {
+        #if DEBUG
+        if ReviewRunProbe.isRecording { ReviewRunProbe.trace(event()) }
+        #endif
     }
 }
