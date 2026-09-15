@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// The close control on a chip, as the numbers every renderer of it reads.
 ///

@@ -6,7 +6,9 @@ public actor SourceLanguageServers {
     private struct Key: Hashable { var root: String; var language: Language; var laravel: Bool }
     private struct Entry { var server: SourceLanguageServer; var used: Date }
     private var entries: [Key: Entry] = [:]
+    #if canImport(CoreServices)
     private var watcher: WorktreeWatcher?
+    #endif
 
     public func server(root: String, language: Language, laravel: Bool = false) async -> SourceLanguageServer {
         let key = Key(root: root, language: language == .blade ? .php : language, laravel: laravel)
@@ -20,12 +22,14 @@ public actor SourceLanguageServers {
         }
         let server = SourceLanguageServer(laravel: laravel)
         entries[key] = Entry(server: server, used: .now)
+        #if canImport(CoreServices)
         if watcher == nil, laravel {
             watcher = WorktreeWatcher(onFilesChanged: { [weak self] changes in
                 Task { await self?.filesChanged(changes) }
             }, onChange: { _ in })
         }
         watcher?.watch(roots: entries.keys.filter(\.laravel).map(\.root))
+        #endif
         return server
     }
 
@@ -81,8 +85,10 @@ public actor SourceLanguageServers {
     public func close() async {
         let servers = entries.values.map(\.server)
         entries = [:]
+        #if canImport(CoreServices)
         watcher?.stop()
         watcher = nil
+        #endif
         for server in servers { await server.close() }
     }
 

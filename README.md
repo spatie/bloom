@@ -219,6 +219,24 @@ mysql -u root -e "DROP DATABASE IF EXISTS \`$database\`"
 script can also bring down whatever the setup script started on it (`docker compose down -v`, or
 killing what is listening). It gets ten minutes to do so.
 
+#### Containers and volumes per workspace
+
+Bloom can remove a workspace's Docker containers, volumes and networks when it is archived, and
+the server's Storage & Cleanup lists the ones left behind by archived workspaces. It only ever
+touches a resource that names the workspace's id, in one of two ways:
+
+- a compose project name containing `$BLOOM_WORKSPACE_ID`, with or without its dashes, which
+  compose copies onto every container, volume and network it creates:
+  `export COMPOSE_PROJECT_NAME="myapp-${BLOOM_WORKSPACE_ID//-/}"`
+- a `bloom.workspace` label whose value is `$BLOOM_WORKSPACE_ID`, for resources made without compose.
+
+A project that does neither is never touched, and images are never removed, because a dev image is
+shared by every workspace built from it. When resources match, the archive confirmation offers
+**Also remove this workspace's containers and volumes (its database and cached data)**, on by
+default. The removal runs after the archive script, and also when the script was skipped because
+the worktree was already gone. If Docker refuses, the archive stops with the worktree kept. An
+archive an agent asked for keeps the containers, as it keeps the branch.
+
 #### Where a browser pane opens
 
 A browser pane opens on `http://localhost:$BLOOM_PORT`, which is right for a project whose dev
@@ -280,6 +298,7 @@ it, so they answer "has this already been worked out" rather than touring the co
 - [`docs/BRIDGE.md`](docs/BRIDGE.md) is the bridge the other way round: what an agent can ask Bloom
   to do, and which callers may ask for what.
 - [`docs/MENUS.md`](docs/MENUS.md) is the menu bar and the keyboard shortcuts.
+- [`docs/SERVER.md`](docs/SERVER.md) covers Bloom Server, its Linux package and connecting from the Mac app, which is off until Remote servers is turned on in Settings > Servers.
 - [`docs/PLAN.md`](docs/PLAN.md) is the build order this was written to, kept for the bug reports
   in it: what broke, why, and what now stops it.
 

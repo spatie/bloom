@@ -42,12 +42,18 @@ public struct UnfinishedRun: Sendable, Hashable {
     public let command: String
     /// Whether a turn was open at the moment the process went away.
     public let leftATurnOpen: Bool
+    /// The project's execution environment, when the CLI was launched through one. Written into
+    /// the row rather than looked up when it is drawn, because a remote row is drawn on a Mac that
+    /// has neither the settings file nor the wrapper.
+    public let execution: AgentMissingFromEnvironment?
 
-    public init(status: Int32, stderr: String, command: String, leftATurnOpen: Bool) {
+    public init(status: Int32, stderr: String, command: String, leftATurnOpen: Bool,
+                execution: AgentMissingFromEnvironment? = nil) {
         self.status = status
         self.stderr = stderr
         self.command = command
         self.leftATurnOpen = leftATurnOpen
+        self.execution = execution
     }
 
     /// What a finished run owes the transcript, or nothing when it owes it nothing.
@@ -63,16 +69,19 @@ public struct UnfinishedRun: Sendable, Hashable {
         sawResult: Bool,
         state: SessionState,
         stderr: String,
-        command: String
+        command: String,
+        execution: AgentMissingFromEnvironment? = nil
     ) -> UnfinishedRun? {
         if state.isMidTurn {
-            return UnfinishedRun(status: status, stderr: stderr, command: command, leftATurnOpen: true)
+            return UnfinishedRun(status: status, stderr: stderr, command: command, leftATurnOpen: true,
+                                 execution: execution)
         }
         // The rule this type was grown from, kept for the case it was written for: a CLI that
         // falls over between turns, having reported nothing, is still worth a row even though
         // there is no turn hanging on it.
         guard status != 0, !sawResult else { return nil }
-        return UnfinishedRun(status: status, stderr: stderr, command: command, leftATurnOpen: false)
+        return UnfinishedRun(status: status, stderr: stderr, command: command, leftATurnOpen: false,
+                             execution: execution)
     }
 
     /// Whether the exit gave any account of itself at all.
@@ -110,7 +119,7 @@ public struct UnfinishedRun: Sendable, Hashable {
     /// exists so that a turn which ended badly cannot also end silently.
     public var payload: Data {
         (try? JSONEncoder().encode(Stored(
-            subtype: subtype, status: Int(status), stderr: stderr, command: command
+            subtype: subtype, status: Int(status), stderr: stderr, command: command, execution: execution
         ))) ?? Data(#"{"type":"error"}"#.utf8)
     }
 
@@ -120,5 +129,6 @@ public struct UnfinishedRun: Sendable, Hashable {
         let status: Int
         let stderr: String
         let command: String
+        let execution: AgentMissingFromEnvironment?
     }
 }

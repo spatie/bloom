@@ -8,8 +8,8 @@ import BloomCore
 /// conversation and a terminal rebuild the column and re-run the workspace's arrival work, and it
 /// is also what made a chat and a terminal mutually exclusive. A pane holds a tab, so now they are
 /// not.
-struct CenterColumnView: View {
-    @Bindable var model: WorkspaceModel
+struct CenterColumnView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -26,9 +26,9 @@ struct CenterColumnView: View {
     /// The space a carried tab's pointer is reported in and its landing is washed in. The column
     /// rather than the window, because the strip, the panes and the overlay that washes them are
     /// all inside it, so the three can share one set of numbers.
-    nonisolated static let space = "bloom.centreColumn"
+    nonisolated static var space: String { "bloom.centreColumn" }
 
-    private var store: WorkspaceTabsStore { .shared }
+    private var store: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// Whether the strip is drawn, which is Safari's rule. The reasoning, including why a split
     /// tab no longer keeps the strip up, is `TabStripVisibility`'s.
@@ -37,6 +37,9 @@ struct CenterColumnView: View {
     }
 
     var body: some View {
+        // Read out here rather than inside the geometry closure, which would otherwise capture this
+        // generic view's metatype and cross an isolation boundary with it.
+        let space = Self.space
         let entries = store.entries(in: model)
         let selected = store.selectedTab(in: model, entries: entries)
         let isStripShown = isStripShown(entries: entries)
@@ -59,12 +62,21 @@ struct CenterColumnView: View {
                     // of the animation; the panes below close or open the gap either way.
                     .transition(.opacity)
             }
-            WorkspaceSettingsNotices(model: model)
-            CenterPanesView(model: model)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: {
-                    panesFrame.value = $0
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    WorkspaceSetupStatusView(model: model, paneHeight: geometry.size.height)
+                        .id(model.workspace.id)
+                    // Run scripts and settings issues are read from this Mac's checkout, so a
+                    // workspace on a server has neither to offer yet.
+                    if let local = model.localWorkspaceModel { WorkspaceSettingsNotices(model: local) }
+                    CenterPanesView(model: model)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(space)) } action: {
+                            panesFrame.value = $0
+                        }
                 }
+            }
         }
+        .id(model.paneStores.identity)
         .coordinateSpace(.named(Self.space))
         // With no strip, a short segment slides along the top of the column, directly under the
         // title bar, with nothing drawn behind it. See `ColumnBusySignal`.
@@ -96,6 +108,9 @@ struct CenterColumnView: View {
         // a strip fading out with a single tab left in it lingers on something already gone.
         .animation(reduceMotion || !isStripShown ? nil : Motion.pane, value: isStripShown)
         .background(Palette.windowBackground)
+        .onChange(of: model.paneStores.center.tabs(for: model.workspace.id).map(\.id)) {
+            model.remoteServer?.prepareTabs(for: model.workspace)
+        }
         // Rename Tab from the File menu. It renames the selected tab, which is the tab the menu
         // item was greyed against, and on a workspace with one tab that is a strip not drawn yet:
         // setting this is what draws it, with the field open.
@@ -107,14 +122,15 @@ struct CenterColumnView: View {
         }
         // A field left open in one workspace is not one to carry into the next.
         .onChange(of: model.workspace.id) { _, _ in renamingID = nil }
-        .task(id: model.workspace.id) {
+        .task(id: model.paneStateID) {
             // The icons this Mac has already seen, read back once per launch. Here rather than at
             // startup because this is what needs them: a workspace reopening on a browser tab
             // should draw its icon on the first frame instead of asking the page for something
             // that is already on disk. Its own task, so it does not hold up the one below.
             await BrowserFaviconStore.shared.warm()
         }
-        .task(id: model.workspace.id) {
+        .task(id: model.paneStateID) {
+            model.remoteServer?.prepareTabs(for: model.workspace)
             openStartingPane()
             await model.onAppear()
             // Last, and that ordering is the whole of it. `onAppear` does not return until the
@@ -125,18 +141,21 @@ struct CenterColumnView: View {
             // of every terminal or browser tab somebody had split, on the first open after each
             // relaunch. `TabReconciliation` refuses an unread list as well, because an ordering
             // that is only correct by inspection is one edit away from being incorrect.
-            WorkspaceTabsStore.shared.reconcile(in: model)
+            model.paneStores.tabs.reconcile(in: model)
             // After the reconcile, because starting a run script may add a tab, and a tab added
             // before the strip has been squared with what is stored is one the reconcile judges.
             // Once per workspace per launch; see `RunScriptLauncher.considerAutostart`.
-            await RunScriptLauncher.shared.considerAutostart(in: model)
+            if let local = model.localWorkspaceModel {
+                await RunScriptLauncher.shared.considerAutostart(in: local)
+            }
         }
         // A settings file that changes while the workspace is open is settled again. Without
         // this, a file added to an open workspace never asked and never started anything until
         // the next launch. Unchanged autostart commands settle to nothing; see
         // `RunScriptAutostart.signature(of:)`.
-        .onChange(of: model.settings.runScripts) { _, _ in
-            Task { await RunScriptLauncher.shared.considerAutostart(in: model) }
+        .onChange(of: model.localWorkspaceModel?.settings.runScripts) { _, _ in
+            guard let local = model.localWorkspaceModel else { return }
+            Task { await RunScriptLauncher.shared.considerAutostart(in: local) }
         }
         // Settings are otherwise re-read only on a switch, so a file edited in another app, or
         // pulled from a terminal outside Bloom, did not reach the `+` menu, the notices or the quick
@@ -144,7 +163,7 @@ struct CenterColumnView: View {
         // somebody who just changed it expects to see the change. The read is off the main actor
         // and coalesced, so this costs a parse and nothing more.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            model.refreshSettings()
+            model.localWorkspaceModel?.refreshSettings()
         }
     }
 
@@ -162,7 +181,7 @@ struct CenterColumnView: View {
         guard frame.contains(point), let tab = store.selectedTab(in: model),
               store.canAbsorb(content) else { return nil }
         let geometry = store.layout(of: tab).geometry(
-            in: frame.size, dividerThickness: CenterPanesView.dividerThickness
+            in: frame.size, dividerThickness: CenterPanesView<Model>.dividerThickness
         )
         let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
         guard var landing = geometry.landing(at: local) else { return nil }
@@ -204,8 +223,8 @@ struct CenterColumnView: View {
         let workspaceID = model.workspace.id
         // Idempotent, and first: adding a tab to a workspace whose stored list has not been read
         // back yet would replace that list rather than extend it.
-        CenterTabStore.shared.load(workspaceID: workspaceID)
-        guard let opening = WorkspaceStartMode.consumeOpeningTab(workspaceID: workspaceID) else {
+        model.paneStores.center.load(workspaceID: workspaceID)
+        guard let opening = WorkspaceStartMode.consumeOpeningTab(workspaceID: workspaceID, defaults: model.paneStores.defaults) else {
             return
         }
         // No address for a browser, where the title bar's `+` passes the workspace's own dev server.
@@ -213,6 +232,12 @@ struct CenterColumnView: View {
         // is answering nothing: an opening tab on a refused connection would be an error page as
         // the first thing a new workspace shows. The address field is where somebody says.
         guard opening.cliAgentKind == nil else { return }
-        NewPane.open(opening.pane, in: model) { WorkspaceTabsStore.shared.select($0, in: model) }
+        NewPane.open(opening.pane, in: model) { content in
+            if opening == .browser, case .tool(let id) = content,
+               let tab = model.paneStores.center.tabs(for: workspaceID).first(where: { $0.id == id }) {
+                model.paneStores.center.awaitPreviewAfterSetup(for: tab)
+            }
+            model.paneStores.tabs.select(content, in: model)
+        }
     }
 }

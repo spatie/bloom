@@ -149,11 +149,12 @@ extension AppModel {
 
         // The sea this workspace wears while the model thinks of a real name. Claimed here,
         // before `manager.start`, because its slug is about to be the branch and the branch has
-        // to exist before the worktree is cut. `OceanCatalog.shouldClaim` holds the rule about
-        // who gets one, in the core where it is tested. A nil store or a declined claim falls
-        // back to the plant placeholder below, exactly as before.
-        let pick: OceanPick?
-        if OceanCatalog.shouldClaim(
+        // to exist before the worktree is cut. `WorkspaceSeaClaim` holds the rule, the draw and
+        // the branch prefix, in the core where a server's start asks the same question. A nil
+        // store or a declined claim falls back to the plant placeholder below, exactly as before.
+        let sea = await WorkspaceSeaClaim.claim(
+            in: store,
+            repositoryPath: repo.path,
             userSuppliedName: name ?? checkout?.workspaceName,
             userSuppliedBranch: branch,
             isChatWorkspace: opensWith.runsAnAgent,
@@ -163,30 +164,9 @@ extension AppModel {
             // branch out of. The sea is both, and it is the name for good rather than a
             // placeholder.
             hasTask: !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        ) {
-            pick = try? await store?.claimOcean()
-        } else {
-            pick = nil
-        }
-
-        // The sea's slug under the project's branch prefix, by literally the rule
-        // `nameAutomatically` applies to a suggested branch rather than by a copy of it: this used
-        // to write the join and the check out again, under a comment claiming they could not
-        // disagree. Nil hands the branch back to the mechanical slug of the prompt.
-        //
-        // Off the main actor, like `resolvedControls` above and for the same reason: the load
-        // reads and parses every settings file this project answers to, and this line sits on the
-        // frame that is dismissing the create window.
-        let seaBranch: String?
-        if let pick {
-            let path = repo.path
-            let prefix = await Task.detached(priority: .userInitiated) {
-                SettingsLoader.load(repo: path).branchPrefix
-            }.value
-            seaBranch = WorkspaceNaming.prefixedBranch(pick.ocean.slug, prefix: prefix)
-        } else {
-            seaBranch = nil
-        }
+        )
+        let pick = sea?.pick
+        let seaBranch = sea?.branch
 
         // The name settled before anything is cut, rather than inside the closure `manager.start`
         // calls, and the reason is the row that has to be drawn while the cutting happens.

@@ -33,11 +33,17 @@ public typealias PaneListing = @Sendable (WorkspaceID) async -> PaneCensus?
 /// named after the page unless somebody renamed it. That is why the answer carries a line saying
 /// so. It is metadata rather than content, and it is marked all the same.
 public struct PaneListTool: BridgeToolHandling {
-    private let census: PaneListing
+    private let report: @Sendable (WorkspaceID) async -> BridgeToolResult
 
     public init(_ census: @escaping PaneListing) {
-        self.census = census
+        report = { workspaceID in
+            guard let census = await census(workspaceID) else { return .failure("That workspace is not open in Bloom any more, so there is nothing to list.") }
+            return .json(census.json)
+        }
     }
+
+    /// The same scope gate can report a census from a connected remote UI.
+    public init(report: @escaping @Sendable (WorkspaceID) async -> BridgeToolResult) { self.report = report }
 
     /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
     public let roles = BridgeWorkspaceScope.roles
@@ -73,11 +79,6 @@ public struct PaneListTool: BridgeToolHandling {
                 BridgeWorkspaceScope.refusal(tool: "pane_list", doing: "lists the panes of")
             )
         }
-        guard let census = await census(workspaceID) else {
-            return .failure(
-                "That workspace is not open in Bloom any more, so there is nothing to list."
-            )
-        }
-        return .json(census.json)
+        return await report(workspaceID)
     }
 }

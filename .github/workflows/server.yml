@@ -1,0 +1,145 @@
+name: Server
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_build:
+        description: Also build and package the server in release configuration, as a release does
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bloom-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf tmux zsh rsync passwd util-linux
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          useradd --create-home --shell /bin/bash bloom-ci
+          chown -R bloom-ci:bloom-ci "$GITHUB_WORKSPACE"
+          runuser -u bloom-ci -- git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          runuser -u bloom-ci -- git config --global user.name "Bloom tests"
+          runuser -u bloom-ci -- git config --global user.email "tests@runbloom.app"
+      - name: Build the standalone server
+        run: |
+          runuser -u bloom-ci -- swift build --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+          runuser -u bloom-ci -- swift build --product bloom-bridge -j 4 -Xswiftc -warnings-as-errors
+      - name: Run the server tests
+        run: runuser -u bloom-ci -- swift test -j 4 -Xswiftc -warnings-as-errors
+      - name: Check sustained subprocess descriptor usage
+        run: runuser -u bloom-ci -- env BLOOM_FD_STRESS=1 swift test --skip-build --filter processDescriptorsStayBounded
+      - name: Verify skill management refuses root
+        run: .build/debug/BloomPackageTests.xctest --testing-library swift-testing --filter ServerSkillsRootRefusalTests
+      - name: Exercise the server executable
+        run: runuser -u bloom-ci -- python3 Tools/server-smoke.py .build/debug/bloom-server
+      - name: Check script and installer regressions as Linux root
+        run: python3 Tools/run-script-tests.py
+      # The release path, short of a release build and an upload: the version comes from a tag,
+      # and describe puts the package through the supervisor's own extraction and manifest checks
+      # before writing the checksum and metadata a release publishes. Debug, because this job has
+      # already built debug for the tests and a second, release build would double its time.
+      - name: Package and describe the server as a release would
+        shell: bash
+        env:
+          BLOOM_SERVER_VERSION: v0.0.0-ci.${{ github.run_number }}
+          TAG: v0.0.0-ci.${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          out=.build/server-release
+          python3 Tools/package-linux-server.py .build/debug/bloom-server "$out/bloom-server-linux-x86_64.tar.gz"
+          python3 Tools/server-release-assets.py describe "$out/bloom-server-linux-x86_64.tar.gz" \
+            --tag "$TAG" --output-dir "$out"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bloom-server-linux-x86_64
+          path: |
+            .build/server-release/bloom-server-linux-x86_64.tar.gz
+            .build/server-release/bloom-server-linux-x86_64.tar.gz.sha256
+            .build/server-release/bloom-server-linux-x86_64.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Pull requests build debug, so without this the first release-mode Linux build with
+  # -warnings-as-errors would be the release itself, found out after the tag is published.
+  # Dispatch with release_build before tagging to ask that question on its own: the same build,
+  # packaging and description as the server-package job in release.yml, without the upload.
+  release-package:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_build
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf
+      - name: Build the server in release configuration
+        run: |
+          set -euo pipefail
+          swift build -c release --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+          swift build -c release --product bloom-bridge -j 4 -Xswiftc -warnings-as-errors
+      - name: Package and describe the server
+        env:
+          BLOOM_SERVER_VERSION: v0.0.0-release-check.${{ github.run_number }}
+          TAG: v0.0.0-release-check.${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          bin="$(swift build -c release --show-bin-path)"
+          out=.build/server-release
+          python3 Tools/package-linux-server.py "$bin/bloom-server" "$out/bloom-server-linux-x86_64.tar.gz"
+          python3 Tools/server-release-assets.py describe "$out/bloom-server-linux-x86_64.tar.gz" \
+            --tag "$TAG" --output-dir "$out"
+          (cd "$out" && sha256sum -c bloom-server-linux-x86_64.tar.gz.sha256)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bloom-server-linux-x86_64-release
+          path: |
+            .build/server-release/bloom-server-linux-x86_64.tar.gz
+            .build/server-release/bloom-server-linux-x86_64.tar.gz.sha256
+            .build/server-release/bloom-server-linux-x86_64.json
+          if-no-files-found: error
+          retention-days: 7
+
+  packaged-runtime:
+    needs: linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubuntu: ["24.04", "26.04"]
+    container: ubuntu:${{ matrix.ubuntu }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: bloom-server-linux-x86_64
+          path: package
+      - name: Run on Ubuntu without a Swift installation
+        run: |
+          apt-get update
+          # openssl signs the throwaway certificate the maintenance smoke test's local GitHub uses.
+          apt-get install -y --no-install-recommends python3 git openssl
+          if command -v swift >/dev/null; then exit 1; fi
+          (cd package && sha256sum -c bloom-server-linux-x86_64.tar.gz.sha256)
+          tar -xzf package/bloom-server-linux-x86_64.tar.gz -C package
+          python3 Tools/server-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
+          python3 Tools/maintenance-runtime-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
+          python3 Tools/maintenance-supervisor-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server --disposable-container

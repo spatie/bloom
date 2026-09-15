@@ -68,6 +68,26 @@ struct SetupTailWindowTests {
         #expect(SetupTailWindow.lines(cap: 3, logLines: 40) == 3)
     }
 
+    @Test("a separate setup viewport scales with the pane and reserves conversation space")
+    func separateViewportScalesWithoutHidingConversation() {
+        #expect(SetupTailWindow.viewportHeight(contentHeight: 1000, paneHeight: 850) == 510)
+        #expect(SetupTailWindow.viewportHeight(contentHeight: 1000, paneHeight: 420) == 252)
+        #expect(SetupTailWindow.viewportHeight(contentHeight: 1000, paneHeight: 240) == 144)
+    }
+
+    @Test("short setup output keeps its natural height on a large display")
+    func shortViewportDoesNotReserveEmptyLogSpace() {
+        #expect(SetupTailWindow.viewportHeight(contentHeight: 72, paneHeight: 1000) == 72)
+        #expect(SetupTailWindow.viewportHeight(contentHeight: 0, paneHeight: 1000) == 36)
+    }
+
+    @Test("an unmeasured setup viewport remains bounded")
+    func unmeasuredViewportIsBounded() {
+        #expect(SetupTailWindow.viewportHeight(contentHeight: 1000, paneHeight: 0) == 220)
+        #expect(SetupTailWindow.viewportHeight(contentHeight: .nan, paneHeight: 850) == 36)
+        #expect(SetupTailWindow.viewportHeight(contentHeight: 1000, paneHeight: .infinity) == 220)
+    }
+
     @Test("a failure is never shorter than a success in the same pane")
     func readsAFailureAtLength() {
         #expect(SetupTailWindow.failureLines(cap: 3) == SetupTailWindow.failureFloor)

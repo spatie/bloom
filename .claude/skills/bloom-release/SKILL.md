@@ -30,20 +30,27 @@ and `.github/workflows/release.yml` for current implementation details. Use `gh`
    the bundle version. The build number comes from reachable commit count and must advance
    beyond the previous shipped build. A pushed tag alone does not trigger release packaging.
 4. Watch the **Release** workflow associated with that tag using `gh run list`, `gh run view`
-   and `gh run watch`. It signs, notarises and uploads the ZIP and DMG, attaches them to GitHub,
-   and updates the Sparkle appcast. If it fails, inspect the failed job before retrying; do not
+   and `gh run watch`. It builds the Linux server, signs, notarises and uploads the ZIP and DMG,
+   updates the Sparkle appcast, then attaches the ZIP, DMG and three server assets to GitHub and
+   verifies the server asset the way a server's supervisor will read it. A failed server package
+   stops the release before signing. If it fails, inspect the failed job before retrying; do not
    delete or move a published tag. Prefer `gh run rerun <run-id>` on the original release-event
    run, which preserves its prerelease flag and asset attachment step. A `workflow_dispatch`
    rebuild has no GitHub prerelease flag: a plain tag marked prerelease on GitHub would become
    stable in the appcast. Use dispatch only when the tag itself preserves the intended channel
    (a stable release or a semver prerelease suffix), and verify GitHub assets separately because
-   asset attachment only runs for release events.
+   asset attachment only runs for release events. A dispatch's server assets are attached from its
+   own run's artefact, as `RELEASING.md#when-the-server-asset-is-broken` describes.
 5. **Publish the generated release notes on runbloom.app as part of the release.** Follow
    [the website procedure](../../../RELEASING.md#publish-the-website-release-notes). The website
    lives in `spatie/runbloom.app`; the app workflow does not publish its changelog. Importing a
    release or generating a draft is insufficient: review the headline and summary, enable
    publication for that version, save, and verify it is visible on the public changelog.
-6. Verify the GitHub release and both assets, their public bucket URLs, the appcast version/build
+6. Verify the server assets with the check in the `bloom-server-release` skill: all three
+   `bloom-server-linux-x86_64` files, `Tools/server-release-assets.py verify` passing, and for a
+   stable release `releases/latest` naming the new tag. Servers cannot update until that holds.
+   If the wire protocol changed, say in the notes that servers need **Update Server…**.
+7. Verify the GitHub release and both app assets, their public bucket URLs, the appcast version/build
    and channel, and `https://runbloom.app/changelog#<tag>`. For a stable release, also verify the
    website's download flow selects its DMG. A prerelease must not replace the stable download.
    Report the release URL, workflow result and published changelog URL. If website access is

@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// A chat's request to be told, once, when the turn its `workspace_say` or `workspace_start` caused
 /// in another workspace comes to rest.

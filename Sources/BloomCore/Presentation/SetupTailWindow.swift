@@ -86,6 +86,16 @@ public enum SetupTailWindow {
         min(cap, max(min(settled, cap), logLines))
     }
 
+    /// A setup row above browser or remote panes uses the same proportional tail as an inline
+    /// transcript row. Cap its scroller against the whole available column, not its own measured
+    /// height, so resizing cannot feed back into the allocation. Short logs keep their natural
+    /// height; longer and expanded logs leave at least 40 percent for the conversation and composer.
+    public static func viewportHeight(contentHeight: Double, paneHeight: Double) -> Double {
+        let content = contentHeight.isFinite ? max(36, contentHeight) : 36
+        guard paneHeight.isFinite, paneHeight > 0 else { return min(content, 220) }
+        return min(content, paneHeight * 0.6)
+    }
+
     /// How many lines a failed run shows without being asked.
     ///
     /// Twelve, or the cap where the pane is big enough to want more, and never fewer than a running

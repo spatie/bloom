@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// The rules an orchestrator's crew is held to: what a crew member may be called, how many may
 /// run, and what Bloom says to the orchestrator when one of them stops.
@@ -39,17 +40,23 @@ public enum Crew {
     /// The longest a name may be. A sidebar row is about twenty characters wide at the width the
     /// column opens at, and a name that is ellipsised in every drawing of it is not an address
     /// anybody can read back to the agent that chose it.
-    public static let nameLimit = 32
+    public static let nameLimit = ToolHostIdentity.crewNameLimit
 
     /// Why a start was refused, in the words the caller is given.
     ///
     /// Each case carries what the sentence needs rather than a formatted string, so the wording
     /// lives in one place and a test can assert the reason rather than the prose.
-    public enum StartRefusal: Error, Equatable {
+    public enum StartRefusal: Error, Equatable, LocalizedError {
         case noName
         case nameTaken(String)
         case tooMany(running: Int)
         case notAnOrchestrator
+        case parentUnavailable
+        case workspaceUnavailable
+        case workspaceMismatch
+        case agentUnavailable(String)
+        case invalidControls
+        public var errorDescription: String? { Crew.sentence(for: self) }
     }
 
     /// A name Bloom will accept, or nil when there is nothing left of it.
@@ -115,11 +122,21 @@ public enum Crew {
             "This workspace already has a subagent called \"\(name)\". Talk to that one with "
                 + "agent_say, or start a new one under another name."
         case .tooMany(let running):
-            "\(running) subagents are already running in this workspace, which is the limit. "
+            "\(running) subagents are already running or starting in this workspace, which is the limit. "
                 + "Stop one with agent_stop, or wait for one to finish."
         case .notAnOrchestrator:
             "A subagent cannot start a subagent. Say what you need to the agent that started you "
                 + "and let it decide."
+        case .parentUnavailable:
+            "The chat that requested this subagent is closed or no longer exists. Open a current chat before starting a subagent."
+        case .workspaceUnavailable:
+            "This workspace is no longer active. Restore it before starting a subagent."
+        case .workspaceMismatch:
+            "The requesting chat belongs to another workspace. Start the subagent from its own workspace."
+        case .agentUnavailable(let agent):
+            "\(agent) is unavailable on this machine. Install it or choose an available agent before starting a subagent."
+        case .invalidControls:
+            "Choose a workspace agent and a nonempty model before starting a subagent."
         }
     }
 

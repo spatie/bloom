@@ -38,28 +38,7 @@ struct AgentSignInSheet: View {
             }
 
             if let session {
-                VStack(spacing: 0) {
-                    Text(session.label)
-                        .font(Typo.codeSmall)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(session.label)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, InspectorLayout.inset)
-                        .frame(height: InspectorLayout.barHeight)
-                        .background(Palette.surfaceSunken)
-
-                    Hairline()
-
-                    LoginTerminal(session: session)
-                        .frame(height: 280)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Metrics.corner)
-                        .strokeBorder(Palette.border, lineWidth: Metrics.outline)
-                )
+                LoginTerminalPanel(session: session)
             }
 
             if let failure {

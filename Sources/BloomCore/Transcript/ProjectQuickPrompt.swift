@@ -13,7 +13,7 @@ import Foundation
 /// - **It is not edited here.** It is a line in a committed file, and the file is where it
 ///   changes. What the panel offers instead is a copy into the owner's own library
 ///   (`personalFields`), which is then theirs to change and to let send.
-public struct ProjectQuickPrompt: Identifiable, Sendable, Hashable {
+public struct ProjectQuickPrompt: Identifiable, Sendable, Hashable, Codable {
     /// Already trimmed, and never empty: the loader skips an entry without one.
     public var name: String
     /// The words that go into the draft.

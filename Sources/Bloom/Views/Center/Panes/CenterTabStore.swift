@@ -19,7 +19,7 @@ import BloomCore
 @MainActor
 @Observable
 final class CenterTabStore {
-    static let shared = CenterTabStore()
+    static var shared: CenterTabStore { PaneStores.local.center }
 
     private(set) var tabsByWorkspace: [WorkspaceID: [CenterTab]] = [:]
 
@@ -38,7 +38,11 @@ final class CenterTabStore {
     /// time a tab is first drawn would be a redraw for nothing.
     @ObservationIgnored private var browsers: [String: BrowserSession] = [:]
 
-    private init() {}
+    private let defaults: UserDefaults
+    private let usesLocalTerminals: Bool
+    weak var workspaceTabs: WorkspaceTabsStore?
+
+    init(defaults: UserDefaults, usesLocalTerminals: Bool) { self.defaults = defaults; self.usesLocalTerminals = usesLocalTerminals }
 
     // MARK: - Reading
 
@@ -74,7 +78,7 @@ final class CenterTabStore {
     /// inconsistency, because `workspace_tab_select` takes back the title it handed out, so a tab
     /// reported as "Chat" that the person is looking at under "Untitled" is a name neither of them
     /// can use.
-    func title(of content: PaneContent, in model: WorkspaceModel) -> String {
+    func title(of content: PaneContent, in model: any WorkspacePaneModel) -> String {
         switch content {
         case .chat(let sessionID):
             let title = model.sessions.first { $0.id == sessionID }?.title ?? ""
@@ -91,7 +95,7 @@ final class CenterTabStore {
     /// what they are: a strip of three tabs all called "Review" tells the reader nothing about
     /// which is which. A review takes the name of the file under the cursor, a browser the name of
     /// the page, and the chain behind the latter is `BrowserTabTitle`.
-    func displayTitle(of tab: CenterTab, in model: WorkspaceModel) -> String {
+    func displayTitle(of tab: CenterTab, in model: any WorkspacePaneModel) -> String {
         switch tab.kind {
         case .browser:
             return BrowserTabTitle.title(
@@ -117,7 +121,7 @@ final class CenterTabStore {
     /// cause one.
     func load(workspaceID: WorkspaceID) {
         guard tabsByWorkspace[workspaceID] == nil else { return }
-        guard let restored = Self.restore(workspaceID: workspaceID) else {
+        guard let restored = restore(workspaceID: workspaceID) else {
             // The strip has to draw something, and there is nothing to draw, so the map still gets
             // an empty list. What is remembered here is that it is not an answer.
             unreadable.insert(workspaceID)
@@ -171,7 +175,7 @@ final class CenterTabStore {
     /// their panes anyway: a tmux session whose tab is only on disk is still one Bloom can reach,
     /// and a sweep that could not see it would kill the shell the user left running in it.
     func terminalTabIDs(for workspaceID: WorkspaceID) -> [String] {
-        let tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID) ?? []
+        let tabs = tabsByWorkspace[workspaceID] ?? restore(workspaceID: workspaceID) ?? []
         return tabs.filter { $0.kind == .terminal }.map(\.id)
     }
 
@@ -219,7 +223,7 @@ final class CenterTabStore {
         let live = await TerminalSessionStore.shared.liveSessions(store: store).map(Set.init)
 
         for (workspaceID, rows) in rowsByWorkspace {
-            var tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID) ?? []
+            var tabs = tabsByWorkspace[workspaceID] ?? restore(workspaceID: workspaceID) ?? []
             let known = Set(tabs.map(\.id))
 
             for row in rows where !known.contains(row.id.rawValue) {
@@ -369,6 +373,28 @@ final class CenterTabStore {
         return tab
     }
 
+    func awaitPreviewAfterSetup(for tab: CenterTab) {
+        update(tab) { $0.opensPreviewAfterSetup = true }
+    }
+
+    func cancelOpeningPreview(for tab: CenterTab) {
+        guard tabs(for: tab.workspaceID).contains(where: { $0.id == tab.id && $0.opensPreviewAfterSetup }) else { return }
+        update(tab) { $0.opensPreviewAfterSetup = false }
+    }
+
+    /// Claim before navigation, so redraws, reconnects and relaunches cannot repeat it.
+    func claimOpeningPreview(for tab: CenterTab, setup: SetupState, port: Int, address: String, hasNavigated: Bool) -> String? {
+        guard let current = tabs(for: tab.workspaceID).first(where: { $0.id == tab.id }) else { return nil }
+        let decision = WorkspacePreview.opening(
+            pending: current.opensPreviewAfterSetup, setup: setup, port: port,
+            address: address, storedAddress: current.url, hasNavigated: hasNavigated
+        )
+        if decision != .wait { cancelOpeningPreview(for: current) }
+        guard case .open(let url) = decision else { return nil }
+        setURL(url, for: current)
+        return url
+    }
+
     /// Called as the page navigates, so the tab remembers where it got to.
     ///
     /// **The only thing that ever clears a page title.** A navigation within one host keeps the
@@ -397,10 +423,20 @@ final class CenterTabStore {
 
     /// Closes a tab and stops whatever it was running. Any pane showing it goes with it, and the
     /// tab it was a pane of settles around the gap. See `TabSurgery`.
-    func close(_ tab: CenterTab, in model: WorkspaceModel) async {
-        WorkspaceTabsStore.shared.prepareToClose(.tool(tab.id), in: model)
+    /// What a tab on a server has to do before it goes, such as ending the shell there. False keeps
+    /// the tab, because a server that could not be reached has not closed anything.
+    @ObservationIgnored private var closeHandlers: [String: @MainActor () async -> Bool] = [:]
+
+    func onClose(_ tab: CenterTab, perform: @escaping @MainActor () async -> Bool) {
+        closeHandlers[tab.id] = perform
+    }
+
+    func close(_ tab: CenterTab, in model: any WorkspacePaneModel) async {
+        if let close = closeHandlers[tab.id], !(await close()) { return }
+        closeHandlers[tab.id] = nil
+        workspaceTabs?.prepareToClose(.tool(tab.id), in: model)
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
-        WorkspaceTabsStore.shared.forget(.tool(tab.id), workspaceID: tab.workspaceID)
+        workspaceTabs?.forget(.tool(tab.id), workspaceID: tab.workspaceID)
 
         switch tab.kind {
         case .browser:
@@ -429,9 +465,9 @@ final class CenterTabStore {
     /// the tab's address is a `file://` one, which is a page out of that worktree opened from a
     /// file row: see `LocalPage.fileURL`. Empty means no local page will load, which is right for
     /// a caller with no workspace to name.
-    func browser(for tab: CenterTab, root: String = "") -> BrowserSession {
+    func browser(for tab: CenterTab, root: String = "", resolve: (@MainActor (String) async throws -> String)? = nil) -> BrowserSession {
         if let existing = browsers[tab.id] { return existing }
-        let session = BrowserSession(url: tab.url, root: root)
+        let session = BrowserSession(url: tab.url, root: root, resolve: resolve)
         browsers[tab.id] = session
         return session
     }
@@ -457,6 +493,7 @@ final class CenterTabStore {
     /// empties a workspace's list, so a centre tab could conjure a bottom panel terminal for a
     /// workspace whose panel had not loaded yet.
     private func stopShell(for tab: CenterTab) {
+        guard usesLocalTerminals else { return }
         TerminalSessionStore.shared.closePanes(of: tab.id)
         if let sessionID = tab.agentSessionID {
             try? AgentKind.removeInteractiveLaunch(sessionID: sessionID)
@@ -477,17 +514,16 @@ final class CenterTabStore {
         // it: from here the list in hand is the list on disk.
         unreadable.remove(workspaceID)
         tabsByWorkspace[workspaceID] = tabs
-        WorkspaceTabsStore.shared.updateOrder(tools: tabs.map(\.id), workspaceID: workspaceID)
-        Self.persist(tabs, workspaceID: workspaceID)
+        workspaceTabs?.updateOrder(tools: tabs.map(\.id), workspaceID: workspaceID)
+        persist(tabs, workspaceID: workspaceID)
     }
 
     /// `TabDefaults` rather than a literal here, because `TerminalPaneCensus` reads the same key
     /// to decide which tmux sessions the orphan sweep may kill. The two used to state the prefix
     /// separately, with nothing pinning them together.
-    private static func key(_ workspaceID: WorkspaceID) -> String { TabDefaults.tabListKey(workspaceID) }
+    private func key(_ workspaceID: WorkspaceID) -> String { TabDefaults.tabListKey(workspaceID) }
 
-    private static func persist(_ tabs: [CenterTab], workspaceID: WorkspaceID) {
-        let defaults = UserDefaults.standard
+    private func persist(_ tabs: [CenterTab], workspaceID: WorkspaceID) {
         guard !tabs.isEmpty else {
             defaults.removeObject(forKey: key(workspaceID))
             return
@@ -498,8 +534,8 @@ final class CenterTabStore {
 
     /// Nil when a list is stored and will not decode, which is doubt. No key at all is a fact and
     /// answers with none: most workspaces have never opened a terminal or a browser.
-    private static func restore(workspaceID: WorkspaceID) -> [CenterTab]? {
-        guard let data = UserDefaults.standard.data(forKey: key(workspaceID)) else { return [] }
+    private func restore(workspaceID: WorkspaceID) -> [CenterTab]? {
+        guard let data = defaults.data(forKey: key(workspaceID)) else { return [] }
         return try? JSONDecoder().decode([CenterTab].self, from: data)
     }
 

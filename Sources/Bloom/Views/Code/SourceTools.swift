@@ -2,14 +2,14 @@ import SwiftUI
 import BloomCore
 
 /// Commands stay beside the file, so the same controls work in a split pane and in a pinned tab.
-struct SourceTools: View {
-    let model: WorkspaceModel
+struct SourceTools<Model: WorkspacePaneModel>: View {
+    let model: Model
     let path: String
     @Bindable var state: SourceEditorState
     @State private var panel: SourceSearchPanel.Mode?
     @State private var showsLine = false
     @State private var line = ""
-    private let navigation = SourceNavigation.shared
+    private var navigation: SourceNavigation { model.paneStores.sourceNavigation }
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
@@ -23,17 +23,24 @@ struct SourceTools: View {
                 .help("Find in this file (Command-F)")
             Menu("Navigate") {
                 Button("Search workspace code…") { panel = .workspace }
+                    .disabled(model.localWorkspaceModel == nil)
                 Button("Jump to symbol…") { panel = .symbols }
+                    .disabled(model.localWorkspaceModel == nil)
                 Button("Go to line…") { line = ""; showsLine = true }
                 Button("Go to Definition") {
-                    SourceActions.definition(at: state.selection.location, path: path, model: model, state: state)
-                }
+                    if let local = model.localWorkspaceModel {
+                        SourceActions.definition(at: state.selection.location, path: path, model: local, state: state)
+                    }
+                }.disabled(model.localWorkspaceModel == nil)
                 Button("Find Usages") {
-                    SourceActions.references(at: state.selection.location, path: path, model: model, state: state)
-                }
+                    if let local = model.localWorkspaceModel {
+                        SourceActions.references(at: state.selection.location, path: path, model: local, state: state)
+                    }
+                }.disabled(model.localWorkspaceModel == nil)
                 Divider()
-                Button("Ask about selected code") { SourceActions.ask(path: path, model: model, state: state) }
-                    .disabled(state.selection.length == 0)
+                Button("Ask about selected code") {
+                    if let local = model.localWorkspaceModel { SourceActions.ask(path: path, model: local, state: state) }
+                }.disabled(state.selection.length == 0 || model.localWorkspaceModel == nil)
             }.menuStyle(.borderlessButton).fixedSize()
                 .popover(isPresented: $showsLine) {
                     VStack(alignment: .leading, spacing: Metrics.spacing) {
@@ -66,7 +73,7 @@ struct SourceTools: View {
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
         .sheet(item: $panel) { mode in
-            SourceSearchPanel(model: model, path: path, state: state, mode: mode)
+            if let local = model.localWorkspaceModel { SourceSearchPanel(model: local, path: path, state: state, mode: mode) }
         }
     }
 
@@ -74,9 +81,9 @@ struct SourceTools: View {
         guard let first = line.split(separator: ":").first, let number = Int(first), number > 0 else { return }
         let parts = line.split(separator: ":")
         let column = parts.count > 1 ? Int(parts[1]) ?? 1 : 1
-        SourceNavigation.shared.visit(CodeLocation(path: path, line: state.line, column: state.column), in: model)
+        model.paneStores.sourceNavigation.visit(CodeLocation(path: path, line: state.line, column: state.column), in: model)
         let location = CodeLocation(path: path, line: number, column: column)
-        SourceNavigation.shared.visit(location, in: model)
+        model.paneStores.sourceNavigation.visit(location, in: model)
         state.go(to: location)
         showsLine = false
     }

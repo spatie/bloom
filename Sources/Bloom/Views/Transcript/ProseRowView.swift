@@ -1,25 +1,22 @@
 import SwiftUI
+import BloomUI
 
-/// Shared by live and saved messages so their boundaries do not move when streaming finishes.
+/// Live and saved messages share their boundaries and the Mac's native rich text adapter.
 struct ProseRowView: View {
     var text: String
     var isStreaming = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.block) {
-            Hairline()
-                .accessibilityHidden(true)
-
+        BloomAssistantProse(
+            maxWidth: TranscriptLayout.proseMeasure,
+            horizontalInset: TranscriptLayout.inset,
+            verticalInset: TranscriptLayout.block,
+            separatorColor: Palette.border,
+            separatorHeight: Metrics.hairline
+        ) {
             MarkdownView(text, isStreaming: isStreaming)
                 .font(Typo.body)
                 .proseLeading()
-                .textSelection(.enabled)
-                // Capped, then left aligned in whatever is left. One frame would centre the column
-                // in a wide pane and take the paragraph off the line every other row starts on.
-                .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .padding(.vertical, TranscriptLayout.block)
     }
 }

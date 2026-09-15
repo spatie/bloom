@@ -30,6 +30,7 @@ struct TurnFooterView: View {
     ///
     /// A turn that failed carries none of this. See `TranscriptModel.abandonRetryRun`.
     var recovered: RetryRun?
+    var isRemote = false
     /// What the agent left running in the background, named, or nothing.
     ///
     /// Only ever handed to the footer that closes the transcript. A turn that ends while a
@@ -46,7 +47,8 @@ struct TurnFooterView: View {
     @State private var snapshotFailure: String?
 
     private var checkpoint: TurnCheckpoint? {
-        transcript?.history.checkpoints.first { $0.endSeq == row.seq && $0.after != nil }
+        guard !isRemote else { return nil }
+        return transcript?.history.checkpoints.first { $0.endSeq == row.seq && $0.after != nil }
     }
 
     var body: some View {
@@ -318,7 +320,7 @@ struct TurnFooterView: View {
     private func fileChips(limit: Int) -> some View {
         HStack(spacing: TranscriptLayout.block) {
             ForEach(files.prefix(limit)) { file in
-                TurnFileChip(file: file, worktree: worktree)
+                TurnFileChip(file: file, worktree: worktree, previewsCurrentFile: !isRemote)
             }
             if files.count > limit {
                 Chip(text: "+\(files.count - limit) more")

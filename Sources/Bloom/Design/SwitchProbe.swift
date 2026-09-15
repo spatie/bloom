@@ -279,7 +279,7 @@ enum SwitchProbe {
 
     /// What a pane has written down about the conversation it is showing.
     ///
-    /// **The pane is the tab's own id, not "solo".** This asked for `CenterPanesView.soloPane`
+    /// **The pane is the tab's own id, not "solo".** This asked for `CenterPanesView<WorkspaceModel>.soloPane`
     /// first, on the strength of two doc comments that said an unsplit tab's pane answers to that
     /// name everywhere, and it came back nil every time: nothing writes that key. `soloPane` is a
     /// `ForEach` identity and nothing else, and the string a pane is actually given is

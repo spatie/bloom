@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 // MARK: - PermissionRule

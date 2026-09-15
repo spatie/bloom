@@ -60,6 +60,8 @@ extension AppModel {
     @discardableResult
     func deleteArchived(_ ids: [WorkspaceID]) async -> ArchiveDeletionOutcome {
         guard let store, !ids.isEmpty else { return .deleted(0) }
+        // Found before the rows go, because the rows are what they are found from.
+        let transcripts = await agentTranscripts(forDeleting: ids)
         let removed: Int
         do {
             removed = try await store.deleteArchivedWorkspaces(ids: ids)
@@ -67,6 +69,7 @@ extension AppModel {
             return .refused(complaint: WorkspaceTrouble.complaint(about: error))
         }
         guard removed > 0 else { return .deleted(0) }
+        Task.detached { for plan in transcripts { _ = plan.remove() } }
 
         // Home, which is where every unresolvable selection in this app lands, and which is also
         // the list the delete is now made from: its Archived chip. That is a round trip rather
@@ -145,6 +148,11 @@ extension AppModel {
             isDeletingBranch: deleteBranch ?? SettingsLoader.load(repo: repo.path).deleteBranchOnArchive
         )
 
+        // Only asked when somebody can be shown the answer. An archive that may not confirm is an
+        // agent's, and it keeps the containers the way it keeps the branch; asking Docker for a
+        // choice nobody sees would turn every such archive of a Docker workspace into a refusal.
+        let docker = allowsConfirmation ? await WorkspaceDocker.local.footprint(of: workspace.id) : nil
+
         let report: WorkspaceSafetyReport
         do {
             report = try await manager.safetyReport(workspace: workspace, repo: repo)
@@ -167,7 +175,8 @@ extension AppModel {
                 report: WorkspaceSafetyReport(),
                 deleteBranch: deleteBranch,
                 problem: "Bloom could not check this workspace for unsaved work. \(trouble.sentence)",
-                hazards: hazards
+                hazards: hazards,
+                docker: docker
             )
             if allowsConfirmation { offerArchiveConfirmation(request, present: presentConfirmation) }
             return .refused(archiveRefusal(request))
@@ -180,9 +189,9 @@ extension AppModel {
             isPullRequestMerged: hazards.isPullRequestMerged
         )
 
-        guard isSafe, !hazards.isAgentRunning, !alwaysConfirm else {
+        guard isSafe, !hazards.isAgentRunning, !alwaysConfirm, docker == nil else {
             let request = ArchiveRequest(
-                workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards
+                workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards, docker: docker
             )
             if allowsConfirmation { offerArchiveConfirmation(request, present: presentConfirmation) }
             return .refused(archiveRefusal(request))
@@ -286,7 +295,7 @@ extension AppModel {
     /// Never asks itself. A merged pull request only ever makes this check more permissive, so a
     /// missing answer costs a confirmation rather than a workspace, and an archive that waited on
     /// the network before it could decide would be worse than the confirmation it saved.
-    private func isPullRequestMerged(_ workspace: Workspace) -> Bool {
+    func isPullRequestMerged(_ workspace: Workspace) -> Bool {
         let pullRequest = workspaceModels[workspace.id]?.pullRequest
             ?? WorkspacePullRequests.shared.pullRequest(for: workspace.id)
         return pullRequest?.isMerged ?? false
@@ -324,6 +333,8 @@ extension AppModel {
             force: true,
             report: request.problem == nil ? request.report : nil,
             hazards: request.hazards,
+            docker: request.docker,
+            removesDocker: request.removesDockerResources,
             presentConfirmation: presentConfirmation
         )
     }
@@ -351,6 +362,8 @@ extension AppModel {
         force: Bool,
         report: WorkspaceSafetyReport?,
         hazards: ArchiveHazards,
+        docker: ArchiveDockerFootprint? = nil,
+        removesDocker: Bool = false,
         allowsConfirmation: Bool = true,
         presentConfirmation: ((ArchiveRequest) -> Void)?
     ) async -> WorkspaceArchiveOutcome {
@@ -413,7 +426,8 @@ extension AppModel {
                 repo: repo,
                 deleteBranch: deleteBranch,
                 force: force,
-                isPullRequestMerged: hazards.isPullRequestMerged
+                isPullRequestMerged: hazards.isPullRequestMerged,
+                docker: removesDocker ? .local : nil
             )
             // Asked again, and the same question, for a window that arrived back on this
             // workspace while git worked. Nothing in the app does that today, because the row is
@@ -487,13 +501,29 @@ extension AppModel {
                 // handed to a view that went away with the selection is a question nobody is ever
                 // shown. The window's dialog is exactly where a refusal with no control to
                 // animate out of belongs, which is what `RootView` says it is for.
-                let request = ArchiveRequest(
-                    workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards
+                var request = ArchiveRequest(
+                    workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards, docker: docker
                 )
+                // Asked again about git, not about Docker: the answer already given stands.
+                if request.offersDockerRemoval { request.removesDocker = removesDocker }
                 if allowsConfirmation {
                     offerArchiveConfirmation(request, present: departure == nil ? presentConfirmation : nil)
                 }
                 return .refused(archiveRefusal(request))
+            case .dockerCleanupFailed(let detail):
+                Log.archive.error(
+                    "Docker refused to remove the containers of \(workspace.name, privacy: .public), so the worktree was kept"
+                )
+                // Its own wording for the same reason a failing archive script has one: the worktree
+                // and the branch are still here, and the owner has two ways forward.
+                alert = BloomAlert(
+                    title: "Docker could not remove the containers",
+                    message: "\u{201C}\(workspace.name)\u{201D} is still here: its worktree and its branch "
+                        + "are untouched. The archive script has already run, and any agent it was "
+                        + "running has been stopped.\n\nStart Docker and archive again, or archive "
+                        + "again and keep its containers.\n\n" + String(detail.suffix(1_000))
+                )
+                return .refused("Docker could not remove this workspace's containers. Its worktree and branch were kept.")
             default:
                 Log.archive.error(
                     "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"

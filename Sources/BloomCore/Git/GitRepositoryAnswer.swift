@@ -19,7 +19,7 @@ public enum GitRepositoryAnswer: Sendable, Equatable {
 }
 
 /// Why git could not say whether a folder is a repository.
-public enum GitRepositoryProblem: Sendable, Equatable {
+public enum GitRepositoryProblem: Sendable, Equatable, Codable {
     /// git does not run at all: not on the PATH, or Apple's stub with no developer tools behind it.
     case gitUnusable(detail: String)
     /// The repository belongs to another user, and git refuses to work in it until it is trusted.

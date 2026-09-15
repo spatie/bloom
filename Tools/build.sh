@@ -13,13 +13,14 @@ cd "$(dirname "$0")/.."
 CONFIG=debug
 RUN=0
 BUILD_ARGS=()
+[[ -z "${BLOOM_BUILD_JOBS:-}" ]] || BUILD_ARGS=(--jobs "$BLOOM_BUILD_JOBS")
 while (( $# )); do
   arg="$1"
   shift
   case "$arg" in
     -r|--release) CONFIG=release ;;
     --run) RUN=1 ;;
-    --jobs) BUILD_ARGS+=(--jobs "${1:?--jobs needs a number}"); shift ;;
+    --jobs) BUILD_ARGS=(--jobs "${1:?--jobs needs a number}"); shift ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -30,6 +31,7 @@ swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product Bloom
 # product, and a separate binary because that is what an MCP server registration can point at: the
 # CLI spawns it, it forwards to the app over a unix socket, and the app answers. See BridgeShim.
 swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-bridge
+swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-server
 # The privileged daemon that holds the lid, for the same reason: one product per invocation.
 swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-sleep-helper
 
@@ -44,6 +46,7 @@ cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
 # bundle without it is not broken: every chat simply has no bridge tools, which is what every chat
 # had before the bridge existed.
 cp "$BIN_DIR/bloom-bridge" "$APP/Contents/MacOS/bloom-bridge"
+cp "$BIN_DIR/bloom-server" "$APP/Contents/MacOS/bloom-server"
 # `SMAppService.daemon(plistName:)` reads this one path and no other, and the plist's BundleProgram
 # points back at the executable beside it. Both are signed by the pass at the foot of this file.
 cp "$BIN_DIR/bloom-sleep-helper" "$APP/Contents/MacOS/bloom-sleep-helper"
@@ -205,13 +208,20 @@ zsh Tools/package-licences.sh "$APP" "$(spm_scratch_containing checkouts)/checko
 # ramp used to be, and the window would be back to two accents with nothing saying so.
 verify_accent_matches_palette() {
   local colourset=Resources/Assets.xcassets/AccentColor.colorset/Contents.json
-  local ink=Sources/BloomCore/Presentation/PaletteInk.swift
-  [[ -f "$colourset" && -f "$ink" ]] || return 0
+  local ink=Packages/BloomClient/Sources/BloomClient/PaletteInk.swift
+  if [[ ! -f "$colourset" || ! -f "$ink" ]]; then
+    echo "==> accent: missing colour set or shared PaletteInk source" >&2
+    return 1
+  fi
 
   local declared asset
   # Pair(light: 0x197593, dark: 0x197593). Both members, because a pair whose halves differ cannot
   # be one colour set and this should say so rather than silently taking the light one.
   declared="$(sed -n 's/.*accentFill = Pair(light: 0x\([0-9A-Fa-f]*\), dark: 0x\([0-9A-Fa-f]*\)).*/\1 \2/p' "$ink")"
+  if [[ ! "$declared" =~ '^[0-9A-Fa-f]{6} [0-9A-Fa-f]{6}$' ]]; then
+    echo "==> accent: could not read one accentFill pair from $ink" >&2
+    return 1
+  fi
   if [[ "${declared%% *}" != "${declared##* }" ]]; then
     echo "==> accent: PaletteInk.accentFill is a pair ($declared), which one colour set cannot be" >&2
     return 1
@@ -311,8 +321,8 @@ if [[ -d "$BIN_DIR/Bloom_Bloom.bundle" ]]; then
   cp -R "$BIN_DIR/Bloom_Bloom.bundle" "$APP/Contents/Resources/"
 fi
 
-# PLCrashReporter's privacy manifest is a SwiftPM resource bundle, even though its code links statically.
-for resource in "$BIN_DIR"/*_CrashReporter.bundle(N); do
+# Statically linked dependencies still ship privacy manifests in SwiftPM resource bundles.
+for resource in "$BIN_DIR"/*_CrashReporter.bundle(N) "$BIN_DIR"/AppAuth_*.bundle(N); do
   cp -R "$resource" "$APP/Contents/Resources/"
 done
 
@@ -384,6 +394,10 @@ PY
     -sdk "$sdk" \
     -I "$BIN_DIR/Modules" \
     -Xcc "-fmodule-map-file=$BIN_DIR/CrashReporter.build/module.modulemap" \
+    -Xcc "-fmodule-map-file=$BIN_DIR/AppAuth.build/module.modulemap" \
+    -Xcc "-fmodule-map-file=$BIN_DIR/AppAuthCore.build/module.modulemap" \
+    -I "$(dirname "$(dirname "$BIN_DIR")")/checkouts/AppAuth-iOS/Sources/AppAuth" \
+    -I "$(dirname "$(dirname "$BIN_DIR")")/checkouts/AppAuth-iOS/Sources/AppAuthCore" \
     -F "${SPARKLE_SEARCH_PATH:-$BIN_DIR}" \
     -emit-const-values-path "$constvalues" \
     -Xfrontend -const-gather-protocols-file -Xfrontend "$protocolList" \
@@ -406,6 +420,11 @@ PY
 }
 
 emit_app_intents_metadata
+
+# The dev scripts set their bundle identity before invoking this build. Derive the launch-agent
+# label from that final identity so a development app cannot register the release app's server.
+python3 Tools/embed-server-setup.py "$APP"
+python3 Tools/prepare-server-service.py "$APP"
 
 # After the metadata, because the bundle has to be signed with everything already inside it.
 #

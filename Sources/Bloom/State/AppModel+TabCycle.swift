@@ -14,7 +14,9 @@ extension AppModel {
             }
             return
         }
-        guard let workspace = selectedModel else { return }
-        WorkspaceTabsStore.shared.selectNextTab(offset: offset, in: workspace)
+        // The pane model rather than the local workspace model, so a server's workspace cycles its
+        // own strip too; each pane model owns its stores rather than sharing one.
+        guard let workspace = selectedPaneModel else { return }
+        workspace.paneStores.tabs.selectNextTab(offset: offset, in: workspace)
     }
 }

@@ -23,6 +23,7 @@ import BloomCore
 /// custom label away and draws only the indicator, which is why it rendered as a lone letter.
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The window's undo manager. Only a view can see it, and `AppModel` is where the archive
     /// that wants it happens, so the sidebar hands it over. Any view in the window would do; this
@@ -97,6 +98,97 @@ struct SidebarView: View {
     /// rules for what counts as "just added" are `RowArrival`'s, and they are the same rules
     /// Home's list uses.
     @State private var arrival = RowArrival<WorkspaceID>()
+
+    private func presentRemoteCreate(_ repo: Repo) {
+        app.remoteServer.remoteRepositoryPath = repo.path
+        app.remoteServer.workspaceName = ""
+        presentCreate(in: repo)
+    }
+
+    /// Which servers have had their first project card, closed or outgrown. See
+    /// `ServerFirstProjectNudge`, which owns the encoding.
+    @AppStorage(ServerFirstProjectNudge.retiredKey) private var retiredFirstProjectNudges = ""
+
+    private func firstProjectNudge(_ catalogue: ServerCatalogue) -> ServerFirstProjectNudge? {
+        let server = app.remoteServer
+        // A server with no profile has no identity to remember a dismissal against, so it is
+        // treated as retired rather than offered a close button that would not stay closed.
+        let isRetired = server.connectionProfile.map {
+            ServerFirstProjectNudge.retired(in: retiredFirstProjectNudges).contains($0.id)
+        } ?? true
+        return ServerFirstProjectNudge.resolve(
+            isEnabled: RemoteServerAvailability.shared.isEnabled,
+            isConnected: server.isConnected && !server.isConnecting && !server.isMaintainingServer,
+            projectCount: catalogue.repositories.count,
+            isRetired: isRetired
+        )
+    }
+
+    private func retireFirstProjectNudge() {
+        guard let id = app.remoteServer.connectionProfile?.id else { return }
+        let retired = ServerFirstProjectNudge.retiring(id, in: retiredFirstProjectNudges)
+        guard retired != retiredFirstProjectNudges else { return }
+        withAnimation(workspaceMotion) { retiredFirstProjectNudges = retired }
+    }
+
+    @ViewBuilder private func firstProjectRow(_ catalogue: ServerCatalogue) -> some View {
+        switch firstProjectNudge(catalogue) {
+        case .card:
+            ServerFirstProjectCard(
+                serverName: app.remoteServer.displayName,
+                onStartProject: {
+                    StartProjectOpening.shared.isRemote = true
+                    openWindow(id: StartProjectWindow.id)
+                },
+                onDismiss: retireFirstProjectNudge
+            )
+            .selectionDisabled()
+            .moveDisabled(true)
+        case .notice:
+            SidebarEmptyNoticeRow(isFiltered: false, sentence: "No projects yet")
+                .selectionDisabled()
+                .moveDisabled(true)
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func remoteProjects(_ catalogue: ServerCatalogue) -> some View {
+                Section {
+                    firstProjectRow(catalogue)
+                    ForEach(SidebarRepoGroup.build(repos: app.remoteServer.sidebarRepositories,
+                        workspaces: catalogue.workspaces, filter: filter, showingHidden: showsHiddenProjects)) { group in
+                        RepoHeaderRow(repo: group.repo, remote: app.remoteServer,
+                            hasUnreadWork: group.hasUnreadWork, workspaceCount: group.workspaces.count,
+                            onCreateWorkspace: presentRemoteCreate)
+                            .selectionDisabled()
+                            .moveDisabled(true)
+                        if !group.repo.collapsed {
+                            if group.workspaces.isEmpty { SidebarEmptyNoticeRow(isFiltered: filter != .all).selectionDisabled() }
+                            ForEach(group.workspaces) { workspace in
+                                SidebarWorkspaceRow(workspace: workspace, remote: app.remoteServer,
+                                    arrival: arrival, projectName: group.repo.name,
+                                    renaming: $renaming, archivePresentation: $archivePresentation)
+                                    .tag(SidebarSelection.remoteWorkspace(workspace.id))
+                                    .sidebarSelection(selectionStyle(for: .remoteWorkspace(workspace.id)))
+                                    .moveDisabled(true)
+                            }
+                        }
+                    }
+                } header: {
+                    SidebarServerHeader(server: app.remoteServer, trailingInset: SidebarProjectsHeader.buttonTrailingInset)
+                        // A server that has ever had a project has been started with, so its card
+                        // is retired rather than waiting to greet it if its projects are all
+                        // removed. On the heading, because it is the one row always drawn.
+                        // Keyed to the server as well, since switching servers swaps the catalogue.
+                        .onChange(of: [app.remoteServer.connectionProfile?.id ?? "", String(catalogue.repositories.isEmpty)],
+                                  initial: true) { _, _ in
+                            guard !catalogue.repositories.isEmpty, app.remoteServer.isConnected else { return }
+                            retireFirstProjectNudge()
+                        }
+                }
+                .task(id: app.remoteServer.connectionGeneration) { app.remoteServer.loadSidebarPreferences() }
+    }
 
     var body: some View {
         List(selection: $listSelection) {
@@ -201,7 +293,15 @@ struct SidebarView: View {
                 // settle on drop are all AppKit's, and none of it is drawn here.
                 .onMove(perform: move)
             } header: {
-                SidebarProjectsHeader(onStartProject: startProject)
+                SidebarProjectsHeader(onStartProject: { StartProjectOpening.shared.isRemote = false; startProject() })
+            }
+            // A catalogue can outlive the connection it came from, so the switch is asked first.
+            if RemoteServerAvailability.shared.isEnabled {
+                if let catalogue = app.remoteServer.catalogue {
+                    remoteProjects(catalogue)
+                } else if app.remoteServer.isConfigured {
+                    SidebarServerHeader(server: app.remoteServer).selectionDisabled()
+                }
             }
         }
         // The native list owns row height, keyboard navigation and which row is selected. How the
@@ -215,6 +315,9 @@ struct SidebarView: View {
         // selection above, keyboard navigation and the standard insets. Four points is not worth
         // that. Project rows use the list's own vertical insets too.
         .listStyle(.sidebar)
+        .sheet(isPresented: Binding(get: { app.remoteServer.showsArchivedWorkspaces }, set: { app.remoteServer.showsArchivedWorkspaces = $0 })) {
+            ServerArchivedWorkspacesView(server: app.remoteServer)
+        }
         .confirmation($stoppingCrew) { pending in
             Confirmation(
                 title: "Stop \(pending.name)?",
@@ -273,7 +376,7 @@ struct SidebarView: View {
             reorderNote = nil
         }
         .overlay {
-            if app.repos.isEmpty, app.isLoaded {
+            if app.repos.isEmpty, !(RemoteServerAvailability.shared.isEnabled && app.remoteServer.isConfigured), app.isLoaded {
                 noProjects
             }
         }

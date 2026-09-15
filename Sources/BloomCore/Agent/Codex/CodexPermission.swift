@@ -30,13 +30,13 @@ import Foundation
 public enum CodexPermission {
     /// The id an ask is filed under, which has to be a string and has to be unique in a session.
     ///
-    /// Prefixed, because the server numbers its own requests from zero and restarts that numbering
-    /// on every connection. A bare `0` would collide with the `0` of the connection before it, and
-    /// `permission_asks` outlives the connection.
-    public static func requestID(_ id: CodexRequestID, threadID: String) -> String {
+    /// The thread survives reconnects, but the server's request counter restarts. Include the
+    /// connection identity too, otherwise a new question inherits an earlier answer and loses
+    /// its buttons even though the resumed agent is still waiting for permission.
+    public static func requestID(_ id: CodexRequestID, threadID: String, connectionID: UUID) -> String {
         switch id {
-        case .number(let value): "codex:\(threadID):\(value)"
-        case .text(let value): "codex:\(threadID):\(value)"
+        case .number(let value): "codex:\(connectionID.uuidString):\(threadID):\(value)"
+        case .text(let value): "codex:\(connectionID.uuidString):\(threadID):\(value)"
         }
     }
 
@@ -45,7 +45,7 @@ public enum CodexPermission {
     /// `item` is the item the request is about, which the caller has because `item/started`
     /// arrived a moment earlier: the request itself carries only an id, so the diff or the command
     /// is not in it. Without the item the question is still asked, just with less on it.
-    public static func ask(for request: CodexApprovalRequest, item: CodexItem?) -> PermissionAsk {
+    public static func ask(for request: CodexApprovalRequest, item: CodexItem?, connectionID: UUID = UUID()) -> PermissionAsk {
         let isQuestion = request.kind == .toolUserInput
         let toolName = isQuestion ? AgentQuestionnaire.toolName
             : item.map(CodexTranslation.toolName(for:)) ?? fallbackToolName(request.kind)
@@ -54,7 +54,7 @@ public enum CodexPermission {
         let rule = rule(toolName: toolName, item: item, request: request)
 
         let ask = PermissionAsk(
-            requestID: requestID(request.id, threadID: request.threadID),
+            requestID: requestID(request.id, threadID: request.threadID, connectionID: connectionID),
             toolName: toolName,
             displayName: displayName(request.kind),
             toolUseID: request.itemID,

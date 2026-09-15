@@ -3,9 +3,9 @@ import BloomCore
 
 /// These bands are ordinary overlays, not popovers. Only the band itself takes clicks, so the
 /// same mouse-down that starts a new selection reaches the page while a comment is open.
-struct BrowserRegionCaptureView: View {
+struct BrowserRegionCaptureView<Model: WorkspacePaneModel>: View {
     @Bindable var capture: BrowserRegionCapture
-    var model: WorkspaceModel
+    var model: Model
     var viewportFrame: CGRect
     var add: @MainActor () -> Void
     @State private var panelSize = CGSize(width: 380, height: 100)

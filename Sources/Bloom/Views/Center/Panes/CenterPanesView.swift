@@ -13,10 +13,10 @@ import BloomCore
 /// rearranged tree changes the frame a pane is drawn at and never which view is drawing it: the
 /// `ForEach` below is keyed by pane id, so SwiftUI moves the view it already has rather than
 /// building a new one. A moved terminal keeps its shell and a moved browser keeps its page.
-struct CenterPanesView: View {
-    @Bindable var model: WorkspaceModel
+struct CenterPanesView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
 
-    private var tabs: WorkspaceTabsStore { .shared }
+    private var tabs: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// What a split takes out of the space its two panes share. One point, because the strip the
     /// pointer aims at is drawn over the panes rather than reserved between them.
@@ -24,7 +24,7 @@ struct CenterPanesView: View {
     /// Not private, because `CenterColumnView` lays the same tree out again to say which pane a tab
     /// carried out of the strip is over, and a different thickness there would put the wash a
     /// point off the pane it is washing.
-    nonisolated static let dividerThickness: Double = 1
+    nonisolated static var dividerThickness: Double { 1 }
 
     /// The space a pane drag is measured in.
     ///
@@ -35,7 +35,7 @@ struct CenterPanesView: View {
     /// over and the rectangle that says so are all one set of numbers rather than three.
     ///
     /// Nonisolated so `CenterPaneDivider` can name it without being on the main actor to do so.
-    nonisolated static let space = "bloom.centrePanes"
+    nonisolated static var space: String { "bloom.centrePanes" }
 
     /// What identifies a pane to `ForEach`, which is not the same question as what identifies it
     /// to the store.
@@ -60,7 +60,7 @@ struct CenterPanesView: View {
     /// Nonisolated because `SplitPaneFrame.soloIdentity` is what reads it, and that lives on a
     /// value type from BloomCore that is on no actor at all. A `View` puts everything it declares
     /// on the main actor, and a name that never changes has no business being one of them.
-    nonisolated static let soloPane = "solo"
+    nonisolated static var soloPane: String { "solo" }
 
     /// A pane being carried, and where it would land if it were let go now.
     ///
@@ -208,7 +208,7 @@ struct CenterPanesView: View {
     /// The plate a carried pane is drawn as: wide enough to read as a pane rather than a chip,
     /// and small enough not to cover the drop target it is being moved onto. Named because it was
     /// two bare numbers in the middle of the stack below.
-    private static let ghostSize = CGSize(width: 96, height: 56)
+    private static var ghostSize: CGSize { CGSize(width: 96, height: 56) }
 
     /// The small plate under the pointer while a pane is being carried.
     ///
@@ -239,13 +239,13 @@ struct CenterPanesView: View {
         case .chat:
             return PaneKind.chat.symbol
         case .tool(let id):
-            let open = CenterTabStore.shared.tabs(for: model.workspace.id)
+            let open = model.paneStores.center.tabs(for: model.workspace.id)
             return open.first { $0.id == id }?.icon ?? PaneKind.terminal.symbol
         }
     }
 }
 
 extension SplitPaneFrame {
-    /// The name every unsplit tab's only pane answers to. See `CenterPanesView.soloPane`.
-    var soloIdentity: String { CenterPanesView.soloPane }
+    /// The name every unsplit tab's only pane answers to. See `CenterPanesView<WorkspaceModel>.soloPane`.
+    var soloIdentity: String { CenterPanesView<WorkspaceModel>.soloPane }
 }

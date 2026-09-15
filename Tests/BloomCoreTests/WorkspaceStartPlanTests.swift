@@ -364,4 +364,48 @@ struct StartNoteTests {
             }
         }
     }
+
+    /// The owner's report: a server window drew the branch slug under the box and the local one,
+    /// whose model names the workspace, drew nothing. The two are meant to be one window.
+    @Test("a server window says nothing about the branch, however much is written")
+    func serverWindowShowsNoBranchPreview() {
+        #expect(WorkspaceStartPlan.branchHint(
+            hasCheckout: false, isRemote: true, willBeNamedByModel: false,
+            isChatWorkspace: true, task: "show me the homepage in a new tab"
+        ) == .nothing)
+        #expect(WorkspaceStartPlan.branchHint(
+            hasCheckout: false, isRemote: true, willBeNamedByModel: false,
+            isChatWorkspace: true, task: ""
+        ) == .nothing)
+    }
+
+    @Test("a checkout is shown on either machine")
+    func checkoutIsShownEverywhere() {
+        for isRemote in [false, true] {
+            #expect(WorkspaceStartPlan.branchHint(
+                hasCheckout: true, isRemote: isRemote, willBeNamedByModel: true,
+                isChatWorkspace: true, task: "review"
+            ) == .checkout)
+        }
+    }
+
+    @Test("this Mac previews the slug only when no model will rename it")
+    func localPreviewOnlyWithoutNaming() {
+        #expect(WorkspaceStartPlan.branchHint(
+            hasCheckout: false, isRemote: false, willBeNamedByModel: true,
+            isChatWorkspace: true, task: "fix login"
+        ) == .nothing)
+        #expect(WorkspaceStartPlan.branchHint(
+            hasCheckout: false, isRemote: false, willBeNamedByModel: false,
+            isChatWorkspace: true, task: "fix login"
+        ) == .preview)
+        #expect(WorkspaceStartPlan.branchHint(
+            hasCheckout: false, isRemote: false, willBeNamedByModel: false,
+            isChatWorkspace: true, task: "  "
+        ) == .namedFromWriting)
+        #expect(WorkspaceStartPlan.branchHint(
+            hasCheckout: false, isRemote: false, willBeNamedByModel: false,
+            isChatWorkspace: false, task: ""
+        ) == .nothing)
+    }
 }

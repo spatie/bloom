@@ -217,6 +217,38 @@ struct WorkspaceArchiveTests {
         #expect(await Git.branchExists(workspace.branch, in: repo.path))
     }
 
+    @Test("a worktree already gone still has its containers removed, where the script could not run")
+    func dockerCleanupRunsWhenTheWorktreeIsAlreadyGone() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+        try FileManager.default.removeItem(atPath: workspace.path)
+
+        let dashless = workspace.id.rawValue.replacingOccurrences(of: "-", with: "")
+        let calls = ArchiveDockerCalls()
+        let docker = WorkspaceDocker(run: { arguments, _ in
+            await calls.record(arguments)
+            if arguments.starts(with: ["volume", "ls"]) {
+                return .init(status: 0, text: "tt-\(dashless)_database\ttt-\(dashless)\t\nshared\t\t\n")
+            }
+            return .init(status: 0, text: "")
+        })
+        try await manager.archive(workspace: workspace, repo: registered, docker: docker)
+        #expect(try await manager.store.workspace(id: workspace.id)?.state == .archived)
+        #expect(await calls.all.contains(["volume", "rm", "--", "tt-\(dashless)_database"]))
+    }
+
+    @Test("Docker refusing to remove the containers keeps the workspace active")
+    func dockerCleanupFailureStopsTheArchive() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+        let docker = WorkspaceDocker(run: { _, _ in .init(status: 1, text: "Cannot connect to the Docker daemon") })
+        await #expect(throws: WorkspaceError.self) {
+            try await manager.archive(workspace: workspace, repo: registered, docker: docker)
+        }
+        #expect(FileManager.default.fileExists(atPath: workspace.path))
+        #expect(try await manager.store.workspace(id: workspace.id)?.state == .active)
+    }
+
     @Test("an unrecognized folder archives while preserving its files and branch",
           arguments: [false, true], [false, true])
     func archivesAnUnrecognizedFolder(force: Bool, prune: Bool) async throws {
@@ -386,4 +418,9 @@ struct WorkspaceArchiveTests {
             "archiving left the detached commit reachable from nothing"
         )
     }
+}
+
+private actor ArchiveDockerCalls {
+    var all: [[String]] = []
+    func record(_ arguments: [String]) { all.append(arguments) }
 }

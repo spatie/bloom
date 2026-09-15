@@ -8,7 +8,28 @@ import SwiftUI
 @MainActor
 enum ReviewRunProbe {
     static var preparedLayouts: [String: String] = [:]
+    /// The height and width each file was last laid out at. A landing on the wrong file has twice
+    /// reported only which text views existed, which cannot say where the target should have been
+    /// or that the files above it were measured at a width the window no longer has.
+    static var preparedGeometry: [String: CGSize] = [:]
+    /// Every header, section and diff block the all-files review has realised. See
+    /// `ReviewProbeGeometry` for why the SwiftUI side reports these.
+    static var sections: [String: ReviewProbeGeometry.Record] = [:]
+    /// What the all-files review asked its scroller to do, interleaved with the offsets the
+    /// navigation probe observed. It is what tells a scroll request that landed on a lazy stack's
+    /// estimate apart from a destination that was released or never requested.
+    private(set) static var navigationTrace: [String] = []
+    static let isRecording = CommandLine.arguments.contains("--review-run-probe")
     static var isRequested: Bool { CommandLine.arguments.contains("--review-run-probe") }
+
+    static func trace(_ event: String) {
+        navigationTrace.append(event)
+        if navigationTrace.count > 80 { navigationTrace.removeFirst(navigationTrace.count - 80) }
+    }
+
+    static func clearTrace() {
+        navigationTrace = []
+    }
 
     static func runAndExit() -> Never {
         guard Bundle.main.bundleIdentifier == "be.spatie.bloom.review-probe" else { exit(1) }

@@ -312,7 +312,8 @@ public struct TmuxCommand: Sendable, Equatable {
     public func attachOrCreate(
         session: String,
         directory: String,
-        environment: [String: String]
+        environment: [String: String],
+        shellCommand: String? = nil
     ) -> [String] {
         // Existing servers keep their original environment even after Bloom is rebuilt.
         var tail = ["set-environment", "-gr", "NO_COLOR", ";",
@@ -321,6 +322,7 @@ public struct TmuxCommand: Sendable, Equatable {
             tail.append("-e")
             tail.append("\(key)=\(environment[key]!)")
         }
+        if let shellCommand { tail.append(shellCommand) }
         return arguments(tail)
     }
 

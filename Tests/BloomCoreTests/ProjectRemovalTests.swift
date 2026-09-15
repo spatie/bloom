@@ -29,6 +29,18 @@ struct ProjectRemovalTests {
         #expect(text.contains("the worktrees stay checked out"))
     }
 
+    @Test("offers to archive first only when there is a worktree, and says what that does")
+    func offersArchiveFirst() {
+        let active = [workspace("one"), workspace("gone", state: .archived)]
+        #expect(ProjectRemoval.offersArchiveFirst(workspaces: active))
+        #expect(!ProjectRemoval.offersArchiveFirst(workspaces: [workspace("gone", state: .archived)]))
+        let text = ProjectRemoval.consequences(workspaces: active, runningAgents: 0)
+        #expect(text.contains("Archive Workspaces, Then Remove runs each workspace\u{2019}s archive script and removes its worktree first"))
+        let refusal = ProjectRemoval.archiveFirstRefusal(project: "Bloom", reasons: ["sea holds work that exists nowhere else"])
+        #expect(refusal.hasPrefix("Bloom is still here and nothing was archived, because one workspace cannot be archived without asking:"))
+        #expect(refusal.contains("Archive it from the sidebar"))
+    }
+
     @Test("a project with nothing in it promises nothing about worktrees")
     func saysNothingAboutWorktreesThatDoNotExist() {
         let text = ProjectRemoval.consequences(workspaces: [], runningAgents: 0)

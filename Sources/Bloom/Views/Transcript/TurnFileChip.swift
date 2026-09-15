@@ -5,6 +5,9 @@ struct TurnFileChip: View {
     var file: TurnFile
     /// The worktree the path is shown relative to. See `TurnFile.display(in:)`.
     var worktree: String
+    /// Off for a workspace on a server, whose paths name files that are not on this Mac, so the
+    /// hover preview would show whatever happens to sit at the same path here.
+    var previewsCurrentFile = true
 
     var body: some View {
         HStack(spacing: TranscriptLayout.tight * 2) {
@@ -27,7 +30,9 @@ struct TurnFileChip: View {
         // whole.
         .fixedSize()
         .background {
-            HoverQuickLook(url: PromptAttachment.sent(path: file.path).url(in: worktree))
+            if previewsCurrentFile {
+                HoverQuickLook(url: PromptAttachment.sent(path: file.path).url(in: worktree))
+            }
         }
         // Said once, in the form the rest of the window says it in.
         //

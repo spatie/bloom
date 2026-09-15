@@ -64,9 +64,14 @@ final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
     }
 
     func endOutput() {
-        lock.lock(); running = false; lock.unlock()
+        exitWithoutClosingOutput()
         stdoutContinuation.finish()
         stderrContinuation.finish()
+    }
+
+    /// Models an exited parent whose child still holds its output pipe open.
+    func exitWithoutClosingOutput() {
+        lock.lock(); running = false; lock.unlock()
     }
 
     var stdin: [String] {

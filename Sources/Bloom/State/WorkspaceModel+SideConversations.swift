@@ -68,7 +68,7 @@ extension WorkspaceModel {
                 state.isVisible = false
                 state.transcript = nil
                 await reloadSessions()
-                WorkspaceTabsStore.shared.reveal(.chat(kept.id), in: self)
+                paneStores.tabs.reveal(.chat(kept.id), in: self)
             } catch is CancellationError {
             } catch {
                 state.error = error.readableMessage

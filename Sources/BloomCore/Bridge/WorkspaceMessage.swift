@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// One message an agent in one workspace sent the agent in another, through `workspace_say`.
 ///

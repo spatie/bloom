@@ -38,7 +38,65 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The Linux server, built once and used twice: bundled into the Mac app, and published on the
+  # GitHub release where every server's maintenance supervisor looks for its next update. Both
+  # are this one file, so a server installed from the app and a server updated in place carry the
+  # same digest. The release job needs this one, so a server that does not build or package stops
+  # the release before an app without its server can be signed.
+  #
+  # Ubuntu 24.04 because the package keeps the host's glibc, and the oldest supported release sets
+  # the minimum; Tools/package-linux-server.py refuses any other build environment. Release
+  # configuration because this is the build people run; it was debug until the updater needed it.
+  server-package:
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf
+      - name: Build the server in release configuration
+        run: |
+          set -euo pipefail
+          swift build -c release --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+          swift build -c release --product bloom-bridge -j 4 -Xswiftc -warnings-as-errors
+      # The tag is the version. The packager writes it into manifest.json, and the supervisor
+      # refuses a download whose manifest names a different version than the release it reviewed,
+      # so describe runs the package through the supervisor's own checks before anything uses it.
+      - name: Package and describe the server
+        env:
+          BLOOM_SERVER_VERSION: ${{ github.event.release.tag_name || inputs.tag }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          bin="$(swift build -c release --show-bin-path)"
+          out=.build/server-release
+          python3 Tools/package-linux-server.py "$bin/bloom-server" "$out/bloom-server-linux-x86_64.tar.gz"
+          python3 Tools/server-release-assets.py describe "$out/bloom-server-linux-x86_64.tar.gz" \
+            --tag "$TAG" --output-dir "$out"
+          (cd "$out" && sha256sum -c bloom-server-linux-x86_64.tar.gz.sha256)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundled-linux-server
+          path: |
+            .build/server-release/bloom-server-linux-x86_64.tar.gz
+            .build/server-release/bloom-server-linux-x86_64.tar.gz.sha256
+            .build/server-release/bloom-server-linux-x86_64.json
+          if-no-files-found: error
+          retention-days: 30
+
   release:
+    needs: server-package
     runs-on: macos-26
     timeout-minutes: 90
 
@@ -72,6 +130,19 @@ jobs:
           ref: ${{ steps.release.outputs.tag }}
           # The build number is a commit count, and a shallow clone counts wrong.
           fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundled-linux-server
+          path: .build/server-package
+      # Checked here as well as where it was made, because an artefact that arrived truncated
+      # would otherwise be discovered by a server after the app had shipped with it inside.
+      - name: Use the matching server package
+        run: |
+          set -euo pipefail
+          (cd .build/server-package && shasum -a 256 -c bloom-server-linux-x86_64.tar.gz.sha256)
+          test -s .build/server-package/bloom-server-linux-x86_64.json
+          echo "BLOOM_LINUX_SERVER_ARCHIVE=$GITHUB_WORKSPACE/.build/server-package/bloom-server-linux-x86_64.tar.gz" >> "$GITHUB_ENV"
 
       # Names only. None of these are ever printed, and the point is to stop
       # before the build rather than to show what is set.
@@ -218,6 +289,11 @@ jobs:
           export BLOOM_UPDATE_FEED_URL
           echo "Feed the app will poll: $BLOOM_UPDATE_FEED_URL"
           ./Tools/build.sh -r
+          # The copy inside the app is what the setup assistant installs, and the copy on the
+          # release is what the supervisor updates to. They have to be the same bytes, or a server
+          # installed from 1.4.0 reports a different package than a server updated to 1.4.0.
+          cmp "$BLOOM_LINUX_SERVER_ARCHIVE" \
+            "$(swift build -c release --show-bin-path)/Bloom.app/Contents/Resources/ServerSetup/server.tar.gz"
 
       # Two notarisation round trips, one for the zip and one for the image, so
       # this is the long step. The image is built from the bundle the zip holds
@@ -360,14 +436,45 @@ jobs:
           # one means an update nobody is offered.
           Tools/release/bucket.sh put "$RUNNER_TEMP/appcast.xml" appcast.xml "public, max-age=300"
 
-      - name: Attach the zip and the disk image to the release
+      # After the appcast, so a server is never offered a version whose app did not ship. The
+      # supervisor on each server polls releases/latest for bloom-server-linux-x86_64.tar.gz and
+      # trusts the sha256 digest GitHub computes for it, so the upload is not done until that
+      # digest has been read back and matched against the file the app bundled.
+      - name: Attach the app and the server to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
           ZIP: ${{ steps.package.outputs.zip }}
           DMG: ${{ steps.package.outputs.dmg }}
-        run: gh release upload "$TAG" "$ZIP" "$DMG" --clobber
+        run: |
+          set -euo pipefail
+          server=.build/server-package
+          gh release upload "$TAG" "$ZIP" "$DMG" \
+            "$server/bloom-server-linux-x86_64.tar.gz" \
+            "$server/bloom-server-linux-x86_64.tar.gz.sha256" \
+            "$server/bloom-server-linux-x86_64.json" \
+            --clobber
+
+      - name: Check the supervisor would accept the published server
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # GitHub fills in an asset's digest after the upload returns, not always before.
+          for attempt in 1 2 3 4 5 6; do
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+            if python3 Tools/server-release-assets.py verify .build/server-package/bloom-server-linux-x86_64.tar.gz \
+                 --release "$RUNNER_TEMP/release.json" \
+                 --description .build/server-package/bloom-server-linux-x86_64.json; then
+              exit 0
+            fi
+            echo "Not verified yet, attempt $attempt."
+            sleep 10
+          done
+          exit 1
 
       - name: Say where it went
         env:

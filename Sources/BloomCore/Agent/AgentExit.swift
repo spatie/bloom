@@ -13,6 +13,10 @@ public enum AgentExitCause: Sendable, Hashable {
     case crashed(String)
     /// There was nothing on PATH to run.
     case missing
+    /// The launch went through the project's `[execution]` wrapper, and the environment on the
+    /// other side of it has no such command. Not `.missing`: installing the CLI on this machine
+    /// does nothing for a container that does not have it.
+    case missingInEnvironment(AgentMissingFromEnvironment)
     /// The CLI printed something for a person to read before it stopped.
     case reported(String)
     /// It printed nothing at all.
@@ -69,6 +73,7 @@ public struct AgentExit: Sendable, Hashable {
         // Deliberately not "Agent exited (0)". The status is true and it is also the least useful
         // thing that could be said about a turn nothing will ever close.
         if case .endedMidTurn = cause { return "Turn never finished" }
+        if case .missingInEnvironment(let missing) = cause { return missing.title }
         return status.map { "Agent exited (\($0))" } ?? "Agent error"
     }
 
@@ -79,6 +84,8 @@ public struct AgentExit: Sendable, Hashable {
             Self.oneLine(Self.stopped("The CLI crashed: \(error)"))
         case .missing:
             "Bloom could not find the agent's command."
+        case .missingInEnvironment(let missing):
+            missing.summary
         case .reported(let text):
             Self.oneLine(text)
         case .silent:
@@ -109,6 +116,10 @@ public struct AgentExit: Sendable, Hashable {
             Install the agent's CLI, or put it somewhere Bloom looks, then send the turn again. \
             Nothing in this conversation was lost.
             """
+        case .missingInEnvironment(let missing):
+            // No `ranCommand`: the path Bloom ran is the wrapper, and the advice already names it
+            // in the words of the settings file.
+            missing.advice
         case .reported:
             """
             Nothing in this conversation was lost, and everything the agent had already changed is \
@@ -195,6 +206,15 @@ public struct AgentExit: Sendable, Hashable {
         // it by its output would land on `.silent` and draw "Agent exited (0)".
         if json?["subtype"]?.stringValue == UnfinishedRun.abandonedSubtype {
             return AgentExit(status: status, cause: .endedMidTurn, detail: stderr, command: command)
+        }
+
+        // Read here, on whichever end draws the row, rather than decided by the runner, so a row
+        // a server wrote is classified by the Mac from the payload alone and older rows written
+        // before the field existed simply fall through to the reading below.
+        if let execution = json?["execution"],
+           let missing = try? JSONDecoder().decode(AgentMissingFromEnvironment.self, from: Data(execution.compactJSON.utf8)),
+           AgentMissingFromEnvironment.recognises(status: status, output: stderr, cli: missing.cli) {
+            return AgentExit(status: status, cause: .missingInEnvironment(missing), detail: stderr, command: command)
         }
 
         return AgentExit(

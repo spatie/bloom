@@ -65,6 +65,8 @@ struct ComposerFooterView: View {
     /// a shell and never sends any of them anywhere. What is left is the send button, which is the
     /// one control on the row that still does something.
     var showsAgentControls: Bool = true
+    var remote: RemoteSessionConnection?
+    var creationSource: CreationComposerSource?
     var usesCLIChat: Binding<Bool>?
     var supportsCLIChat: Bool = true
 
@@ -78,8 +80,18 @@ struct ComposerFooterView: View {
         [project ?? "", controls.agentKind.rawValue, controls.model, String(showsAgentControls)]
     }
 
-    private var codexSpeed: CodexSpeed? {
-        loadedSpeedRequest == speedRequest ? loadedSpeed : nil
+    /// A workspace on a server takes the speed its server reported, because the reading below is
+    /// this Mac's Codex configuration and says nothing about the Codex that would run the turn.
+    private var codexSpeedReading: CodexSpeedReading {
+        if let remote {
+            return .reported(remote.codexSpeeds, model: controls.model, isLoaded: remote.prepared)
+        }
+        if let creationSource {
+            return .reported(creationSource.codexSpeeds, model: controls.model, isLoaded: creationSource.hasReceived)
+        }
+        guard loadedSpeedRequest == speedRequest else { return .loading }
+        if let loadedSpeed { return .read(loadedSpeed) }
+        return speedFailed ? .unavailable : .loading
     }
 
     /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
@@ -100,7 +112,7 @@ struct ComposerFooterView: View {
 
     /// Shared, because `ViewThatFits` below builds this row three times and three copies would be
     /// three fetches of the Codex model list.
-    private var catalog: ComposerModelCatalog { ComposerModelCatalog.shared }
+    private var catalog: ComposerModelCatalog { remote?.models ?? creationSource?.models ?? ComposerModelCatalog.shared }
 
     /// Held here rather than in `ComposerContextGauge`, because two of the three candidates below
     /// contain that control and `ViewThatFits` throws away the state of the ones it does not
@@ -180,13 +192,15 @@ struct ComposerFooterView: View {
         }
         // On appearance rather than on first use of the menu, so the Codex section is there when
         // the menu is opened rather than a moment after. It fetches once.
-        .task { if showsAgentControls { catalog.load() } }
+        .task { if showsAgentControls, remote == nil, creationSource == nil { catalog.load() } }
         .task(id: speedRequest) {
             let request = speedRequest
             loadedSpeed = nil
             loadedSpeedRequest = request
             speedFailed = false
             guard showsAgentControls, controls.agentKind == .codex else { return }
+            // A server's speed arrives with its composer state. See `codexSpeedReading`.
+            guard remote == nil, creationSource == nil else { return }
             do {
                 let speed = try await CodexSpeed.read(
                     cwd: project ?? AgentScratchDirectory.current(), modelID: controls.model
@@ -200,8 +214,10 @@ struct ComposerFooterView: View {
         }
         // Re-run when the composer moves to another checkout, because a project's own styles are
         // that project's. The scan itself does nothing when the answer is already held and fresh.
-        .task(id: project) {
+        .task(id: project ?? remote?.sessionID.rawValue ?? "") {
             guard showsAgentControls else { return }
+            if let remote { outputStyles = remote.styles; return }
+            if let creationSource { outputStyles = creationSource.styles; return }
             let catalog = ComposerOutputStyleCatalog.shared(for: project)
             outputStyles = catalog
             await catalog.refreshIfStale(project: project)
@@ -272,8 +288,8 @@ struct ComposerFooterView: View {
                         }
                     },
                     onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
-                    codexSpeed: codexSpeed,
-                    codexSpeedFailed: loadedSpeedRequest == speedRequest && speedFailed,
+                    codexSpeed: codexSpeedReading.speed,
+                    codexSpeedFailed: codexSpeedReading == .unavailable,
                     onInteractionMode: { mode in edit { $0.interactionMode = mode } }
                 )
             }
@@ -439,16 +455,7 @@ struct ComposerFooterView: View {
     /// The caller decides what changing the backend means, because a chat that has already spoken
     /// forks rather than changing. See `BackendChange`.
     private func selectModel(_ id: String) {
-        let backend = catalog.backend(ofModel: id, current: controls.agentKind)
-        edit {
-            $0.model = id
-            $0.agentKind = backend
-            $0.effort = catalog.resolvedEffort($0.effort, for: backend, model: id)
-            // The permission mode moves itself. A mode the new backend does not have cannot
-            // survive the move (Codex has no Plan, Claude Code has no Approve for me), and that
-            // used to be arranged here, in a view, by one of the four places a backend changes.
-            // It is an invariant of `ComposerControls` now: see the property's own note.
-        }
+        edit { $0 = catalog.selecting(id, in: $0) }
     }
 
 }

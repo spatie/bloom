@@ -29,7 +29,7 @@ import Foundation
 
 /// What was found by looking for the folder a new project would live in. Gathered by
 /// `NewProjectStarter.inspect`, judged by `NewProjectVerdict.of`.
-public struct NewProjectFacts: Sendable, Equatable {
+public struct NewProjectFacts: Sendable, Equatable, Codable {
     /// The name as typed, untrimmed. Trimming is `NewProjectPlan.folderName`, and it happens here
     /// rather than at the field so an all-spaces name is refused rather than silently accepted.
     public var name: String

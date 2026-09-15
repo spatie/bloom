@@ -9,8 +9,26 @@ import BloomCore
 /// Only the controls that mean something for the pane below are drawn. A row of four trailing
 /// buttons pushed the picker into its narrow form at the DEFAULT inspector width, and two of them
 /// did nothing at all on the checks tab.
-struct InspectorToolbar: View {
-    @Bindable var model: WorkspaceModel
+struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
+    @Binding var selection: InspectorTab
+    var tabs: [InspectorTab]
+    var fileCount: Int
+    /// Whether folder grouping means anything for what the list is showing. Off for uncommitted
+    /// changes, where a path can appear twice in two layers and a tree would draw it twice.
+    var allowsGrouping: Bool
+    var scopeMenu: ScopeMenu
+    var worktreeMenu: WorktreeMenu
+
+    init(selection: Binding<InspectorTab>, tabs: [InspectorTab], fileCount: Int,
+         allowsGrouping: Bool = true,
+         @ViewBuilder scopeMenu: () -> ScopeMenu, @ViewBuilder worktreeMenu: () -> WorktreeMenu) {
+        _selection = selection
+        self.tabs = tabs
+        self.fileCount = fileCount
+        self.allowsGrouping = allowsGrouping
+        self.scopeMenu = scopeMenu()
+        self.worktreeMenu = worktreeMenu()
+    }
 
     /// Shared with `ChangedFileList` through the same defaults key, and outliving the launch
     /// because a user who thinks in folders thinks in folders tomorrow too.
@@ -47,7 +65,7 @@ struct InspectorToolbar: View {
     /// the pane's default width instead of dropping to its pop-up form.
     private var trailing: some View {
         HStack(spacing: Metrics.spacingTight) {
-            if model.inspectorTab == .changes || model.inspectorTab == .history {
+            if selection == .changes || selection == .history {
                 Button {
                     isTree.toggle()
                 } label: {
@@ -63,7 +81,7 @@ struct InspectorToolbar: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.changedFiles.isEmpty || model.diffScope == .uncommitted)
+                .disabled(fileCount == 0 || !allowsGrouping)
                 .accessibilityLabel("Group changes by folder")
                 .accessibilityAddTraits(isTree ? .isSelected : [])
                 .help(
@@ -72,6 +90,27 @@ struct InspectorToolbar: View {
                         : "Group the changed files by folder"
                 )
 
+                // What the list is measured from, for a pane that has nowhere else to say it.
+                // A local workspace carries its scope menu in `ChangesHistoryList` under this row
+                // instead, and hands `EmptyView` over, which is what this asks about: a `Menu`
+                // wrapping nothing still draws a button, so the control has to be left out rather
+                // than left empty.
+                if ScopeMenu.self != EmptyView.self {
+                    Menu {
+                        scopeMenu
+                    } label: {
+                        Label(
+                            "What the changes are measured from",
+                            systemImage: "line.3.horizontal.decrease.circle"
+                        )
+                    }
+                    .labelStyle(.iconOnly)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("What the changes are measured from")
+                }
             }
 
             // No Refresh. The list keeps itself current: `AppModel`'s poll re-reads the selected
@@ -82,7 +121,7 @@ struct InspectorToolbar: View {
             // The items themselves are `WorktreeMenuItems`, which is a view of its own so that
             // this menu can be photographed. See its head.
             Menu {
-                WorktreeMenuItems(workspace: model.workspace, pullRequest: model.pullRequest)
+                worktreeMenu
             } label: {
                 Label("More for this worktree", systemImage: "ellipsis.circle")
             }
@@ -97,9 +136,12 @@ struct InspectorToolbar: View {
 
     /// The compact fallback for a width that cannot hold the tab labels.
     private var tabPicker: some View {
-        // Checks is appended only when GitHub has reported a run.
-        Picker("Inspector view", selection: $model.inspectorTab) {
-            ForEach(model.availableInspectorTabs, id: \.self) { tab in
+        // Whichever tabs this workspace has, rather than all three. Checks is only offered when
+        // GitHub has reported a run for the branch, so a workspace with no pull request draws two
+        // segments and no gap where a third used to be. `InspectorTab.available` is where that is
+        // decided and why it is decided there.
+        Picker("Inspector view", selection: $selection) {
+            ForEach(tabs, id: \.self) { tab in
                 Text(title(for: tab)).tag(tab)
             }
         }
@@ -107,10 +149,10 @@ struct InspectorToolbar: View {
 
     private var tabStrip: some View {
         HStack(spacing: 0) {
-            ForEach(model.availableInspectorTabs, id: \.self) { tab in
-                let isSelected = model.inspectorTab == tab
+            ForEach(tabs, id: \.self) { tab in
+                let isSelected = selection == tab
                 Button {
-                    model.inspectorTab = tab
+                    selection = tab
                 } label: {
                     Text(title(for: tab))
                         .font(isSelected ? Typo.labelEmphasis : Typo.label)
@@ -184,8 +226,23 @@ struct InspectorToolbar: View {
     /// one file inside it, and the field holding a word is what says the list below is showing
     /// fewer.
     private func title(for tab: InspectorTab) -> String {
-        guard tab == .changes, model.inspectorTab != .history, !model.changedFiles.isEmpty else { return tab.rawValue }
-        return "\(tab.rawValue) (\(Set(model.changedFiles.map(\.path)).count))"
+        guard tab == .changes, selection != .history, fileCount > 0 else { return tab.rawValue }
+        return "\(tab.rawValue) (\(fileCount))"
     }
 
+}
+
+extension InspectorToolbar where ScopeMenu == EmptyView, WorktreeMenu == WorktreeMenuItems {
+    init(model: WorkspaceModel) {
+        // Counted by path rather than by row: uncommitted changes list a file once per layer, and
+        // the tab would say four for two files staged and edited again.
+        self.init(selection: Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0 }),
+            tabs: model.availableInspectorTabs,
+            fileCount: Set(model.changedFiles.map(\.path)).count,
+            allowsGrouping: model.diffScope != .uncommitted) {
+            EmptyView()
+        } worktreeMenu: {
+            WorktreeMenuItems(workspace: model.workspace, pullRequest: model.pullRequest)
+        }
+    }
 }

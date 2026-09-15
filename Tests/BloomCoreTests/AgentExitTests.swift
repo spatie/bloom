@@ -255,6 +255,7 @@ struct AgentExitTests {
         let causes: [AgentExitCause] = [
             .crashed("TypeError: x"),
             .missing,
+            .missingInEnvironment(AgentMissingFromEnvironment(environment: "Docker", command: ".bloom/docker/run", cli: "claude")),
             .reported("Error: x"),
             .silent,
             .endedMidTurn,

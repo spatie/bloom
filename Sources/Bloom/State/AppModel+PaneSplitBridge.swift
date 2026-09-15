@@ -7,7 +7,7 @@ extension AppModel {
         _ order: PaneOrder, axis: SplitAxis, anchor: PaneSplitAnchor, in workspaceID: WorkspaceID
     ) async -> PaneOutcome {
         guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         let entries = tabs.entries(in: model)
         let snapshots = entries.map { tab in
             let layout = tabs.layout(of: tab)

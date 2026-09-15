@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// The two things somebody can deliberately send from Bloom: a feedback submission, and a prompt
 /// for the agent that builds Bloom.

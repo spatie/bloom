@@ -28,6 +28,7 @@ final class SleepSwitch {
 
     @ObservationIgnored private let service = SMAppService.daemon(plistName: "be.spatie.bloom.sleep.plist")
     @ObservationIgnored private var connection: NSXPCConnection?
+    @ObservationIgnored private var connectionID: UUID?
 
     private init() {
         refreshStanding()
@@ -80,21 +81,14 @@ final class SleepSwitch {
     func setHoldingLidClosed(_ held: Bool) {
         refreshStanding()
         guard standing == .ready else { return }
-        // Hopped rather than assumed: NSXPCConnection calls its invalidation handler on its own
-        // queue, and `assumeIsolated` there is a trap rather than a check.
-        let proxy = proxy { [weak self] in
-            Task { @MainActor in self?.connection = nil }
-        }
-        proxy?.setSleepDisabled(held, clientPID: ProcessInfo.processInfo.processIdentifier, withReply: Self.ignoreReply)
+        proxy()?.setSleepDisabled(held, clientPID: ProcessInfo.processInfo.processIdentifier, withReply: Self.ignoreReply)
     }
 
     /// Puts the switch back, whatever a session thought. Called on the way out, so quitting Bloom
     /// never leaves a Mac that will not sleep.
     func releaseOnQuit() {
         guard case .ready = standing else { return }
-        proxy(onInvalidation: {})?.setSleepDisabled(
-            false, clientPID: ProcessInfo.processInfo.processIdentifier, withReply: Self.ignoreReply
-        )
+        proxy()?.setSleepDisabled(false, clientPID: ProcessInfo.processInfo.processIdentifier, withReply: Self.ignoreReply)
     }
 
     private func refreshStanding() {
@@ -106,24 +100,45 @@ final class SleepSwitch {
         }
     }
 
-    private func proxy(onInvalidation: @escaping @Sendable () -> Void) -> SleepControl? {
+    private func proxy() -> SleepControl? {
         if connection == nil {
+            let identifier = UUID()
             let created = NSXPCConnection(machServiceName: "be.spatie.bloom.sleep", options: .privileged)
             created.remoteObjectInterface = NSXPCInterface(with: SleepControl.self)
-            created.invalidationHandler = onInvalidation
-            created.resume()
+            let invalidated = Self.invalidationHandler(owner: self, identifier: identifier)
+            created.invalidationHandler = invalidated
+            created.interruptionHandler = invalidated
             connection = created
+            connectionID = identifier
+            created.resume()
         }
-        return connection?.remoteObjectProxyWithErrorHandler(Self.ignoreError) as? SleepControl
+        guard let connectionID else { return nil }
+        let invalidated = Self.invalidationHandler(owner: self, identifier: connectionID)
+        return connection?.remoteObjectProxyWithErrorHandler(Self.errorHandler(invalidated)) as? SleepControl
     }
 
-    /// The reply and the error handler XPC calls back on its own queue, declared outside the
-    /// class's main actor. Written inline as `{ _ in }` inside a method of this class, each closure
-    /// inherited main actor isolation, and Swift checks that on entry: the first time the daemon
-    /// was unreachable, the error handler ran on XPC's queue and Bloom stopped at launch in
-    /// `dispatch_assert_queue`.
-    private nonisolated static let ignoreReply: @Sendable (Bool) -> Void = { _ in }
-    private nonisolated static let ignoreError: @Sendable (any Error) -> Void = { _ in }
+    private func invalidateConnection(_ identifier: UUID) {
+        guard connectionID == identifier else { return }
+        let previous = connection
+        connection = nil
+        connectionID = nil
+        previous?.invalidate()
+    }
+
+    // XPC invokes these blocks on its own queue. Build them outside MainActor isolation;
+    // even an empty closure created in proxy() otherwise inherits a runtime actor assertion.
+    private nonisolated static func invalidationHandler(owner: SleepSwitch, identifier: UUID) -> @Sendable () -> Void {
+        { [weak owner] in
+            Task { @MainActor in owner?.invalidateConnection(identifier) }
+        }
+    }
+
+    private nonisolated static func errorHandler(_ invalidated: @escaping @Sendable () -> Void) -> @Sendable (any Error) -> Void {
+        { _ in invalidated() }
+    }
+
+    private nonisolated static func ignoreReply(_ result: Bool) {}
+
 }
 
 /// The daemon's side of the wire, declared again here rather than shared through a module: the

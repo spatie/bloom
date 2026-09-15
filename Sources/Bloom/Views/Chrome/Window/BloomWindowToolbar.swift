@@ -10,8 +10,21 @@ struct BloomWindowToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            WindowTitleControl(app: app)
-                .padding(.leading, Metrics.spacingWide)
+            Group {
+                if let workspace = app.selectedRemoteWorkspace {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(workspace.name).fontWeight(.semibold)
+                        Label(app.remoteServer.displayName, systemImage: "server.rack")
+                            // Toolbars otherwise inherit icon-only labels, leaving a stray glyph below the title.
+                            .labelStyle(.titleAndIcon)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    WindowTitleControl(app: app)
+                }
+            }
+            .padding(.leading, Metrics.spacingWide)
         }
         // The editable window title is text, so it does not need a button's background.
         .sharedBackgroundVisibility(.hidden)
@@ -33,9 +46,9 @@ struct BloomWindowToolbar: ToolbarContent {
         // centre column to open a tab in, and a `+` that does nothing there is worse than none.
         // `selectedModel` rather than `selectedWorkspace`, because the menu acts on the model and
         // a model not prepared yet has nothing for it to act on.
-        if let workspace = app.selectedModel, app.selectedWorkspace != nil {
+        if let workspace = app.selectedPaneModel, app.selectedWorkspace != nil || app.selection.isRemote {
             ToolbarItem(placement: .primaryAction) {
-                NewTabMenu(model: workspace)
+                newTabMenu(for: workspace)
             }
         }
 
@@ -46,7 +59,7 @@ struct BloomWindowToolbar: ToolbarContent {
             .help("Search workspaces, transcripts and commands")
         }
 
-        if app.selectedWorkspace != nil {
+        if app.selectedWorkspace != nil || app.selection.isRemote {
             ToolbarItem(placement: .primaryAction) {
                 Button("Inspector", systemImage: "sidebar.right") {
                     app.isInspectorVisible.toggle()

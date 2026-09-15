@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// The colours of a message between workspaces, beside `PaletteInk` rather than inside it.
 ///

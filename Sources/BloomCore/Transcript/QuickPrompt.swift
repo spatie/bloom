@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// A few lines the owner wrote and keeps typing again, kept by Bloom so they can be put back in

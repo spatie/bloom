@@ -16,6 +16,7 @@ import BloomCore
 /// split view, the inspector, the archive confirmation and the alert.
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    private let remoteServers = RemoteServerAvailability.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
 
@@ -167,6 +168,25 @@ struct RootView: View {
             .animation(reduceMotion ? nil : Motion.pane, value: app.notice)
 
             .task { await app.bootstrap() }
+            // Keyed on the Settings switch as well as on loading, so turning remote servers off
+            // cancels the reconnect loop rather than leaving it ticking with nothing to do, and
+            // turning them on starts it again. After loading, as it was when it followed
+            // `bootstrap` in the task above. See `RemoteServerFeature`.
+            .task(id: app.isLoaded && remoteServers.isEnabled) {
+                guard app.isLoaded, remoteServers.isEnabled else { return }
+                await app.remoteServer.maintainConnection()
+            }
+            .task(id: RemotePollKey(generation: app.remoteServer.connectionGeneration, isEnabled: remoteServers.isEnabled)) {
+                guard remoteServers.isEnabled else { return }
+                await app.remoteServer.poll()
+            }
+            .task(id: RemotePollKey(generation: app.remoteServer.connectionGeneration, isEnabled: remoteServers.isEnabled)) {
+                guard remoteServers.isEnabled else { return }
+                await app.remoteServer.pollReview()
+            }
+            .onChange(of: remoteServers.isEnabled) { _, isEnabled in
+                Task { await app.remoteServersAvailabilityChanged(to: isEnabled) }
+            }
             // The install ping. Started from here because this is the first moment there is a window
             // and a model, and it keeps a loop of its own from then on rather than living inside this
             // task: Bloom goes on running with its window closed, and a view's task does not. It waits
@@ -236,6 +256,15 @@ struct RootView: View {
                 Button(
                     request.confirmLabel, role: request.isDestructive ? .destructive : nil
                 ) { confirmArchive(request) }
+                // A dialogue cannot hold the popover's checkbox, so keeping the containers is a
+                // second answer instead. The first button removes them, as the message says.
+                if request.offersDockerRemoval {
+                    Button(request.keepDockerLabel) {
+                        var keeping = request
+                        keeping.removesDocker = false
+                        confirmArchive(keeping)
+                    }
+                }
                 // No `.keyboardShortcut(.defaultAction)` on the cancel button, and that is not an
                 // oversight. It used to be there, to keep Return off the destructive answer, and it
                 // did that by REPLACING the cancel button's own key binding. A `.cancel` role button
@@ -449,7 +478,10 @@ struct RootView: View {
     /// which is the empty state that offers to add one; every control that could ask is disabled
     /// or diverted in that state anyway.
     private func openCreateWindow(in repo: Repo?) {
-        let target = repo ?? app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first
+        let selected: Repo? = if app.selection.isRemote {
+            app.remoteServer.catalogue?.repositories.first { $0.id == app.selectedRemoteWorkspace?.repoID }
+        } else { app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first }
+        let target = repo ?? selected
         guard let target else { return openWindow(id: CreateWorkspaceWindow.id) }
         openWindow(id: CreateWorkspaceWindow.id, value: target.id)
     }
@@ -511,4 +543,10 @@ extension Notification {
     static let bloomPullRequestKey = "bloom.newWorkspace.pullRequest"
     /// Which workspace a `bloomRenameWorkspace` post is about, as its raw id.
     static let bloomWorkspaceIDKey = "bloom.workspaceID"
+}
+
+/// What the two server polling tasks restart on: a new connection, or the Settings switch.
+private struct RemotePollKey: Equatable {
+    let generation: Int
+    let isEnabled: Bool
 }

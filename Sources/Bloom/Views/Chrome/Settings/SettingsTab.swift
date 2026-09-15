@@ -10,6 +10,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
     case prompts
     case terminal
     case commandLine
+    case servers
 
     var title: String {
         switch self {
@@ -23,6 +24,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .prompts: "Prompts"
         case .terminal: "Terminal"
         case .commandLine: "Command Line"
+        case .servers: "Servers"
         }
     }
 
@@ -38,6 +40,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .prompts: "text.bubble"
         case .terminal: "terminal"
         case .commandLine: "link"
+        case .servers: "server.rack"
         }
     }
 }

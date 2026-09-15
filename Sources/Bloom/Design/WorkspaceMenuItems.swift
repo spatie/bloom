@@ -92,6 +92,7 @@ struct WorkspaceMenuItems: View {
     }
 
     var workspace: Workspace
+    var remote: ServerWindowModel?
     var scope: Scope = .row
     /// A visible source can keep the safety question attached to its own control.
     var onArchive: (() -> Void)?
@@ -114,9 +115,9 @@ struct WorkspaceMenuItems: View {
         copyBranchItem
         setupItem
         Divider()
-        WorkspacePinItem(workspace: workspace, app: app)
-        WorkspaceUnreadItem(workspace: workspace, app: app)
-        WorkspaceColourItem(workspace: workspace, app: app)
+        WorkspacePinItem(workspace: workspace, remote: remote, app: app)
+        WorkspaceUnreadItem(workspace: workspace, remote: remote, app: app)
+        WorkspaceColourItem(workspace: workspace, remote: remote, app: app)
         renameItem
         Divider()
         // Straight through, with no dialog of its own. Whether this needs confirming is not
@@ -155,10 +156,12 @@ struct WorkspaceMenuItems: View {
 
     private var openInEditorItem: some View {
         Button("Open in Editor") { Reveal.inEditor(workspace.path, repo: workspace.repoID) }
+            .disabled(remote != nil)
     }
 
     private var revealInFinderItem: some View {
         Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
+            .disabled(remote != nil)
     }
 
     private var copyBranchItem: some View {
@@ -195,7 +198,11 @@ struct WorkspaceMenuItems: View {
     /// its own invalidation question and is not this one.
     @ViewBuilder
     private var setupItem: some View {
-        if let model = app.existingModel(for: workspace.id), let offer = model.setupRunOffer {
+        if let remote {
+            Button(workspace.setupState == .pending ? "Run Setup" : "Run Setup Again") {
+                Task { await remote.updateWorkspace(workspace, action: .runSetup) }
+            }.disabled(workspace.setupState == .running || remote.isRunning(workspace))
+        } else if let model = app.existingModel(for: workspace.id), let offer = model.setupRunOffer {
             Button(offer.title) { SetupRunAlert.shared.ask(model) }
                 .disabled(!offer.isEnabled)
         }
@@ -215,11 +222,14 @@ struct WorkspaceMenuItems: View {
 /// One item that changes its label rather than two, which is the shape all three of these have.
 struct WorkspacePinItem: View {
     var workspace: Workspace
+    var remote: ServerWindowModel?
     var app: AppModel
 
     var body: some View {
         MenuCommand(.pin, alternate: workspace.pinned) {
-            Task { await app.togglePinned(workspace) }
+            Task {
+                if let remote { await remote.updateWorkspace(workspace, action: .setPinned(!workspace.pinned)) } else { await app.togglePinned(workspace) }
+            }
         }
     }
 }
@@ -235,12 +245,15 @@ struct WorkspacePinItem: View {
 /// is `WorkspaceMenuSubject.allows` and happens before this view is built at all.
 struct WorkspaceUnreadItem: View {
     var workspace: Workspace
+    var remote: ServerWindowModel?
     var app: AppModel
 
     var body: some View {
         if let mark = WorkspaceUnreadMark.action(for: workspace) {
             MenuCommand(.unreadMark, alternate: mark == .markRead) {
-                Task { await app.setUnread(workspace, mark.unread) }
+                Task {
+                    if let remote { await remote.updateWorkspace(workspace, action: .setUnread(mark.unread)) } else { await app.setUnread(workspace, mark.unread) }
+                }
             }
         }
     }
@@ -257,6 +270,7 @@ struct WorkspaceUnreadItem: View {
 /// means "clear", is a rule you can only find out about by losing a colour you wanted.
 struct WorkspaceColourItem: View {
     var workspace: Workspace
+    var remote: ServerWindowModel?
     var app: AppModel
 
     var body: some View {
@@ -289,7 +303,9 @@ struct WorkspaceColourItem: View {
         Binding(
             get: { workspace.colour ?? "" },
             set: { hex in
-                Task { await app.setColour(workspace, to: hex.isEmpty ? nil : hex) }
+                Task {
+                    if let remote { await remote.updateWorkspace(workspace, action: .setColour(hex.isEmpty ? nil : hex)) } else { await app.setColour(workspace, to: hex.isEmpty ? nil : hex) }
+                }
             }
         )
     }

@@ -1,0 +1,768 @@
+import Foundation
+import Observation
+import BloomCore
+import BloomClient
+import BloomAuthentication
+import CryptoKit
+
+@MainActor @Observable
+final class ServerSetupModel {
+    typealias InstallOperation = @Sendable (ServerSetupConnection, String, URL, URL, String?, @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent
+    enum Phase { case introduction, address, trust, checking, readyToInstall, installing, accounts, connecting, complete }
+    var host = "" { didSet { if host != oldValue { connectionInputsChanged() } } }
+    var identityFile = "" { didSet { if identityFile != oldValue { connectionInputsChanged() } } }
+    var label = ""
+    var installsBrowserTools = true
+    var installsDocker = true
+    var installsSwap = true
+    private(set) var swapReady = false
+    private(set) var swapAttempted = false
+    private(set) var swapDiagnostic: ServerSetupFailure?
+    private(set) var swapStatusMessage: String?
+    private(set) var isInstallingSwap = false
+    var willInstallSwap: Bool { installsSwap && check?.shouldOfferSwapInstall == true }
+    private(set) var dockerReady = false
+    private(set) var dockerAttempted = false
+    private(set) var dockerDiagnostic: ServerSetupFailure?
+    private(set) var isInstallingDocker = false
+    var isInstallingOptionalTools: Bool { isInstallingBrowser || isInstallingDocker || isInstallingSwap }
+    var optionalDiagnostic: ServerSetupFailure? { swapDiagnostic ?? dockerDiagnostic ?? browserDiagnostic }
+    var hasChosenAccountMethod = false
+    private(set) var browserReadiness: ServerBrowserReadiness?
+    private(set) var browserFailure: String?
+    private(set) var browserRecovery: String?
+    private(set) var browserAttempted = false
+    private(set) var browserDiagnostic: ServerSetupFailure?
+    private(set) var phase = Phase.introduction
+    private(set) var isBusy = false
+    private(set) var isStopping = false
+    private(set) var fingerprint: String?
+    private(set) var failure: ServerSetupFailure?
+    private(set) var progress: [String] = []
+    private(set) var activity = ServerSetupActivity()
+    private(set) var isInstallingBrowser = false
+    private(set) var check: ServerInstallCheck?
+    private(set) var includedPackage: ServerSetupPackageMetadata?
+    var versionComparison: ServerSetupVersionComparison {
+        .init(installedVersion: check?.installedVersion, installedPackageSHA256: check?.installedPackageSHA256,
+              included: includedPackage, maintenanceManagement: check?.maintenanceManagement)
+    }
+    var canUpdateExistingServer: Bool {
+        guard canMaintainExistingServer, includedPackage != nil else { return false }
+        if versionComparison.needsMaintenanceSetup { return true }
+        switch versionComparison.state {
+        case .sameBuild, .sameVersion, .installedNewer, .packageUnavailable: return false
+        default: return true
+        }
+    }
+    private(set) var accountChecks: [ServerDiagnostics.Check] = []
+    private(set) var agentAuthentication: [AgentAuthenticationStatus] = []
+    private let resources: URL?
+    private let supportDirectory: URL?
+    private let server: ServerWindowModel
+    private let installConnection: InstallOperation
+    private let inspectConnection: @Sendable (ServerSetupConnection, String) async throws -> ServerInstallCheck
+    private var connection: ServerSetupConnection?
+    private var candidate: ServerSetupHostKey?
+    private var installed: ServerInstallEvent?
+    private var clientKey: URL?
+    private var installedKnownHosts: URL?
+    private var task: Task<Void, Never>?
+    private var stoppingServerID: UUID?
+    private var maintenanceReconnectGeneration: Int?
+    private(set) var maintenanceInstallationCompleted = false
+    private(set) var maintenanceServerRunning = false
+    /// Where this setup saved the server's maintenance key, once the server confirmed its digest.
+    /// The Finish step offers to copy the key only then, so it never offers a key the server refused.
+    private(set) var maintenanceKeyServerID: String?
+    private(set) var maintenanceKeyIssued = false
+    private(set) var uninstallOutcome: ServerUninstallOutcome?
+    private(set) var isUninstalling = false
+    /// The installer's own code for the last refused uninstall, which decides whether forcing is offered.
+    private(set) var uninstallRefusalCode: String?
+    private var generation = UUID()
+    private var retryStep = Phase.address
+    private var validatedHost = ""
+    private var validatedIdentity = ""
+    private var accountClient: ServerClient?
+
+    var canInstallOptionalTools: Bool { connection != nil && installed?.serviceHome != nil && !isBusy }
+    var githubIsAuthenticated: Bool { accountChecks.contains { $0.id == .github && $0.status == .ready } }
+
+    /// What the last account check said. A sign-in sheet reads it after its command exits, because
+    /// a clean exit is not proof: a login backed out of exits zero as well.
+    func isAuthenticated(_ account: ServerSetupAccount) -> Bool {
+        if account == .github { return githubIsAuthenticated }
+        let agent: AgentKind = account == .codex ? .codex : .claudeCode
+        return agentAuthentication.contains { $0.agent == agent && $0.state == .ready }
+    }
+    var canConnect: Bool { installed != nil && accountClient != nil && !isBusy && !server.isConnecting && !server.isSigningIn && !server.isPerformingCommand }
+    private var support: URL { supportDirectory ?? Store.defaultDirectory.appendingPathComponent("server-setup", isDirectory: true) }
+    private var knownHosts: URL { support.appendingPathComponent("known_hosts") }
+
+    init(server: ServerWindowModel, resources: URL? = nil, supportDirectory: URL? = nil, resumeExisting: Bool = true,
+         inspectConnection: @escaping @Sendable (ServerSetupConnection, String) async throws -> ServerInstallCheck = { try await $0.inspect(script: $1) },
+         installConnection: @escaping InstallOperation = { connection, script, archive, key, maintenanceDigest, progress in
+             try await connection.install(script: script, archive: archive, clientPublicKey: key, maintenanceKeySHA256: maintenanceDigest, progress: progress)
+         }) {
+        self.resources = resources; self.supportDirectory = supportDirectory
+        self.server = server
+        self.inspectConnection = inspectConnection
+        self.installConnection = installConnection
+        if let metadata = resource("package.json") {
+            includedPackage = try? JSONDecoder().decode(ServerSetupPackageMetadata.self, from: Data(contentsOf: metadata))
+        }
+        if resumeExisting, server.isConfigured, !server.usesHTTPS, !server.knownHostsFile.isEmpty, !server.identityFile.isEmpty,
+           let user = server.host.split(separator: "@").first, server.host.contains("@") {
+            // Returning to accounts does not schedule a new administrator installation.
+            installsDocker = false
+            installsSwap = false
+            host = server.host; label = server.customLabel; validatedHost = server.host
+            clientKey = URL(fileURLWithPath: server.identityFile)
+            installedKnownHosts = URL(fileURLWithPath: server.knownHostsFile)
+            installed = ServerInstallEvent(executable: server.executable, dataDirectory: server.remoteDirectory, serviceUser: String(user))
+            phase = .accounts
+            hasChosenAccountMethod = true
+        }
+    }
+
+    func beginSetup() {
+        guard phase == .introduction else { return }
+        phase = .address
+    }
+
+    func showIntroduction() {
+        guard phase == .address, !isBusy else { return }
+        failure = nil
+        phase = .introduction
+    }
+
+    func inspect() async {
+        await perform(.checking) {
+            self.hasChosenAccountMethod = false
+            self.dockerReady = false; self.dockerAttempted = false; self.dockerDiagnostic = nil
+            self.resetSwapStatus()
+            self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.agentAuthentication = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.browserDiagnostic = nil; self.check = nil; self.candidate = nil; self.fingerprint = nil
+            try self.prepareTrustStore()
+            let host = self.host.trimmingCharacters(in: .whitespacesAndNewlines)
+            let connection = try ServerSetupConnection(host: host, identityFile: self.identityFile, knownHostsFile: self.knownHosts.path)
+            self.connection = connection
+            self.validatedHost = host; self.validatedIdentity = self.identityFile
+            do {
+                let check = try await self.inspectConnection(connection, self.installerScript())
+                try Task.checkCancellation()
+                self.check = check
+                // A clean check leaves nothing to decide on the Server page, which used to sit
+                // showing "Ready for setup" until Continue was pressed. Installation says what the
+                // check found. A blocker keeps the page, because that is where it is fixed.
+                self.phase = check.blockers.isEmpty ? .readyToInstall : .address
+            } catch let error as ServerSetupFailure where error.code == .hostUnknown {
+                let candidate = try await connection.candidateKey()
+                try Task.checkCancellation()
+                self.candidate = candidate; self.fingerprint = candidate.fingerprint; self.phase = .trust
+            }
+        }
+    }
+
+    func trustHost() async {
+        guard let connection, let candidate, inputsUnchanged else { return }
+        if await perform(.checking, operation: { try await connection.trust(candidate) }) { await inspect() }
+    }
+
+    var canReviewInstallation: Bool { check?.blockers.isEmpty == true && inputsUnchanged && !isBusy }
+    var isStoppingServer: Bool { stoppingServerID != nil }
+
+    var canStopServer: Bool {
+        guard let check, check.existing, inputsUnchanged, !isBusy,
+              check.blockers.contains(where: { $0.code == "server_running" }) else { return false }
+        return check.blockers.allSatisfy { $0.code == "server_running" }
+    }
+
+    func stopServer() async {
+        guard canStopServer, let connection else { return }
+        let operationID = UUID()
+        stoppingServerID = operationID
+        defer { if stoppingServerID == operationID { stoppingServerID = nil } }
+        await perform(.checking) {
+            self.record("Checking for active work before stopping Bloom Server.")
+            let check = try await connection.stopServer(script: self.installerScript())
+            try Task.checkCancellation()
+            self.check = check
+            self.record("Bloom Server stopped. Installation checks refreshed.")
+            self.phase = .address
+        }
+    }
+
+    /// An administrator connection for a server that is already installed, prefilled from its saved
+    /// SSH host. The workspace connection signs in as the service account, which administers nothing.
+    static func administrator(for server: ServerWindowModel) -> ServerSetupModel {
+        let setup = ServerSetupModel(server: server, resumeExisting: false)
+        setup.label = server.displayName
+        setup.installsBrowserTools = false; setup.installsDocker = false; setup.installsSwap = false
+        if !server.usesHTTPS, let hostname = server.host.split(separator: "@").last {
+            setup.host = "root@" + hostname
+        }
+        setup.beginSetup()
+        return setup
+    }
+
+    /// The same target rule as maintenance: the check must describe the saved server's own
+    /// installation. An HTTPS connection has no SSH host or directory to compare, so there the
+    /// administrator address typed, and named again in the confirmation, is the target.
+    var canUninstall: Bool {
+        guard let check, inputsUnchanged, !isBusy, ServerUninstallPlan.canUninstall(check) else { return false }
+        if server.usesHTTPS { return true }
+        let targetHost = server.host.split(separator: "@").last.map(String.init)
+        let checkedHost = validatedHost.split(separator: "@").last.map(String.init)
+        return targetHost == checkedHost && check.dataDirectory == server.remoteDirectory
+    }
+
+    func uninstall(deletesData: Bool, force: Bool) async {
+        guard canUninstall, let connection else { return }
+        uninstallOutcome = nil
+        uninstallRefusalCode = nil
+        activity = ServerSetupActivity()
+        isUninstalling = true
+        defer { isUninstalling = false }
+        let completed = await perform(.checking) { [self] in
+            let script = try self.installerScript()
+            self.record(deletesData ? "Uninstalling Bloom Server and deleting the account’s data." : "Uninstalling Bloom Server and keeping the account’s data.")
+            let event = try await connection.uninstall(script: script, deletesData: deletesData, force: force) { [weak self] event in
+                await self?.receive(event)
+            }
+            if event.event == "error" {
+                self.uninstallRefusalCode = event.code
+                throw ServerSetupFailure.installation(code: event.code ?? "installation_failed", message: event.message,
+                    recovery: event.recovery, details: event.details, command: event.command, exitStatus: event.exitStatus)
+            }
+            guard let outcome = ServerUninstallOutcome(event: event) else {
+                throw ServerSetupFailure.installation(code: "uninstall_unconfirmed", message: "The server did not confirm what was removed.",
+                    recovery: "Choose Check Again to see what is still installed, then try again.")
+            }
+            self.uninstallOutcome = outcome
+            self.record(outcome.message)
+            // Nothing is left to reconnect to, and retrying would only fill the sidebar with errors.
+            self.server.shouldReconnect = false
+            if self.server.isConnected { await self.server.disconnect() }
+        }
+        if completed { activity.finish() }
+    }
+
+    /// Maintenance is limited to the selected installation, even if an administrator checks another host.
+    var canMaintainExistingServer: Bool {
+        guard let check, check.existing, inputsUnchanged, !isBusy,
+              check.blockers.allSatisfy({ $0.code == "server_running" }) else { return false }
+        let targetHost = server.host.split(separator: "@").last.map(String.init)
+        let checkedHost = validatedHost.split(separator: "@").last.map(String.init)
+        return targetHost == checkedHost && check.dataDirectory == server.remoteDirectory
+    }
+
+    func startExistingServer() async {
+        guard canMaintainExistingServer, let connection else { return }
+        let profileID = server.connectionProfile?.id
+        let connectionGeneration = server.connectionGeneration
+        maintenanceServerRunning = false
+        let completed = await perform(.connecting) { [self] in
+            self.record("Starting the existing Bloom Server installation.")
+            _ = try await connection.startServer(script: self.installerScript()) { [weak self] event in
+                await self?.receive(event)
+            }
+            self.maintenanceServerRunning = true
+            self.record("Bloom Server is running. Reconnecting to your workspaces.")
+            guard self.server.connectionProfile?.id == profileID,
+                  self.server.connectionGeneration == connectionGeneration else { throw CancellationError() }
+            await self.server.connect()
+            guard self.server.isConnected else { throw ServerSetupFailure(code: .unreachable) }
+            self.phase = .complete
+        }
+        if completed { activity.finish() }
+    }
+
+    var canReplaceMaintenanceKey: Bool { canMaintainExistingServer && check?.maintenanceManagement == true }
+
+    /// Issue a new maintenance key with administrator SSH access, for a device that has lost or
+    /// never had the key. The new key waits in a pending Keychain slot before its digest is sent,
+    /// so a lost reply retries with the same key instead of stranding one the server accepted.
+    func replaceMaintenanceKey(serverID: String) async {
+        guard canReplaceMaintenanceKey, let connection, !serverID.isEmpty else { return }
+        maintenanceKeyIssued = false
+        let completed = await perform(.installing) { [self] in
+            let script = try self.installerScript()
+            let pendingKey = "replacement:" + serverID
+            let key = try ServerMaintenanceCredentials.load(serverID: pendingKey) ?? ServerMaintenanceCredentials.generateToken()
+            try ServerMaintenanceCredentials.save(token: key, serverID: pendingKey)
+            self.record("Issuing a new maintenance key. Only its SHA-256 digest is sent to the server.")
+            let event = try await connection.replaceMaintenanceKey(script: script, digest: ServerMaintenanceCredentials.digest(of: key)) { [weak self] event in
+                await self?.receive(event)
+            }
+            guard event.maintenanceKeyAccepted == true else {
+                throw ServerSetupFailure.installation(code: "maintenance_key", message: "The server did not confirm the new maintenance key.",
+                    recovery: "Check the server again and retry. Until then the previous key still applies.")
+            }
+            try ServerMaintenanceCredentials.save(token: key, serverID: serverID)
+            try? ServerMaintenanceCredentials.delete(serverID: pendingKey)
+            self.maintenanceKeyIssued = true
+            self.record("The new maintenance key is saved in this Mac’s Keychain.")
+        }
+        if completed { activity.finish() }
+    }
+
+    func updateExistingServer() async {
+        guard canUpdateExistingServer else { return }
+        let profileID = server.connectionProfile?.id
+        installsBrowserTools = false; installsDocker = false; installsSwap = false
+        phase = .readyToInstall
+        maintenanceReconnectGeneration = nil
+        maintenanceInstallationCompleted = false
+        maintenanceServerRunning = false
+        installed = nil
+        await install(restartingExistingServer: true)
+        guard installed != nil, let reconnectGeneration = maintenanceReconnectGeneration else { return }
+        let installationFailure = failure
+        // Account diagnostics must not prevent a verified update from restoring the existing connection.
+        // perform owns this final connection attempt even if the presenting task has disappeared.
+        await perform(.connecting) {
+            guard self.server.connectionProfile?.id == profileID,
+                  self.server.connectionGeneration == reconnectGeneration else { throw CancellationError() }
+            self.record("Bloom Server is running. Reconnecting to your workspaces.")
+            await self.server.connect()
+            guard self.server.isConnected else { throw ServerSetupFailure(code: .unreachable) }
+            self.phase = .complete
+        }
+        if failure == nil { failure = installationFailure }
+    }
+
+    func reviewInstallation() {
+        guard phase == .address, canReviewInstallation else { return }
+        failure = nil
+        phase = .readyToInstall
+    }
+
+    #if DEBUG
+    /// Puts the wizard on "Setup stopped" for `ServerSetupLayoutProbe`, with the same activity
+    /// lines `perform` writes for a failure. A real installation reaches that page only through a
+    /// server package, a new client key and the Keychain, and a check of where things sit on a
+    /// page has no business touching any of the three.
+    func showFailureForLayoutProbe(_ failure: ServerSetupFailure, events: [ServerInstallEvent]) {
+        phase = .installing
+        activity.begin(browser: installsBrowserTools, docker: installsDocker, swap: willInstallSwap)
+        events.forEach { receive($0) }
+        self.failure = failure
+        activity.fail(message: failure.message)
+        record(failure.message)
+        if let command = failure.command { activity.append("Command: " + command) }
+        if let status = failure.exitStatus { activity.append("Exit status: \(status)") }
+    }
+    #endif
+
+    func install(restartingExistingServer: Bool = false) async {
+        guard phase == .readyToInstall, let connection, inputsUnchanged,
+              restartingExistingServer ? canMaintainExistingServer : check?.blockers.isEmpty == true else { return }
+        let reviewedProfile = server.connectionProfile?.id
+        let reviewedGeneration = server.connectionGeneration
+        activity.begin(browser: installsBrowserTools, docker: installsDocker, swap: willInstallSwap)
+        progress = []
+        let completed = await perform(.installing) { [self] in
+            let package = try self.serverPackage()
+            let script = try self.installerScript()
+            let key = try await self.prepareClientKey()
+            self.clientKey = key
+            // Save before installation so a lost reply cannot strand the only administrative
+            // credential. Only its digest crosses the administrator SSH connection.
+            let pendingKey = "setup:" + self.validatedHost
+            let maintenanceKey = try ServerMaintenanceCredentials.load(serverID: pendingKey)
+                ?? ServerMaintenanceCredentials.generateToken()
+            try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: pendingKey)
+            let maintenanceDigest = ServerMaintenanceCredentials.digest(of: maintenanceKey)
+            self.record("Client key ready. Connecting to upload the server package.")
+            let installOperation = self.installConnection
+            let publicKey = URL(fileURLWithPath: key.path + ".pub")
+            let progress: @Sendable (ServerInstallEvent) async -> Void = { [weak self] event in await self?.receive(event) }
+            let installed: ServerInstallEvent
+            if restartingExistingServer {
+                try Task.checkCancellation()
+                guard self.server.connectionProfile?.id == reviewedProfile,
+                      self.server.connectionGeneration == reviewedGeneration, !self.server.isDisconnecting,
+                      self.inputsUnchanged else { throw CancellationError() }
+                let profileID = reviewedProfile
+                let needsStop = self.check?.blockers.contains(where: { $0.code == "server_running" }) == true
+                self.record(needsStop ? "Pausing this Mac’s connection before the server update." : "Updating the stopped server.")
+                await self.server.disconnect()
+                guard self.server.connectionProfile?.id == reviewedProfile else { throw CancellationError() }
+                let pausedGeneration = self.server.connectionGeneration
+                self.maintenanceReconnectGeneration = pausedGeneration
+                do {
+                    installed = try await ServerUpdateLifecycle.perform(needsStop: needsStop, stop: {
+                        await progress(ServerInstallEvent(event: "progress", step: "server-stop", message: "Checking active work and stopping Bloom Server."))
+                        _ = try await connection.stopServer(script: script)
+                    }, install: {
+                        try await installOperation(connection, script, package, publicKey, maintenanceDigest, progress)
+                    }, restart: {
+                        _ = try await connection.startServer(script: script, progress: progress)
+                    })
+                } catch let update as ServerUpdateFailure {
+                    self.maintenanceInstallationCompleted = update.installationCompleted
+                    self.maintenanceServerRunning = update.serverRunning
+                    if self.server.connectionProfile?.id == profileID, self.server.connectionGeneration == pausedGeneration {
+                        self.server.shouldReconnect = true
+                        if update.serverRunning {
+                            self.record("The server is running. Restoring your connection after the update failure.")
+                            await self.server.connect()
+                        }
+                    }
+                    throw ServerSetupFailure.installation(code: "installation", message: "The server update did not finish.",
+                        recovery: update.serverRunning ? "The server was restarted. Review the output before trying the update again." : "Use Start Server to recover the service after resolving the reported problem.",
+                        details: update.localizedDescription)
+                }
+            } else {
+                installed = try await installOperation(connection, script, package, publicKey, maintenanceDigest, progress)
+            }
+            if restartingExistingServer {
+                self.maintenanceInstallationCompleted = true
+                self.maintenanceServerRunning = true
+            } else { try Task.checkCancellation() }
+            // A confirmed maintenance installation must retain its credential association even
+            // when cancellation arrives during the final readiness check.
+            self.installed = installed
+            if installed.maintenanceKeyAccepted == true, let endpoint = self.installedEndpoint {
+                let serverID = PaneStateNamespace.connectionID(endpoint)
+                try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: serverID)
+                self.maintenanceKeyServerID = serverID
+            }
+            self.activity.finish()
+            if restartingExistingServer {
+                self.phase = .accounts
+                return
+            }
+            if self.willInstallSwap { try await self.configureSwap() }
+            if self.installsBrowserTools { try await self.configureBrowser() }
+            if self.installsDocker { try await self.configureDocker() }
+            try Task.checkCancellation()
+            self.phase = .accounts
+        }
+        if completed, !restartingExistingServer, installed != nil, phase == .accounts { await refreshAccounts() }
+    }
+
+    func refreshAccounts() async {
+        guard let endpoint = installedEndpoint else { return }
+        await perform(.accounts) {
+            self.activity.start(.accounts, message: "Checking GitHub and agent sign-ins on the server")
+            await self.accountClient?.disconnect()
+            self.accountClient = nil
+            let client = try await ServerClient.connect(to: endpoint)
+            do {
+                let reply = try await client.request(ServerRequest(.diagnostics), timeout: .seconds(20))
+                guard case .diagnostics(let report) = reply.result else { throw ServerSetupFailure(code: .installation) }
+                try Task.checkCancellation()
+                self.accountClient = client
+                self.accountChecks = report.checks
+                self.agentAuthentication = report.authentication ?? []
+                self.server.invalidateAgentAuthentication()
+                self.browserReadiness = report.browser
+                if report.browser?.status == .ready { self.browserFailure = nil; self.browserRecovery = nil; self.browserDiagnostic = nil }
+                self.phase = .accounts
+                self.activity.finish()
+                self.record("Account checks complete.")
+            } catch { await client.disconnect(); throw error }
+        }
+    }
+
+    func retryBrowserInstall() async {
+        guard canInstallOptionalTools else { return }
+        let completed = await perform(.accounts) { try await self.configureBrowser() }
+        if completed, phase == .accounts { await refreshAccounts() }
+    }
+
+    func retryDockerInstall() async {
+        guard canInstallOptionalTools else { return }
+        let completed = await perform(.accounts) { try await self.configureDocker() }
+        if completed, phase == .accounts { await refreshAccounts() }
+    }
+
+    func retrySwapInstall() async {
+        guard canInstallOptionalTools, swapAttempted else { return }
+        let completed = await perform(.accounts) { try await self.configureSwap() }
+        if completed, phase == .accounts { await refreshAccounts() }
+    }
+
+    private func configureSwap() async throws {
+        swapAttempted = true; swapReady = false; swapDiagnostic = nil; swapStatusMessage = nil
+        isInstallingSwap = true
+        defer { isInstallingSwap = false }
+        swapDiagnostic = try await configureOptionalTool(.swap, name: "Swap", scriptName: "install-bloom-swap.py") { connection, script, user, home, progress in
+            let result = try await connection.installSwap(script: script, user: user, serviceHome: home, progress: progress)
+            self.swapStatusMessage = result.message
+            return result
+        }
+        swapReady = swapDiagnostic == nil
+    }
+
+    private func resetSwapStatus() {
+        swapReady = false; swapAttempted = false; swapDiagnostic = nil; swapStatusMessage = nil
+    }
+
+    private func configureBrowser() async throws {
+        browserAttempted = true; browserFailure = nil; browserRecovery = nil; browserDiagnostic = nil
+        isInstallingBrowser = true
+        defer { isInstallingBrowser = false }
+        browserDiagnostic = try await configureOptionalTool(.browser, name: "Browser testing", scriptName: "install-bloom-browser.py") { connection, script, user, home, progress in
+            try await connection.installBrowser(script: script, user: user, serviceHome: home, progress: progress)
+        }
+        browserFailure = browserDiagnostic?.message
+        browserRecovery = browserDiagnostic?.recovery
+    }
+
+    private func configureDocker() async throws {
+        dockerAttempted = true; dockerReady = false; dockerDiagnostic = nil
+        isInstallingDocker = true
+        defer { isInstallingDocker = false }
+        dockerDiagnostic = try await configureOptionalTool(.docker, name: "Docker", scriptName: "install-bloom-docker.py") { connection, script, user, home, progress in
+            try await connection.installDocker(script: script, user: user, serviceHome: home, progress: progress)
+        }
+        dockerReady = dockerDiagnostic == nil
+    }
+
+    /// Optional tools share the same streamed diagnostics and cancellation boundary. Their failure
+    /// stays attached to the failed stage while the usable server continues to account setup.
+    private func configureOptionalTool(
+        _ stage: ServerSetupActivity.Stage, name: String, scriptName: String,
+        operation: (ServerSetupConnection, String, String, String, @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent
+    ) async throws -> ServerSetupFailure? {
+        activity.start(stage, message: "Preparing " + name)
+        do {
+            guard let connection, let user = installed?.serviceUser, let home = installed?.serviceHome,
+                  let url = resource(scriptName) else { throw ServerSetupFailure(code: .packageMissing) }
+            let script = try String(contentsOf: url, encoding: .utf8)
+            let result = try await operation(connection, script, user, home) { [weak self] event in await self?.receive(event) }
+            try Task.checkCancellation()
+            guard result.event == "complete", result.ready == true else {
+                throw ServerSetupFailure.installation(code: result.code ?? "installation_failed", message: result.message,
+                    recovery: result.recovery, details: result.details, command: result.command, exitStatus: result.exitStatus)
+            }
+            activity.finish()
+            record(name + " verified on the server.")
+            return nil
+        } catch {
+            try Task.checkCancellation()
+            let diagnostic = error as? ServerSetupFailure ?? ServerSetupFailure(code: .unknown)
+            activity.fail(message: diagnostic.message)
+            record(diagnostic.message)
+            if let command = diagnostic.command { activity.append("Command: " + command) }
+            if let status = diagnostic.exitStatus { activity.append("Exit status: \(status)") }
+            if let details = diagnostic.details, !activity.output.contains(details) { activity.append(details) }
+            record("Bloom Server is ready. " + name + " needs attention.")
+            return diagnostic
+        }
+    }
+
+    func connect() async {
+        guard canConnect, let installed, let endpoint = installedEndpoint,
+              case .ssh(let host, let executable, let directory, let identity, let knownHosts) = endpoint else { return }
+        await perform(.connecting) {
+            self.record("Connecting to Bloom Server and loading its projects")
+            await self.accountClient?.disconnect(); self.accountClient = nil
+            try Task.checkCancellation()
+            guard let profile = ServerConnectionProfile(values: [
+                "host": host, "executable": executable, "directory": directory,
+                "identityFile": identity ?? "", "knownHostsFile": knownHosts ?? "",
+            ], label: self.label) else { throw ServerSetupFailure(code: .installation) }
+            let connected = await self.server.connect(to: profile)
+            try Task.checkCancellation()
+            guard connected else { throw ServerSetupFailure(code: .unreachable) }
+            if self.accountChecks.contains(where: { $0.id == .agents && $0.detail.contains("codex") }) { self.server.agent = .codex }
+            self.record("Connected as \(installed.serviceUser ?? "bloom").")
+            self.phase = .complete
+        }
+    }
+
+    /// Credentials use the installed service account, never the administrator used for setup.
+    var accountConnection: ServerSetupConnection? {
+        guard let endpoint = installedEndpoint, case .ssh(let host, _, _, let identity, let knownHosts) = endpoint,
+              let knownHosts else { return nil }
+        return try? ServerSetupConnection(host: host, identityFile: identity, knownHostsFile: knownHosts)
+    }
+
+    func accountTerminal(_ account: ServerSetupAccount) -> TerminalLaunch? {
+        guard let connection = accountConnection else { return nil }
+        guard var arguments = try? connection.arguments(command: account.shellCommand) else { return nil }
+        if let index = arguments.firstIndex(of: "-T") { arguments[index] = "-tt" }
+        return TerminalLaunch(executable: "/usr/bin/ssh", execName: "ssh", arguments: arguments,
+                              environment: Shell.environment().map { "\($0.key)=\($0.value)" }.sorted(), directory: NSTemporaryDirectory())
+    }
+
+    func retry() async {
+        switch retryStep {
+        case .installing: await inspect()
+        case .accounts: await refreshAccounts()
+        case .connecting: await refreshAccounts(); if canConnect { await connect() }
+        default: await inspect()
+        }
+    }
+
+    var diagnosticReport: String {
+        var parts = ["Bloom Server setup", "Server: \(host)", "Phase: \(phase)", "Step: \(activity.currentMessage)"]
+        parts.append("Steps:\n" + ServerSetupActivity.Stage.allCases.map { "\($0.title): \(activity.status(of: $0))" }.joined(separator: "\n"))
+        if let check {
+            parts.append("System: \(check.platform), \(check.architecture), access: \(check.privilege)")
+            for notice in check.blockers { parts.append("Check failed: \(notice.code)\n\(notice.message)\n\(notice.recoverySuggestion)") }
+            for notice in check.warnings { parts.append("Warning: \(notice.message)") }
+        }
+        for failure in [failure, browserDiagnostic, dockerDiagnostic, swapDiagnostic].compactMap({ $0 }) {
+            parts += ["Error: \(failure.code.rawValue)", failure.message, "Recovery: \(failure.recovery)"]
+            if let command = failure.command { parts.append("Command: " + command) }
+            if let status = failure.exitStatus { parts.append("Exit status: \(status)") }
+            if let details = failure.details { parts.append("Details:\n" + details) }
+        }
+        if let browserFailure { parts.append("Browser setup: " + browserFailure) }
+        if let browserRecovery { parts.append("Browser recovery: " + browserRecovery) }
+        if !activity.lines.isEmpty { parts.append("Server output:\n" + activity.output) }
+        return parts.joined(separator: "\n\n")
+    }
+
+    var hasInstalledServer: Bool { installed != nil }
+    var canContinueToAccounts: Bool { installedEndpoint != nil && inputsUnchanged && !isBusy }
+    var canGoBack: Bool { phase != .introduction && (!isBusy || phase == .checking) }
+
+    func goBack() async {
+        guard canGoBack else { return }
+        switch phase {
+        case .introduction: break
+        case .address: showIntroduction()
+        case .trust, .checking, .readyToInstall: editAddress()
+        case .installing:
+            failure = nil
+            phase = .readyToInstall
+        case .accounts:
+            failure = nil
+            phase = check == nil ? .address : .readyToInstall
+        case .connecting, .complete: await refreshAccounts()
+        }
+    }
+
+    func continueToAccounts() async {
+        guard canContinueToAccounts else { return }
+        await refreshAccounts()
+    }
+
+    func editAddress() { cancel(); phase = .address; failure = nil }
+
+    private func connectionInputsChanged() {
+        guard phase != .introduction else { return }
+        cancel()
+        check = nil; candidate = nil; fingerprint = nil; failure = nil; progress = []
+        installed = nil; connection = nil; activity = ServerSetupActivity()
+        dockerReady = false; dockerAttempted = false; dockerDiagnostic = nil
+        resetSwapStatus()
+        phase = .address
+    }
+    func stopSetup() async {
+        guard isBusy, !isStopping else { return }
+        let operation = task
+        isStopping = true
+        cancel()
+        let stoppedGeneration = generation
+        isBusy = true
+        await operation?.value
+        guard generation == stoppedGeneration else { isStopping = false; return }
+        isBusy = false; isStopping = false
+        failure = ServerSetupFailure(code: .cancelled)
+        activity.fail(message: "Setup stopped by you")
+        record("Setup stopped by you. The output is kept below.")
+    }
+
+    func cancel() {
+        generation = UUID(); task?.cancel(); task = nil; isBusy = false
+        stoppingServerID = nil
+        if let client = accountClient { Task { await client.disconnect() } }
+        accountClient = nil
+    }
+
+    private var inputsUnchanged: Bool { host.trimmingCharacters(in: .whitespacesAndNewlines) == validatedHost && identityFile == validatedIdentity }
+    private var installedEndpoint: ServerEndpoint? {
+        guard let installed, let clientKey, let user = installed.serviceUser,
+              let executable = installed.executable, let directory = installed.dataDirectory else { return nil }
+        let address = validatedHost.split(separator: "@").last.map(String.init) ?? validatedHost
+        return .ssh(host: user + "@" + address, executable: executable, directory: directory,
+                    identityFile: clientKey.path, knownHostsFile: (installedKnownHosts ?? knownHosts).path)
+    }
+
+    @discardableResult
+    private func perform(_ step: Phase, operation: @escaping @MainActor () async throws -> Void) async -> Bool {
+        guard !isBusy else { return false }
+        let id = UUID(); generation = id; retryStep = step; phase = step; failure = nil; isBusy = true
+        let task = Task { @MainActor in
+            do { try await operation() } catch {
+                guard self.generation == id else { return }
+                let failure = error as? ServerSetupFailure ?? ServerSetupFailure(code: error is CancellationError ? .cancelled : .unknown)
+                self.failure = failure
+                self.activity.fail(message: failure.message)
+                if self.activity.lines.last?.text != failure.message { self.record(failure.message) }
+                if let command = failure.command { self.activity.append("Command: " + command) }
+                if let status = failure.exitStatus { self.activity.append("Exit status: \(status)") }
+                if let details = failure.details, !self.activity.output.contains(details) { self.activity.append(details) }
+            }
+            if self.generation == id { self.isBusy = false }
+        }
+        self.task = task
+        await task.value
+        return generation == id && failure == nil && !task.isCancelled
+    }
+
+    func receive(_ event: ServerInstallEvent) {
+        guard !Task.isCancelled else { return }
+        activity.receive(event)
+        if event.event == "progress", let message = event.message {
+            progress.append(String(message.prefix(300)))
+            if progress.count > 50 { progress.removeFirst(progress.count - 50) }
+        }
+    }
+
+    private func record(_ message: String) {
+        guard !Task.isCancelled else { return }
+        activity.append(message)
+        progress.append(String(message.prefix(300)))
+        if progress.count > 50 { progress.removeFirst(progress.count - 50) }
+    }
+
+    private func prepareTrustStore() throws {
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        if !FileManager.default.fileExists(atPath: knownHosts.path) {
+            let original = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/known_hosts")
+            let data = (try? Data(contentsOf: original)) ?? Data()
+            try data.write(to: knownHosts, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: knownHosts.path)
+        }
+    }
+
+    private func prepareClientKey() async throws -> URL {
+        let name = SHA256.hash(data: Data(validatedHost.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+        let path = support.appendingPathComponent("client-" + name)
+        if !FileManager.default.fileExists(atPath: path.path) {
+            let result = try await Shell.run("/usr/bin/ssh-keygen", ["-t", "ed25519", "-N", "", "-C", "Bloom server client", "-f", path.path], stdin: "", timeout: .seconds(10))
+            guard result.ok else { throw ServerSetupFailure(code: .authentication) }
+        }
+        return path
+    }
+
+    private func resource(_ name: String) -> URL? {
+        if let resources { return resources.appendingPathComponent(name) }
+        return Bundle.main.resourceURL?.appendingPathComponent("ServerSetup").appendingPathComponent(name)
+    }
+
+    private func installerScript() throws -> String {
+        guard let url = resource("install-bloom-server.py") else { throw ServerSetupFailure(code: .packageMissing) }
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func serverPackage() throws -> URL {
+        guard let url = resource("server.tar.gz"),
+              let metadata = resource("package.json"),
+              let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: metadata)) as? [String: Any],
+              manifest["protocolVersion"] as? Int == ServerRequest.protocolVersion else { throw ServerSetupFailure(code: .packageMissing) }
+        let digest = SHA256.hash(data: try Data(contentsOf: url, options: .mappedIfSafe)).map { String(format: "%02x", $0) }.joined()
+        guard manifest["sha256"] as? String == digest else { throw ServerSetupFailure(code: .packageInvalid) }
+        return url
+    }
+}
+
+typealias ServerSetupAccount = RemoteSignInAccount

@@ -176,22 +176,7 @@ final class TerminalSessionStore {
     /// explicitly, rather than turning inspection into an action.
     func output(paneID: String, lines limit: Int) -> (text: String, live: Bool)? {
         guard let view = terminals[paneID] else { return nil }
-        let terminal = view.getTerminal()
-        var lines: [String] = []
-
-        var row = terminal.buffer.totalLinesTrimmed
-        while let line = terminal.getScrollInvariantLine(row: row) {
-            let text = line.translateToString(trimRight: true, skipNullCellsFollowingWide: true)
-            if line.isWrapped, !lines.isEmpty {
-                lines[lines.count - 1] += text
-            } else {
-                lines.append(text)
-            }
-            row += 1
-        }
-
-        while lines.last?.isEmpty == true { lines.removeLast() }
-        return (lines.suffix(limit).joined(separator: "\n"), view.process?.running == true)
+        return (view.renderedOutput(lines: limit), view.hasLiveConnection)
     }
 
     /// Bytes sent to the shell exactly as terminal input, without taking keyboard focus.
@@ -312,6 +297,17 @@ final class TerminalSessionStore {
             )
         }
 
+        let execution: WorkspaceExecution
+        do {
+            execution = try repo.map { try WorkspaceExecution.resolve(workspace: workspace, repo: $0, environment: extra) }
+                ?? WorkspaceExecution(environment: extra)
+        } catch {
+            view.feed(text: error.localizedDescription + "\r\n")
+            view.willStop()
+            terminals[tab.id.rawValue] = view
+            return view
+        }
+
         // `tab.id.rawValue` is the pane id here: a split hands each pane a `TerminalTab` carrying its own id,
         // and an unsplit tab is its own single pane.
         paneOwner[tab.id.rawValue] = workspace.id
@@ -321,10 +317,10 @@ final class TerminalSessionStore {
         if let command = persistence?.command, let session = decision.session {
             paneSession[tab.id.rawValue] = session
             view.start(TerminalLaunch.tmux(
-                command: command, session: session, directory: start, extra: extra
+                command: command, session: session, directory: start, extra: extra, execution: execution
             ))
         } else {
-            view.start(TerminalLaunch.loginShell(directory: start, extra: extra))
+            view.start(TerminalLaunch.loginShell(directory: start, extra: extra, execution: execution))
         }
 
         terminals[tab.id.rawValue] = view

@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Carrying an archived workspace's conversation on in a new worktree.
 ///

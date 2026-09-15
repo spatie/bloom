@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// Where the side conversation card is drawn inside its chat pane, and where its tail meets it.
 ///

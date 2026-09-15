@@ -1,0 +1,3 @@
+import BloomAuthentication
+
+typealias ServerAuthentication = BloomAuthentication.ServerAuthentication

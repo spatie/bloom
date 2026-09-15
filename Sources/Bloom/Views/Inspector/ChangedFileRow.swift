@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import BloomCore
+import BloomUI
 
 /// One changed file: git's own status letter, the filename, and what it cost in lines.
 ///
@@ -22,7 +23,10 @@ struct ChangedFileRow: View, Equatable {
             && lhs.isSelected == rhs.isSelected
             && lhs.isViewed == rhs.isViewed
             && lhs.fullPath == rhs.fullPath
+            && lhs.supportsLocalFileActions == rhs.supportsLocalFileActions
             && lhs.depth == rhs.depth
+            && lhs.supportsViewedMarks == rhs.supportsViewedMarks
+            && lhs.supportsFileRevert == rhs.supportsFileRevert
             && lhs.allowsWorktreeActions == rhs.allowsWorktreeActions
     }
 
@@ -48,13 +52,17 @@ struct ChangedFileRow: View, Equatable {
     /// Ticks the file, or takes the tick off. The wording of the item is `ReviewedMarkAction`'s,
     /// shared with the file bar's toggle.
     var onSetViewed: @MainActor (Bool) -> Void = { _ in }
+    var supportsLocalFileActions = true
+    var supportsFileRevert = true
+    var supportsViewedMarks = true
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: InspectorLayout.gap) {
+            BloomFileRow(spacing: InspectorLayout.gap) {
                 glyph
+            } name: {
                 // No colour of its own: the list already set the row's foreground, and a pinned
                 // label colour would stay dark on the accent fill.
                 Text(file.filename)
@@ -68,7 +76,7 @@ struct ChangedFileRow: View, Equatable {
                     // already made the row the loudest thing in the list and dimming its name
                     // against that reads as unreadable rather than as quiet.
                     .opacity(isViewed && !isOnSelection ? InspectorLayout.viewedOpacity : 1)
-                Spacer(minLength: Metrics.spacingSmall)
+            } trailing: {
                 if isViewed {
                     Image(systemName: "checkmark.circle.fill")
                         .font(Typo.micro)
@@ -96,18 +104,22 @@ struct ChangedFileRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .background {
-            if allowsWorktreeActions { HoverQuickLook(url: URL(fileURLWithPath: fullPath)) }
+            if supportsLocalFileActions, allowsWorktreeActions {
+                HoverQuickLook(url: URL(fileURLWithPath: fullPath))
+            }
         }
         // The real file, so a drop into Finder or an editor gets the document rather than a
         // sentence about where it lives. One file per drag: the list carries a single selection.
-        .fileDrag(path: fullPath, enabled: allowsWorktreeActions)
+        .fileDrag(path: fullPath, enabled: supportsLocalFileActions && allowsWorktreeActions)
         .contextMenu {
             // First, because it is the one item here about the reader's pass through the diff
             // rather than about handing the file to something else, and because it is the item
             // this menu is most often opened for during a review.
-            Button(ReviewedMarkAction(isViewed: isViewed).title) { onSetViewed(!isViewed) }
-            Divider()
-            if allowsWorktreeActions {
+            if supportsViewedMarks {
+                Button(ReviewedMarkAction(isViewed: isViewed).title) { onSetViewed(!isViewed) }
+                Divider()
+            }
+            if supportsLocalFileActions, allowsWorktreeActions {
                 OpenInItems(target: .file(fullPath))
                 Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
                 // With the two above rather than beside Copy path: all of them hand this row to
@@ -116,8 +128,8 @@ struct ChangedFileRow: View, Equatable {
                 LocalPageItems(path: fullPath, open: onOpenPage, split: onSplitPage)
             }
             Button("Copy path", action: copyPath)
-            Divider()
-            if allowsWorktreeActions {
+            if supportsFileRevert, allowsWorktreeActions {
+                Divider()
                 Button("Revert this file", role: .destructive, action: onRevert)
             }
         }

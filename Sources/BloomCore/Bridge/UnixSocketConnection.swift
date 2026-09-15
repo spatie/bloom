@@ -1,4 +1,9 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#else
+import Darwin
+#endif
 import Synchronization
 
 /// One end of a connected unix domain socket, read as lines and written as lines.
@@ -6,13 +11,11 @@ import Synchronization
 /// Line delimited JSON both ways, because that is what MCP over stdio already is and the shim is a
 /// relay: whatever the CLI wrote on one line arrives here as one line and goes back the same way.
 ///
-/// `SO_NOSIGPIPE` is set on every socket this type owns, and it is not optional. Writing to a
-/// socket whose far end has gone raises SIGPIPE, whose default disposition kills the process, so
-/// without it Bloom would be taken down by an agent CLI exiting mid-call. With it the write
-/// returns EPIPE and the connection closes, which is what "the other side left" should look like.
+/// Darwin sockets use `SO_NOSIGPIPE`; Linux writes use `MSG_NOSIGNAL`. A disconnected client
+/// must cause a failed write, never a SIGPIPE that takes down every other server session.
 public final class UnixSocketConnection: Sendable {
     private let descriptor: Int32
-    private let handle: FileHandle
+    private let source = Mutex<(any DispatchSourceRead)?>(nil)
     private let buffer = LineBuffer()
     /// Whether the descriptor has been given back to the kernel. Guarded by a `Mutex` rather
     /// than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventFanout` in
@@ -20,34 +23,39 @@ public final class UnixSocketConnection: Sendable {
     /// mark the flag once no write is mid-flight, so the descriptor can never be reclaimed
     /// underneath a writer.
     private let closed = Mutex(false)
+    private let writer = Mutex(())
+    private let writeQueue = DispatchQueue(label: "be.spatie.bloom.bridge.write", qos: .utility)
+    private let writeTimeout: Duration
 
     /// Lines from the far end, ending when it closes. Unbounded, because every line is a request
     /// or a reply and dropping one strands whoever is waiting for it.
     public let lines: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
 
-    init(descriptor: Int32) {
+    init(descriptor: Int32, writeTimeout: Duration = .seconds(30)) {
         self.descriptor = descriptor
-        handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+        self.writeTimeout = writeTimeout
         (lines, continuation) = AsyncStream.makeStream(of: String.self, bufferingPolicy: .unbounded)
 
+        #if canImport(Darwin)
         var on: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-        // Blocking, explicitly. On BSD, and therefore on macOS, an accepted socket inherits
-        // O_NONBLOCK from the listener, and the listener has to be non-blocking so its accept loop
-        // can drain. `availableData` on a non-blocking descriptor answers with no bytes when there
-        // are none yet, which reads exactly like end of file, so an inherited flag would close
-        // every connection the moment it went quiet.
-        _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL, 0) & ~O_NONBLOCK)
+        #endif
+        // Darwin Unix-domain send can still block with MSG_DONTWAIT alone. Keep the
+        // descriptor nonblocking too, so a slow peer cannot hold the close lock.
+        _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK)
 
-        handle.readabilityHandler = { [weak self] handle in
-            guard let self else { return }
-            let data = handle.availableData
-            if data.isEmpty {
-                close()
-                return
-            }
-            deliver(data)
+        source.withLock {
+            let reader = DispatchSource.makeReadSource(
+                fileDescriptor: descriptor, queue: DispatchQueue(label: "be.spatie.bloom.bridge.read")
+            )
+            reader.setEventHandler { [weak self] in self?.readAvailable() }
+            // FileHandle's readability handler cancels asynchronously. Closing its descriptor
+            // ourselves let Linux recycle it while libdispatch still watched it, crashing the
+            // event loop under connection churn. Only the cancellation handler may release it.
+            reader.setCancelHandler { SystemCalls.close(descriptor) }
+            reader.resume()
+            $0 = reader
         }
     }
 
@@ -58,15 +66,15 @@ public final class UnixSocketConnection: Sendable {
     /// than a tool call that hangs for a timeout the model cannot see.
     public static func connect(to path: String) throws -> UnixSocketConnection {
         var address = try UnixSocketAddress.make(path: path)
-        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        let descriptor = socket(AF_UNIX, SystemCalls.streamSocketType, 0)
         guard descriptor >= 0 else { throw UnixSocketError.couldNotOpen(code: errno) }
 
         let result = UnixSocketAddress.withSocketAddress(&address) { socketAddress, length in
-            Darwin.connect(descriptor, socketAddress, length)
+            SystemCalls.connect(descriptor, socketAddress, length)
         }
         guard result == 0 else {
             let code = errno
-            Darwin.close(descriptor)
+            SystemCalls.close(descriptor)
             throw UnixSocketError.couldNotConnect(path: path, code: code)
         }
         return UnixSocketConnection(descriptor: descriptor)
@@ -77,12 +85,27 @@ public final class UnixSocketConnection: Sendable {
     public var peerProcessID: pid_t? {
         closed.withLock { closed -> pid_t? in
             guard !closed else { return nil }
+            #if os(Linux)
+            // Linux has no LOCAL_PEERPID; the kernel records the peer's credentials instead, and
+            // Bloom Server's bridge asks the same question there. Without this the linux job
+            // failed to compile on SOL_LOCAL. Glibc only declares `ucred` and `SO_PEERCRED` under
+            // _GNU_SOURCE, which Swift does not define, so both are spelled out here: the struct
+            // is three 32 bit fields and the option is 17 on x86_64 and arm64 alike.
+            struct PeerCredentials { var pid: pid_t = 0; var uid: uid_t = 0; var gid: gid_t = 0 }
+            let peerCredentialsOption: Int32 = 17
+            var credentials = PeerCredentials()
+            var length = socklen_t(MemoryLayout<PeerCredentials>.size)
+            guard getsockopt(descriptor, SOL_SOCKET, peerCredentialsOption, &credentials, &length) == 0,
+                  credentials.pid > 0 else { return nil }
+            return credentials.pid
+            #else
             var pid: pid_t = 0
             var length = socklen_t(MemoryLayout<pid_t>.size)
             guard getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0, pid > 0 else {
                 return nil
             }
             return pid
+            #endif
         }
     }
 
@@ -90,28 +113,73 @@ public final class UnixSocketConnection: Sendable {
         for line in buffer.take(data) { continuation.yield(line) }
     }
 
+    private func readAvailable() {
+        var bytes = [UInt8](repeating: 0, count: 16_384)
+        while !closed.withLock({ $0 }) {
+            let count = bytes.withUnsafeMutableBytes { SystemCalls.socketRead(descriptor, $0.baseAddress, $0.count) }
+            if count > 0 {
+                deliver(Data(bytes.prefix(count)))
+            } else if count < 0, errno == EINTR {
+                continue
+            } else if count < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                return
+            } else {
+                close()
+                return
+            }
+        }
+    }
+
     /// Writes one line, newline appended. Silently does nothing once the connection is closed,
     /// because every caller of this is answering something and there is nothing useful for it to
     /// do about a far end that has already gone.
     public func writeLine(_ text: String) {
+        guard !closed.withLock({ $0 }) else { return }
         var payload = Array(text.utf8)
         if payload.last != UInt8(ascii: "\n") { payload.append(UInt8(ascii: "\n")) }
 
-        closed.withLock { closed in
-            guard !closed else { return }
+        writer.withLock { _ in
+            let output = closed.withLock { closed in closed ? -1 : fcntl(descriptor, F_DUPFD_CLOEXEC, 0) }
+            guard output >= 0 else { close(); return }
+            defer { SystemCalls.close(output) }
             var offset = 0
+            var deadline = ContinuousClock.now + writeTimeout
             while offset < payload.count {
-                let written = payload.withUnsafeBufferPointer { bytes in
-                    Darwin.write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+                // send is nonblocking and protected against close. Poll uses an owned duplicate
+                // outside that lock, so a waiting writer cannot starve shutdown or touch a reused FD.
+                let written: Int = closed.withLock { closed in
+                    guard !closed else { return -1 }
+                    let count = payload.withUnsafeBufferPointer { bytes in
+                        #if os(Linux)
+                        Glibc.send(output, bytes.baseAddress! + offset, bytes.count - offset, Int32(MSG_NOSIGNAL | MSG_DONTWAIT))
+                        #else
+                        Darwin.send(output, bytes.baseAddress! + offset, bytes.count - offset, MSG_DONTWAIT)
+                        #endif
+                    }
+                    if count < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                        return 0
+                    }
+                    if count < 0, errno == EINTR { return 0 }
+                    return count > 0 ? count : -1
                 }
-                // EINTR is a signal landing mid-write and nothing else, so the same bytes are
-                // written again. Any other failure means the far end is gone and there is nothing
-                // to retry.
-                if written < 0 {
-                    if errno == EINTR { continue }
-                    return
+                if written < 0 { close(); return }
+                if written > 0 { offset += written; deadline = .now + writeTimeout } else {
+                    var ready = pollfd(fd: output, events: Int16(POLLOUT), revents: 0)
+                    _ = poll(&ready, 1, 50)
                 }
-                offset += written
+                if ContinuousClock.now >= deadline { close(); return }
+            }
+        }
+    }
+
+    /// Waiting for a slow peer must not occupy an actor or a Swift cooperative executor thread.
+    /// Cancellation of an MCP call still needs to deliver its result, so connection lifetime,
+    /// rather than the caller's cancellation bit, decides whether to discard an awaiting write.
+    public func writeLineAsync(_ text: String) async {
+        await withCheckedContinuation { continuation in
+            writeQueue.async {
+                self.writeLine(text)
+                continuation.resume()
             }
         }
     }
@@ -124,8 +192,9 @@ public final class UnixSocketConnection: Sendable {
         }
         guard claimed else { return }
 
-        handle.readabilityHandler = nil
+        source.withLock { $0?.cancel() }
         continuation.finish()
-        Darwin.close(descriptor)
     }
+
+    deinit { close() }
 }

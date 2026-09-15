@@ -28,6 +28,26 @@ struct CreateWorkspaceView: View {
     /// the repo of whatever is selected. Either way the project arrives decided, so the control
     /// for it never asks a question: it reports, and opens only if you want to change your mind.
     var initialRepo: Repo?
+    @State private var isRemote: Bool
+    @State private var showsGitHub = false
+    @State private var creationProblem: String?
+    /// The create on a server that this window is waiting for. See `RemoteWorkspaceCreation`.
+    @State private var remoteCreation = RemoteWorkspaceCreation()
+    private var isCreatingRemote: Bool { remoteCreation.isRunning }
+    /// What the waiting screen says the server is doing, fixed when Create was pressed.
+    @State private var remoteActivity = ""
+    /// Said under the form after Cancel, because cancelling stops the waiting and not the server.
+    @State private var creationNotice: String?
+    @State private var creationSource = CreationComposerSource()
+
+    init(initialRepo: Repo? = nil, initialIsRemote: Bool = false) {
+        self.initialRepo = initialRepo
+        _isRemote = State(initialValue: initialIsRemote)
+    }
+
+    private var backend: ProjectCreationBackend { ProjectCreationBackend(app: app, isRemote: isRemote) }
+    private var repos: [Repo] { isRemote ? (app.remoteServer.catalogue?.repositories ?? []) : app.repos }
+    private var creationKey: String { "\(isRemote)-\(repoID?.rawValue ?? "")-\(String(describing: app.remoteServer.endpoint))" }
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -135,7 +155,7 @@ struct CreateWorkspaceView: View {
     /// work on" and a one-line box answers it with "something short".
     private static let minEditorLines: CGFloat = 5
 
-    private var repo: Repo? { app.repos.first { $0.id == repoID } }
+    private var repo: Repo? { repos.first { $0.id == repoID } }
 
     private var trimmedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -180,12 +200,12 @@ struct CreateWorkspaceView: View {
     /// two ways to finish and only one of them used what had been typed. The mode answers it
     /// first, so there is nothing left to disagree about.
     private var canCreate: Bool {
-        WorkspaceStartPlan.canStart(
+        (!isRemote || !mode.runsAnAgent || creationSource.models.offers(controls.agentKind)) && WorkspaceStartPlan.canStart(
             hasProject: repo != nil,
             prompt: task,
             hasCheckout: checkout != nil,
             isChatWorkspace: mode.runsAnAgent,
-            isBusy: app.isCreatingWorkspace || isLoading
+            isBusy: app.isCreatingWorkspace || isCreatingRemote || isLoading
         )
     }
 
@@ -204,7 +224,7 @@ struct CreateWorkspaceView: View {
     /// where the project has one. No worktree jargon, because a person who knows the word does not
     /// need the sentence and a person who does not is not helped by it.
     private var consequence: some View {
-        Text("Creates a separate copy of the project on this Mac, on its own branch.")
+        Text(isRemote ? "Creates a separate copy of the project on the server, on its own branch." : "Creates a separate copy of the project on this Mac, on its own branch.")
             .font(Typo.caption)
             .foregroundStyle(Palette.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
@@ -219,14 +239,34 @@ struct CreateWorkspaceView: View {
             header
             Hairline()
 
-            if app.repos.isEmpty {
+            if repos.isEmpty {
                 noProjects
                     .padding(Metrics.gutter)
             } else {
                 composer
+                if isRemote, mode.runsAnAgent, !creationSource.models.offers(controls.agentKind) {
+                    Callout(text: "No usable agent models are available on this server. Check agent installation and sign-in.", symbol: "exclamationmark.triangle", tone: .warning)
+                        .padding(.horizontal, Metrics.gutter)
+                        .padding(.bottom, Metrics.spacingWide)
+                }
+                if isRemote, mode.runsAnAgent, checkout == nil, baseBranch == repo?.defaultBranch,
+                   let status = creationSource.authentication.first(where: { $0.agent == controls.agentKind }), status.requiresSignIn {
+                    HStack {
+                        Text(status.message).font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                        Spacer()
+                        Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
+                    }
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.bottom, Metrics.spacingWide)
+                }
                 if hasSetupScript {
                     WorkspaceSetupOption(isEnabled: $runSetupScript)
                         .disabled(isLoading)
+                        .padding(.horizontal, Metrics.gutter)
+                        .padding(.bottom, Metrics.spacingWide)
+                }
+                if let creationNotice {
+                    Callout(text: creationNotice, symbol: "info.circle", tone: .warning)
                         .padding(.horizontal, Metrics.gutter)
                         .padding(.bottom, Metrics.spacingWide)
                 }
@@ -235,11 +275,27 @@ struct CreateWorkspaceView: View {
         }
         .frame(width: Self.width)
         .background(Palette.surface)
+        // Over the form rather than instead of it, so the window keeps its size and a cancelled
+        // wait comes back to exactly what was typed.
+        .overlay {
+            if isRemote, remoteCreation.isRunning {
+                RemoteCreationWaitView(
+                    creation: remoteCreation, server: app.remoteServer, activity: remoteActivity,
+                    runsSetup: hasSetupScript && runSetupScript,
+                    onCancel: {
+                        remoteCreation.cancel()
+                        creationNotice = "Bloom stopped waiting for \(app.remoteServer.displayName). If the server "
+                            + "finishes creating the workspace anyway, it appears in the sidebar."
+                    },
+                    onCloseWindow: { dismiss() }
+                )
+            }
+        }
         // One task keyed on the project, not a task plus an onChange: the pair ran `load` twice on
         // every open (the first pass writes `repoID`, which fired the onChange), and a load left
         // in flight when the project changed could land another project's branches on this one's
         // window. `.task(id:)` cancels the stale load; `load` checks before writing.
-        .task(id: repoID) { await load() }
+        .task(id: creationKey) { await load() }
         // The keyboard goes to the pull request box rather than to the task, when the window was
         // opened to open a pull request. `load` puts it in the task unconditionally, so this has
         // to come after it rather than beside it.
@@ -262,13 +318,44 @@ struct CreateWorkspaceView: View {
         // A second task, and a second trip, because listing pull requests is a network call and
         // the composer has to be typeable before it lands. The window opens on the branch route
         // either way; the picker fills in behind it.
-        .task(id: repoID) { await loadCheckouts() }
+        .task(id: creationKey) { await loadCheckouts() }
+        .task(id: app.remoteServer.agentAuthenticationRevision) {
+            guard isRemote, app.remoteServer.agentAuthenticationRevision > 0, let repoID else { return }
+            let key = creationKey
+            do {
+                if case .workspaceContext(let context) = try await backend.request(.workspaceContext(repoID)), key == creationKey {
+                    creationSource.authentication = context.composer.authentication ?? []
+                }
+            } catch { if !Task.isCancelled { creationProblem = error.localizedDescription } }
+        }
         // The base's fetch, started while the task is still being written, so the cut that
         // follows Create finds it done rather than waiting on the network. Keyed on the project
         // and the base together, so choosing another base fetches that one. See
         // `BaseBranchFetches`.
         .task(id: prefetchKey) { await prefetchBase() }
         // The draft's chips and the files behind them belong to a window that is going away.
+        .onChange(of: repoID) { _, _ in
+            checkout = nil; baseBranch = ""; referenceProblem = nil
+            isEnteringReference = false; checkoutOptions = WorkspaceCheckoutOptions()
+        }
+        .onChange(of: isRemote) { _, _ in
+            repoID = nil; checkout = nil; baseBranch = ""; checkoutOptions = WorkspaceCheckoutOptions()
+            creationSource = CreationComposerSource(); creationProblem = nil
+        }
+        // Remote servers switched off while this window is open. See `CreationDestinationPicker`.
+        .onChange(of: RemoteServerAvailability.shared.isEnabled, initial: true) { _, isEnabled in
+            if !isEnabled, isRemote { isRemote = false }
+        }
+        .sheet(isPresented: $showsGitHub) {
+            GitHubProjectPicker(isRemote: isRemote) { selected in repoID = selected.id }
+                .environment(app)
+        }
+        .alert("Could not create workspace", isPresented: Binding(get: { creationProblem != nil }, set: { if !$0 { creationProblem = nil } })) {
+            if isRemote, AgentAuthenticationStatus.isSignInFailure(creationProblem ?? "") {
+                Button("Sign In on Server…") { creationProblem = nil; openWindow(id: ServerAccountsWindow.id) }
+            }
+            Button("OK", role: .cancel) { creationProblem = nil }
+        } message: { Text(creationProblem ?? "") }
         .onDisappear(perform: discardDraft)
     }
 
@@ -289,6 +376,7 @@ struct CreateWorkspaceView: View {
             // What the band is now is the sentence that was already after the title: "in bloom,
             // from main", the two choices that are about the workspace rather than about the turn.
             projectControl
+            CreationDestinationPicker(isRemote: $isRemote).disabled(isCreatingRemote)
 
             if repo != nil {
                 sourceControl
@@ -296,10 +384,10 @@ struct CreateWorkspaceView: View {
 
             Spacer(minLength: 0)
 
-            if isLoading {
+            if isLoading || isCreatingRemote {
                 ProgressView()
                     .controlSize(.small)
-                    .accessibilityLabel("Loading branches")
+                    .accessibilityLabel(isCreatingRemote ? "Creating workspace" : "Loading branches")
             }
         }
         // The same padding as `ProjectSetupSheet`'s header, which is the app's other header
@@ -326,68 +414,58 @@ struct CreateWorkspaceView: View {
     /// The project, with its mark on it. A `Menu` rather than a `Picker`, which is what finally
     /// gets the tile into this control: a picker on macOS is an `NSPopUpButton` whose items draw a
     /// title and an `NSImage`, so a `Label` with a SwiftUI icon had the icon silently dropped.
-    @ViewBuilder
     private var projectControl: some View {
-        let label = ComposerControlLabel(
-            text: repo?.name ?? "Choose a project",
-            tint: Palette.textPrimary,
-            showsMenuIndicator: app.repos.count > 1
-        ) {
-            RepoIcon(repo: repo, size: Metrics.repoIconSmall)
-        }
-
-        // One project is not a choice. It still says which project, because a window that cut a
-        // worktree without naming the repository would be asking for trust it has not earned.
-        if app.repos.count > 1 {
-            Menu {
-                // An inline `Picker` inside the menu, not a `Picker` in place of it. The tile on
-                // the control above still needs a `Menu`, for the reason written just above; the
-                // tick beside the project you are already in is the platform's to draw, and a
-                // `Button` whose label carries a checkmark symbol never got one. See
-                // `ComposerOptionMenu`.
-                //
-                // Each row carries the project's own mark as well, which an item in an `NSMenu`
-                // has room for: a title, an image and a state marker are three separate slots and
-                // they coexist. What the image slot will not take is a SwiftUI view, so the mark
-                // arrives as a bitmap of the same `RepoIcon` the chip and the sidebar draw. See
-                // `RepoIconImage`.
-                //
-                // One picker keeps a single selection across both visibility groups.
-                Picker("Project", selection: Binding(
-                    get: { repoID ?? RepoID("") },
-                    set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
-                )) {
-                    ForEach(ProjectMenuGroup.grouped(app.repos)) { group in
-                        Section(group.title) {
-                            ForEach(group.repos) { candidate in
-                                Label {
-                                    Text(candidate.name)
-                                } icon: {
-                                    if let mark = RepoIconImage.of(candidate) {
-                                        // Keep the project's colours in the menu's image slot.
-                                        Image(nsImage: mark).renderingMode(.original)
-                                    }
+        Menu {
+            // One picker keeps the selection across visible and hidden projects, scoped to the
+            // selected destination. The menu also creates projects when there are none yet.
+            Picker("Project", selection: Binding(
+                get: { repoID ?? RepoID("") },
+                set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
+            )) {
+                ForEach(ProjectMenuGroup.grouped(repos)) { group in
+                    Section(group.title) {
+                        ForEach(group.repos) { candidate in
+                            Label {
+                                Text(candidate.name)
+                            } icon: {
+                                if let mark = RepoIconImage.of(shown(candidate)) {
+                                    Image(nsImage: mark).renderingMode(.original)
                                 }
-                                .tag(candidate.id)
                             }
+                            .tag(candidate.id)
                         }
                     }
                 }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } label: {
-                label
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Choose the project")
-            .accessibilityLabel("Project")
-            .accessibilityValue(repo?.name ?? "")
-        } else {
-            label
+            .pickerStyle(.inline)
+            .labelsHidden()
+            Divider()
+            Button("Browse GitHub…") { showsGitHub = true }
+            Button("Start a Project…", action: addProject)
+        } label: {
+            ComposerControlLabel(text: repo?.name ?? "Choose a project", tint: Palette.textPrimary, showsMenuIndicator: true) {
+                RepoIcon(repo: repo.map(shown), size: Metrics.repoIconSmall)
+            }
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(isCreatingRemote)
+        .help("Choose the project")
+        .accessibilityLabel("Project")
+        .accessibilityValue(repo?.name ?? "")
+    }
+
+    /// The project as its tile is drawn. A server project gets the same initials tile in its own
+    /// accent that a local one without artwork has, rather than the bare folder glyph it used to,
+    /// which made the two windows look like different forms. Its artwork path is dropped first,
+    /// because that path is on the server and `RepoIcon` would go and open it on this Mac.
+    private func shown(_ candidate: Repo) -> Repo {
+        guard isRemote else { return candidate }
+        var tile = candidate
+        tile.iconPath = nil
+        return tile
     }
 
     /// Where the work comes from: a new branch cut from a base, an open pull request, or a branch
@@ -568,7 +646,8 @@ struct CreateWorkspaceView: View {
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
-            onOpenAttachment: open(attachment:)
+            onOpenAttachment: open(attachment:),
+            creationSource: isRemote ? creationSource : nil
         ) { actions in
             ComposerFooterView(
                 controls: controls,
@@ -588,6 +667,7 @@ struct CreateWorkspaceView: View {
                 // is the same fallback said once, for a surface that can do neither.
                 onQuickPrompt: actions.insert,
                 onSend: create,
+                creationSource: isRemote ? creationSource : nil,
                 usesCLIChat: Binding(
                     get: { usesCLIChat && defaultCLIMode != nil },
                     set: { usesCLIChat = $0 }
@@ -754,43 +834,52 @@ struct CreateWorkspaceView: View {
     /// monospaced font.
     @ViewBuilder
     private var hint: some View {
-        if let checkout {
-            // The checkout says everything the branch preview would have: what is being opened,
-            // what the diff will be measured against, and the one sentence a merged or closed
-            // pull request deserves before it is opened and found to be empty.
-            HStack(spacing: Metrics.spacingSmall) {
-                Chip(
-                    text: "\(checkout.preferredLocalBranch) → \(checkout.baseBranch(default: repo?.defaultBranch ?? "main"))",
-                    systemImage: "arrow.triangle.pull",
-                    monospaced: true
-                )
-                .lineLimit(1)
-
-                if let sentence = checkoutNote {
-                    Text(sentence)
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                }
-            }
-        } else if willBeNamedByModel {
-            // Deliberately nothing. See above.
+        switch WorkspaceStartPlan.branchHint(
+            hasCheckout: checkout != nil,
+            isRemote: isRemote,
+            willBeNamedByModel: willBeNamedByModel,
+            isChatWorkspace: mode.runsAnAgent,
+            task: task
+        ) {
+        case .checkout:
+            if let checkout { checkoutHint(checkout) }
+        case .nothing:
+            // Deliberately nothing. See above, and `WorkspaceStartPlan.branchHint` for the server.
             EmptyView()
-        } else if task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        case .namedFromWriting:
             // Only chat mode has anything to say here, and only when no model is going to write
             // the name. The other modes have said it already: the line under the name field says
             // Bloom will name it, and the branch follows the name. A second sentence eight points
             // lower saying the same thing again was the third place this window explained a
             // mechanism nobody had asked about, and the mechanism is the part that was wrong.
-            if mode.runsAnAgent {
-                Text("The branch is named from what you write")
+            Text("The branch is named from what you write")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+        case .preview:
+            Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
+                .lineLimit(1)
+        }
+    }
+
+    /// The checkout says everything the branch preview would have: what is being opened, what the
+    /// diff will be measured against, and the one sentence a merged or closed pull request
+    /// deserves before it is opened and found to be empty.
+    private func checkoutHint(_ checkout: WorkspaceCheckout) -> some View {
+        HStack(spacing: Metrics.spacingSmall) {
+            Chip(
+                text: "\(checkout.preferredLocalBranch) → \(checkout.baseBranch(default: repo?.defaultBranch ?? "main"))",
+                systemImage: "arrow.triangle.pull",
+                monospaced: true
+            )
+            .lineLimit(1)
+
+            if let sentence = checkoutNote {
+                Text(sentence)
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
             }
-        } else {
-            Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
-                .lineLimit(1)
         }
     }
 
@@ -814,7 +903,7 @@ struct CreateWorkspaceView: View {
         } description: {
             Text("Add a git repository before starting a workspace.")
         } actions: {
-            Button("Choose a folder", systemImage: "folder", action: addProject)
+            Button("Start a Project…", systemImage: "folder", action: addProject)
                 .buttonStyle(.borderedProminent)
                 // Explicit so every primary action reads from the shared semantic token.
                 .tint(Palette.controlAccent)
@@ -836,8 +925,10 @@ struct CreateWorkspaceView: View {
 
     /// Which fetch `prefetchBase` should be running, or nil when nothing is being cut: no project,
     /// no base yet, or a checkout, which fetches in its own way.
+    /// Nil on a server, whose project path is on that machine: a fetch there is the server's cut to
+    /// make, and one started here would run git against a directory this Mac does not have.
     private var prefetchKey: String? {
-        guard let repo, checkout == nil, !baseBranch.isEmpty else { return nil }
+        guard !isRemote, let repo, checkout == nil, !baseBranch.isEmpty else { return nil }
         return repo.path + "\u{0}" + baseBranch
     }
 
@@ -907,12 +998,16 @@ struct CreateWorkspaceView: View {
     // MARK: - Actions
 
     private func load() async {
+        if isRemote, !app.remoteServer.isConnected {
+            app.remoteServer.connectionMode = .remote
+            await app.remoteServer.connect()
+            guard !Task.isCancelled else { return }
+        }
         if repoID == nil {
             // Writing `repoID` restarts this task for the resolved project, so the listing below
             // runs once per project rather than once on open and again on the change.
-            repoID = initialRepo?.id
-                ?? app.selectedWorkspace.flatMap { app.repo(for: $0) }?.id
-                ?? app.repos.first?.id
+            repoID = repos.first(where: { $0.id == initialRepo?.id })?.id
+                ?? repos.first?.id
             return
         }
         guard let repo else { return }
@@ -930,6 +1025,18 @@ struct CreateWorkspaceView: View {
         focusTheBox()
         isLoading = true
 
+        if isRemote {
+            do {
+                guard case .workspaceContext(let context) = try await backend.request(.workspaceContext(repo.id)) else { return }
+                guard !Task.isCancelled else { return }
+                branches = context.branches; branchPrefix = context.branchPrefix
+                hasSetupScript = context.hasSetupScript; isNamingAvailable = false
+                controls = context.composer.controls; creationSource.receive(context)
+                baseBranch = WorkspaceStartContext.resolvedBaseBranch(current: baseBranch, branches: branches, defaultBranch: repo.defaultBranch)
+            } catch { if !Task.isCancelled { creationProblem = error.localizedDescription } }
+            if !Task.isCancelled { isLoading = false }
+            return
+        }
         let path = repo.path
         var appDefaults = AppDefaults()
         if let store = app.store {
@@ -1034,9 +1141,9 @@ struct CreateWorkspaceView: View {
         }
         let branch = WorkspaceCheckoutPlan.localBranch(for: chosen, taken: Set(branches))
         if holder.isBloomWorkspace, let repo, let held = WorkspaceCheckoutPlan.workspaceHolding(
-            branch: branch, in: repo.id, among: app.workspaces
+            branch: branch, in: repo.id, among: isRemote ? (app.remoteServer.catalogue?.workspaces ?? []) : app.workspaces
         ) {
-            app.selection = .workspace(held.id)
+            app.selection = isRemote ? .remoteWorkspace(held.id) : .workspace(held.id)
             dismiss()
             return
         }
@@ -1084,11 +1191,19 @@ struct CreateWorkspaceView: View {
     private func resolveReference(_ text: String) {
         guard let repo, !isResolvingReference else { return }
         let path = repo.path
+        let key = creationKey
         isResolvingReference = true
         referenceProblem = nil
         Task {
-            let resolution = await WorkspaceCheckoutResolver.resolve(text, repoPath: path)
+            let resolution: WorkspaceCheckoutResolution
+            if isRemote {
+                do {
+                    guard case .reference(let value) = try await backend.request(.resolveReference(repoID: repo.id, reference: text)) else { return }
+                    resolution = value
+                } catch { resolution = .failure(error.localizedDescription) }
+            } else { resolution = await WorkspaceCheckoutResolver.resolve(text, repoPath: path) }
             isResolvingReference = false
+            guard key == creationKey else { return }
             switch resolution {
             case .checkout(let resolved): offer(resolved)
             case .failure(let sentence): referenceProblem = sentence
@@ -1113,6 +1228,13 @@ struct CreateWorkspaceView: View {
     private func loadCheckouts() async {
         guard let repo else { return }
         isLoadingCheckouts = true
+        if isRemote {
+            do {
+                if case .checkouts(let options) = try await backend.request(.checkouts(repo.id)), !Task.isCancelled { checkoutOptions = options }
+            } catch { if !Task.isCancelled { referenceProblem = error.localizedDescription } }
+            if !Task.isCancelled { isLoadingCheckouts = false }
+            return
+        }
         let options = await WorkspaceCheckoutOptions.load(
             repoPath: repo.path,
             repoID: repo.id,
@@ -1130,7 +1252,8 @@ struct CreateWorkspaceView: View {
     }
 
     private func addProject() {
-        Task { await app.addProjectByAsking() }
+        StartProjectOpening.shared.isRemote = isRemote
+        openWindow(id: StartProjectWindow.id)
     }
 
     /// A chip in this window has no review tab to open into, so it opens where a file opens when
@@ -1176,6 +1299,25 @@ struct CreateWorkspaceView: View {
             FileManager.default.fileExists(atPath: $0.url(in: directory).path)
         }
         let staged = StagedAttachments(directory: directory, attachments: ready)
+        if isRemote {
+            creationNotice = nil
+            remoteActivity = RemoteCreationWait.activity(checkout: source, baseBranch: base)
+            let backend = backend
+            // Through a model the waiting screen can cancel and retry, not a bare task. See
+            // `RemoteWorkspaceCreation` for the frozen window that replaced.
+            remoteCreation.start {
+                try await backend.startWorkspace(repo: repo, text: text, mode: chosen, base: base, checkout: source,
+                    controls: chosenControls, runSetup: shouldRunSetup, staged: staged)
+            } finished: { failure in
+                if let failure {
+                    creationProblem = failure.localizedDescription
+                    return
+                }
+                dismiss()
+                openWindow(id: BloomApp.mainWindowID)
+            }
+            return
+        }
         // The chips go now; the files stay until the worktree has taken them.
         PromptAttachmentStore.shared.clear(sessionID: handedOver)
         // Still rotated, even though creating now always dismisses. `dismiss` runs `onDisappear`,

@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Whether a stored row is going to draw anything at all, answered from the row rather than from a
 /// laid out view.
@@ -22,30 +23,7 @@ import Foundation
 /// reports its height when it is drawn and is corrected then, exactly as any other estimate is, so
 /// being wrong here costs one correction rather than a wrong transcript.
 public enum TranscriptRowInk {
-    /// How far into a payload the marker is looked for. The type and the subtype are the first two
-    /// fields the CLI writes, so this is generous rather than tight.
-    private static let probeLength = 256
-
-    /// What an init row's payload says and no other system row's does.
-    ///
-    /// The closing quote is deliberately not part of it. A subtype that merely STARTS with `init`
-    /// is then read as an init and drawn from the mean, which is what every row does today;
-    /// spelling the quote and missing a real init would draw a visible row at nothing until it
-    /// reported. Of the two ways to be wrong, this is the one that costs nothing.
-    private static let initMarker = Data("\"subtype\":\"init".utf8)
-
-    /// Whether this row is expected to draw nothing at all.
-    ///
-    /// Only `system` is answered. Every other kind draws something often enough that a claim about
-    /// it would be a guess, and a guess here is worth less than the mean it would replace. A tool
-    /// result whose call is on the row above draws nothing either, but which rows those are is a
-    /// question about the row before it rather than about the row, so it is not answered here.
-    ///
-    /// Two `system` rows draw: an init, and a background task's notification, which is stored only
-    /// when it opens a turn the CLI started by itself. See `BackgroundWake`.
     public static func drawsNothing(kind: MessageKind, payload: Data) -> Bool {
-        guard kind == .system else { return false }
-        return payload.prefix(probeLength).range(of: initMarker) == nil
-            && !BackgroundWake.isRow(kind: kind, payload: payload)
+        TranscriptVisibility.systemDrawsNothing(kind: kind.rawValue, payload: payload)
     }
 }

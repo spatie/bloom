@@ -1,5 +1,6 @@
 import SwiftUI
 import BloomCore
+import BloomUI
 
 /// One rendered diff line: gutter numbers, the marker column, and the highlighted source.
 ///
@@ -73,11 +74,11 @@ struct DiffLineView: View, Equatable {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 0) {
+        BloomDiffLineFrame(width: width, height: CodeMetrics.rowHeight) {
             DiffGutter(line: line, numbers: numbers)
+        } content: {
             content
         }
-        .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
         // One element per line, said as a sentence. The wording, and why a colour is not a label,
         // are on `DiffGutter.speech`.
         //

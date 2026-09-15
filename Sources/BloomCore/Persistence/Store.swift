@@ -31,6 +31,7 @@ import Synchronization
 /// automatically; reach for `upsert` on an existing row and it is reintroduced.
 public actor Store {
     private let db: SQLiteDatabase
+    private var setupAttempts: [WorkspaceID: UUID] = [:]
     public nonisolated let path: String
 
     /// The bundle identifier of the copy the owner actually uses, and the one the dev build gets.
@@ -40,6 +41,7 @@ public actor Store {
     /// `Tools/guard.sh` names the directory that goes with it.
     public static let primaryBundleIdentifier = "be.spatie.bloom"
     public static let devBundleIdentifier = "be.spatie.bloom.dev"
+    public static let remoteBundleIdentifier = "be.spatie.bloom.remote"
 
     /// Which Application Support directory a binary with this bundle identifier may use.
     ///
@@ -69,6 +71,7 @@ public actor Store {
         switch identifier {
         case primaryBundleIdentifier: "Bloom"
         case devBundleIdentifier: "Bloom Dev"
+        case remoteBundleIdentifier: "Bloom Remote"
         case .some(let other) where !other.isEmpty: "Bloom (\(other))"
         // An executable that is not inside a bundle at all: `swift run`, `.build/debug/Bloom`, or
         // a test host. Nil and empty are the same claim and are treated the same way.
@@ -1314,8 +1317,20 @@ public actor Store {
         }
     }
 
+    /// Forgets a project and every workspace it has, in one transaction.
+    ///
+    /// The cascade from `repos` takes the workspaces and everything with a foreign key to them,
+    /// and it used to be the whole of this. It left `drafts` and `deliveries` behind for every chat
+    /// the project had, the two tables `deleteArchivedWorkspaces` names for exactly that reason, so
+    /// each workspace goes through the same purge first.
     public func deleteRepo(id: RepoID) throws {
-        try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
+        try db.transaction {
+            for row in try db.query("SELECT id FROM workspaces WHERE repo_id = ?", [.text(id)]) {
+                guard let workspaceID = row.string("id") else { continue }
+                try purgeWorkspaceRows(WorkspaceID(workspaceID))
+            }
+            try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
+        }
     }
 
     // MARK: - Workspaces
@@ -1441,6 +1456,32 @@ public actor Store {
         return try upsert(row)
     }
 
+    // Attempt ownership is transient, like the child process. After a restart the durable
+    // running state and its latest output are recovered by recoverInterruptedSetups.
+    func beginSetupAttempt(workspaceID: WorkspaceID) throws -> UUID {
+        let attempt = UUID()
+        _ = try update(workspaceID: workspaceID) {
+            $0.apply(.runStarted)
+            $0.setupLog = ""
+        }
+        setupAttempts[workspaceID] = attempt
+        return attempt
+    }
+
+    func recordSetupOutput(workspaceID: WorkspaceID, attempt: UUID, log: String) throws {
+        guard setupAttempts[workspaceID] == attempt else { return }
+        _ = try update(workspaceID: workspaceID) {
+            guard $0.setupState == .running else { return }
+            $0.setupLog = String(log.suffix(Workspace.setupLogLimit))
+        }
+    }
+
+    func finishSetupAttempt(workspaceID: WorkspaceID, attempt: UUID, succeeded: Bool, log: String) throws {
+        guard setupAttempts[workspaceID] == attempt else { return }
+        setupAttempts.removeValue(forKey: workspaceID)
+        _ = try update(workspaceID: workspaceID) { $0.apply(.runFinished(succeeded: succeeded, log: log)) }
+    }
+
     /// Writes a whole workspace drag's new order in one transaction.
     ///
     /// The same reasoning as `reorderProjects`, and it is worth reading there: a loop of separate
@@ -1484,12 +1525,26 @@ public actor Store {
     /// measuring a 500 MB transcript table cheap enough to do every time the screen opens, rather
     /// than a number cached somewhere and quietly wrong.
     public func archivedFootprints() throws -> [ArchivedWorkspaceFootprint] {
-        let rows = try db.query("""
+        try footprints(rows: db.query("""
             SELECT w.*, r.name AS repo_name
             FROM workspaces w
             JOIN repos r ON r.id = w.repo_id
             WHERE w.state = 'archived'
-            """)
+            """))
+    }
+
+    /// The same measurement over one project's workspaces, active ones included, for a project
+    /// removal that deletes every record the project has. See `ServerRemoval`.
+    public func footprints(repoID: RepoID) throws -> [ArchivedWorkspaceFootprint] {
+        try footprints(rows: db.query("""
+            SELECT w.*, r.name AS repo_name
+            FROM workspaces w
+            JOIN repos r ON r.id = w.repo_id
+            WHERE w.repo_id = ?
+            """, [.text(repoID)]))
+    }
+
+    private func footprints(rows: [Row]) throws -> [ArchivedWorkspaceFootprint] {
         guard !rows.isEmpty else { return [] }
 
         var sessions: [String: Int] = [:]
@@ -1574,37 +1629,66 @@ public actor Store {
                     "SELECT 1 AS ok FROM workspaces WHERE id = ? AND state = 'archived'", [.text(id)]
                 ).first != nil
                 guard isArchived else { continue }
-
-                try db.run(
-                    "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
-                    [.text(id)]
-                )
-                // A message between workspaces still queued into or out of this one will now never
-                // go, so the bubble in the other chat has to stop saying "queued" and offering Cancel.
-                try db.run(
-                    """
-                    UPDATE workspace_messages SET state = 'cancelled'
-                    WHERE state = 'queued' AND delivery_id IN (
-                        SELECT id FROM deliveries
-                        WHERE source_workspace_id = ?
-                           OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
-                    )
-                    """,
-                    [.text(id), .text(id)]
-                )
-                try db.run(
-                    """
-                    DELETE FROM deliveries
-                    WHERE source_workspace_id = ?
-                       OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
-                    """,
-                    [.text(id), .text(id)]
-                )
-                try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
+                try purgeWorkspaceRows(id)
                 deleted += 1
             }
             return deleted
         }
+    }
+
+    /// One workspace's rows, including the two tables no foreign key reaches. Called inside a
+    /// transaction by both deletes; see `deleteArchivedWorkspaces` for why each statement is here.
+    private func purgeWorkspaceRows(_ id: WorkspaceID) throws {
+        try db.run(
+            "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
+            [.text(id)]
+        )
+        // A message between workspaces still queued into or out of this one will now never
+        // go, so the bubble in the other chat has to stop saying "queued" and offering Cancel.
+        try db.run(
+            """
+            UPDATE workspace_messages SET state = 'cancelled'
+            WHERE state = 'queued' AND delivery_id IN (
+                SELECT id FROM deliveries
+                WHERE source_workspace_id = ?
+                   OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
+            )
+            """,
+            [.text(id), .text(id)]
+        )
+        try db.run(
+            """
+            DELETE FROM deliveries
+            WHERE source_workspace_id = ?
+               OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
+            """,
+            [.text(id), .text(id)]
+        )
+        try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
+    }
+
+    /// Every agent CLI thread a workspace's chats held, closed chats included, because a closed
+    /// chat's transcript is still on disk. Read before a permanent delete, which is the only thing
+    /// that wants it. See `AgentTranscriptFiles`.
+    public func agentThreads(workspaceID: WorkspaceID) throws -> [AgentThread] {
+        try db.query(
+            "SELECT agent_kind, agent_session_id FROM sessions WHERE workspace_id = ? AND agent_session_id IS NOT NULL",
+            [.text(workspaceID)]
+        ).compactMap { row in
+            guard let id = row.string("agent_session_id"), !id.isEmpty else { return nil }
+            return AgentThread(kind: AgentKind(rawValue: row.string("agent_kind") ?? "") ?? .claudeCode, agentSessionID: id)
+        }
+    }
+
+    /// Thread ids held by any chat outside `workspaceIDs`, Ask Bloom included. A carried-on chat
+    /// resumes the archived one's thread by id, so these are the files a delete must leave alone.
+    public func agentThreadIDs(outside workspaceIDs: [WorkspaceID]) throws -> Set<String> {
+        let excluded = Set(workspaceIDs.map(\.rawValue))
+        return Set(try db.query("SELECT workspace_id, agent_session_id FROM sessions WHERE agent_session_id IS NOT NULL").compactMap { row in
+            guard let id = row.string("agent_session_id"), !id.isEmpty else { return nil }
+            if let workspace = row.string("workspace_id"), excluded.contains(workspace) { return nil }
+            return id
+        })
     }
 
     /// How big the database file is, and how much of it is space nothing is using.
@@ -1954,6 +2038,47 @@ public actor Store {
             "SELECT * FROM sessions WHERE workspace_id = ? AND parent_session_id IS NOT NULL AND archived_at IS NULL ORDER BY created_at",
             [.text(workspaceID)]
         ).map(Self.session(from:))
+    }
+
+    /// Parent validity, names, reserved slots, controls and the initial brief are one commit.
+    /// Queued idle members reserve a slot before a runner can mark them running, so concurrent
+    /// callers cannot pass the ceiling simply by outrunning process startup.
+    public func startCrewMember(_ order: CrewOrder, parentID: SessionID, workspaceID: WorkspaceID,
+                                availableAgents: [AgentKind]? = nil) throws -> Session {
+        try Task.checkCancellation()
+        return try db.transaction {
+            guard let parent = try session(id: parentID), parent.archivedAt == nil else { throw Crew.StartRefusal.parentUnavailable }
+            guard parent.workspaceID == workspaceID else { throw Crew.StartRefusal.workspaceMismatch }
+            guard let workspace = try workspace(id: workspaceID), workspace.state == .active else { throw Crew.StartRefusal.workspaceUnavailable }
+            let members = try crew(inWorkspace: workspaceID)
+            let queued = Set(try db.query("""
+                SELECT DISTINCT d.target_session_id FROM deliveries d
+                JOIN sessions s ON s.id = d.target_session_id
+                WHERE s.workspace_id = ? AND s.archived_at IS NULL AND d.delivered_at IS NULL
+                """, [.text(workspaceID)]).compactMap { $0.string("target_session_id").map { SessionID($0) } })
+            let occupied = members.filter { CrewCensus.isRunning($0) || ($0.state == .idle && queued.contains($0.id)) }.count
+            let name = try Crew.start(name: order.name, existing: Set(members.map(\.title)), running: occupied,
+                                      callerIsSubagent: parent.parentSessionID != nil).get()
+            var controls = ComposerControls(session: parent,
+                isFastMode: try setting(ComposerControls.fastModeKey(sessionID: parentID)) == "1",
+                outputStyle: try setting(ComposerControls.outputStyleKey(sessionID: parentID)) ?? OutputStyle.defaultName,
+                codexContextWindow: CodexContextWindow.normalised(try setting(ComposerControls.contextWindowKey(sessionID: parentID))))
+            controls.model = order.model ?? controls.model
+            controls.effort = order.effort ?? controls.effort
+            guard controls.agentKind.canRunWorkspaces, !controls.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw Crew.StartRefusal.invalidControls
+            }
+            if let availableAgents, !availableAgents.contains(controls.agentKind) { throw Crew.StartRefusal.agentUnavailable(controls.agentKind.label) }
+            try Task.checkCancellation()
+            let existing = try sessions(workspaceID: workspaceID)
+            let member = try upsert(Session(workspaceID: workspaceID, parentSessionID: parentID, title: name,
+                model: controls.model, effort: controls.effort, agentKind: controls.agentKind, permissionMode: controls.permissionMode,
+                sortOrder: (existing.map(\.sortOrder).max() ?? -1) + 1))
+            for (key, value) in controls.settings(sessionID: member.id) { try setSetting(key, value) }
+            try enqueueDelivery(Delivery(targetSessionID: member.id, sourceWorkspaceID: workspaceID, kind: .message,
+                                         crew: CrewMessage.brief(from: parent.title, task: order.task)))
+            return member
+        }
     }
 
     /// Every crew member in the app at once, grouped by the worktree it is working in.

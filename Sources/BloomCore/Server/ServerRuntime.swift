@@ -1,0 +1,1254 @@
+import Foundation
+import BloomClient
+
+/// The standalone runtime is the single owner of its store and its session runners. Clients
+/// request snapshots and commands, never open its SQLite file or launch a second runner.
+public actor ServerRuntime {
+    public typealias AgentDiscovery = @Sendable (Store) async -> [AgentKind]
+    private let installedAgents: AgentDiscovery
+    private let authentication: ServerAgentAuthentication.Check
+    public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
+    private let store: Store
+    private let storage: ServerStorageService
+    /// Prunes Docker in the background after setups and when space runs low. See `ServerDockerHousekeeping`.
+    nonisolated let housekeeper: ServerDockerHousekeeper
+    private let skills: ServerSkillsService
+    private let makeRunner: RunnerFactory?
+    /// How long a session's shutdown waits for its terminated runner to exit. See `ServerSession.shutdown()`.
+    private let runnerExitGrace: Duration
+    private var bridge: BridgeServer?
+    private var bridgeArchives: [SessionID: Task<Void, Never>] = [:]
+    let uiBroker = ServerUIBroker()
+    private let reviewCache = ServerReviewCache()
+    private let repositories = ServerRepositoryResolver()
+    private let terminals = ServerTerminalService()
+    private let workspaceAdmissions: ServerWorkspaceAdmissions
+    private let terminalStreams: ServerTerminalStreams
+    private let modelCatalogue = CodexModelCatalog.live()
+    private var sessions: [SessionID: ServerSession] = [:]
+    private var creating: [SessionID: Task<ServerSession, Error>] = [:]
+    private var commands: [UUID: Task<ServerReply, Never>] = [:]
+    private var commandOperations: [UUID: ServerOperation] = [:]
+    private var stopping: [SessionID: Int] = [:]
+    private var closingSessions: Set<SessionID> = []
+    private var changingWorkspaces: Set<WorkspaceID> = []
+    private var settingUpWorkspaces: Set<WorkspaceID> = []
+    /// Setup runs that began after a create had already replied. See `setUpInBackground`.
+    private var backgroundSetups: [WorkspaceID: Task<Void, Never>] = [:]
+    /// Chats whose queued prompts wait for their workspace's setup to end. See `ServerPromptQueue.held`.
+    private var setupHeldSessions: Set<SessionID> = []
+    /// When each setup this process watched began, and how long it took once it ended.
+    private var setupClock: [WorkspaceID: (startedAt: Date, durationMS: Int?)] = [:]
+    private var archivePreviews: [UUID: ServerArchivePreview] = [:]
+    /// Permanent removals waiting for their confirmation. See `ServerRemovalPreview`.
+    private var removalPlans: [UUID: ServerRemovalPlan] = [:]
+    private var removingProjects: Set<RepoID> = []
+    /// The one pending `VACUUM`. See `scheduleCompaction`.
+    private var compaction: Task<Void, Never>?
+    private var isClosed = false
+    private var shutdownTask: Task<Void, Never>?
+    private var promptQueue: ServerPromptQueue?
+    private var maintenanceQuiescing = false
+    private var maintenanceTrial = false
+    private var maintenanceWorkspaceStarts = 0
+    private var maintenanceBridgeCalls = 0
+    private enum MaintenanceCommitState { case pending, restoring, failed(String), complete }
+    private var maintenanceCommitState: MaintenanceCommitState = .pending
+    private let maintenanceRestoration: (@Sendable () async throws -> Void)?
+
+    public init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil, maintenanceTrial: Bool = false, runnerExitGrace: Duration = .seconds(6)) {
+        self.init(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner,
+                  workspaceAdmissions: ServerWorkspaceAdmissions(), maintenanceTrial: maintenanceTrial, runnerExitGrace: runnerExitGrace)
+    }
+
+    init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
+         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions, storageService: ServerStorageService? = nil, skillsService: ServerSkillsService? = nil, maintenanceTrial: Bool = false,
+         maintenanceRestoration: (@Sendable () async throws -> Void)? = nil, runnerExitGrace: Duration = .seconds(6)) {
+        self.workspaceAdmissions = workspaceAdmissions
+        self.store = store
+        storage = storageService ?? ServerStorageService(directory: (store.path as NSString).deletingLastPathComponent,
+            workspaces: { [store] in try await store.workspaces(includeArchived: true) })
+        housekeeper = ServerDockerHousekeeper(storage: storage)
+        skills = skillsService ?? ServerSkillsService(directory: URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("skills").path,
+                                     home: FileManager.default.homeDirectoryForCurrentUser.path)
+        self.installedAgents = installedAgents
+        self.authentication = authentication
+        terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
+        self.makeRunner = makeRunner
+        self.runnerExitGrace = runnerExitGrace
+        self.maintenanceTrial = maintenanceTrial
+        self.maintenanceRestoration = maintenanceRestoration
+    }
+
+    private func authenticationStatuses(_ agents: [AgentKind], workspace: Workspace? = nil) async -> [AgentAuthenticationStatus] {
+        await ServerAgentAuthentication.checkAll(agents, store: store, workspace: workspace, check: authentication)
+    }
+
+    private func requireAuthentication(_ agent: AgentKind, workspace: Workspace? = nil) async throws {
+        let status = await authentication(agent, store, workspace)
+        try Task.checkCancellation()
+        if status.requiresSignIn { throw AgentAuthenticationRequired(agent: agent) }
+    }
+
+    private func queue() -> ServerPromptQueue {
+        if let promptQueue { return promptQueue }
+        let queue = ServerPromptQueue(store: store, load: { [weak self] id in
+            guard let self else { throw ServerFailure("The server is shutting down.") }
+            return try await self.authenticatedSession(id)
+        }, settled: { [weak self] id, ending in
+            await self?.bridgeTurnEnded(sessionID: id, ending: ending)
+        }, held: { [weak self] id in
+            await self?.isHeldForSetup(id) ?? false
+        })
+        promptQueue = queue
+        return queue
+    }
+
+    func startBridge(socketPath: String) throws -> BridgeServer {
+        let server = BridgeServer(store: store, socketPath: socketPath, toolbox: bridgeToolbox(),
+            configurationDirectory: URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("mcp-config").path)
+        try server.start()
+        bridge = server
+        return server
+    }
+
+    public func restoreQueuedPrompts() async throws {
+        // A deferred archive belongs to the interrupted turn, not whichever turn starts after
+        // restarting this daemon. Require a fresh request instead of surprising a later caller.
+        for workspace in try await store.workspaces() {
+            for session in try await store.sessions(workspaceID: workspace.id) {
+                let key = "server.archive.after-turn.\(session.id)"
+                guard try await store.setting(key) != nil else { continue }
+                try await store.setSetting(key, nil)
+                let payload = try JSONEncoder().encode(JSONValue.object([
+                    "message": .string("The pending archive request was cancelled because the server restarted before the turn ended. Review this workspace before requesting archive again."),
+                ]))
+                _ = try await store.appendNext(sessionID: session.id, kind: .error, payload: payload)
+            }
+        }
+        try await queue().restore()
+    }
+
+    public func respond(to request: ServerRequest) async -> ServerReply {
+        guard BloomWire.supportedVersions.contains(request.version) else {
+            return ServerReply(id: request.id, result: .failure("Incompatible Bloom server protocol. Update the client and server."))
+        }
+        var reply = await dispatch(request)
+        reply.version = request.version
+        return reply
+    }
+
+    private func dispatch(_ request: ServerRequest) async -> ServerReply {
+        if maintenanceTrial || (maintenanceQuiescing && !request.operation.allowedDuringMaintenance) {
+            return ServerReply(id: request.id, result: .failure("Bloom Server is preparing an update. Existing work can finish; new work will be available when maintenance ends."))
+        }
+        if case .skills = request.operation, request.version < 14 {
+            return ServerReply(id: request.id, result: .failure("Skill management requires Bloom protocol 14 and the skillManagement capability."))
+        }
+        if case .uiBridge = request.operation, request.version < 14 {
+            return ServerReply(id: request.id, result: .failure("Workspace UI tools require Bloom protocol 14."))
+        }
+        if request.version < 13 {
+            switch request.operation {
+            case .storage, .cleanupStorage:
+                return ServerReply(id: request.id, result: .failure("Storage management requires Bloom protocol 13 and the storageManagement capability."))
+            default: break
+            }
+        }
+        if case .workspace(_, .setupOutput) = request.operation, request.version < 15 {
+            return ServerReply(id: request.id, result: .failure("Live setup output requires Bloom protocol 15."))
+        }
+        switch request.operation {
+        case .workspace(_, .deletePreview), .workspace(_, .delete), .project(_, .removalPreview), .project(_, .remove):
+            if request.version < 16 {
+                return ServerReply(id: request.id, result: .failure("Deleting workspaces and removing projects require Bloom protocol 16."))
+            }
+        case .removeStorageLeftovers:
+            if request.version < 16 {
+                return ServerReply(id: request.id, result: .failure("Removing leftover Docker resources requires Bloom protocol 16."))
+            }
+        default: break
+        }
+        if case .diagnostics = request.operation, request.version < 13 {
+            return ServerReply(id: request.id, result: .failure("Server diagnostics require Bloom protocol 13."))
+        }
+        guard !isClosed else { return ServerReply(id: request.id, result: .failure("The server is shutting down.")) }
+        if case .uiBridge(let operation) = request.operation {
+            do {
+                if case .attach(let workspaceID, _, _) = operation { _ = try await workspace(workspaceID, readingDuringSetup: true) }
+                return ServerReply(id: request.id, result: .uiBridge(try await uiBroker.handle(operation, registrationID: request.id)))
+            } catch { return ServerReply(id: request.id, result: .failure(error.localizedDescription)) }
+        }
+        if !request.operation.mutates { return await execute(request) }
+        if let task = commands[request.id] {
+            _ = await task.value
+            return await recorded(request)
+        }
+        // Register before awaiting the store. Concurrent retries share the same operation.
+        let task = Task { await self.performOnce(request) }
+        commands[request.id] = task
+        commandOperations[request.id] = request.operation
+        let reply = await task.value
+        commands.removeValue(forKey: request.id)
+        commandOperations.removeValue(forKey: request.id)
+        return reply
+    }
+
+    private func key(_ request: ServerRequest) -> String { "server.command.\(request.id.uuidString)" }
+
+    private func recorded(_ request: ServerRequest) async -> ServerReply {
+        do {
+            guard let value = try await store.setting(key(request)) else {
+                throw ServerFailure("The command outcome is unknown. Refresh before trying again.")
+            }
+            let record = try JSONDecoder().decode(ServerCommandRecord.self, from: Data(value.utf8))
+            guard record.request.id == request.id, record.request.operation == request.operation else { throw ServerFailure("A command ID cannot be reused for a different operation.") }
+            return record.reply ?? ServerReply(id: request.id, result: .failure(
+                "The server stopped while handling this command. Inspect the workspace before submitting a new command."
+            ))
+        } catch { return ServerReply(id: request.id, result: .failure(error.localizedDescription)) }
+    }
+
+    private func performOnce(_ request: ServerRequest) async -> ServerReply {
+        do {
+            if try await store.setting(key(request)) != nil { return await recorded(request) }
+            try await saveRecord(ServerCommandRecord(request: request))
+            let reply = await execute(request)
+            try await saveRecord(ServerCommandRecord(request: request, reply: reply))
+            return reply
+        } catch { return ServerReply(id: request.id, result: .failure(error.localizedDescription)) }
+    }
+
+    private func saveRecord(_ record: ServerCommandRecord) async throws {
+        let data = try JSONEncoder().encode(record)
+        try await store.setSetting(key(record.request), String(decoding: data, as: UTF8.self))
+    }
+
+    private func execute(_ request: ServerRequest) async -> ServerReply {
+        do {
+            let permit: ServerWorkspaceAdmissions.Permit?
+            switch request.operation.workspaceMutation {
+            case .workspace(let id): permit = try workspaceAdmissions.admit(id)
+            case .session(let id):
+                guard let workspaceID = try await storedSession(id).workspaceID else { throw ServerFailure("This session has no workspace.") }
+                permit = try workspaceAdmissions.admit(workspaceID)
+            case nil: permit = nil
+            }
+            defer { permit?.release() }
+            return ServerReply(id: request.id, result: try await execute(request.operation))
+        } catch { return ServerReply(id: request.id, result: .failure(error.localizedDescription)) }
+    }
+
+    private func execute(_ operation: ServerOperation) async throws -> ServerResult {
+        guard !isClosed else { throw ServerFailure("The server is shutting down.") }
+        switch operation {
+        case .skills(let request):
+            let path: String?
+            if let id = request.workspaceID { path = try await workspace(id, readingDuringSetup: true).path } else { path = nil }
+            return .skills(try await skills.handle(request, workspacePath: path))
+        case .maintenance:
+            throw ServerFailure("Server updates require the managed maintenance service. Enable it through server setup, then reconnect.")
+        case .uiBridge: throw ServerFailure("UI leases must be handled by the owning runtime.")
+        case .creation(let action):
+            var models: [CodexModel] = []
+            if case .workspaceContext = action { models = (try? await modelCatalogue.pickerModels()) ?? [] }
+            let repositoryDirectory = URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("repositories").path
+            var result = try await ProjectCreationOperations.perform(action, store: store, models: models,
+                availableAgents: await installedAgents(store), defaultProjectLocation: repositoryDirectory)
+            if case .workspaceContext(let id) = action, case .workspaceContext(var context) = result,
+               let repo = try await store.repo(id: id) {
+                let wrapped = !(SettingsLoader.load(workspace: repo.path, repo: repo.path).executionCommand ?? []).isEmpty
+                if !wrapped { context.composer.authentication = await authenticationStatuses(context.composer.availableAgents ?? []) }
+                context.composer.codexSpeeds = await ServerComposer.codexSpeeds(cwd: repo.path,
+                    available: context.composer.availableAgents ?? [], wrapped: wrapped)
+                result = .workspaceContext(context)
+            }
+            return .creation(result)
+        case .reviewSnapshot(let id, let scope, let revision, let wait):
+            return .reviewSnapshot(try await reviewCache.snapshot(workspace: workspace(id, readingDuringSetup: true), scope: scope, knownRevision: revision, wait: wait))
+        case .reviewPatch(let id, let path, let scope, let revision):
+            return .reviewPatch(try await reviewCache.patch(workspace: workspace(id, readingDuringSetup: true), path: path, scope: scope, knownRevision: revision))
+        case .storage:
+            return .storage(await storage.inspect())
+        case .cleanupStorage(let targets):
+            return .storageCleanup(try await storage.clean(targets))
+        case .removeStorageLeftovers(let ids):
+            // Held as changing for the whole removal, so a restore cannot start setting a workspace
+            // up again while its volumes are being deleted underneath it.
+            guard changingWorkspaces.isDisjoint(with: ids) else {
+                throw ServerFailure("A workspace is being archived or restored. Refresh storage and try again.")
+            }
+            changingWorkspaces.formUnion(ids)
+            defer { changingWorkspaces.subtract(ids) }
+            return .storageLeftoverRemoval(try await storage.removeLeftovers(ids))
+        case .diagnostics:
+            return .diagnostics(await ServerDiagnosticsCollector.collect(directory: (store.path as NSString).deletingLastPathComponent,
+                authentication: await authenticationStatuses(await installedAgents(store)), cleanupNotice: await housekeeper.notice))
+        case .hello:
+            return .hello(name: ProcessInfo.processInfo.hostName)
+        case .previewAddress(let address):
+            return .text(try await ServerPreview.resolve(address))
+        case .terminalStream(let id, let name):
+            let workspace = try await workspace(id)
+            let result = try await ServerWorkspaceOperations.perform(.terminal(name: name), workspace: workspace, store: store, terminals: terminals)
+            guard case .terminal(let terminal) = result else { throw ServerFailure("The terminal could not be started.") }
+            return .text(try await terminalStreams.open(terminal: terminal, workspace: workspace))
+        case .composer(let id):
+            let session = try await storedSession(id)
+            guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+            let selected = try await workspace(workspaceID, readingDuringSetup: true)
+            let path = selected.path
+            let controls = try await ServerComposer.controls(session: session, store: store)
+            let models = (try? await modelCatalogue.pickerModels()) ?? []
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let available = await installedAgents(store)
+            let repoPath = try await store.repo(id: selected.repoID)?.path ?? path
+            let wrapped = !(SettingsLoader.load(workspace: path, repo: repoPath).executionCommand ?? []).isEmpty
+            return .composer(ServerComposerState(controls: controls, models: models,
+                commands: SlashCommandIndex.discover(home: home, project: path),
+                styles: OutputStyleIndex.discover(home: home, project: path), availableAgents: available,
+                authentication: await authenticationStatuses([controls.agentKind], workspace: selected),
+                codexSpeeds: await ServerComposer.codexSpeeds(cwd: path, available: available, wrapped: wrapped)))
+        case .markRead(let id, let seq):
+            _ = try await storedSession(id)
+            try await store.updateLastReadSeq(sessionID: id, seq: seq)
+            return .accepted
+        case .renameSession(let id, let title):
+            _ = try await storedSession(id)
+            let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.utf8.count <= 1_024 else { throw ServerFailure("Enter a shorter conversation name.") }
+            try await store.updateSessionPreferences(id: id, title: name)
+            return .accepted
+        case .closeSession(let id):
+            return try await closeSession(id, notifyingParent: true)
+        case .setComposer(let id, let controls):
+            try ServerAgentAvailability.require(controls.agentKind, in: await installedAgents(store))
+            let session = try await storedSession(id)
+            guard controls.agentKind.canRunWorkspaces, !controls.model.isEmpty else { throw ServerFailure("Choose an available agent and model.") }
+            if controls.agentKind != session.agentKind {
+                guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+                let workspace = try await workspace(workspaceID)
+                let result = try await ServerWorkspaceOperations.perform(.newSession(agent: controls.agentKind, model: controls.model,
+                    effort: controls.effort, permissionMode: controls.permissionMode), workspace: workspace, store: store, terminals: terminals)
+                if case .created(let created, _, _) = result { try await ServerComposer.save(controls, session: created, store: store) }
+                return result
+            }
+            try await configure(id, controls: controls)
+            return .accepted
+        case .project(let id, let action):
+            switch action {
+            case .removalPreview:
+                guard let repo = try await store.repo(id: id) else { throw ServerFailure("This project is no longer available.") }
+                return .removalPreview(remember(try await projectRemovalPlan(repo)))
+            case .remove(let confirmation):
+                return try await removeProject(id, confirmation: confirmation)
+            default:
+                return try await ServerSidebar.project(action, id: id, store: store)
+            }
+        case .catalogue:
+            let workspaces = try await store.workspaces()
+            var storedSessions: [Session] = []
+            for workspace in workspaces { storedSessions += try await store.sessions(workspaceID: workspace.id) }
+            return .catalogue(ServerCatalogue(
+                repositories: try await store.repos(), workspaces: workspaces, sessions: storedSessions,
+                archivedWorkspaces: try await store.workspaces(includeArchived: true).filter { $0.state == .archived }
+            ))
+        case .create(let request):
+            return try await startWorkspace(request)
+        case .transcript(let id, let afterSeq):
+            guard afterSeq >= -1 else { throw ServerFailure("Invalid transcript cursor.") }
+            let session = try await storedSession(id)
+            let live = sessions[id]
+            try await live?.refreshState(store: store, sessionID: id)
+            let queued = try await queue().snapshot(id)
+            return .transcript(ServerTranscript(
+                session: session,
+                messages: try await store.messages(sessionID: id, afterSeq: afterSeq, limit: 500),
+                pendingQuestions: try await store.pendingPermissionAsks(sessionID: id).map { $0.ask.raw },
+                isBusy: await live?.isBusy ?? false,
+                streamingText: await live?.streamingText ?? "",
+                permissionDecisions: try await store.permissionAskDecisions(sessionID: id),
+                queuedPrompts: queued.0, queueError: queued.1
+            ))
+        case .workspace(let id, let action):
+            switch action {
+            case .archivePreview:
+                return .archivePreview(try await prepareArchive(workspace(id)))
+            case .archive(let confirmation, let removingDocker):
+                return try await archiveWorkspace(id, confirmation: confirmation, removingDocker: removingDocker == true)
+            case .restore: return try await restoreWorkspace(id)
+            case .deletePreview:
+                guard !changingWorkspaces.contains(id) else { throw ServerFailure("This workspace is already being changed.") }
+                return .removalPreview(remember(try await ServerRemoval.workspacePlan(storedWorkspace(id), context: removalContext())))
+            case .delete(let confirmation): return try await deleteWorkspace(id, confirmation: confirmation)
+            case .newSession(let agent, _, _, _):
+                try ServerAgentAvailability.require(agent, in: await installedAgents(store))
+                return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
+            case .setupOutput:
+                let selected = try await workspace(id, readingDuringSetup: true)
+                let clock = setupClock[id]
+                return .setupOutput(ServerSetupOutput(state: selected.setupState, log: selected.setupLog,
+                    startedAt: clock?.startedAt, durationMS: clock?.durationMS))
+            case .runSetup:
+                let selected = try await workspace(id)
+                guard backgroundSetups[id] == nil else { throw ServerFailure("Workspace setup is already running.") }
+                guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
+                settingUpWorkspaces.insert(id)
+                let startedAt = Date()
+                setupClock[id] = (startedAt, nil)
+                defer {
+                    changingWorkspaces.remove(id)
+                    settingUpWorkspaces.remove(id)
+                    setupClock[id] = (startedAt, Int(Date().timeIntervalSince(startedAt) * 1000))
+                }
+                let chats = try await store.sessions(workspaceID: id)
+                for chat in chats {
+                    let pending = try await store.pendingDeliveries(sessionID: chat.id)
+                    let busy = await sessions[chat.id]?.isBusy == true
+                    guard pending.isEmpty, !busy, creating[chat.id] == nil,
+                          chat.state != .running, chat.state != .waiting else {
+                        throw ServerFailure("Stop the workspace's agents and clear queued prompts before running setup again.")
+                    }
+                }
+                do {
+                    let reply = try await ServerWorkspaceOperations.perform(action, workspace: selected, store: store, terminals: terminals)
+                    housekeeper.setupEnded(succeeded: true)
+                    return reply
+                } catch {
+                    housekeeper.setupEnded(succeeded: false)
+                    throw error
+                }
+            default:
+                return try await ServerWorkspaceOperations.perform(action,
+                    workspace: workspace(id, readingDuringSetup: !action.mutates), store: store, terminals: terminals)
+            }
+        case .configure(let id, let model, let effort, let permissionMode):
+            var controls = try await ServerComposer.controls(session: storedSession(id), store: store)
+            controls.model = model
+            controls.effort = effort
+            controls.permissionMode = permissionMode
+            try await configure(id, controls: controls)
+            return .accepted
+        case .send(let id, let text, let retryDeliveryID):
+            guard stopping[id] == nil else { throw ServerFailure("This session is being stopped.") }
+            let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !body.isEmpty, body.utf8.count <= 1_048_576 else { throw ServerFailure("The prompt is empty or too large.") }
+            let session = try await storedSession(id)
+            try ServerAgentAvailability.require(session.agentKind, in: await installedAgents(store))
+            guard session.archivedAt == nil else { throw ServerFailure("This conversation is closed.") }
+            guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+            let selected = try await workspace(workspaceID)
+            try await requireAuthentication(session.agentKind, workspace: selected)
+            if let retryDeliveryID {
+                try await queue().retryAuthenticationPaused(sessionID: id, deliveryID: retryDeliveryID, text: body)
+            } else { try await queue().enqueue(body, sessionID: id) }
+            return .accepted
+        case .cancelQueued(let id, let deliveryID):
+            try await queue().cancel(deliveryID, sessionID: id)
+            return .accepted
+        case .changes(let id, let scope):
+            return .changes(try await ServerReview.changes(workspace: workspace(id, readingDuringSetup: true), scope: scope))
+        case .patch(let id, let path, let scope):
+            return .patch(try await ServerReview.patch(workspace: workspace(id, readingDuringSetup: true), path: path, scope: scope))
+        case .file(let id, let path):
+            let selected = try await workspace(id, readingDuringSetup: true)
+            return .file(try ServerReview.file(workspace: selected, path: path))
+        case .stop(let id):
+            stopping[id, default: 0] += 1
+            defer {
+                stopping[id, default: 1] -= 1
+                if stopping[id] == 0 { stopping.removeValue(forKey: id) }
+            }
+            // A Stop received during runner creation must also stop that pending start. Wait
+            // for already accepted sends to settle while refusing new ones for this session.
+            let sends = commandOperations.compactMap { commandID, operation -> Task<ServerReply, Never>? in
+                if case .send(let target, _, _) = operation, target == id { return commands[commandID] }
+                return nil
+            }
+            for send in sends { _ = await send.value }
+            _ = try await storedSession(id)
+            try await queue().pause(id)
+            await sessions[id]?.stop()
+            return .accepted
+        case .answer(let id, let requestID, let answer):
+            guard let live = sessions[id] else { throw ServerFailure("This session has no running agent.") }
+            if case .denyWithReason(_, let endsTurn) = answer, endsTurn { try await queue().pause(id) }
+            try await live.answer(requestID: requestID, decision: answer.decision, store: store, sessionID: id)
+            return .accepted
+        }
+    }
+
+    private func closeSession(_ id: SessionID, notifyingParent: Bool) async throws -> ServerResult {
+        guard closingSessions.insert(id).inserted else { throw ServerFailure("This conversation is already being closed.") }
+        defer { closingSessions.remove(id) }
+        let session = try await storedSession(id)
+        guard session.archivedAt == nil else { return .accepted }
+        stopping[id, default: 0] += 1
+        defer {
+            stopping[id, default: 1] -= 1
+            if stopping[id] == 0 { stopping.removeValue(forKey: id) }
+        }
+        _ = try await execute(.stop(sessionID: id))
+        if notifyingParent, let parentID = session.parentSessionID, let workspaceID = session.workspaceID,
+           let parent = try await store.session(id: parentID), parent.archivedAt == nil, parent.workspaceID == workspaceID {
+            try? await queue().enqueue(Delivery(targetSessionID: parentID, sourceWorkspaceID: workspaceID, kind: .report,
+                                               crew: .stoppedByOwner(name: session.title)))
+        }
+        await sessions[id]?.shutdown()
+        sessions.removeValue(forKey: id)
+        bridge?.retire(sessionID: id)
+        _ = try await store.update(sessionID: id) { $0.archivedAt = Date() }
+        return .accepted
+    }
+
+    private func storedSession(_ id: SessionID) async throws -> Session {
+        guard let session = try await store.session(id: id) else { throw ServerFailure("This session no longer exists.") }
+        return session
+    }
+
+    private func configure(_ id: SessionID, controls: ComposerControls) async throws {
+        guard !controls.model.isEmpty else { throw ServerFailure("Choose a model.") }
+        guard stopping[id] == nil else { throw ServerFailure("This session is being changed. Try again shortly.") }
+        stopping[id] = 1
+        defer { stopping.removeValue(forKey: id) }
+        for (commandID, operation) in commandOperations {
+            if case .send(let target, _, _) = operation, target == id { _ = await commands[commandID]?.value }
+        }
+        let queued = try await queue().snapshot(id)
+        guard queued.0.isEmpty else { throw ServerFailure("Wait for queued messages before changing settings.") }
+        if let live = sessions[id] {
+            try await live.refreshState(store: store, sessionID: id)
+            guard await !live.isBusy else { throw ServerFailure("Stop the current turn before changing its settings.") }
+            await live.shutdown()
+            sessions.removeValue(forKey: id)
+        }
+        let session = try await storedSession(id)
+        try await ServerComposer.save(controls, session: session, store: store)
+    }
+
+    private func workspace(_ id: WorkspaceID, readingDuringSetup: Bool = false) async throws -> Workspace {
+        guard !changingWorkspaces.contains(id) || (readingDuringSetup && settingUpWorkspaces.contains(id)) else { throw ServerFailure("This workspace is being set up, archived or restored. Try again shortly.") }
+        guard let workspace = try await store.workspace(id: id), workspace.state == .active else {
+            throw ServerFailure("This workspace is no longer available.")
+        }
+        return workspace
+    }
+
+    /// `measuringDocker` is off for the archive's own rechecks, which compare git's answers only,
+    /// and for an agent's archive, which never removes containers: listing Docker there would cost
+    /// a validation and three listings for a value nothing reads.
+    private func prepareArchive(_ workspace: Workspace, keepingBranch: Bool = false, measuringDocker: Bool = true) async throws -> ServerArchivePreview {
+        var preview = try await ServerSidebar.preview(workspace: workspace, store: store, docker: measuringDocker ? storage.workspaceDocker : nil)
+        if keepingBranch { preview.hazards.isDeletingBranch = false }
+        archivePreviews = archivePreviews.filter { Date().timeIntervalSince($0.value.createdAt) < 600 }
+        archivePreviews[preview.id] = preview
+        return preview
+    }
+
+    private func archiveWorkspace(_ id: WorkspaceID, confirmation: UUID, removingDocker: Bool = false, bridgeSafe: Bool = false) async throws -> ServerResult {
+        guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
+        defer { changingWorkspaces.remove(id) }
+        let transition = try workspaceAdmissions.beginTransition(id)
+        var remainsClosed = false
+        defer { transition.finish(closed: remainsClosed) }
+        guard let workspace = try await store.workspace(id: id) else { throw ServerFailure("This workspace no longer exists.") }
+        if workspace.state == .archived { remainsClosed = true; return .accepted }
+        guard let accepted = archivePreviews[confirmation], accepted.workspace.id == id,
+              Date().timeIntervalSince(accepted.createdAt) < 600 else {
+            return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: !bridgeSafe))
+        }
+        // Both RPC and MCP mutations hold tickets, including work paused before its first
+        // Store write. Capture sessions only once those accepted operations have settled.
+        try await transition.drain()
+        // A setup that began after its create replied holds no ticket. Stop it before the worktree
+        // it is building goes, which files the run as stopped rather than leaving a script writing
+        // into a deleted directory.
+        if let setup = backgroundSetups[id] {
+            setup.cancel()
+            await setup.value
+        }
+        let fresh = try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: false)
+        guard fresh.report == accepted.report, fresh.hazards == accepted.hazards else {
+            return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: !bridgeSafe))
+        }
+        let chats = try await store.sessions(workspaceID: id)
+        for chat in chats {
+            _ = try await execute(.stop(sessionID: chat.id))
+            if let pending = creating[chat.id] { _ = try? await pending.value }
+            await sessions[chat.id]?.shutdown()
+            sessions.removeValue(forKey: chat.id)
+            bridge?.retire(sessionID: chat.id)
+        }
+        let settled = try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: false)
+        guard settled.report == accepted.report, settled.hazards.isDeletingBranch == accepted.hazards.isDeletingBranch else {
+            return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe, measuringDocker: !bridgeSafe))
+        }
+        guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's repository is unavailable.") }
+        // Only a choice the confirmation actually offered: an answer to a question never shown,
+        // or an agent's archive, keeps the containers.
+        let removesDocker = removingDocker && !bridgeSafe && accepted.request.offersDockerRemoval
+        try await WorkspaceManager(store: store).archive(workspace: workspace, repo: repo,
+            deleteBranch: accepted.hazards.isDeletingBranch, force: !bridgeSafe,
+            docker: removesDocker ? storage.workspaceDocker : nil)
+        remainsClosed = true
+        await uiBroker.close(workspaceID: id)
+        await terminalStreams.close(workspaceID: id)
+        try await terminals.close(workspaceID: id, store: store, cwd: repo.path)
+        archivePreviews = archivePreviews.filter { $0.value.workspace.id != id }
+        return .accepted
+    }
+
+    private func restoreWorkspace(_ id: WorkspaceID) async throws -> ServerResult {
+        guard !changingWorkspaces.contains(id) else { throw ServerFailure("This workspace is already being changed.") }
+        changingWorkspaces.insert(id)
+        defer { changingWorkspaces.remove(id) }
+        let transition = try workspaceAdmissions.beginTransition(id)
+        var remainsClosed = false
+        defer { transition.finish(closed: remainsClosed) }
+        try await transition.drain()
+        guard let workspace = try await store.workspace(id: id), let repo = try await store.repo(id: workspace.repoID) else {
+            throw ServerFailure("This workspace's project is unavailable.")
+        }
+        if workspace.state == .active { return .accepted }
+        remainsClosed = true
+        _ = try await WorkspaceManager(store: store).restore(workspace: workspace, repo: repo)
+        remainsClosed = false
+        return .accepted
+    }
+
+    // MARK: - Permanent removal
+
+    private func removalContext() -> ServerRemovalContext { ServerRemovalContext(store: store) }
+
+    /// Keeps a plan for its confirmation, replacing any earlier plan for the same target, so a
+    /// reader who asked twice cannot confirm the older of two answers.
+    private func remember(_ plan: ServerRemovalPlan) -> ServerRemovalPreview {
+        removalPlans = removalPlans.filter { Date().timeIntervalSince($0.value.preview.createdAt) < 600 && $0.value.target != plan.target }
+        removalPlans[plan.preview.id] = plan
+        return plan.preview
+    }
+
+    private func acceptedRemoval(_ confirmation: UUID, target: ServerRemovalPlan.Target) -> ServerRemovalPlan? {
+        guard let plan = removalPlans[confirmation], plan.target == target,
+              Date().timeIntervalSince(plan.preview.createdAt) < 600 else { return nil }
+        return plan
+    }
+
+    private func storedWorkspace(_ id: WorkspaceID) async throws -> Workspace {
+        guard let workspace = try await store.workspace(id: id) else { throw ServerFailure("This workspace is no longer available.") }
+        return workspace
+    }
+
+    private func deleteWorkspace(_ id: WorkspaceID, confirmation: UUID) async throws -> ServerResult {
+        guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
+        defer { changingWorkspaces.remove(id) }
+        // The same transition a restore takes, so a restore and a delete cannot pass each other.
+        // Closed afterwards either way: a delete that failed leaves an archived workspace.
+        let transition = try workspaceAdmissions.beginTransition(id)
+        defer { transition.finish(closed: true) }
+        try await transition.drain()
+        let fresh = try await ServerRemoval.workspacePlan(storedWorkspace(id), context: removalContext())
+        guard let accepted = acceptedRemoval(confirmation, target: .workspace(id)), accepted.matches(fresh) else {
+            return .removalPreview(remember(fresh))
+        }
+        removalPlans.removeValue(forKey: confirmation)
+        return try await purge(fresh)
+    }
+
+    private func projectRemovalPlan(_ repo: Repo) async throws -> ServerRemovalPlan {
+        var archives: [WorkspaceID: Result<ServerArchivePreview, ServerFailure>] = [:]
+        for active in try await store.workspaces(repoID: repo.id) {
+            do {
+                archives[active.id] = .success(try await prepareArchive(workspace(active.id)))
+            } catch {
+                archives[active.id] = .failure(ServerFailure(error.localizedDescription))
+            }
+        }
+        return try await ServerRemoval.projectPlan(repo, archives: archives, context: removalContext())
+    }
+
+    /// Archives the project's active workspaces through the ordinary archive, then deletes.
+    ///
+    /// Each archive is its own confirmed, rechecked archive: its agents are stopped, its archive
+    /// script runs and its worktree goes, and a workspace whose answer moved sends the whole
+    /// removal back as a fresh preview with nothing deleted. Only once every workspace is archived
+    /// is the plan measured a final time, because the worktrees that just went were what kept a
+    /// clone in use, and the clone is still only deleted when the reader was told it would be.
+    private func removeProject(_ id: RepoID, confirmation: UUID) async throws -> ServerResult {
+        guard removingProjects.insert(id).inserted else { throw ServerFailure("This project is already being removed.") }
+        defer { removingProjects.remove(id) }
+        guard let repo = try await store.repo(id: id) else { throw ServerFailure("This project is no longer available.") }
+        let fresh = try await projectRemovalPlan(repo)
+        guard let accepted = acceptedRemoval(confirmation, target: .project(id)), accepted.matches(fresh) else {
+            return .removalPreview(remember(fresh))
+        }
+        if let blocker = fresh.preview.blocker { throw ServerFailure(blocker) }
+        removalPlans.removeValue(forKey: confirmation)
+        for (workspaceID, archive) in fresh.archives.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            guard case .accepted = try await archiveWorkspace(workspaceID, confirmation: archive) else {
+                return .removalPreview(remember(try await projectRemovalPlan(repo)))
+            }
+        }
+        var settled = try await projectRemovalPlan(repo)
+        guard settled.preview.blocker == nil, settled.archives.isEmpty else { return .removalPreview(remember(settled)) }
+        if accepted.clone == nil { settled.clone = nil }
+        return try await purge(settled, repo: repo)
+    }
+
+    /// Files first, then rows. The files are found from the rows, so a delete interrupted after
+    /// the rows went would leave transcripts and profiles nothing could ever find again; the other
+    /// way round, a retry measures what is left and asks again.
+    private func purge(_ plan: ServerRemovalPlan, repo: Repo? = nil) async throws -> ServerResult {
+        // A workspace delete already holds its one workspace. A project's archived workspaces are
+        // held here, so a restore cannot bring one back between its files going and its rows.
+        let pending = repo == nil ? [] : plan.workspaceIDs
+        let locked = pending.filter { changingWorkspaces.insert($0).inserted }
+        defer { for id in locked { changingWorkspaces.remove(id) } }
+        guard locked.count == pending.count else {
+            throw ServerFailure("A workspace in this project is being changed. Try again shortly.")
+        }
+        var failures = ServerRemoval.removeFiles(of: plan)
+        try await store.deleteArchivedWorkspaces(ids: plan.workspaceIDs)
+        if let repo {
+            guard try await store.workspaces(repoID: repo.id).isEmpty else {
+                throw ServerFailure("A workspace was started in this project while it was being removed. Nothing more was deleted.")
+            }
+            try await store.deleteRepo(id: repo.id)
+            if let clone = plan.clone {
+                do { try FileManager.default.removeItem(atPath: clone) } catch { failures.append(clone) }
+            }
+        }
+        archivePreviews = archivePreviews.filter { !plan.workspaceIDs.contains($0.value.workspace.id) }
+        scheduleCompaction()
+        guard failures.isEmpty else {
+            return .text("Deleted, but these could not be removed from the server: " + failures.joined(separator: ", "))
+        }
+        return .accepted
+    }
+
+    /// Hands the pages a delete freed back to the disk, once nothing is working.
+    ///
+    /// **Not straight after the delete, and not never.** On the Mac compaction is a button, because
+    /// `VACUUM` holds the store for as long as copying the whole file takes and a window that
+    /// froze on its own would be a bug report. A server has no button to press and nobody sitting
+    /// in front of it, and the whole reason somebody deletes there is a disk that is filling, so
+    /// leaving the pages on SQLite's free list would free nothing they can see. The stall is the
+    /// same actor stall, and every RPC and every agent event waits behind it, so it waits for a
+    /// moment when no turn is streaming, no workspace is changing and no command is running, and
+    /// checks every fifteen seconds for up to an hour. Below `DatabaseSize.isWorthCompacting` it
+    /// does nothing at all. A deferred compaction that never found a quiet hour is picked up by the
+    /// next delete.
+    private func scheduleCompaction() {
+        guard compaction == nil else { return }
+        compaction = Task { [weak self] in
+            for _ in 0..<240 {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled, let self else { return }
+                if await self.compactIfQuiet() { break }
+            }
+            await self?.endCompaction()
+        }
+    }
+
+    private func compactIfQuiet() async -> Bool {
+        guard !isClosed else { return true }
+        guard commands.isEmpty, changingWorkspaces.isEmpty, backgroundSetups.isEmpty else { return false }
+        for session in sessions.values where await session.isBusy { return false }
+        guard let size = try? await store.databaseSize(), size.isWorthCompacting else { return true }
+        try? await store.compactDatabase()
+        return true
+    }
+
+    private func endCompaction() { compaction = nil }
+
+    private func startWorkspace(_ request: ServerWorkspaceRequest, origin: WorkspaceOrigin = .user) async throws -> ServerResult {
+        try requireMaintenanceAdmission()
+        maintenanceWorkspaceStarts += 1
+        defer { maintenanceWorkspaceStarts -= 1 }
+        let controls = request.controls ?? ComposerControls(model: request.model, effort: request.effort,
+            agentKind: request.agent, permissionMode: request.permissionMode)
+        let mode = request.mode ?? .chat
+        guard controls.agentKind.canRunWorkspaces, !controls.model.isEmpty, !request.repositoryPath.isEmpty,
+              !mode.runsAnAgent || !(request.prompt ?? request.name).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ServerFailure("Choose a project, a model and a task for the workspace.")
+        }
+        if mode.runsAnAgent {
+            try ServerAgentAvailability.require(controls.agentKind, in: await installedAgents(store))
+            let wrapped = !(SettingsLoader.load(workspace: request.repositoryPath, repo: request.repositoryPath).executionCommand ?? []).isEmpty
+            let currentBranch = try? await Git.currentBranch(of: request.repositoryPath)
+            let branchMatches = request.baseBranch == nil || request.baseBranch == currentBranch
+            if !wrapped, request.checkout == nil, branchMatches { try await requireAuthentication(controls.agentKind) }
+        }
+        let attachments = request.attachments ?? []
+        guard attachments.reduce(0, { $0 + $1.data.count }) <= 10_000_000 else { throw ServerFailure("Use up to 10 MB of attachments in the first message.") }
+        guard Set(attachments.map(\.sourcePath)).count == attachments.count else { throw ServerFailure("Attach each file once.") }
+        for attachment in attachments {
+            guard attachment.sourcePath.hasPrefix(".bloom/attachments/"), !attachment.sourcePath.contains("..") else { throw ServerFailure("Invalid staged attachment path.") }
+            try ServerFileOperations.validateUpload(name: attachment.name, data: attachment.data)
+        }
+        let manager = WorkspaceManager(store: store)
+        let path = try await repositories.resolve(request.repositoryPath, dataDirectory: URL(fileURLWithPath: store.path).deletingLastPathComponent())
+        let repo = try await manager.addRepository(at: path)
+        guard !removingProjects.contains(repo.id) else { throw ServerFailure("This project is being removed.") }
+        let suppliedName = request.mode == nil ? request.name : nil
+        // The same sea the local create window claims, from this server's own catalogue table.
+        // Without it a terminal or browser start with nothing typed came back as "New workspace"
+        // on `workspace`, `workspace-2`, while the same start on the Mac was a named sea. No
+        // automatic rename runs here, so a chat never claims one: its prompt is its name.
+        let sea = await WorkspaceSeaClaim.claim(
+            in: store, repositoryPath: repo.path,
+            userSuppliedName: suppliedName ?? request.checkout?.workspaceName, userSuppliedBranch: nil,
+            isChatWorkspace: mode.runsAnAgent, wantsAutomaticName: false,
+            hasTask: !(request.prompt ?? request.name).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+        let started = try await manager.start(WorkspaceStartRequest(
+            repo: repo, prompt: request.prompt ?? request.name, origin: origin, baseBranch: request.baseBranch,
+            branch: sea?.branch,
+            name: suppliedName ?? (mode.runsAnAgent ? nil
+                : WorkspaceStartPlan.terminalName(userSuppliedBranch: nil, claimedSea: sea?.pick.ocean.name)),
+            checkout: request.checkout, controls: controls,
+            // Deferred, never `.run`. `.run` awaited the whole setup script inside this request,
+            // so the reply, and the create window waiting on it, waited too: the owner's Docker
+            // based project compiles PHP extensions from source during setup, and the window sat
+            // greyed out with a tiny spinner for many minutes and no way out. Setup now starts
+            // below once the worktree and the rows exist, exactly as the Mac's own create does.
+            opensSession: mode.runsAnAgent, setupPolicy: request.runSetupScript == false ? .skip : .deferred
+        ))
+        // `.deferred` leaves a project with something to run at `pending`, and one with nothing at
+        // `skipped`, so the row already says whether there is a run to wait for.
+        let runsSetup = started.workspace.setupState == .pending
+        var prompt = request.prompt ?? ""
+        for attachment in attachments {
+            let uploaded = try ServerFileOperations.upload(workspace: started.workspace, name: attachment.name, data: attachment.data)
+            prompt = prompt.replacingOccurrences(of: attachment.sourcePath, with: uploaded)
+        }
+        var keptDraft: String?
+        if let session = started.session {
+            try await ServerComposer.save(controls, session: session, store: store)
+            // Held before the prompt is queued, so no drain can start in between.
+            if runsSetup { setupHeldSessions.insert(session.id) }
+            if !prompt.isEmpty {
+                // With setup still to run, the sign-in check waits for the drain: a workspace that
+                // runs its agent inside a container cannot be asked about sign-in before setup has
+                // built that container, and the queue already pauses on a sign-in failure with the
+                // retry the client offers for it.
+                let status = runsSetup ? nil : await authentication(controls.agentKind, store, started.workspace)
+                if status?.requiresSignIn == true, request.mode != nil {
+                    keptDraft = prompt
+                    try await store.saveDraft(sessionID: session.id, body: prompt)
+                } else { try await queue().enqueue(prompt, sessionID: session.id) }
+            }
+        }
+        if runsSetup { setUpInBackground(started.workspace, repo: repo, heldSession: started.session?.id) }
+        if request.mode != nil {
+            return .creation(.workspaceStarted(workspace: started.workspace, session: started.session,
+                setupSucceeded: started.setupSucceeded, draft: keptDraft))
+        }
+        guard let session = started.session else { throw ServerFailure("The workspace has no session.") }
+        return .created(session: session, workspace: started.workspace, setupSucceeded: started.setupSucceeded)
+    }
+
+    /// Runs a new workspace's setup script after its create has replied, and lets its chat's queue
+    /// move once the script ends.
+    ///
+    /// Whatever the outcome, the queue moves, because that is what the Mac does
+    /// (`WorkspaceModel.runSetupThenSend`): a failed setup is something the agent can read the log
+    /// of and fix, and holding the prompt back left a workspace silent for good. The server used
+    /// to keep the prompt as a draft instead, which only worked because the reply waited for the
+    /// script and could hand the draft back.
+    ///
+    /// Not a lifecycle change. The workspace is not put in `changingWorkspaces`, so terminals,
+    /// file reads and new messages all keep working during the run, as they do locally, while
+    /// Run Setup refuses and archive stops the run before removing the worktree.
+    private func setUpInBackground(_ workspace: Workspace, repo: Repo, heldSession: SessionID?) {
+        let id = workspace.id
+        let startedAt = Date()
+        setupClock[id] = (startedAt, nil)
+        let store = store, housekeeper = housekeeper
+        backgroundSetups[id] = Task { [weak self] in
+            let manager = WorkspaceManager(store: store)
+            let port = await manager.ensurePort(for: workspace)
+            let succeeded = await manager.runSetup(workspace: workspace, repo: repo, port: port, onOutput: { _ in })
+            // A cancelled setup was an archive stopping it, not a build that needs tidying after.
+            if !Task.isCancelled { housekeeper.setupEnded(succeeded: succeeded) }
+            await self?.finishBackgroundSetup(id, startedAt: startedAt, heldSession: heldSession)
+        }
+    }
+
+    private func finishBackgroundSetup(_ id: WorkspaceID, startedAt: Date, heldSession: SessionID?) async {
+        backgroundSetups.removeValue(forKey: id)
+        setupClock[id] = (startedAt, Int(Date().timeIntervalSince(startedAt) * 1000))
+        guard let heldSession else { return }
+        setupHeldSessions.remove(heldSession)
+        guard !isClosed else { return }
+        try? await queue().resumeStoredDeliveries(heldSession)
+    }
+
+    private func isHeldForSetup(_ id: SessionID) -> Bool { setupHeldSessions.contains(id) }
+
+    private func authenticatedSession(_ id: SessionID) async throws -> ServerSession {
+        if await sessions[id]?.isBusy != true {
+            let session = try await storedSession(id)
+            guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+            try await requireAuthentication(session.agentKind, workspace: workspace(workspaceID))
+        }
+        return try await liveSession(id)
+    }
+
+    private func liveSession(_ id: SessionID) async throws -> ServerSession {
+        guard !isClosed, !closingSessions.contains(id), try await storedSession(id).archivedAt == nil else {
+            throw ServerFailure("This conversation is closed. Open a new chat before sending a message.")
+        }
+        if !changingWorkspaces.isEmpty {
+            let stored = try await storedSession(id)
+            if let workspaceID = stored.workspaceID, changingWorkspaces.contains(workspaceID) {
+                throw ServerFailure("This workspace is being set up, archived or restored.")
+            }
+        }
+        if let session = sessions[id] { return session }
+        if let task = creating[id] {
+            let live = try await task.value
+            guard !isClosed else {
+                await live.shutdown()
+                throw ServerFailure("The server is shutting down.")
+            }
+            return live
+        }
+        // Strong for the creation, which `creating` awaits anyway; the ending callback the session
+        // keeps is weak, and saying so here is what Xcode 27's ImplicitStrongCapture asks for.
+        let task = Task { [self] () throws -> ServerSession in
+            let session = try await self.storedSession(id)
+            guard session.archivedAt == nil else { throw ServerFailure("This conversation is closed.") }
+            guard let workspaceID = session.workspaceID,
+                  let workspace = try await self.store.workspace(id: workspaceID), workspace.state == .active else {
+                throw ServerFailure("This workspace is no longer available.")
+            }
+            var handle = self.bridge?.register(session: session, workspace: workspace)
+            if handle != nil, self.makeRunner == nil, let repo = try await self.store.repo(id: workspace.repoID) {
+                let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
+                if settings.executionBridge == true, !(settings.executionCommand ?? []).isEmpty, let current = handle {
+                    var attachment = current.attachment
+                    attachment.containerEnvironment = try await self.skills.activeContainerEnvironment()
+                    handle = BridgeHandle(attachment: attachment, mcpConfigPath: current.mcpConfigPath)
+                }
+            }
+            let runner = self.makeRunner?(session, workspace.path, self.store)
+                ?? SessionRunnerFactory.make(session: session, workspacePath: workspace.path, store: self.store, bridge: handle)
+            return ServerSession(runner: runner, runnerExitGrace: self.runnerExitGrace) { [weak self] ending in await self?.queue().turnEnded(session.id, ending: ending) }
+        }
+        creating[id] = task
+        do {
+            let live = try await task.value
+            creating.removeValue(forKey: id)
+            guard !isClosed else {
+                await live.shutdown()
+                throw ServerFailure("The server is shutting down.")
+            }
+            sessions[id] = live
+            return live
+        } catch {
+            creating.removeValue(forKey: id)
+            throw error
+        }
+    }
+
+    public func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        isClosed = true
+        workspaceAdmissions.stop()
+        let task = Task { await self.finishShutdown() }
+        shutdownTask = task
+        await task.value
+    }
+
+    private func finishShutdown() async {
+        let runningCommands = Array(commands.values)
+        for command in runningCommands { command.cancel() }
+        let archiving = Array(bridgeArchives.values)
+        for task in archiving { task.cancel() }
+        compaction?.cancel()
+        // Cancelling stops each script and files its run as stopped. Awaited before the queue
+        // shuts down, so none of them resumes a prompt into a queue that is going away.
+        let setups = Array(backgroundSetups.values)
+        for task in setups { task.cancel() }
+        for task in setups { await task.value }
+        await uiBroker.shutdown()
+        await bridge?.shutdown()
+        await reviewCache.shutdown()
+        await promptQueue?.shutdown()
+        await terminalStreams.shutdown()
+        await terminals.shutdown()
+        let liveSessions = Array(sessions.values)
+        await withTaskGroup(of: Void.self) { group in
+            for session in liveSessions { group.addTask { await session.shutdown() } }
+        }
+        for command in runningCommands { _ = await command.value }
+        for task in archiving { await task.value }
+        await workspaceAdmissions.waitUntilIdle()
+        sessions.removeAll()
+    }
+}
+
+extension ServerRuntime {
+    /// Only the inherited supervisor channel calls these methods. Ordinary RPC and MCP never
+    /// acquire maintenance authority, and closing admission happens before any awaited checks.
+    func maintenanceControl(_ action: String) async throws -> ServerMaintenanceControl.Status {
+        switch action {
+        case "quiesce":
+            guard !maintenanceTrial else { throw ServerFailure("The candidate has not been committed.") }
+            maintenanceQuiescing = true
+        case "resume":
+            guard !maintenanceTrial else { throw ServerFailure("Commit the candidate before accepting work.") }
+            maintenanceQuiescing = false
+        case "commit":
+            guard !isClosed else { throw ServerFailure("The server is shutting down.") }
+            guard maintenanceTrial else { return .init(ready: true, busy: false, message: nil) }
+            switch maintenanceCommitState {
+            case .restoring: throw ServerFailure("The candidate is still restoring its queues.")
+            case .failed(let message): throw ServerFailure("The candidate could not finish starting. Restart it before trying again. " + message)
+            case .pending, .complete: break
+            }
+            maintenanceCommitState = .restoring
+            do {
+                if let maintenanceRestoration { try await maintenanceRestoration() } else { try await restoreQueuedPrompts() }
+                guard !isClosed else { throw ServerFailure("The server shut down while restoring its queues.") }
+                maintenanceCommitState = .complete
+                maintenanceTrial = false
+            } catch {
+                maintenanceCommitState = .failed(error.localizedDescription)
+                throw error
+            }
+        case "status": break
+        default: throw ServerFailure("Unknown supervisor control action.")
+        }
+        if maintenanceTrial {
+            switch maintenanceCommitState {
+            case .restoring: return .init(ready: false, busy: true, message: "Restoring queued work.")
+            case .failed(let message): return .init(ready: false, busy: true, message: "Candidate startup failed: " + message)
+            case .pending, .complete: return .init(ready: false, busy: false, message: "Waiting for update validation.")
+            }
+        }
+        let draining = await promptQueue?.activeDrainCount ?? 0
+        var busy = draining > 0 || maintenanceWorkspaceStarts > 0 || maintenanceBridgeCalls > 0 || !commands.isEmpty || !creating.isEmpty
+            || !changingWorkspaces.isEmpty || !settingUpWorkspaces.isEmpty || !backgroundSetups.isEmpty || !bridgeArchives.isEmpty
+            || workspaceAdmissions.hasActiveOperations
+        for session in Array(sessions.values) {
+            busy = await session.isBusy || busy
+        }
+        let terminalConnections = await terminalStreams.hasConnections
+        let terminalWork = await terminals.hasMaintenanceBlockers()
+        busy = busy || terminalConnections || terminalWork
+        return .init(ready: !isClosed, busy: busy, message: terminalConnections || terminalWork
+            ? "Close terminal connections and stop terminal work before updating."
+            : busy ? "Waiting for running agents and workspace operations to finish." : nil)
+    }
+
+    private func requireMaintenanceAdmission() throws {
+        guard !maintenanceQuiescing, !maintenanceTrial else {
+            throw ServerFailure("Bloom Server is preparing an update. Try again after maintenance ends.")
+        }
+    }
+
+    func maintenanceBridgeCall(_ handler: any BridgeToolHandling, request: MCPRequest,
+                               identity: BridgeIdentity, store: Store) async -> BridgeToolResult {
+        guard !isClosed, !maintenanceTrial else { return .failure("Bloom Server is starting an update. Try again after maintenance ends.") }
+        // Register before asking the session actor whether it is busy. A quiesce/status call
+        // must count this admission check and the entire direct-to-Store tool operation.
+        maintenanceBridgeCalls += 1
+        defer { maintenanceBridgeCalls -= 1 }
+        if maintenanceQuiescing {
+            guard let id = identity.sessionID, let session = sessions[id], await session.isBusy else {
+                return .failure("Bloom Server is preparing an update. New tool calls can resume after maintenance ends.")
+            }
+        }
+        guard !isClosed, !Task.isCancelled else { return .failure("The tool call was cancelled before it started.") }
+        return await handler.call(request, as: identity, store: store)
+    }
+
+    private func bridgeToolbox() -> BridgeToolbox {
+        let handlers = BridgeToolbox.standard.handlers + ServerUIBridgeTools.handlers(broker: uiBroker, store: store) + [
+            WorkspaceStartTool { [weak self] order, project, identity, origin in
+                guard let self else { throw ServerFailure("The server is shutting down.") }
+                return try await self.startWorkspaceForBridge(order, project: project, identity: identity, origin: origin)
+            },
+            AgentStartTool { [weak self] order, sessionID, workspaceID in
+                guard let self else { return .refused("The server is shutting down.") }
+                return await self.startCrewForBridge(order, sessionID: sessionID, workspaceID: workspaceID)
+            },
+            AgentSayTool { [weak self] name, text, sessionID, workspaceID in
+                guard let self else { return .refused("The server is shutting down.") }
+                return await self.sayForBridge(name, text: text, sessionID: sessionID, workspaceID: workspaceID)
+            },
+            AgentStopTool { [weak self] name, sessionID, workspaceID in
+                guard let self else { return .refused("The server is shutting down.") }
+                return await self.stopCrewForBridge(name, sessionID: sessionID, workspaceID: workspaceID)
+            },
+            WorkspaceArchiveTool { [weak self] order in
+                guard let self else { return .refused("The server is shutting down.") }
+                return await self.archiveForBridge(order)
+            },
+            WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
+                guard let self else { return .refused("The server is shutting down.") }
+                return await self.mergeForBridge(workspace, pullRequest: pullRequest, method: method)
+            },
+        ]
+        return BridgeToolbox(handlers: handlers.map { handler in
+            ServerMaintenanceBridgeTool(wrapped: handler, perform: { [weak self] request, identity, store in
+                guard let self else { return .failure("The server is shutting down.") }
+                return await self.maintenanceBridgeCall(handler, request: request, identity: identity, store: store)
+            })
+        })
+    }
+}
+
+extension ServerRuntime {
+    private func startWorkspaceForBridge(_ order: AgentWorkspaceOrder, project: Repo, identity: BridgeIdentity, origin: WorkspaceOrigin) async throws -> StartedWorkspaceSummary {
+        var inherited = ComposerControls()
+        if let id = identity.sessionID, let session = try await store.session(id: id) {
+            inherited = try await ServerComposer.controls(session: session, store: store)
+        }
+        let controls = try await BridgeWorkspaceControls.resolve(for: order, inheriting: inherited, store: store)
+        var request = ServerWorkspaceRequest(repositoryPath: project.path, name: order.name ?? order.prompt)
+        request.prompt = order.prompt; request.controls = controls
+        request.baseBranch = order.source.baseBranch; request.checkout = order.source.checkout
+        let result = try await startWorkspace(request, origin: origin)
+        guard case .created(_, let workspace, _) = result else { throw ServerFailure("The server did not return the new workspace.") }
+        return StartedWorkspaceSummary(workspaceID: workspace.id, name: workspace.name, branch: workspace.branch, path: workspace.path)
+    }
+}
+
+extension ServerRuntime {
+    private func startCrewForBridge(_ order: CrewOrder, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewStartOutcome {
+        do {
+            try requireMaintenanceAdmission()
+            let permit = try workspaceAdmissions.admit(workspaceID)
+            defer { permit.release() }
+            guard !isClosed, !closingSessions.contains(sessionID) else { throw Crew.StartRefusal.parentUnavailable }
+            _ = try await workspace(workspaceID)
+            let available = await installedAgents(store)
+            let member = try await store.startCrewMember(order, parentID: sessionID, workspaceID: workspaceID, availableAgents: available)
+            try await queue().resumeStoredDeliveries(member.id)
+            return .started("Started subagent '\(member.title)' in this workspace. Talk to it with agent_say; its final response will return here when it stops.")
+        } catch let refusal as Crew.StartRefusal {
+            return .refused(Crew.sentence(for: refusal))
+        } catch { return .refused(error.localizedDescription) }
+    }
+
+    private func sayForBridge(_ name: String?, text: String, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewSayOutcome {
+        do {
+            try requireMaintenanceAdmission()
+            let permit = try workspaceAdmissions.admit(workspaceID)
+            defer { permit.release() }
+            let caller = try await storedSession(sessionID)
+            guard caller.workspaceID == workspaceID else { throw ServerFailure("The calling chat belongs to another workspace.") }
+            _ = try await workspace(workspaceID)
+            let target: Session
+            let message: CrewMessage
+            if let name {
+                let members = try await store.crew(of: sessionID)
+                guard case .found(let member) = CrewLookup.find(name, among: members) else {
+                    throw ServerFailure("That subagent name is missing or ambiguous. Call agent_list again.")
+                }
+                target = member; message = .said(from: caller.title, text: text, sender: .orchestrator)
+            } else {
+                guard let parentID = caller.parentSessionID else { throw ServerFailure("This chat has no parent agent. Name a subagent to message.") }
+                target = try await storedSession(parentID)
+                guard target.workspaceID == workspaceID else { throw ServerFailure("The parent chat belongs to another workspace.") }
+                message = .said(from: caller.title, text: text, sender: .subagent)
+            }
+            guard target.archivedAt == nil else { throw ServerFailure("That conversation is closed. Start a new subagent instead.") }
+            try await queue().enqueue(Delivery(targetSessionID: target.id, sourceWorkspaceID: workspaceID, kind: .message, crew: message))
+            return .delivered("Queued that for '\(target.title)'. Messages arrive in order; a busy agent reads this after its current turn ends.")
+        } catch { return .refused(error.localizedDescription) }
+    }
+
+    private func stopCrewForBridge(_ name: String, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewStopOutcome {
+        do {
+            let permit = try workspaceAdmissions.admit(workspaceID)
+            defer { permit.release() }
+            let caller = try await storedSession(sessionID)
+            guard caller.workspaceID == workspaceID else { throw ServerFailure("The calling chat belongs to another workspace.") }
+            let members = try await store.crew(of: sessionID)
+            guard case .found(let member) = CrewLookup.find(name, among: members) else {
+                throw ServerFailure("That subagent name is missing or ambiguous. Call agent_list again.")
+            }
+            _ = try await closeSession(member.id, notifyingParent: false)
+            return .stopped("Stopped subagent '\(member.title)' and closed its chat. Its conversation was kept.")
+        } catch { return .refused(error.localizedDescription) }
+    }
+
+    private func archiveForBridge(_ order: WorkspaceArchiveOrder) async -> WorkspaceArchiveOutcome {
+        do {
+            let current = try await workspace(order.workspace.id)
+            if let sessionID = order.afterTurnOf {
+                let permit = try workspaceAdmissions.admit(current.id)
+                defer { permit.release() }
+                let caller = try await storedSession(sessionID)
+                guard caller.workspaceID == current.id else { throw ServerFailure("The calling chat belongs to another workspace.") }
+                try await store.setSetting("server.archive.after-turn.\(sessionID)", current.id.rawValue)
+                return .requested
+            }
+            if let objection = await WorkspaceArchiveSafety.objection(to: current, excusing: nil, store: store) { return .refused(objection) }
+            let preview = try await prepareArchive(current, keepingBranch: true, measuringDocker: false)
+            guard preview.report.isSafeToDiscard(deletingBranch: false, isPullRequestMerged: preview.hazards.isPullRequestMerged),
+                  !preview.hazards.isAgentRunning else {
+                return .refused("Archiving needs confirmation because this workspace has unprotected work. Review its archive preview in Bloom.")
+            }
+            let result = try await archiveWorkspace(current.id, confirmation: preview.id, bridgeSafe: true)
+            guard case .accepted = result else { return .refused("The workspace changed while it was being checked. Review its archive preview again.") }
+            return .archived
+        } catch { return .refused(error.localizedDescription) }
+    }
+
+    private func mergeForBridge(_ target: Workspace, pullRequest: PullRequest, method: GitHub.MergeMethod) async -> WorkspaceMergeHandoff {
+        do {
+            let permit = try workspaceAdmissions.admit(target.id)
+            defer { permit.release() }
+            let workspace = try await workspace(target.id)
+            guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This workspace's project is unavailable.") }
+            let existing = try await store.sessions(workspaceID: workspace.id)
+            let session: Session
+            if let current = existing.first(where: { $0.parentSessionID == nil }) { session = current } else {
+                session = try await ServerWorkspaceOperations.createSession(workspace: workspace, controls: ComposerControls(), title: "Merge", store: store)
+            }
+            let template = try await store.setting(PromptOverrides.key(for: .mergePullRequest))
+                ?? PromptRegistry.definition(for: .mergePullRequest).defaultTemplate
+            let context = MergePromptContext(workspaceName: workspace.name, number: pullRequest.number, title: pullRequest.title,
+                                             branch: pullRequest.branch, baseBranch: workspace.baseBranch, method: method)
+            let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
+            let extra = ProjectInstructions.resolve(.merge, in: workspace.path, stated: ProjectInstructions.stated(.merge, in: settings))
+            let text = ProjectInstructions.turn(context.render(template: template).text, for: .merge, adding: extra)
+            try await queue().enqueue(text, sessionID: session.id)
+            return .turnBegun(chat: session.title)
+        } catch { return .refused(error.localizedDescription) }
+    }
+
+    private func bridgeTurnEnded(sessionID: SessionID, ending: CrewTurnEnd) async {
+        guard !isClosed, !closingSessions.contains(sessionID),
+              let session = try? await store.session(id: sessionID), session.archivedAt == nil, let workspaceID = session.workspaceID else { return }
+        if let parentID = session.parentSessionID, session.archivedAt == nil,
+           let parent = try? await store.session(id: parentID), parent.archivedAt == nil,
+           let report = ending.report(name: session.title, continuing: false) {
+            try? await queue().enqueue(Delivery(targetSessionID: parentID, sourceWorkspaceID: workspaceID, kind: .report, crew: report))
+        }
+        guard (try? await store.setting("server.archive.after-turn.\(sessionID)")) != nil else { return }
+        if case .cancelled = ending {
+            try? await store.setSetting("server.archive.after-turn.\(sessionID)", nil)
+            return
+        }
+        // The archive closes this runner. Run it outside that runner's event pump so closing the
+        // pump cannot cancel the archive halfway through its normal lifecycle.
+        bridgeArchives[sessionID]?.cancel()
+        bridgeArchives[sessionID] = Task { [weak self] in await self?.completeBridgeArchive(sessionID: sessionID, workspaceID: workspaceID) }
+    }
+
+    private func completeBridgeArchive(sessionID: SessionID, workspaceID: WorkspaceID) async {
+        defer { bridgeArchives[sessionID] = nil }
+        try? await store.setSetting("server.archive.after-turn.\(sessionID)", nil)
+        guard !isClosed, let workspace = try? await store.workspace(id: workspaceID) else { return }
+        if case .refused(let reason) = await archiveForBridge(.init(workspace: workspace, afterTurnOf: nil)) {
+            let payload = try? JSONEncoder().encode(JSONValue.object(["message": .string("The requested archive was not completed. " + reason)]))
+            if let payload { _ = try? await store.appendNext(sessionID: sessionID, kind: .error, payload: payload) }
+        }
+    }
+}

@@ -237,9 +237,17 @@ public enum ArchiveDeletionOutcome: Sendable, Hashable {
 
 public struct ArchiveDeletion: Sendable, Hashable {
     public let footprints: [ArchivedWorkspaceFootprint]
+    /// Where the branches were looked for. A Bloom Server builds this same confirmation, and "not
+    /// on this Mac" read on a Mac about a branch on a server is a sentence about the wrong machine.
+    public let host: String
+    /// What the delete also removes from disk, one line each: the agent CLIs' own transcripts and,
+    /// on a server, the workspace's browser profile. See `AgentTranscriptFiles`.
+    public let filesOnDisk: [String]
 
-    public init(_ footprints: [ArchivedWorkspaceFootprint]) {
+    public init(_ footprints: [ArchivedWorkspaceFootprint], host: String = "this Mac", filesOnDisk: [String] = []) {
         self.footprints = footprints
+        self.host = host
+        self.filesOnDisk = filesOnDisk
     }
 
     public var isEmpty: Bool { footprints.isEmpty }
@@ -299,7 +307,7 @@ public struct ArchiveDeletion: Sendable, Hashable {
             losses.append(notes == 1 ? "a workspace note" : "\(notes) workspace notes")
         }
 
-        return losses
+        return losses + filesOnDisk
     }
 
     /// What survives, which is the half a confirmation usually forgets and the half that decides
@@ -317,17 +325,17 @@ public struct ArchiveDeletion: Sendable, Hashable {
             let branches = footprints.count == 1
                 ? "The branch \(footprints[0].workspace.branch) is"
                 : "All \(footprints.count) branches are"
-            return "\(branches) still on this Mac, so no commit is affected. What goes is the record of the work, not the work."
+            return "\(branches) still on \(host), so no commit is affected. What goes is the record of the work, not the work."
         }
         if known.allSatisfy({ !$0 }) {
             let subject = footprints.count == 1
                 ? "The branch \(footprints[0].workspace.branch) is"
                 : "None of these branches are"
-            return "\(subject) not on this Mac. If no remote still carries \(footprints.count == 1 ? "it" : "them"), this record is the last thing left of the work."
+            return "\(subject) not on \(host). If no remote still carries \(footprints.count == 1 ? "it" : "them"), this record is the last thing left of the work."
         }
         let gone = known.filter { !$0 }.count
         return """
-        \(gone) of these \(footprints.count) branches \(gone == 1 ? "is" : "are") no longer on this Mac. \
+        \(gone) of these \(footprints.count) branches \(gone == 1 ? "is" : "are") no longer on \(host). \
         If no remote still carries \(gone == 1 ? "it" : "them"), \(gone == 1 ? "that record is" : "those records are") \
         the last thing left of that work.
         """

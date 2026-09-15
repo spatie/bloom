@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Everything the shim needs to reach one session, as a value.
 public struct BridgeAttachment: Sendable, Hashable {
@@ -6,12 +7,15 @@ public struct BridgeAttachment: Sendable, Hashable {
     public let socketPath: String
     public let token: String
     public let role: BridgeRole
+    /// Host paths supplied only to an opted-in container launcher, never to MCP registration.
+    public var containerEnvironment: [String: String]
 
-    public init(shimPath: String, socketPath: String, token: String, role: BridgeRole) {
+    public init(shimPath: String, socketPath: String, token: String, role: BridgeRole, containerEnvironment: [String: String] = [:]) {
         self.shimPath = shimPath
         self.socketPath = socketPath
         self.token = token
         self.role = role
+        self.containerEnvironment = containerEnvironment
     }
 
     /// The three variables, and nothing else. The shim inherits the rest of the CLI's environment
@@ -43,7 +47,7 @@ public enum BridgeRegistration {
     /// Claude Code has the same exposure for a milder reason: `--mcp-config` is additive over the
     /// user's own servers on purpose (never `--strict-mcp-config`, which would shut theirs out),
     /// so a shared name is a name that can be taken.
-    public static let serverName = "bloom-workspace-bridge"
+    public static let serverName = ToolHostIdentity.bridgeServerName
 
     /// The name the owner's own client registers Bloom under, **derived per copy of the app** and
     /// deliberately not `serverName`.

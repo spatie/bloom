@@ -81,7 +81,7 @@ enum ChangesReviewProbe {
             await Task.yield()
             await model.refreshChanges()
             FileReview.open(path: "Source.swift", in: model)
-            SourceEditorState.file(root + "/Source.swift").prefersEditing = true
+            PaneStores.local.sourceFile(root + "/Source.swift").prefersEditing = true
             await settle(window)
             let oldText = texts(in: host).joined(separator: "\n")
             check(oldText.contains("let value = 1"), "historical patch did not render")
@@ -111,7 +111,7 @@ enum ChangesReviewProbe {
             await model.refreshChanges()
             check(model.diffScope == .uncommitted && model.changedFiles.isEmpty, "a superseded refresh overwrote the scope")
 
-            SourceEditorState.file(root + "/Source.swift").prefersEditing = false
+            PaneStores.local.sourceFile(root + "/Source.swift").prefersEditing = false
             model.setDiffScope(.all)
             await Task.yield()
             await model.refreshChanges()

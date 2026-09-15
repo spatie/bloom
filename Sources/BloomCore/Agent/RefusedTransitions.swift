@@ -1,5 +1,4 @@
 import Foundation
-import os
 import Synchronization
 
 /// Where a lifecycle says it was asked for something that cannot happen.
@@ -63,7 +62,7 @@ public enum RefusedTransitions {
     private static let entries = Mutex<[Entry]>([])
     private static let refusals = Mutex<Int>(0)
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "transitions"
     )

@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// Keeps a content-sized utility centred on its owner, including when its content changes height.
 /// Screen bounds win near an edge so the title bar and primary action remain reachable.

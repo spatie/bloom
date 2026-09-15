@@ -16,6 +16,7 @@ struct FileMediaView: View {
     var worktree: String
     /// Relative to the worktree, exactly as the review tab carries it.
     var path: String
+    var sourceURL: URL?
 
     /// The bar's own width, for the same reason `FilePreview` measures its own. This bar used to
     /// measure nothing and always draw the folder, so the one of the three that is most often
@@ -61,7 +62,7 @@ struct FileMediaView: View {
     }
 
     private var url: URL {
-        URL(filePath: (worktree as NSString).appendingPathComponent(path))
+        sourceURL ?? URL(filePath: (worktree as NSString).appendingPathComponent(path))
     }
 
     private var filename: String { (path as NSString).lastPathComponent }

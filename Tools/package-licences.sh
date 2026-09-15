@@ -16,6 +16,7 @@ copy_notice() {
 
 copy_notice "$source_root/LICENSE.md" Bloom.txt
 copy_notice "$checkouts/SwiftTerm/LICENSE" SwiftTerm.txt
+copy_notice "$checkouts/AppAuth-iOS/LICENSE" AppAuth.txt
 # Sparkle's notice includes its bundled third-party licences.
 copy_notice "$checkouts/Sparkle/LICENSE" Sparkle.txt
 copy_notice "$checkouts/swift-argument-parser/LICENSE.txt" SwiftArgumentParser.txt

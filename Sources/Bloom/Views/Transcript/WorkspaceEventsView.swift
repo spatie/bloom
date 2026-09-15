@@ -119,15 +119,15 @@ struct WorkspaceEventsView: View, Equatable {
 ///
 /// Since the panel at the bottom of the window went, this row is the only place a setup log is
 /// read, which is why it unfolds to `TextCap.lineCap` lines where it used to stop at two hundred.
-/// A failed run gets a second link beside the first, offering the run again, so that the sentence
-/// the row already ends on ("run setup again") can be pressed where it is read rather than looked
-/// for in the Workspace menu.
+/// A failed run offers a retry beside its title, so the way out stays visible before a long log.
 struct WorkspaceEventRow: View {
     var event: WorkspaceEvent
     var isFirstThing: Bool
     /// See `WorkspaceEventsView.paneHeight`, and `tailCap`.
     var paneHeight: CGFloat = 0
     var model: WorkspaceModel?
+    var onRunSetupAgain: (@MainActor () -> Void)?
+    var onRecoverDocker: (@MainActor () -> Void)?
     /// See `endID`, and `WorkspaceEventsView.onShowLogEnd`.
     var onShowLogEnd: (@MainActor (Bool) -> Void)?
 
@@ -192,12 +192,21 @@ struct WorkspaceEventRow: View {
         let tail = tail
 
         VStack(alignment: .leading, spacing: 0) {
-            if canExpand {
-                ExpandableRowHeader(isExpanded: isExpanded, onToggle: { isExpanded.toggle() }) {
-                    header
+            HStack(alignment: .top, spacing: Metrics.spacing) {
+                if canExpand {
+                    ExpandableRowHeader(isExpanded: isExpanded, onToggle: { isExpanded.toggle() }) {
+                        header(showsLog: !tail.isEmpty)
+                    }
+                } else {
+                    header(showsLog: !tail.isEmpty)
                 }
-            } else {
-                header
+                HStack(spacing: Metrics.spacing) {
+                    if event.kind == .setup, event.outcome == .failed, let onRecoverDocker {
+                        setupActionButton("Start Docker…", help: "Check Docker and start or configure it for this server", action: onRecoverDocker)
+                    }
+                    if showsRunSetupAgain { retryButton }
+                }
+                .padding(.trailing, TranscriptLayout.inset)
             }
 
             if !tail.isEmpty {
@@ -281,15 +290,32 @@ struct WorkspaceEventRow: View {
         }
     }
 
-    private var header: some View {
-        ToolRowHeader(
-            presentation: event.presentation,
+    /// A running setup counts up once a second, in the same place a finished one shows how long it
+    /// took. Only the header is inside the timeline, so the log below is not redrawn each tick.
+    @ViewBuilder
+    private func header(showsLog: Bool) -> some View {
+        if event.isRunning, let startedAt = event.startedAt {
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                headerRow(showsLog: showsLog, durationMS: max(1, Int(context.date.timeIntervalSince(startedAt) * 1000)))
+            }
+        } else {
+            headerRow(showsLog: showsLog, durationMS: event.durationMS)
+        }
+    }
+
+    private func headerRow(showsLog: Bool, durationMS: Int?) -> some View {
+        var presentation = event.presentation
+        // The visible log already contains this detail in full. Repeating a truncated copy in
+        // the header leaves less room for the failure label and its recovery actions.
+        if showsLog { presentation.detail = "" }
+        return ToolRowHeader(
+            presentation: presentation,
             // Only ever read by a file chip, and an event has none: its detail is a line of log or
             // a branch name, never a path this row invites anybody to open. It used to build an
             // empty `Workspace` with a blank `RepoID` every pass to satisfy the type.
             home: model.map { TranscriptHome($0.workspace) } ?? TranscriptHome(),
             isError: event.isFailure,
-            durationMS: event.durationMS,
+            durationMS: durationMS,
             isExpanded: isExpanded,
             isHovered: isHovered,
             showsDisclosure: canExpand
@@ -451,54 +477,18 @@ struct WorkspaceEventRow: View {
                         .frame(width: TranscriptLayout.rule)
                 }
 
-            // Both links are about the same block of output, so they sit on one line under it
-            // rather than stacking: one shows more of what happened, the other has another go at
-            // it. The row draws nothing at all when neither applies, which is why the pair is
-            // behind a condition of its own instead of being an `HStack` that is sometimes empty:
-            // an empty stack is still a view, and the gap above it would be drawn under every
-            // finished run.
-            if showsExpandLink || showsRunSetupAgain || showsStopSetup {
-                // Wider than the `spacing` rung most pairs use. The gap was the only thing
-                // saying these were two controls back when both were plain words, and at six
-                // points "Show more of the log Run setup again" read as one sentence somebody had
-                // forgotten to punctuate. The retry is a bordered button now and no longer relies
-                // on the gap to be told apart, but the link beside it still wants the air.
+            // The retry stays beside the failure title. Log disclosure and stopping the current
+            // run remain together below its output, with no empty action row after completion.
+            if showsExpandLink || showsStopSetup {
                 HStack(spacing: Metrics.gutter) {
                     if showsExpandLink {
                         Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
                             .linkButton()
                             .font(Typo.caption)
                             .help(isExpanded ? "Folds the log back to its last lines" : "Unfolds the log in this row")
-                            // The caret above this row is the same control, already announced as
-                            // one by `ExpandableRowHeader` and already carrying the hint that says
-                            // which way it will go. Two buttons that do one thing should be one
-                            // thing to a reader who cannot see that they sit on the same row, so
-                            // this half is the visible affordance and the caret is the spoken one.
+                            // The header's caret already announces this same disclosure to accessibility.
                             .accessibilityHidden(true)
                     }
-
-                    // **A button rather than a link, and the odd one out on this row on purpose.**
-                    // Reported as not looking clickable, and it did not: a failed setup draws a
-                    // red heading over a log full of red error text, and one more line of small
-                    // coloured words under it reads as the last line of the log rather than as
-                    // the way out of it. Its neighbour stays a link because it is a disclosure
-                    // and the caret above the row already affords it; this one is the only thing
-                    // on screen that does anything about the failure, and the transcript already
-                    // draws that kind of thing as a bordered button. See `AgentQuestionCard` and
-                    // `PermissionAskRowView`, which answer a question the same way.
-                    //
-                    // Not hidden from accessibility the way its neighbour is. Nothing else on this
-                    // row does what it does, so there is no second announcement of it to prefer.
-                    if showsRunSetupAgain, let model {
-                        Button("Run setup again") { SetupRunAlert.shared.ask(model) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .font(Typo.caption)
-                            .help("Asks, then runs this repository's setup script in this workspace again")
-                    }
-
-                    // No confirmation, unlike the run: stopping costs nothing that "Run setup
-                    // again" on the failed row it leaves behind cannot give back.
                     if showsStopSetup, let model {
                         Button("Stop setup") { model.stopSetup() }
                             .buttonStyle(.bordered)
@@ -513,6 +503,26 @@ struct WorkspaceEventRow: View {
         .padding(.leading, TranscriptLayout.detailIndent)
         .padding(.trailing, TranscriptLayout.inset)
         .padding(.bottom, TranscriptLayout.block)
+    }
+
+    /// The retry stays beside the failure title, before any log that needs scrolling.
+    private var retryButton: some View {
+        setupActionButton("Run setup again", help: "Runs this repository's setup script in this workspace again") {
+            if let onRunSetupAgain {
+                onRunSetupAgain()
+            } else if let model {
+                SetupRunAlert.shared.ask(model)
+            }
+        }
+    }
+
+    private func setupActionButton(_ title: String, help: String, action: @escaping @MainActor () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .font(Typo.caption)
+            .fixedSize()
+            .help(help)
     }
 
     /// Whether the link that unfolds the log is worth drawing. See `hasMoreToShow`.
@@ -537,7 +547,7 @@ struct WorkspaceEventRow: View {
     /// with a line saying what it went looking for, so the worst case is an explanation rather than
     /// a wrong answer.
     private var showsRunSetupAgain: Bool {
-        event.kind == .setup && event.outcome == .failed && model?.canRunSetup == true
+        event.kind == .setup && event.outcome == .failed && (onRunSetupAgain != nil || model?.canRunSetup == true)
     }
 
     /// Whether this row offers to stop the run, which is for as long as the script is going.

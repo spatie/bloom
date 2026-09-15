@@ -35,7 +35,7 @@ enum SourceActions {
     static func lookupInDiff(at offset: Int, view: CodeTextView, lines: [DiffLine?], source: String,
                              path: String, model: WorkspaceModel, references: Bool, automatic: Bool,
                              newTab: Bool, onOpen: @escaping (CodeLocation, Bool) -> Void) {
-        let state = SourceEditorState.file((model.workspace.path as NSString).appendingPathComponent(path))
+        let state = model.paneStores.sourceFile((model.workspace.path as NSString).appendingPathComponent(path))
         state.navigationTask?.cancel()
         guard let sourceOffset = DiffDocument.sourceOffset(in: lines, offset: offset, source: source) else {
             state.message = "This diff line is not in the current file. Open the current source to navigate."

@@ -1,0 +1,202 @@
+import SwiftUI
+import BloomCore
+
+/// Servers are flat group headings, at the same depth as This Mac.
+struct SidebarServerHeader: View {
+    @Bindable var server: ServerWindowModel
+    /// Zero as a plain row, and `SidebarProjectsHeader.buttonTrailingInset` as a section header,
+    /// which the list draws 14 points wider than a row. Without it the actions button sat past
+    /// the project `+` and the This Mac button above it.
+    var trailingInset: CGFloat = 0
+    @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
+    @State private var hovered = false
+    @State private var showsConnectionFailure = false
+    @State private var reconnectHovered = false
+    @State private var isRenaming = false
+    @State private var label = ""
+    @State private var showsRemoval = false
+    @State private var removalProfile: ServerConnectionProfile?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            header
+            connectionStatus
+        }
+        .padding(.trailing, trailingInset)
+        .popover(isPresented: $showsConnectionFailure) { ServerConnectionFailureView(server: server) }
+        .onChange(of: server.isConnected) { _, connected in
+            if connected { showsConnectionFailure = false }
+        }
+        .onChange(of: server.isMaintainingServer) { _, updating in
+            if updating { showsConnectionFailure = false }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: Metrics.spacing) {
+            Button { openWindow(id: ServerWindow.id) } label: {
+                Image(systemName: hovered ? "gearshape" : "server.rack")
+                    .frame(width: 16, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("Server settings")
+            Text(server.displayName).lineLimit(1).truncationMode(.middle)
+                .accessibilityAddTraits(.isHeader)
+            if let notice = app.serverMaintenance.updateNotice, !server.isMaintainingServer {
+                Button {
+                    app.serverMaintenance.revealsUpdates = true
+                    openWindow(id: ServerWindow.id)
+                } label: {
+                    Label(notice.headline, systemImage: "arrow.down.circle.fill").labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.controlAccent)
+                .help(notice.summary + " Review it in Server Settings.")
+                .accessibilityIdentifier("sidebar-server-update-available")
+            }
+            if server.isConnecting && !server.isMaintainingServer { ProgressView().controlSize(.mini) }
+            Spacer(minLength: 0)
+            Menu { actions } label: {
+                Label("Server actions", systemImage: "ellipsis")
+                    .labelStyle(.iconOnly)
+                    .font(Typo.label)
+                    .frame(width: Metrics.headerButton.width, height: Metrics.headerButton.height)
+                    .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+                    .background(hovered ? Palette.hover : .clear,
+                                in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+            }
+            // Match the adjacent project buttons. The borderless menu style supplies its own
+            // label sizing and ink, so a frame on its image did not align the actual control.
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .foregroundStyle(hovered ? Palette.textPrimary : Palette.textSecondary)
+            .help("Server actions")
+        }
+        .font(Typo.captionEmphasis)
+        .foregroundStyle(Palette.textSecondary)
+        .contentShape(Rectangle())
+        .onHoverChange { hovered = $0 }
+        .contextMenu { actions }
+        .alert("Rename Server", isPresented: $isRenaming) {
+            TextField("Server label", text: $label)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { server.renameServer(label) }
+        } message: { Text("This label is used in Bloom. Leave it empty to use the hostname.") }
+        .alert("Remove Server?", isPresented: $showsRemoval, presenting: removalProfile) { profile in
+            Button("Cancel", role: .cancel) {}
+            Button("Remove Server", role: .destructive) {
+                Task { await server.removeServer(profile) { app.clearRemoteSelection() } }
+            }
+            .disabled(!server.canRemoveServer || server.connectionProfile?.id != profile.id)
+        } message: { profile in
+            Text("\(profile.displayName) will be removed from Bloom on this Mac. Bloom Server keeps running on the server, with its projects and agents. To remove it from the server as well, choose Uninstall Bloom Server… first. Local drafts and SSH keys stay on this Mac.")
+        }
+    }
+
+    private var hasConnectionFailure: Bool {
+        !server.isMaintainingServer && server.connectionRecovery.phase != .disconnected && server.connectionRecovery.lastError != nil
+    }
+
+    @ViewBuilder private var connectionStatus: some View {
+        if server.isMaintainingServer || !server.isConnected || server.isConnecting {
+            HStack(spacing: 6) {
+                if server.isMaintainingServer {
+                    Text("Updating server…").foregroundStyle(Palette.textSecondary)
+                } else if hasConnectionFailure {
+                    Button { showsConnectionFailure = true } label: {
+                        Label(server.isConnecting ? "Retrying connection…" : "Could not connect",
+                              systemImage: "exclamationmark.triangle")
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.warning)
+                    .help("Show the connection error and retry options")
+                } else {
+                    Text(server.isConnecting ? "Connecting…" : "Disconnected")
+                        .foregroundStyle(Palette.textSecondary)
+                }
+                Spacer(minLength: 0)
+                if server.isMaintainingServer {
+                    ProgressView().controlSize(.mini)
+                        .frame(width: 24, height: 22)
+                        .accessibilityLabel("Server maintenance in progress")
+                } else if !server.isConnecting {
+                    Button {
+                        Task {
+                            guard !server.isMaintainingServer else { return }
+                            await server.connect()
+                        }
+                    } label: {
+                        Label(hasConnectionFailure ? "Retry connection" : "Connect to server", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
+                            .font(Typo.captionEmphasis)
+                            .frame(width: 24, height: 22)
+                            .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+                            .background(reconnectHovered ? Palette.hover : .clear,
+                                        in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.controlAccent)
+                    .help(hasConnectionFailure ? "Retry connection to " + server.displayName : "Connect to " + server.displayName)
+                    .accessibilityIdentifier("sidebar-server-reconnect")
+                    .onHoverChange { reconnectHovered = $0 }
+                    .disabled(server.isRemovingServer || server.isDisconnecting || server.isMaintainingServer)
+                }
+            }
+            .font(Typo.caption)
+            .padding(.leading, 24)
+            .padding(.trailing, Metrics.spacingSmall * 2)
+            .frame(minHeight: 22)
+        }
+    }
+
+    @ViewBuilder private var actions: some View {
+        if server.isConnected {
+            Button("Disconnect") { Task { await server.disconnect() } }
+        } else {
+            Button("Connect") {
+                Task {
+                    guard !server.isMaintainingServer else { return }
+                    await server.connect()
+                }
+            }.disabled(server.isConnecting || server.isMaintainingServer || server.isRemovingServer || server.isDisconnecting)
+        }
+        if hasConnectionFailure {
+            Button("Connection Details…") { showsConnectionFailure = true }
+        }
+        Divider()
+        Button("Start a Project…") {
+            StartProjectOpening.shared.isRemote = true
+            openWindow(id: StartProjectWindow.id)
+        }
+        .disabled(!server.isConnected || server.isConnecting)
+        Button("Rename Server…") { label = server.displayName; isRenaming = true }
+        Button("Server Settings…") { openWindow(id: ServerWindow.id) }
+        if server.savedServers.profiles.count > 1 {
+            Menu("Switch Server") {
+                ForEach(server.savedServers.profiles) { profile in
+                    Button(profile.displayName) { Task { await server.selectServer(profile) } }
+                        .disabled(profile.id == server.connectionProfile?.id)
+                }
+            }
+            .disabled(server.isConnecting || server.isPerformingCommand)
+        }
+        Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
+        Button("Archived Workspaces…") { server.showsArchivedWorkspaces = true }
+            .disabled(!server.isConnected || server.isConnecting)
+        Divider()
+        Button("Uninstall Bloom Server…") {
+            ServerSettingsOpening.shared.requestsUninstall = true
+            openWindow(id: ServerWindow.id)
+        }
+        .disabled(server.isMaintainingServer || server.isRemovingServer)
+        Button("Remove Server…", role: .destructive) {
+            removalProfile = server.connectionProfile
+            showsRemoval = removalProfile != nil
+        }
+        .disabled(!server.canRemoveServer)
+    }
+}

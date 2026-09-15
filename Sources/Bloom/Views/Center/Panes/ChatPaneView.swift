@@ -10,10 +10,11 @@ import BloomCore
 /// them can be dragged to a different place in each.
 struct ChatPaneView: View {
     var transcript: TranscriptModel
-    @Bindable var model: WorkspaceModel
+    var model: WorkspaceModel?
     /// Which pane of the tab this is, and the only thing it is used for is remembering where the
     /// reader had got to in the conversation. See `TranscriptPaneMemory`.
     var pane: String
+    var paneModel: (any WorkspacePaneModel)?
 
     /// Whether the user has scrolled away from the newest row, which is the only thing the jump
     /// pill is an answer to. Read here rather than passed on, because the pill is drawn here.
@@ -41,7 +42,7 @@ struct ChatPaneView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isSideConversationVisible: Bool {
-        model.sideConversations[transcript.session.id]?.isVisible == true
+        model?.sideConversations[transcript.session.id]?.isVisible == true
     }
 
     /// Grows out of the button it hangs off, a little, as a popover does. Only a fade under Reduce
@@ -82,8 +83,8 @@ struct ChatPaneView: View {
     var body: some View {
         TranscriptView(
             transcript: transcript,
-            isRunningSetup: model.isRunningSetup,
-            memory: TranscriptPaneMemory(model: model, pane: pane)
+            isRunningSetup: model?.isRunningSetup ?? false,
+            memory: (paneModel ?? model).map { TranscriptPaneMemory(model: $0, pane: pane) }
         ) { isTranscriptScrolledUp = $0 }
         .environment(\.composerRoom, room)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -101,9 +102,9 @@ struct ChatPaneView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            if let origin = sideOrigin, transcript.session.sideConversationParentID == nil {
+            if let model, let origin = sideOrigin, transcript.session.sideConversationParentID == nil {
                 Button {
-                    WorkspaceTabsStore.shared.reveal(.chat(origin.parentID), in: model)
+                    model.paneStores.tabs.reveal(.chat(origin.parentID), in: model)
                 } label: {
                     Label("From \(origin.title)", systemImage: "arrow.turn.up.left")
                         .font(.caption)
@@ -124,7 +125,7 @@ struct ChatPaneView: View {
         // where it goes and where its tail points.
         .overlayPreferenceValue(SideConversationButtonAnchor.self) { anchor in
             GeometryReader { geometry in
-                if let state = model.sideConversations[transcript.session.id], state.isVisible {
+                if let model, let state = model.sideConversations[transcript.session.id], state.isVisible {
                     let placement = SideConversationPlacement(
                         pane: geometry.size,
                         anchor: anchor.map { geometry[$0] },
@@ -141,6 +142,8 @@ struct ChatPaneView: View {
             .animation(reduceMotion ? nil : Motion.pane, value: isSideConversationVisible)
         }
         .task(id: transcript.session.id) {
+            sideOrigin = nil
+            guard let model else { return }
             let origin = try? await model.store?.sideConversationSnapshot(sessionID: transcript.session.id)
             guard !Task.isCancelled else { return }
             sideOrigin = origin

@@ -1,59 +1,8 @@
 import Foundation
 
-/// What a worktree has changed, counted the way the inspector and the sidebar show it.
-///
-/// Every call in this file runs git with `-z` and parses the bytes rather than the text. A path
-/// is a byte string that may hold a tab or a newline and need not decode as UTF-8 at all, and
-/// git's default output C-quotes anything that is not plain ASCII, so splitting the decoded
-/// `String` on tabs gets both wrong.
-///
-/// `LocalWork` is here rather than in `Git+Safety.swift` because it is the cheap question, the
-/// one a pull request strip can afford to ask beside a poll. Its own comment has the difference.
-///
-/// `ChangedFile` below is one entry of the answer: a path, what happened to it, and the counts.
-public struct ChangedFile: Identifiable, Sendable, Hashable {
-    public enum Change: String, Sendable {
-        case added = "A"
-        case modified = "M"
-        case deleted = "D"
-        case renamed = "R"
-        case copied = "C"
-        case untracked = "?"
-    }
+import BloomClient
 
-    public var path: String
-    public var oldPath: String?
-    public var change: Change
-    public var additions: Int
-    public var deletions: Int
-    public var isBinary: Bool
-
-    public var layer: ChangeLayer?
-    public var stagingRevision: String?
-
-    public var id: String { layer.map { "\($0.rawValue):\(path)" } ?? path }
-
-    public var filename: String { (path as NSString).lastPathComponent }
-    public var directory: String { (path as NSString).deletingLastPathComponent }
-
-    public init(
-        path: String,
-        oldPath: String? = nil,
-        change: Change,
-        additions: Int = 0,
-        deletions: Int = 0,
-        isBinary: Bool = false,
-        layer: ChangeLayer? = nil
-    ) {
-        self.path = path
-        self.oldPath = oldPath
-        self.change = change
-        self.additions = additions
-        self.deletions = deletions
-        self.isBinary = isBinary
-        self.layer = layer
-    }
-}
+public typealias ChangedFile = BloomClient.ChangedFile
 
 /// What this worktree is holding that GitHub has not been told about.
 ///
@@ -114,7 +63,7 @@ extension Git {
     /// NUL-delimited output preserves paths containing tabs, newlines and quoted characters.
     /// A failed command throws rather than being reported as an empty comparison.
     public static func changedFiles(
-        worktree: String, base: String, scope: DiffScope = .all
+        worktree: String, base: String, scope: DiffScope = .all, maximumUntrackedFileBytes: Int? = nil
     ) async throws -> [ChangedFile] {
         if scope == .uncommitted { return try await uncommittedFiles(worktree: worktree) }
         if case .commit(let commit) = scope {
@@ -153,15 +102,29 @@ extension Git {
             // Counted the way git counts. `components(separatedBy:)` returns an empty trailing
             // piece after the final newline, and since practically every text file ends in one,
             // every untracked file used to read one addition too many.
-            let lineCount = (try? String(contentsOfFile: full, encoding: .utf8))
-                .map(countLines) ?? 0
+            let summary = untrackedText(path: path, worktree: worktree, limit: maximumUntrackedFileBytes)
+            let lineCount = summary.text.map(countLines) ?? 0
             byPath[path] = ChangedFile(
                 path: path, change: .untracked, additions: lineCount, deletions: 0,
-                isBinary: lineCount == 0 && FileManager.default.fileExists(atPath: full)
+                isBinary: summary.text == nil && !summary.isLimited && FileManager.default.fileExists(atPath: full),
+                hasIncompleteStats: summary.isLimited
             )
         }
 
         return byPath.values.sorted { $0.path < $1.path }
+    }
+
+    private static func untrackedText(path: String, worktree: String, limit: Int?) -> (text: String?, isLimited: Bool) {
+        let full = URL(fileURLWithPath: worktree).appendingPathComponent(path).path
+        // Git records a symlink's target spelling, not the contents of whatever it points at.
+        if let target = try? FileManager.default.destinationOfSymbolicLink(atPath: full) { return (target, false) }
+        guard let contained = ContainedPath.relative(path, inside: worktree),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: contained.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber else { return (nil, false) }
+        if let limit, size.int64Value > limit { return (nil, true) }
+        guard let text = try? String(contentsOf: contained, encoding: .utf8), !text.contains("\0") else { return (nil, false) }
+        return (text, false)
     }
 
     /// `diff --name-status -z` records: a status field, then one path, except for `R`/`C` where
@@ -407,13 +370,5 @@ extension Git {
     /// Public because the transcript counts lines too, for the "42 lines" a Write chip shows and
     /// for a turn's own rollup of what it changed. Those numbers sit a few points from the
     /// inspector's, which are git's, so they have to be counted the same way.
-    public static func countLines(_ contents: String) -> Int {
-        guard !contents.isEmpty else { return 0 }
-        var count = contents.reduce(into: 0) { total, character in
-            if character == "\n" { total += 1 }
-        }
-        // A file whose last line has no newline still has that line.
-        if contents.hasSuffix("\n") == false { count += 1 }
-        return count
-    }
+    public static func countLines(_ contents: String) -> Int { SourceLineCount.count(contents) }
 }

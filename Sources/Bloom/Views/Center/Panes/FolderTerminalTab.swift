@@ -15,12 +15,12 @@ enum FolderTerminalTab {
     /// Nothing happens if the folder has gone between the right click and the click, which is the
     /// same answer `FolderTerminal.canOpen` gave the menu when it decided whether to draw the item
     /// at all.
-    static func open(folder: String, in model: WorkspaceModel) {
+    static func open(folder: String, in model: any WorkspacePaneModel) {
         guard let target = target(folder: folder, in: model) else { return }
         NewPane.open(
             .terminal, in: model, title: target.title, directory: target.directory
         ) { content in
-            WorkspaceTabsStore.shared.reveal(content, in: model)
+            model.paneStores.tabs.reveal(content, in: model)
         }
     }
 
@@ -29,8 +29,9 @@ enum FolderTerminalTab {
     ///
     /// Asked by `PaneDuplicate` as well, so that duplicating a shell standing in `resources/css`
     /// opens another one there rather than back at the worktree root.
-    static func target(folder: String, in model: WorkspaceModel) -> FolderTerminal.Target? {
-        let taken = CenterTabStore.shared.tabs(for: model.workspace.id)
+    static func target(folder: String, in model: any WorkspacePaneModel) -> FolderTerminal.Target? {
+        guard model.remoteServer == nil else { return nil }
+        let taken = model.paneStores.center.tabs(for: model.workspace.id)
             .filter { $0.kind == .terminal }
             .map(\.title)
         return FolderTerminal.target(folder: folder, taken: taken)

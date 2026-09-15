@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
+#endif
 
 public enum MediaShowToolName {
     public static let show = "media_show"
@@ -57,17 +59,8 @@ public struct WorkspaceMedia: Sendable, Hashable {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
               !isDirectory.boolValue,
-              let type = UTType(filenameExtension: file.pathExtension)
+              let kind = kind(forExtension: file.pathExtension)
         else { return nil }
-
-        let kind: WorkspaceMediaKind
-        if type.conforms(to: .image) {
-            kind = .image
-        } else if type.conforms(to: .movie) {
-            kind = .video
-        } else {
-            return nil
-        }
 
         return WorkspaceMedia(url: file, relativePath: display(of: file, under: root), kind: kind)
     }
@@ -99,11 +92,25 @@ public struct WorkspaceMedia: Sendable, Hashable {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
               !isDirectory.boolValue,
-              let type = UTType(filenameExtension: file.pathExtension),
-              type.conforms(to: .image)
+              kind(forExtension: file.pathExtension) == .image
         else { return nil }
 
         return WorkspaceMedia(url: file, relativePath: file.lastPathComponent, kind: .image)
+    }
+
+    private static func kind(forExtension name: String) -> WorkspaceMediaKind? {
+        #if canImport(UniformTypeIdentifiers)
+        guard let type = UTType(filenameExtension: name) else { return nil }
+        if type.conforms(to: .image) { return .image }
+        if type.conforms(to: .movie) { return .video }
+        return nil
+        #else
+        switch name.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp", "avif", "heic", "tif", "tiff", "bmp", "ico", "svg": .image
+        case "mp4", "m4v", "mov", "webm", "avi", "mkv": .video
+        default: nil
+        }
+        #endif
     }
 }
 

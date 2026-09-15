@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 // The typed ids for messages between workspaces, beside `Identifier.swift` rather than in it.
 // That file is also being moved into a package on the server runtime branch, and every id

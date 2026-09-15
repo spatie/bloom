@@ -42,14 +42,12 @@ struct RepoInstructionsSection: View {
                 placeholder: "Regenerate the lock file rather than resolving it by hand.",
                 text: $model.draft.conflictInstructions
             )
-            DisclosureGroup("How instructions are applied") {
-                VStack(alignment: .leading, spacing: Metrics.spacing) {
-                    Text("Saved instructions apply to every workspace in this project, including existing ones. Commit the settings file to share them with your team.")
-                    Text("Bloom attaches these instructions alongside its built-in merge and conflict-resolution steps. Empty fields add nothing.")
-                }
-                .settingsFootnote()
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                Text("Saved instructions apply to every workspace in this project, including existing ones. Commit the settings file to share them with your team.")
+                Text("Bloom attaches these instructions alongside its built-in merge and conflict-resolution steps. Empty fields add nothing.")
             }
+            .settingsFootnote()
+            .frame(maxWidth: .infinity, alignment: .leading)
         } header: {
             Text("Project instructions")
         }

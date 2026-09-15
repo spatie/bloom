@@ -5,27 +5,50 @@ struct ArchiveConfirmationPopover: View {
     let request: ArchiveRequest
     var canConfirm = true
     var tint: Color = Palette.controlAccent
-    let onConfirm: () -> Void
+    /// Handed the request as the owner left it, Docker choice included.
+    let onConfirm: (ArchiveRequest) -> Void
     let onCancel: () -> Void
+
+    @State private var removesDocker: Bool
+
+    init(request: ArchiveRequest, canConfirm: Bool = true, tint: Color = Palette.controlAccent,
+         onConfirm: @escaping (ArchiveRequest) -> Void, onCancel: @escaping () -> Void) {
+        self.request = request; self.canConfirm = canConfirm; self.tint = tint
+        self.onConfirm = onConfirm; self.onCancel = onCancel
+        _removesDocker = State(initialValue: request.removesDocker)
+    }
+
+    private var answered: ArchiveRequest {
+        var value = request
+        value.removesDocker = removesDocker
+        return value
+    }
 
     var body: some View {
         ConfirmationPopover(
             title: "Archive this workspace?",
-            confirmLabel: request.confirmLabel,
+            confirmLabel: answered.confirmLabel,
             tint: tint,
             canConfirm: canConfirm,
-            onConfirm: onConfirm,
+            onConfirm: { onConfirm(answered) },
             onCancel: onCancel,
             width: 380
         ) {
-            ViewThatFits(in: .vertical) {
-                Text(request.message).fixedSize(horizontal: false, vertical: true)
-                ScrollView {
-                    Text(request.message).frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 10) {
+                ViewThatFits(in: .vertical) {
+                    Text(answered.message).fixedSize(horizontal: false, vertical: true)
+                    ScrollView {
+                        Text(answered.message).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
                 }
-                .scrollBounceBehavior(.basedOnSize)
+                .frame(maxHeight: 440)
+                if request.offersDockerRemoval {
+                    Toggle(request.dockerToggleLabel, isOn: $removesDocker)
+                        .toggleStyle(.checkbox)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .frame(maxHeight: 440)
         }
     }
 
@@ -49,9 +72,9 @@ extension View {
                 request: value,
                 canConfirm: canConfirm,
                 tint: tint,
-                onConfirm: {
+                onConfirm: { answered in
                     request.wrappedValue = nil
-                    onConfirm(value)
+                    onConfirm(answered)
                 },
                 onCancel: { request.wrappedValue = nil }
             )

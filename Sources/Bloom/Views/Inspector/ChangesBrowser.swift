@@ -141,8 +141,8 @@ struct ChangesHistoryList: View {
     private func select(_ scope: DiffScope) {
         model.setDiffScope(scope)
         FileReview.open(path: "", in: model)
-        if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
-            CenterTabStore.shared.setShowsAllFiles(true, for: tab)
+        if let tab = model.paneStores.center.review(for: model.workspace.id) {
+            model.paneStores.center.setShowsAllFiles(true, for: tab)
         }
         armToken += 1
     }

@@ -1,0 +1,21 @@
+{
+  "listen": "127.0.0.1:18880",
+  "api_host": "bloom.example.com",
+  "server_id": "bloom-ubuntu-one",
+  "runtime_socket": "/run/bloom/runtime.sock",
+  "access": {
+    "issuer": "https://login.example.com/realms/bloom",
+    "jwks_url": "https://login.example.com/realms/bloom/protocol/openid-connect/certs",
+    "audience": "bloom-control",
+    "required_scopes": ["bloom:control"],
+    "allowed_subjects": ["REPLACE_WITH_YOUR_PROVIDER_SUBJECT"]
+  },
+  "oauth": {
+    "issuer": "https://login.example.com/realms/bloom",
+    "authorization_endpoint": "https://login.example.com/realms/bloom/protocol/openid-connect/auth",
+    "token_endpoint": "https://login.example.com/realms/bloom/protocol/openid-connect/token",
+    "client_id": "bloom-native",
+    "scopes": ["openid", "offline_access", "bloom:control"]
+  },
+  "previews": []
+}

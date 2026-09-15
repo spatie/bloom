@@ -1,6 +1,15 @@
 {
-  "originHash" : "c5530a0e1ce9893c5b809248100aea1864feab285a3f2e3a13cb0d24f68ce91a",
+  "originHash" : "a5ec5e443af77939113d8229101cf3d908b83b16534a924f1174199d209e8d81",
   "pins" : [
+    {
+      "identity" : "appauth-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/openid/AppAuth-iOS.git",
+      "state" : {
+        "revision" : "a972daac82d449d58ab119e91c68153e29ddac33",
+        "version" : "3.0.0"
+      }
+    },
     {
       "identity" : "flare-client-swift",
       "kind" : "remoteSourceControl",

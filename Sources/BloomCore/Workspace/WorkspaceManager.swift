@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 public enum WorkspaceError: Error, CustomStringConvertible {
     case projectFolderMissing
@@ -13,6 +12,9 @@ public enum WorkspaceError: Error, CustomStringConvertible {
     case unsafeToArchive(WorkspaceSafetyReport)
     case archiveScriptFailed(status: Int32, output: String)
     case archiveScriptIncomplete(ShellFailure)
+    /// The archive was asked to remove the workspace's containers and volumes and Docker refused.
+    /// Nothing after it ran, so the worktree and the branch are still there.
+    case dockerCleanupFailed(String)
     /// The row was read, the work was done, and by the time it came to write the result there was
     /// no such workspace in the database any more. Only reachable when the project it belonged to
     /// was removed while this was running, which cascades its workspaces away.
@@ -31,6 +33,8 @@ public enum WorkspaceError: Error, CustomStringConvertible {
                 + output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(500)
         case .archiveScriptIncomplete(let failure):
             "The archive script did not finish, so nothing was removed: \(failure.description)"
+        case .dockerCleanupFailed(let detail):
+            "The archive script ran, but its containers and volumes could not be removed, so the worktree was kept: \(detail)"
         case .workspaceGone(let name): "\(name) is no longer in the database"
         }
     }
@@ -142,7 +146,7 @@ public struct WorkspaceManager: Sendable {
     }
 
     /// Where a project coming back into the sidebar says so. See `bringProjectBack`.
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "workspace"
     )
@@ -241,7 +245,7 @@ public struct WorkspaceManager: Sendable {
         )
         try await Git.recordBase(repository, for: finalBranch, in: worktreePath)
 
-        try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
+        try copyFiles(SettingsLoader.load(workspace: worktreePath, repo: repo.path).filesToCopy, from: repo.path, to: worktreePath)
 
         // Naming `setupState` reaches the initialiser that is internal to the module, which is
         // why this can say it and nothing in `Sources/Bloom` can. A workspace with no setup script
@@ -254,7 +258,7 @@ public struct WorkspaceManager: Sendable {
             branch: finalBranch,
             path: worktreePath,
             baseBranch: base,
-            setupState: setupPolicy.initialState(script: settings.setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
+            setupState: setupPolicy.initialState(script: SettingsLoader.load(workspace: worktreePath, repo: repo.path).setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin
         )
@@ -307,7 +311,6 @@ public struct WorkspaceManager: Sendable {
         origin: WorkspaceOrigin,
         setupPolicy: WorkspaceSetupPolicy
     ) async throws -> Workspace {
-        let settings = SettingsLoader.load(repo: repo.path)
         let existingBranches = Set(try await Git.branches(of: repo.path))
         let branch = WorkspaceCheckoutPlan.localBranch(for: checkout, taken: existingBranches)
 
@@ -371,7 +374,7 @@ public struct WorkspaceManager: Sendable {
             }
         }
 
-        try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
+        try copyFiles(SettingsLoader.load(workspace: worktreePath, repo: repo.path).filesToCopy, from: repo.path, to: worktreePath)
 
         let workspace = Workspace(
             id: id,
@@ -380,7 +383,7 @@ public struct WorkspaceManager: Sendable {
             branch: branch,
             path: worktreePath,
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),
-            setupState: setupPolicy.initialState(script: settings.setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
+            setupState: setupPolicy.initialState(script: SettingsLoader.load(workspace: worktreePath, repo: repo.path).setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin,
             // Written now rather than waited for. A review workspace knows its pull request before
@@ -526,9 +529,9 @@ public struct WorkspaceManager: Sendable {
             onOutput("Setup was cancelled before it began, so nothing was started.")
             return false
         }
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
         let launch = ScriptLaunch.resolve(
-            text: settings.setupScript, file: settings.scriptFiles[.setup], repo: repo.path
+            text: settings.setupScript, file: settings.scriptFiles[.setup], repo: workspace.path
         )
 
         let hasSubmodules = Git.hasSubmodules(in: workspace.path)
@@ -580,7 +583,16 @@ public struct WorkspaceManager: Sendable {
             break
         }
 
-        _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runStarted) }
+        let attempt = try? await store.beginSetupAttempt(workspaceID: workspace.id)
+        let output = SetupOutputBuffer(store: store, workspaceID: workspace.id, attempt: attempt)
+        if !preparationLog.isEmpty { await output.append(preparationLog.trimmingCharacters(in: .newlines)) }
+        let persistence = Task {
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { break }
+                await output.flush()
+            }
+        }
+        defer { persistence.cancel() }
 
         let env = environment(for: workspace, repo: repo, port: port)
         let runner = StreamingProcess(
@@ -590,7 +602,6 @@ public struct WorkspaceManager: Sendable {
             environment: Shell.environment(extra: env)
         )
 
-        var log = preparationLog
         var didStart = false
         await withTaskCancellationHandler {
             do {
@@ -600,12 +611,12 @@ public struct WorkspaceManager: Sendable {
                 try Task.checkCancellation()
                 for try await line in lines {
                     try Task.checkCancellation()
-                    log += line + "\n"
+                    await output.append(line)
                     onOutput(line)
                 }
             } catch {
                 if Task.isCancelled { runner.terminate() }
-                log += "\n\(error)\n"
+                await output.append("\(error)")
                 onOutput("\(error)")
             }
         } onCancel: {
@@ -622,20 +633,21 @@ public struct WorkspaceManager: Sendable {
         // `exitStatus` for ever and leave the row `running`, so it gets SIGKILL after a grace
         // period. The line in the log is what tells a reader later that nobody's script failed.
         if Task.isCancelled {
-            log += Self.setupStoppedNote + "\n"
+            await output.append(Self.setupStoppedNote)
             onOutput(Self.setupStoppedNote)
         }
 
         let status: Int32? = didStart ? await runner.exitStatus : nil
         if let status { onExit?(Int(status)) }
         let succeeded = status == 0 && !Task.isCancelled
-        let printed = log
+        let printed = await output.snapshot()
         // The whole `workspace` value here is as old as the run, and a run can take minutes, so
         // upserting it would clobber every other write to the row made in the meantime. `update`
         // re-reads inside the actor; `apply` writes the state and the log in one statement and
         // caps the log, so there is no shape of this that files an outcome without its output.
-        _ = try? await store.update(workspaceID: workspace.id) {
-            $0.apply(.runFinished(succeeded: succeeded, log: printed))
+        if let attempt {
+            try? await store.finishSetupAttempt(workspaceID: workspace.id, attempt: attempt,
+                                               succeeded: succeeded, log: printed)
         }
         return succeeded
     }
@@ -743,13 +755,17 @@ public struct WorkspaceManager: Sendable {
     ///   one. Nothing here can ask: `gh` lives above this layer and a report that shelled out to
     ///   the network would make every archive wait on it. Passing it in is what stops a squash
     ///   merged branch, which git calls unmerged, from being refused as unsafe.
+    /// - Parameter docker: the engine to remove this workspace's containers, volumes and networks
+    ///   from, when the owner chose that in the confirmation. `nil` keeps them, which is what
+    ///   every caller that showed nobody the choice passes.
     public func archive(
         workspace: Workspace,
         repo: Repo,
         deleteBranch: Bool? = nil,
         force: Bool = false,
         isPullRequestMerged: Bool = false,
-        archiveScriptTimeout: Duration = WorkspaceManager.archiveScriptTimeout
+        archiveScriptTimeout: Duration = WorkspaceManager.archiveScriptTimeout,
+        docker: WorkspaceDocker? = nil
     ) async throws {
         // Already archived, so there is nothing here to wind down. Everything below this line acts
         // on a worktree that has been removed once already: the archive script would run in a
@@ -763,7 +779,7 @@ public struct WorkspaceManager: Sendable {
         // See the branch delete near the end of this method for what it guards.
         let worktreeWasOnDisk = FileManager.default.fileExists(atPath: workspace.path)
 
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
         let shouldDeleteBranch = deleteBranch ?? settings.deleteBranchOnArchive
 
         let report: WorkspaceSafetyReport?
@@ -793,7 +809,7 @@ public struct WorkspaceManager: Sendable {
         // running, a database still there. Deleting the worktree anyway leaves that mess with
         // nothing left to clean it up from.
         let archiveLaunch = ScriptLaunch.resolve(
-            text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: repo.path
+            text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: workspace.path
         )
         // A `.missing` archive script is not run and does not stop the archive, for the same
         // reason a missing setup script does not stop a workspace being created.
@@ -828,6 +844,22 @@ public struct WorkspaceManager: Sendable {
                     status: result.status,
                     output: result.stderr.isEmpty ? result.stdout : result.stderr
                 )
+            }
+        }
+
+        // After the script, so a project whose own teardown does `docker compose down -v` gets to
+        // do it its way first and this finds nothing left. And outside the script's condition,
+        // because the case this exists for is the one where the script never ran: a worktree
+        // already gone from disk used to skip the script silently and orphan every container and
+        // volume it would have removed, with nothing left in Bloom that knew they were there.
+        //
+        // Before the worktree goes, and a failure stops the archive, for the reason a failing
+        // script does: once the row says archived, nothing comes back for what Docker refused.
+        if let docker {
+            do {
+                try await docker.removeResources(of: workspace.id)
+            } catch {
+                throw WorkspaceError.dockerCleanupFailed(error.localizedDescription)
             }
         }
 
@@ -957,7 +989,7 @@ public enum PortAllocator {
     }
 
     static func isFree(_ port: Int) -> Bool {
-        let handle = socket(AF_INET, SOCK_STREAM, 0)
+        let handle = socket(AF_INET, SystemCalls.streamSocketType, 0)
         guard handle >= 0 else { return true }
         defer { close(handle) }
 

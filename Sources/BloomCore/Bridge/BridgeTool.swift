@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// One tool as `tools/list` describes it.

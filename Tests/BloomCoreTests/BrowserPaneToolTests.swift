@@ -219,9 +219,9 @@ struct BrowserPaneToolTests {
 
     @Test("each direction moves the page its own way")
     func eachDirectionMoves() {
-        #expect(BrowserScroll(direction: .top).movement.contains("scrollTo(0, 0)"))
-        #expect(BrowserScroll(direction: .bottom).movement.contains("scrollHeight"))
-        #expect(BrowserScroll(direction: .up).movement.contains("-Math.round"))
+        #expect(BrowserPageScript.scroll(BrowserScroll(direction: .top)).source.contains("scrollTo(0, 0)"))
+        #expect(BrowserPageScript.scroll(BrowserScroll(direction: .bottom)).source.contains("scrollHeight"))
+        #expect(BrowserPageScript.scroll(BrowserScroll(direction: .up)).source.contains("-Math.round"))
     }
 
     // MARK: - Going somewhere

@@ -22,12 +22,12 @@ import BloomCore
 /// The first three take their name and their glyph from `PaneKind` rather than spelling them out,
 /// because the pane's split submenus offer the same three and the two lists have to keep saying
 /// the same words.
-struct NewTabMenu: View {
-    let model: WorkspaceModel
+struct NewTabMenu<Model: WorkspacePaneModel>: View {
+    let model: Model
 
-    private var store: WorkspaceTabsStore { .shared }
+    private var store: WorkspaceTabsStore { model.paneStores.tabs }
 
-    private var tabs: CenterTabStore { .shared }
+    private var tabs: CenterTabStore { model.paneStores.center }
 
     private var launcher: RunScriptLauncher { .shared }
 
@@ -37,6 +37,8 @@ struct NewTabMenu: View {
                 .keyboardShortcut("t", modifiers: .command)
             Button(PaneKind.terminal.title, systemImage: PaneKind.terminal.symbol, action: newTerminal)
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+            Button("Open Preview", systemImage: "play.rectangle") { BrowserTab.openPreview(in: model) }
+                .disabled(model.isRunningSetup)
             Button(PaneKind.browser.title, systemImage: PaneKind.browser.symbol, action: newBrowser)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
             Divider()
@@ -62,7 +64,7 @@ struct NewTabMenu: View {
         // the menu on the next switch. The read is coalesced and off the main actor, and the
         // pointer takes longer to reach the button than the parse takes.
         .onHover {
-            if $0 { model.refreshSettings() }
+            if $0 { model.localWorkspaceModel?.refreshSettings() }
         }
         .accessibilityLabel("New Tab")
         .help("New tab in this workspace")
@@ -76,7 +78,8 @@ struct NewTabMenu: View {
     /// shows its tab rather than starting a second copy. The words are `RunScriptMenuItem`.
     @ViewBuilder
     private var runScriptItems: some View {
-        let scripts = model.settings.runScripts
+        // Read from this Mac's checkout, so a workspace on a server offers none yet.
+        let scripts = model.localWorkspaceModel?.settings.runScripts ?? []
         if !scripts.isEmpty {
             let running = runningScripts()
             Divider()
@@ -88,7 +91,7 @@ struct NewTabMenu: View {
                         missingFile: missingFile(of: script)
                     )
                     Button {
-                        launcher.pick(script, in: model)
+                        if let local = model.localWorkspaceModel { launcher.pick(script, in: local) }
                     } label: {
                         // A label and then a second text, which a menu draws as the title with
                         // its glyph and a subtitle under it.
@@ -113,7 +116,7 @@ struct NewTabMenu: View {
     }
 
     private func missingFile(of script: RunScript) -> String? {
-        guard let file = model.settings.scriptFiles[.run(script.id)], file.isMissing else { return nil }
+        guard let file = model.localWorkspaceModel?.settings.scriptFiles[.run(script.id)], file.isMissing else { return nil }
         return file.path
     }
 
@@ -142,4 +145,13 @@ struct NewTabMenu: View {
             NewPane.open(.browser, in: model, url: address) { store.select($0, in: model) }
         }
     }
+}
+
+/// The menu for whichever workspace the window is on, local or on a server. The toolbar holds that
+/// as `any WorkspacePaneModel`, and a generic view is built from an existential by opening it,
+/// which is all this does.
+@MainActor
+func newTabMenu(for model: any WorkspacePaneModel) -> AnyView {
+    func menu<Model: WorkspacePaneModel>(_ model: Model) -> AnyView { AnyView(NewTabMenu(model: model)) }
+    return menu(model)
 }

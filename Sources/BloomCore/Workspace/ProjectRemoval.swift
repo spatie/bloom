@@ -51,7 +51,35 @@ public enum ProjectRemoval {
         text += " Nothing on disk is deleted: the repository stays where it is"
         if active > 0 {
             text += ", and the worktrees stay checked out, so they have to be removed with `git worktree remove` if they are no longer wanted"
+            text += ". \(archiveFirstLabel) runs each workspace\u{2019}s archive script and removes its worktree first, "
+                + "and removes nothing if one of them holds work that exists nowhere else"
         }
         return text + "."
+    }
+
+    /// The second way out of a project that still has worktrees on disk.
+    ///
+    /// Removing a project used to leave every active worktree checked out and every archive
+    /// script unrun, so whatever a setup script had started (a container, a database, a port) was
+    /// still there with nothing left in Bloom to wind it down. Archiving each workspace first is
+    /// what the sidebar would have done one at a time, so it is offered beside the plain removal
+    /// rather than instead of it.
+    public static let archiveFirstLabel = "Archive Workspaces, Then Remove"
+
+    /// Whether to offer `archiveFirstLabel`: only when there is an active worktree to archive.
+    public static func offersArchiveFirst(workspaces: [Workspace]) -> Bool {
+        workspaces.contains { $0.state == .active }
+    }
+
+    /// Why an archive-first removal did not start, one line per workspace in the way.
+    ///
+    /// Nothing is archived until every workspace has been checked, so this says that nothing was
+    /// touched: a removal that archived two workspaces and stopped at the third would leave a
+    /// project half dismantled and the reader guessing which half.
+    public static func archiveFirstRefusal(project: String, reasons: [String]) -> String {
+        "\(project) is still here and nothing was archived, because "
+            + (reasons.count == 1 ? "one workspace cannot be archived without asking:" : "\(reasons.count) workspaces cannot be archived without asking:")
+            + "\n\n" + reasons.map { "\u{2022} \($0)" }.joined(separator: "\n")
+            + "\n\nArchive \(reasons.count == 1 ? "it" : "them") from the sidebar, where the confirmation shows what would be lost, then remove the project."
     }
 }

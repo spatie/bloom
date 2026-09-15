@@ -57,6 +57,10 @@ struct WorkspaceEvent: Identifiable, Equatable {
     /// success, and painting all of it red said the opposite. See `SetupLogLine`.
     var failureSummary: String = ""
     var durationMS: Int?
+    /// When a run that is still going began, so its row can count up while the reader waits. A
+    /// Docker build on a small server runs for many minutes, and a row that says nothing about how
+    /// long it has been going cannot be told apart from one that has stopped moving.
+    var startedAt: Date?
 
     /// How many lines `log` holds, counted once when the event is built rather than in a body.
     ///
@@ -83,7 +87,8 @@ struct WorkspaceEvent: Identifiable, Equatable {
         note: String = "",
         log: String = "",
         failureSummary: String = "",
-        durationMS: Int? = nil
+        durationMS: Int? = nil,
+        startedAt: Date? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -94,6 +99,7 @@ struct WorkspaceEvent: Identifiable, Equatable {
         self.log = log
         self.failureSummary = failureSummary
         self.durationMS = durationMS
+        self.startedAt = startedAt
         self.logLines = LogTail.lineCount(log)
     }
 
@@ -137,8 +143,9 @@ struct WorkspaceEvent: Identifiable, Equatable {
     /// means a re-run replaces the line rather than appending a second one, which is right: a
     /// workspace has one setup, however many times it has been run.
     /// - Parameter status: what the script exited with, when this launch watched the run.
+    /// - Parameter startedAt: when the run in progress began, for the count beside a running row.
     static func setup(
-        state: SetupState, log: String, durationMS: Int?, status: Int? = nil
+        state: SetupState, log: String, durationMS: Int?, status: Int? = nil, startedAt: Date? = nil
     ) -> WorkspaceEvent? {
         switch state {
         case .pending:
@@ -147,9 +154,13 @@ struct WorkspaceEvent: Identifiable, Equatable {
             return nil
 
         case .running:
+            // What the script is doing, in words, when its output says. "Setting up" for the whole
+            // of a twenty minute Docker build told the reader nothing they did not already know.
+            // See `SetupStep`, which is where both this row and a remote workspace's read it.
             return WorkspaceEvent(
                 id: "setup", kind: .setup, outcome: .running,
-                title: "Setting up", detail: LogTail.lastLine(log), log: log
+                title: SetupStep.read(log: log)?.title ?? "Setting up", detail: LogTail.lastLine(log), log: log,
+                startedAt: startedAt
             )
 
         case .succeeded:
@@ -180,7 +191,7 @@ struct WorkspaceEvent: Identifiable, Equatable {
                 // row must always carry: whether anything else happened. See `SetupFailure`.
                 note: [
                     diagnosis.sentence,
-                    diagnosis.advice.isEmpty ? SetupFailure.instruction : SetupFailure.agentStarted,
+                    diagnosis.advice.isEmpty ? SetupFailure.instruction : SetupFailure.workspaceAvailable,
                 ]
                     .filter { !$0.isEmpty }
                     .joined(separator: " "),
@@ -216,14 +227,9 @@ struct WorkspaceEvent: Identifiable, Equatable {
 /// is the way out.
 enum SetupFailure {
     static let instruction =
-        "The agent was started anyway. Check the setup output and run setup again."
+        "Your workspace is still available. Check the setup output and run setup again."
 
-    /// The half of that sentence which is true whatever went wrong, for the rows where
-    /// `SetupDiagnosis` already said what to do and saying it twice would be the only result.
-    ///
-    /// It is the half that must never be dropped. A red row that leaves somebody guessing whether
-    /// their worktree survived, or whether an agent is off working in it anyway, is worse than one
-    /// that explains nothing. It used to read "No agent was started", which was the honest answer
-    /// while a failed setup held the queue; it does not any more. See `DeliveryHold`.
-    static let agentStarted = "The agent was started anyway."
+    // Local and remote creation handle the first prompt differently after setup fails. The
+    // shared event knows only the setup result, so it must not claim an agent was started.
+    static let workspaceAvailable = "Your workspace is still available."
 }

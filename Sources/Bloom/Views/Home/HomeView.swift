@@ -580,7 +580,7 @@ struct HomeView: View {
             guard let footprint = cleanup.footprints.first(where: { $0.id == workspace.id }) else {
                 return
             }
-            deleting = ArchiveDeletion([footprint])
+            deleting = ArchiveDeletion([footprint], filesOnDisk: await app.agentTranscriptLosses(for: workspace))
         }
     }
 

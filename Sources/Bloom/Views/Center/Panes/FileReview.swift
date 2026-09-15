@@ -14,42 +14,42 @@ import BloomCore
 @MainActor
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
-    static func open(path: String, in model: WorkspaceModel, focusing: Bool = false) {
+    static func open(path: String, in model: any WorkspacePaneModel, focusing: Bool = false) {
         let location = CodeLocation.parse(path)
         if location.path != path { open(location: location, in: model); return }
-        SourceEditorState.file((model.workspace.path as NSString).appendingPathComponent(path)).diffRequest = nil
-        SourceNavigation.shared.visit(location, in: model)
+        model.paneStores.sourceFile((model.workspace.path as NSString).appendingPathComponent(path)).diffRequest = nil
+        model.paneStores.sourceNavigation.visit(location, in: model)
         if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
         show(path: path, in: model, focusing: focusing)
         // A file somebody named opens on its own, changed or not. It used to be only the unchanged
         // ones: a changed file clicked in the inspector scrolled the all-files review to it and left
         // every other diff around it, which a reader reported as the click not doing what it says.
         // All files is still one segment away in the review toolbar, and `step` keeps the mode.
-        if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
-            CenterTabStore.shared.setShowsAllFiles(false, for: tab)
+        if let tab = model.paneStores.center.review(for: model.workspace.id) {
+            model.paneStores.center.setShowsAllFiles(false, for: tab)
         }
     }
 
-    static func open(location: CodeLocation, in model: WorkspaceModel, recording: Bool = true) {
+    static func open(location: CodeLocation, in model: any WorkspacePaneModel, recording: Bool = true) {
         var location = location
         location.path = location.displayPath(relativeTo: model.workspace.path)
-        if recording { SourceNavigation.shared.visit(location, in: model) }
+        if recording { model.paneStores.sourceNavigation.visit(location, in: model) }
         let absolute = (location.path as NSString).isAbsolutePath ? location.path
             : (model.workspace.path as NSString).appendingPathComponent(location.path)
-        SourceEditorState.file(absolute).go(to: location)
+        model.paneStores.sourceFile(absolute).go(to: location)
         show(path: location.path, in: model, focusing: true)
-        if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
-            CenterTabStore.shared.setShowsAllFiles(false, for: tab)
+        if let tab = model.paneStores.center.review(for: model.workspace.id) {
+            model.paneStores.center.setShowsAllFiles(false, for: tab)
         }
         if model.changedFiles.contains(where: { $0.path == location.path }) { model.selectedFilePath = location.path }
     }
 
-    static func activePath(in model: WorkspaceModel) -> String? {
-        let workspaceTabs = WorkspaceTabsStore.shared
+    static func activePath(in model: any WorkspacePaneModel) -> String? {
+        let workspaceTabs = model.paneStores.tabs
         guard let selected = workspaceTabs.selectedTab(in: model) else { return nil }
         let layout = workspaceTabs.layout(of: selected)
         let panes = [layout.focus] + layout.panes.filter { $0 != layout.focus }
-        let tabs = CenterTabStore.shared.tabs(for: model.workspace.id)
+        let tabs = model.paneStores.center.tabs(for: model.workspace.id)
         for pane in panes {
             guard case let .tool(id) = workspaceTabs.content(of: pane, in: selected),
                   let tab = tabs.first(where: { $0.id == id && $0.kind == .review }) else { continue }
@@ -59,7 +59,7 @@ enum FileReview {
         return nil
     }
 
-    static func openFromDiff(_ target: CodeLocation, in model: WorkspaceModel, newTab: Bool) async {
+    static func openFromDiff(_ target: CodeLocation, in model: any WorkspacePaneModel, newTab: Bool) async {
         var location = target
         location.path = location.displayPath(relativeTo: model.workspace.path)
         if !newTab, let file = model.reviewFiles.first(where: { $0.path == location.path }) {
@@ -67,13 +67,13 @@ enum FileReview {
             guard !Task.isCancelled else { return }
             if let diff = DiffDocument.parse(patch: patch, path: file.path), DiffDocument.contains(location, in: diff) {
                 let absolute = (model.workspace.path as NSString).appendingPathComponent(location.path)
-                let state = SourceEditorState.file(absolute)
+                let state = model.paneStores.sourceFile(absolute)
                 state.request = nil
                 state.prefersEditing = false
                 state.diffLine = location.line
                 state.diffRequest = location
                 state.diffRevision &+= 1
-                SourceNavigation.shared.visit(location, in: model)
+                model.paneStores.sourceNavigation.visit(location, in: model)
                 model.selectedFilePath = location.path
                 show(path: location.path, in: model, focusing: true)
                 return
@@ -89,12 +89,12 @@ enum FileReview {
     /// they are walking. It is true for the routes that name no file, which are the `+` menu and
     /// the keyboard: those are somebody asking to BE in the review, and a request that lands on a
     /// pane nobody is standing in looks exactly like a menu item that does nothing.
-    private static func show(path: String, in model: WorkspaceModel, focusing: Bool) {
-        let tab = CenterTabStore.shared.showReview(path: path, workspaceID: model.workspace.id)
+    private static func show(path: String, in model: any WorkspacePaneModel, focusing: Bool) {
+        let tab = model.paneStores.center.showReview(path: path, workspaceID: model.workspace.id)
         // `reveal` brings the tab holding the review forward and takes nothing off a pane, so the
         // rule above is kept by the door rather than by a guard here. A review already on screen
         // is already on screen, whichever pane of the tab in front is showing it.
-        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model, focusing: focusing)
+        model.paneStores.tabs.reveal(.tool(tab.id), in: model, focusing: focusing)
     }
 
     /// Opens a file in a tab that stays on it, which is what a double click on a file pill and
@@ -104,16 +104,16 @@ enum FileReview {
     /// what a single click does. This one is the deliberate second gesture: the tab it opens is
     /// never the one `showReview` repoints, so a reading you set aside survives the next filename
     /// you click. See `CenterTab.isPinnedToPath`.
-    static func openInNewTab(path: String, in model: WorkspaceModel) {
+    static func openInNewTab(path: String, in model: any WorkspacePaneModel) {
         let location = CodeLocation.parse(path)
-        SourceNavigation.shared.visit(location, in: model)
+        model.paneStores.sourceNavigation.visit(location, in: model)
         if location.path != path {
             let absolute = (location.path as NSString).isAbsolutePath ? location.path
                 : (model.workspace.path as NSString).appendingPathComponent(location.path)
-            SourceEditorState.file(absolute).go(to: location)
+            model.paneStores.sourceFile(absolute).go(to: location)
         }
-        let tab = CenterTabStore.shared.openPinnedReview(path: location.path, workspaceID: model.workspace.id)
-        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+        let tab = model.paneStores.center.openPinnedReview(path: location.path, workspaceID: model.workspace.id)
+        model.paneStores.tabs.reveal(.tool(tab.id), in: model)
     }
 
     /// Opens the review on whatever the reader was last looking at, which is the selected changed
@@ -124,7 +124,7 @@ enum FileReview {
     /// nothing in its diff still has a review tab to open, and what it draws is the sentence
     /// saying nothing differs from the base branch yet. Refusing here, or greying the menu row
     /// out, is what made this read as a control that did nothing.
-    static func open(in model: WorkspaceModel) {
+    static func open(in model: any WorkspacePaneModel) {
         let remembered = currentPath(in: model)
         let fallback = model.selectedFilePath ?? model.reviewFiles.first?.path
         show(
@@ -136,19 +136,19 @@ enum FileReview {
 
     /// Scroll-follow is transient selection, not a navigation request. Keeping it out of
     /// the tab store avoids rebuilding every tool pane and writing defaults while scrolling.
-    static func currentPath(in model: WorkspaceModel) -> String? {
-        let tab = CenterTabStore.shared.review(for: model.workspace.id)
+    static func currentPath(in model: any WorkspacePaneModel) -> String? {
+        let tab = model.paneStores.center.review(for: model.workspace.id)
         return tab?.showsAllFiles == true ? model.selectedFilePath ?? tab?.path : tab?.path
     }
 
-    static func openAll(in model: WorkspaceModel) {
+    static func openAll(in model: any WorkspacePaneModel) {
         setShowsAllFiles(true, in: model)
     }
 
     /// Both mode controls use the review tab's state and remember the selected file.
     /// Returning to one file must not land on an empty review or silently choose another file.
-    static func setShowsAllFiles(_ all: Bool, in model: WorkspaceModel) {
-        let store = CenterTabStore.shared
+    static func setShowsAllFiles(_ all: Bool, in model: any WorkspacePaneModel) {
+        let store = model.paneStores.center
         let remembered = store.review(for: model.workspace.id)?.path
         let candidates = [model.selectedFilePath, remembered].compactMap { $0 }
         let path = candidates.first { candidate in
@@ -156,18 +156,18 @@ enum FileReview {
         } ?? model.reviewFiles.first?.path ?? ""
         let tab = store.showReview(path: path, workspaceID: model.workspace.id)
         store.setShowsAllFiles(all, for: tab)
-        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+        model.paneStores.tabs.reveal(.tool(tab.id), in: model)
     }
 
     /// The same keystroke both ways: open the review, or, if the pane the reader is in is already
     /// showing it, put the conversation back. The tab stays open, because the keystroke is about
     /// what is in front of them rather than about what they are keeping.
-    static func toggle(in model: WorkspaceModel) {
-        let tabs = WorkspaceTabsStore.shared
+    static func toggle(in model: any WorkspacePaneModel) {
+        let tabs = model.paneStores.tabs
         guard let tab = tabs.selectedTab(in: model) else { return open(in: model) }
         let pane = tabs.focusedPane(of: tab)
 
-        if let review = CenterTabStore.shared.review(for: model.workspace.id),
+        if let review = model.paneStores.center.review(for: model.workspace.id),
            tabs.content(of: pane, in: tab) == .tool(review.id) {
             guard let session = model.activeSession ?? model.sessions.first else { return }
             // In an unsplit review tab this is picking the conversation's tab, which is what the
@@ -182,7 +182,7 @@ enum FileReview {
     /// Walks the changed files, which is what a review is for. Wraps, so holding the shortcut down
     /// goes round rather than stopping dead at the last file, and keeps the inspector's own
     /// selection in step so the list scrolls and highlights along with the diff.
-    static func step(_ delta: Int, in model: WorkspaceModel) {
+    static func step(_ delta: Int, in model: any WorkspacePaneModel) {
         let files = model.reviewFiles
         guard !files.isEmpty else { return }
 
@@ -194,7 +194,7 @@ enum FileReview {
         model.selectedFilePath = files[next].path
         // Walking is not naming a file, so it keeps the mode on screen: in All files it scrolls to
         // the next section rather than closing the others, which `open(path:)` would.
-        if CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true {
+        if model.paneStores.center.review(for: model.workspace.id)?.showsAllFiles == true {
             setShowsAllFiles(true, in: model)
         } else {
             open(path: files[next].path, in: model)

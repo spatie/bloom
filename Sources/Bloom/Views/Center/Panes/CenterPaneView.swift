@@ -8,8 +8,8 @@ import BloomCore
 /// It used to own the dropping as well, a `.dropDestination` for a tab dragged out of the strip.
 /// A tab is carried by a gesture now rather than as a system drag, so there is no drop session to
 /// receive, and the column hit tests the panes instead. See `CenterColumnView.landing(for:at:)`.
-struct CenterPaneView: View {
-    @Bindable var model: WorkspaceModel
+struct CenterPaneView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
     /// The tab this pane belongs to, and nil when the workspace has no tab to be in at all. A
     /// pane belongs to a tab now rather than to the workspace, which is what stops picking a tab
     /// from rewriting whatever pane the user happened to be standing in.
@@ -19,7 +19,7 @@ struct CenterPaneView: View {
     /// menu does not offer it.
     var isSplit: Bool
 
-    private var tabs: WorkspaceTabsStore { .shared }
+    private var tabs: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// What this pane is showing, or nothing when there is no tab for it to belong to.
     private var showing: PaneContent? {
@@ -54,7 +54,7 @@ struct CenterPaneView: View {
     private var waiting: PaneWait? {
         switch showing {
         case .chat(let sessionID):
-            if CenterTabStore.shared.terminal(for: sessionID, in: model.workspace.id) != nil { return nil }
+            if model.paneStores.center.terminal(for: sessionID, in: model.workspace.id) != nil { return nil }
             // The transcript exists, so the pane has a composer to draw and the wait belongs to
             // the transcript rather than to the pane. See `ChatPaneView.waiting`.
             //
@@ -124,9 +124,9 @@ struct CenterPaneView: View {
         case .chat(let sessionID):
             // The lookup only, never `transcript(for:)`: building one writes observed state, and a
             // body may not do that. `prepare` below is where it is built.
-            if let terminal = CenterTabStore.shared.terminal(for: sessionID, in: model.workspace.id) {
-                if model.pendingCLILaunches.contains(sessionID) {
-                    cliSetup(terminal, sessionID: sessionID)
+            if let terminal = model.paneStores.center.terminal(for: sessionID, in: model.workspace.id) {
+                if let local = model.localWorkspaceModel, local.pendingCLILaunches.contains(sessionID) {
+                    cliSetup(terminal, sessionID: sessionID, in: local)
                 } else {
                     ToolPaneView(
                         model: model, tab: terminal, siblings: paneContents,
@@ -134,7 +134,7 @@ struct CenterPaneView: View {
                     )
                 }
             } else if let transcript = model.existingTranscript(for: sessionID) {
-                ChatPaneView(transcript: transcript, model: model, pane: pane)
+                ChatPaneView(transcript: transcript, model: model.localWorkspaceModel, pane: pane, paneModel: model)
             } else if model.sessions.contains(where: { $0.id == sessionID }) {
                 // Nothing, rather than the `LoadingView` that used to be here. This branch is the
                 // gap between a session being known and its transcript being built, which is one
@@ -150,7 +150,7 @@ struct CenterPaneView: View {
             }
 
         case .tool(let tabID):
-            if let tab = CenterTabStore.shared.tabs(for: model.workspace.id)
+            if let tab = model.paneStores.center.tabs(for: model.workspace.id)
                 .first(where: { $0.id == tabID }) {
                 ToolPaneView(
                     model: model, tab: tab,
@@ -224,7 +224,7 @@ struct CenterPaneView: View {
         let pane = pane
 
         NewPane.open(kind, in: model) { content in
-            WorkspaceTabsStore.shared.split(tab: tab, pane: pane, axis: axis, showing: content)
+            model.paneStores.tabs.split(tab: tab, pane: pane, axis: axis, showing: content)
         }
     }
 
@@ -243,12 +243,13 @@ struct CenterPaneView: View {
 
     /// A fresh workspace runs its setup script before anything else, and that can take minutes on a
     /// large repository. Saying so beats an empty rectangle that looks like a failure.
-    private func cliSetup(_ terminal: CenterTab, sessionID: SessionID) -> some View {
+    /// A CLI chat is launched in a shell on this Mac, so only a local workspace ever has one waiting.
+    private func cliSetup(_ terminal: CenterTab, sessionID: SessionID, in local: WorkspaceModel) -> some View {
         TerminalView(
-            tab: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: model.workspace.id, title: terminal.title),
-            workspace: model.workspace, repo: model.repo, port: model.port,
-            output: (model.sessions.first { $0.id == sessionID }?.agentKind ?? .claudeCode)
-                .interactiveSetupOutput(prompt: model.pendingCLIPrompts[sessionID], log: model.setupOutput)
+            tab: TerminalTab(id: TerminalTabID(terminal.id), workspaceID: local.workspace.id, title: terminal.title),
+            workspace: local.workspace, repo: local.repo, port: local.port,
+            output: (local.sessions.first { $0.id == sessionID }?.agentKind ?? .claudeCode)
+                .interactiveSetupOutput(prompt: local.pendingCLIPrompts[sessionID], log: local.setupOutput)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -12,8 +12,8 @@ import BloomCore
 /// a workspace with one tab has no strip, however that tab is split, the way a Safari window with
 /// one tab has no tab bar. The `+` that used to end this row is `NewTabMenu`, in the title bar,
 /// which is what lets the row go.
-struct SessionTabsView: View {
-    @Bindable var model: WorkspaceModel
+struct SessionTabsView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
     /// The tab whose name field is open. Owned by the column rather than by this view, because
     /// Rename Tab has to be able to open a field on a strip that is not drawn yet: the column
     /// hears the request, sets this, and the strip appears with the field already open.
@@ -54,11 +54,11 @@ struct SessionTabsView: View {
 
     /// The space the tabs are measured in and the pointer is reported in. It is the row of tabs
     /// itself, so it scrolls with them and the two sets of numbers cannot drift apart.
-    private static let stripSpace = "bloom.tabStrip"
+    private static var stripSpace: String { "bloom.tabStrip" }
 
-    private var tabs: CenterTabStore { .shared }
+    private var tabs: CenterTabStore { model.paneStores.center }
 
-    private var store: WorkspaceTabsStore { .shared }
+    private var store: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// The strip, derived rather than stored.
     ///
@@ -129,7 +129,7 @@ struct SessionTabsView: View {
         } append: {
         } trailing: {}
         .onGeometryChange(for: ClosedRange<Double>.self) { proxy in
-            let frame = proxy.frame(in: .named(CenterColumnView.space))
+            let frame = proxy.frame(in: .named(CenterColumnView<WorkspaceModel>.space))
             return Double(frame.minY)...Double(frame.maxY)
         } action: {
             band.value = $0
@@ -148,7 +148,7 @@ struct SessionTabsView: View {
     /// The centre column opens onto the reading ground, which settles both what a selected tab is
     /// filled with and how far the track under it is sunk. See `TabPane`, which carries the
     /// measurements that used to live here.
-    private static let pane = TabPane.content
+    private static var pane: TabPane { TabPane.content }
 
     /// The conversation or the tool tab one entry of the strip stands for, and nil for an entry
     /// whose content has gone between the strip being derived and this being asked.
@@ -204,7 +204,7 @@ struct SessionTabsView: View {
         if let turn = TerminalSessionStore.shared.agentTurns[session.id], turn.isAwaitingPermission {
             return "questionmark.circle"
         }
-        if CenterTabStore.shared.terminal(for: session.id, in: model.workspace.id) != nil {
+        if tabs.terminal(for: session.id, in: model.workspace.id) != nil {
             return PaneGlyph.agentMark(for: session.agentKind)
         }
         return PaneGlyph.agentMark(for: session.agentKind, among: model.sessions.map(\.agentKind))
@@ -278,7 +278,7 @@ struct SessionTabsView: View {
     /// The run script a terminal tab was opened for, as the settings file states it now.
     private func runScript(of tab: CenterTab) -> RunScript? {
         guard let id = tab.runScriptID else { return nil }
-        return model.settings.runScripts.first { $0.id == id }
+        return model.localWorkspaceModel?.settings.runScripts.first { $0.id == id }
     }
 
     private func closeTitle(for tab: CenterTab) -> String {
@@ -372,7 +372,7 @@ struct SessionTabsView: View {
             content: content,
             carry: carry,
             stripSpace: Self.stripSpace,
-            columnSpace: CenterColumnView.space,
+            columnSpace: CenterColumnView<WorkspaceModel>.space,
             isEnabled: isEnabled,
             onMeasure: { spans.value[content] = $0 },
             onChanged: { carried(content, $0, title: title, symbol: symbol) },
@@ -504,18 +504,7 @@ struct SessionTabsView: View {
     private func commitRename(_ session: Session, to newTitle: String) {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         renamingID = nil
-        guard !title.isEmpty, title != session.title, let store = app.store else { return }
-
-        let updated = session.with { $0.title = title }
-        if let index = model.sessions.firstIndex(where: { $0.id == session.id }) {
-            model.sessions[index] = updated
-        }
-        Task {
-            // The title alone. This value was read when the strip was drawn, and a running agent
-            // has been writing its own columns into that row since, one of which is the id
-            // `--resume` needs.
-            try? await store.updateSessionPreferences(id: session.id, title: title)
-            await model.reloadSessions()
-        }
+        guard !title.isEmpty, title != session.title else { return }
+        Task { await model.renameSession(session, title: title) }
     }
 }

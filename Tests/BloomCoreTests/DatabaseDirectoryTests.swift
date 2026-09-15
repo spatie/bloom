@@ -32,6 +32,11 @@ struct DatabaseDirectoryTests {
         #expect(Store.devBundleIdentifier == "be.spatie.bloom.dev")
     }
 
+    @Test func remoteCopyHasItsOwnDirectory() {
+        #expect(name(Store.remoteBundleIdentifier) == "Bloom Remote")
+        #expect(Store.remoteBundleIdentifier == "be.spatie.bloom.remote")
+    }
+
     /// The case nothing warned about. `swift run Bloom` and `.build/debug/Bloom` are not inside a
     /// bundle, so there is no identifier at all, and until this they resolved to the real database.
     @Test("a binary in no bundle gets a directory that says so")
@@ -50,7 +55,7 @@ struct DatabaseDirectoryTests {
     @Test("no two identities share a directory")
     func noneCollide() {
         let identifiers: [String?] = [
-            Store.primaryBundleIdentifier, Store.devBundleIdentifier,
+            Store.primaryBundleIdentifier, Store.devBundleIdentifier, Store.remoteBundleIdentifier,
             "be.spatie.bloom.snapshot", "be.spatie.bloomer", nil,
         ]
         let names = identifiers.map(name)

@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 import Synchronization
 
 /// One `codex app-server` process, spoken to in JSON-RPC.
@@ -26,6 +27,7 @@ public actor CodexClient {
     // MARK: Configuration
 
     public struct Configuration: Sendable {
+        public var commandPrefix: [String]
         public var executable: String
         /// The directory the agent works in. Passed per thread as well, because `turn/start` can
         /// override it, but the process is launched here so relative paths in tracing make sense.
@@ -42,6 +44,7 @@ public actor CodexClient {
         /// `-c` override at launch is a per-session registration exactly as Claude Code's
         /// recomputed argv is. See `BridgeRegistration.codexArguments`.
         public var bridge: BridgeAttachment?
+        public var bridgeInWrapper: Bool
         /// How large this process should be told the model's context window is, in tokens, or
         /// `CodexContextWindow.modelDefault` for Codex's own catalogue. Per process, which here is
         /// per chat, and unlike the model and the effort it cannot travel with a turn: the two
@@ -50,14 +53,17 @@ public actor CodexClient {
 
         public init(
             executable: String = CodexClient.executable,
+            commandPrefix: [String] = [],
             cwd: String,
             codexHome: String? = nil,
             clientName: String = "Bloom",
             clientVersion: String = "0.0.0",
             environment: [String: String] = Shell.environment(),
             bridge: BridgeAttachment? = nil,
+            bridgeInWrapper: Bool = false,
             contextWindow: Int = CodexContextWindow.modelDefault
         ) {
+            self.commandPrefix = commandPrefix
             self.executable = executable
             self.cwd = cwd
             self.codexHome = codexHome
@@ -65,6 +71,7 @@ public actor CodexClient {
             self.clientVersion = clientVersion
             self.environment = environment
             self.bridge = bridge
+            self.bridgeInWrapper = bridgeInWrapper
             self.contextWindow = contextWindow
         }
     }
@@ -86,16 +93,16 @@ public actor CodexClient {
         // the same trap, refusing to start on a user config holding anything this build of Codex
         // does not recognise.
         var arguments = Self.arguments
-        if let bridge = configuration.bridge {
+        if configuration.commandPrefix.isEmpty || configuration.bridgeInWrapper, let bridge = configuration.bridge {
             arguments += BridgeRegistration.codexArguments(bridge)
         }
         arguments += CodexContextWindow.overrides(for: configuration.contextWindow)
-        return AgentLaunch(
+        return WorkspaceExecution(commandPrefix: configuration.commandPrefix).wrapping(AgentLaunch(
             executable: configuration.executable,
             arguments: arguments,
             cwd: configuration.cwd,
             environment: environment
-        )
+        ))
     }
 
     // MARK: State
@@ -150,6 +157,10 @@ public actor CodexClient {
     public nonisolated var events: AsyncStream<CodexEvent> { sink.stream() }
 
     public var isRunning: Bool { process?.isRunning ?? false }
+
+    /// A process can end before the runner consumes its final event. A closed output stream
+    /// also makes the connection unusable while the process remains alive.
+    public var isConnected: Bool { closedReason == nil && isRunning }
 
     /// The same answer, readable without the actor, which is what a quit path polling for the
     /// process to actually be gone needs.

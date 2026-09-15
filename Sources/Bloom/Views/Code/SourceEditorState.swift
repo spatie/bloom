@@ -6,15 +6,6 @@ import BloomCore
 @MainActor
 @Observable
 final class SourceEditorState {
-    private static var files: [String: SourceEditorState] = [:]
-    static func file(_ path: String) -> SourceEditorState {
-        let path = URL(fileURLWithPath: path).standardizedFileURL.path
-        if let state = files[path] { return state }
-        let state = SourceEditorState()
-        files[path] = state
-        return state
-    }
-
     @ObservationIgnored var appliedRevision = -1
     var selection = NSRange(location: 0, length: 0)
     var scrollOrigin = NSPoint.zero
@@ -60,28 +51,27 @@ final class SourceEditorState {
 @MainActor
 @Observable
 final class SourceNavigation {
-    static let shared = SourceNavigation()
     var histories: [WorkspaceID: SourceHistory] = [:]
 
-    func visit(_ location: CodeLocation, in model: WorkspaceModel) {
+    func visit(_ location: CodeLocation, in model: any WorkspacePaneModel) {
         var history = histories[model.workspace.id] ?? SourceHistory()
         if history.entries.indices.contains(history.index) {
             let current = history.entries[history.index].path
             let absolute = (current as NSString).isAbsolutePath ? current
                 : (model.workspace.path as NSString).appendingPathComponent(current)
-            let state = SourceEditorState.file(absolute)
+            let state = model.paneStores.sourceFile(absolute)
             history.updateCurrent(CodeLocation(path: current, line: state.line, column: state.column))
         }
         history.visit(location)
         histories[model.workspace.id] = history
     }
 
-    func move(_ delta: Int, in model: WorkspaceModel) {
+    func move(_ delta: Int, in model: any WorkspacePaneModel) {
         guard var history = histories[model.workspace.id] else { return }
         if history.entries.indices.contains(history.index) {
             let current = history.entries[history.index].path
             let absolute = (current as NSString).isAbsolutePath ? current : (model.workspace.path as NSString).appendingPathComponent(current)
-            let state = SourceEditorState.file(absolute)
+            let state = model.paneStores.sourceFile(absolute)
             history.updateCurrent(CodeLocation(path: current, line: state.line, column: state.column))
         }
         guard let location = history.move(delta) else { return }

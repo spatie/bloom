@@ -148,4 +148,40 @@ public enum WorkspaceStartPlan {
             ? "Leave it empty and Bloom names it for you. " + agentless
             : "This names the workspace and its branch. " + agentless
     }
+
+    /// What the line under the chat box says about the branch.
+    public enum BranchHint: Equatable, Sendable {
+        /// The chosen pull request or branch, which says everything a preview would have.
+        case checkout
+        /// Nothing at all.
+        case nothing
+        /// That the branch will be named from what is written, before anything is.
+        case namedFromWriting
+        /// The slug the branch will be cut as.
+        case preview
+    }
+
+    /// Which of those the window shows.
+    ///
+    /// **A server window says nothing about the branch, and that is a choice for sameness rather
+    /// than for accuracy.** The server does not ask a model for a name, so the slug it cuts is
+    /// exactly the preview this would have drawn. The owner put the two windows side by side and
+    /// the remote one had a monospaced chip under the box that the local one, which names its
+    /// workspaces with a model, never shows. The windows are meant to be one window with the
+    /// machine as a qualifier on it, so the chip went, and the name is read in the sidebar the
+    /// moment the workspace exists, which is where a local one is read too.
+    public static func branchHint(
+        hasCheckout: Bool,
+        isRemote: Bool,
+        willBeNamedByModel: Bool,
+        isChatWorkspace: Bool,
+        task: String
+    ) -> BranchHint {
+        if hasCheckout { return .checkout }
+        if isRemote || willBeNamedByModel { return .nothing }
+        if task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return isChatWorkspace ? .namedFromWriting : .nothing
+        }
+        return .preview
+    }
 }

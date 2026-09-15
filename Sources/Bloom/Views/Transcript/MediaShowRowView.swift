@@ -20,6 +20,10 @@ struct MediaShowRowView: View {
     var source: Source = .workspace
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(AppModel.self) private var app
+    @State private var remoteMedia: WorkspaceMedia?
+    @State private var isLoadingRemote = false
+    @State private var remoteError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.block) {
@@ -57,8 +61,10 @@ struct MediaShowRowView: View {
 
                     Spacer(minLength: 0)
                 }
+            } else if isLoadingRemote {
+                ProgressView("Loading media…")
             } else {
-                Label("This media file is no longer available", systemImage: "doc.questionmark")
+                Label(remoteError ?? "This media file is no longer available", systemImage: "doc.questionmark")
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
                     .padding(TranscriptLayout.block)
@@ -70,15 +76,49 @@ struct MediaShowRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.block)
+        .task(id: remoteMediaID) { await loadRemoteMedia() }
+        .onDisappear { releaseRemoteMedia() }
     }
 
     private var resolvedMedia: WorkspaceMedia? {
-        switch source {
+        if home.remoteWorkspaceID != nil { return remoteMedia }
+        return switch source {
         case .workspace:
             WorkspaceMedia.resolve(path: request.path, in: home.worktree)
         case .codexImageView:
             WorkspaceMedia.resolveImageView(path: request.path, in: home.worktree)
         }
+    }
+
+    private func loadRemoteMedia() async {
+        guard let workspaceID = home.remoteWorkspaceID else { return }
+        releaseRemoteMedia()
+        isLoadingRemote = true
+        remoteError = nil
+        do {
+            let media = try await app.remoteServer.downloadMedia(request.path, workspaceID: workspaceID)
+            guard !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: media.url.deletingLastPathComponent())
+                return
+            }
+            remoteMedia = media
+            isLoadingRemote = false
+        } catch is CancellationError {
+            isLoadingRemote = false
+        } catch {
+            isLoadingRemote = false
+            remoteError = error.localizedDescription
+        }
+    }
+
+    private var remoteMediaID: String {
+        guard let workspaceID = home.remoteWorkspaceID else { return "local" }
+        return String(reflecting: app.remoteServer.endpoint) + "/" + workspaceID.rawValue + "/" + request.path
+    }
+
+    private func releaseRemoteMedia() {
+        if let media = remoteMedia { try? FileManager.default.removeItem(at: media.url.deletingLastPathComponent()) }
+        remoteMedia = nil
     }
 
     @ViewBuilder

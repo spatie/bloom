@@ -356,8 +356,14 @@ struct TempRepo {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
-        try process.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let reader = try ProcessPipeReader(pipe.fileHandleForReading)
+        defer { reader.close() }
+        try ProcessLaunch.run(process)
+        var data = Data()
+        while let chunk = try reader.next() {
+            if chunk.isEmpty { break }
+            data.append(chunk)
+        }
         process.waitUntilExit()
         return String(decoding: data, as: UTF8.self)
     }
@@ -369,6 +375,10 @@ struct TempRepo {
 /// walking up from this file. Symlinks are resolved too, because the core suite is run from a mirrored
 /// package that has no app target (see Tools/test-core.sh).
 func bloomFixtureLines(_ name: String) throws -> [String] {
+    if let root = ProcessInfo.processInfo.environment["BLOOM_TEST_FIXTURES_DIR"] {
+        return try String(contentsOf: URL(fileURLWithPath: root).appendingPathComponent(name), encoding: .utf8)
+            .components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
     let starts = [
         URL(fileURLWithPath: #filePath),
         URL(fileURLWithPath: #filePath).resolvingSymlinksInPath(),
@@ -409,10 +419,9 @@ final class LineCollector: @unchecked Sendable {
 
 // MARK: - Readable failures
 
-// Same package, so no @retroactive is needed or allowed here.
 /// Without this, a failed archive expectation prints every stored property of the report and
 /// buries the one thing the reader needs: what archiving would have destroyed.
-extension WorkspaceSafetyReport: CustomTestStringConvertible {
+extension WorkspaceSafetyReport: @retroactive CustomTestStringConvertible {
     public var testDescription: String {
         isSafeToDiscard
             ? "safe to discard"

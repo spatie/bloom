@@ -35,6 +35,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source "$PWD/Tools/guard.sh"
+source "$PWD/Tools/isolated-build.sh"
 
 REF=HEAD
 LAUNCH=1
@@ -58,9 +59,11 @@ bloom_refuse_if_own_host "$DEST" "$BLOOM_REAL_DB"
 echo "==> $RESOLVED  $SUBJECT"
 
 # A detached worktree at the commit, so nothing uncommitted comes along.
+bloom_build_lock "$HOME/Library/Caches/BloomBuild/master/release.lock"
 git worktree remove --force "$WORK" 2>/dev/null || true
 rm -rf "$WORK"
 git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
+BLOOM_BUILD_WORKTREE="$WORK"
 
 # Runs a command in the worktree, quiet when it works and printed in full when
 # it does not.
@@ -88,7 +91,8 @@ build_in_worktree() {
 }
 
 # Its own scratch path, so a concurrent agent build cannot swap objects underneath.
-build_in_worktree swift build -c release --product Bloom --scratch-path /tmp/bloom-master-build
+mkdir -p /tmp/bloom-master-build
+ln -sfn /tmp/bloom-master-build "$WORK/.build"
 
 # The worktree holds whatever that ref held, and the build script has only lived
 # in Tools since today. Pinning to a commit from before the move is the whole
@@ -100,22 +104,17 @@ build_in_worktree "./$BUILD_SCRIPT" -r
 BUILT="$WORK/.build/release/Bloom.app"
 [ -d "$BUILT" ] || BUILT="$(cd "$WORK" && swift build -c release --show-bin-path)/Bloom.app"
 
-mkdir -p "$HOME/Applications"
-rm -rf "$DEST"
-cp -R "$BUILT" "$DEST"
-
-# Record what this is, so a stale install can be identified without guessing.
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED" 2>/dev/null || true
+# Stamp the candidate before signing. Changing an installed plist invalidates its signature.
+/usr/bin/defaults write "$BUILT/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED"
+bloom_sign_built_app "$BUILT"
+bloom_build_lock "$HOME/Library/Caches/BloomBuild/master/install.lock"
+bloom_publish_built_app "$BUILT" "$DEST" "$BLOOM_REAL_BUNDLE_ID" "$BLOOM_REAL_DB" "$LAUNCH"
 
 git worktree remove --force "$WORK" 2>/dev/null || true
 
 echo "==> installed $DEST"
 
 if [ "$LAUNCH" -eq 1 ]; then
-  # Only ever kills the installed copy. A debug build running from .build, and
-  # any agent's re-identified build, are left alone.
-  pkill -f "$DEST/Contents/MacOS/Bloom" 2>/dev/null || true
-  sleep 1
-  open "$DEST"
+  open -g "$DEST"
   echo "==> launched"
 fi

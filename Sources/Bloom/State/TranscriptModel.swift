@@ -1,6 +1,7 @@
 import SwiftUI
 import Observation
 import BloomCore
+import BloomClient
 
 /// One renderable row in a transcript.
 ///
@@ -118,12 +119,14 @@ final class TranscriptModel {
     /// New Ask conversations use the folder chosen in Settings, with Bloom's own folder as fallback.
     let cwd: String
     private unowned let app: AppModel
+    let remote: RemoteSessionConnection?
 
     /// Where this conversation's file paths point, and which workspace a file chip opens into.
     /// One value rather than the whole workspace, because those two fields are all a row has ever
     /// read off it. See `TranscriptHome`.
     var home: TranscriptHome {
-        TranscriptHome(workspaceID: workspace?.id, worktree: cwd)
+        if remote != nil { return TranscriptHome(worktree: cwd, remoteWorkspaceID: workspace?.id) }
+        return TranscriptHome(workspaceID: workspace?.id, worktree: cwd)
     }
 
     /// The row as the app holds it now. The snapshot above goes stale the moment automatic
@@ -324,7 +327,7 @@ final class TranscriptModel {
     /// it. An orchestrator told twice that one agent stopped picks the work back up twice, on the
     /// first sentence and then again on a second that says the same thing. Cleared where a turn
     /// begins, so it never silences the next one.
-    private var hasReportedTurnEnded = false
+    private var turnReportClaim = CrewTurnReportClaim()
 
     /// Bumped whenever something outside the list asks it to go back to the newest row. A counter
     /// rather than a flag, so two requests in a row are two requests, and the list has nothing to
@@ -388,6 +391,8 @@ final class TranscriptModel {
     /// without both walking the whole transcript and still sometimes returning an older sequence.
     /// Outside observation because it is only a database cursor and nothing draws it.
     @ObservationIgnored private var highestSeenMessageSeq = -1
+    @ObservationIgnored private var remoteDecisions: [String: String] = [:]
+    private var remoteQueueError: String?
     /// When the current turn was handed to the runner, so a session row written before that can be
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
@@ -397,11 +402,12 @@ final class TranscriptModel {
         row.kind == .result && (!isRunning || turnStartedAt.map { row.createdAt >= $0 } ?? true)
     }
 
-    init(session: Session, workspace: Workspace, app: AppModel) {
+    init(session: Session, workspace: Workspace, app: AppModel, remote: RemoteSessionConnection? = nil) {
         self.session = session
         self.workspace = workspace
         self.cwd = workspace.path
         self.app = app
+        self.remote = remote
         history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
@@ -415,14 +421,43 @@ final class TranscriptModel {
         self.workspace = nil
         self.cwd = directory
         self.app = app
+        self.remote = nil
         history.report = { [unowned app] in app.notice = BloomNotice(message: $0) }
     }
 
-    private var store: Store? { app.store }
+    private var store: Store? { remote == nil ? app.store : nil }
+
+    /// A remote session fills the same presentation model, while its store and runner remain
+    /// exclusively on the server. No remote message enters the Mac database.
+    var remoteCursor: Int { highestSeenMessageSeq }
+
+    func receiveRemote(_ snapshot: ServerTranscript, messages: [Message]) {
+        guard remote != nil, snapshot.session.id == session.id else { return }
+        session = snapshot.session
+        let appendedFrom = rows.count
+        for message in messages where message.seq > highestSeenMessageSeq {
+            absorb(message, decisions: snapshot.permissionDecisions)
+            highestSeenMessageSeq = message.seq
+        }
+        for (requestID, decision) in snapshot.permissionDecisions where remoteDecisions[requestID] != decision {
+            settle(PermissionResolution(requestID: requestID, decision: decision))
+        }
+        remoteDecisions = snapshot.permissionDecisions
+        noteContextWindow(in: rows[appendedFrom...])
+        storedIsRunning = snapshot.isBusy
+        storedIsAwaitingPermission = !snapshot.pendingQuestions.isEmpty
+        streamingText = snapshot.streamingText
+        pendingDeliveries = snapshot.queuedPrompts.map { prompt in
+            pendingDeliveries.first { $0.id == prompt.id } ?? Delivery(id: prompt.id, targetSessionID: session.id, body: prompt.text)
+        }
+        remoteQueueError = snapshot.queueError
+        isLoaded = true
+    }
 
     // MARK: - Loading
 
     func load() async {
+        if remote != nil { return }
         guard let store, !isLoaded else {
             SwitchTrace.mark("transcript.reused", workspace: workspace?.id)
             SwitchTrace.markOnScreen("transcript.reused", workspace: workspace?.id)
@@ -523,8 +558,7 @@ final class TranscriptModel {
         into rows: inout [TranscriptRow],
         indexByRefID: inout [String: Int]
     ) {
-        if message.kind == .toolResult, let refID = message.refID,
-           let index = indexByRefID[refID] {
+        if let index = TranscriptToolPairing.resultIndex(kind: message.kind.rawValue, refID: message.refID, indexByRefID: indexByRefID) {
             rows[index].resultPayload = message.payload
             let summary = ToolResultSummary.decode(message.payload)
             rows[index].isError = summary.isError
@@ -542,9 +576,7 @@ final class TranscriptModel {
             row.isQuestion = ask.isQuestion
         }
         rows.append(row)
-        if message.kind == .toolUse, let refID = message.refID {
-            indexByRefID[refID] = rows.count - 1
-        }
+        TranscriptToolPairing.recordCall(kind: message.kind.rawValue, refID: message.refID, rowIndex: rows.count - 1, indexByRefID: &indexByRefID)
     }
 
     /// The same fold, over messages that were never stored.
@@ -616,6 +648,10 @@ final class TranscriptModel {
     }
 
     func markAllRead() async {
+        if let remote, let seq = rows.last?.seq {
+            if seq != session.lastReadSeq { await remote.markRead(seq); session.lastReadSeq = seq }
+            return
+        }
         guard let store, let last = rows.last?.seq, last != session.lastReadSeq else { return }
         session.lastReadSeq = last
         try? await store.updateLastReadSeq(sessionID: session.id, seq: last)
@@ -697,6 +733,16 @@ final class TranscriptModel {
     @discardableResult
     func submit(_ text: String, clearingDraft sourceDraft: String? = nil,
                 interactionMode: InteractionMode? = nil, sourcePlan: PlanArtefact? = nil) async -> Bool {
+        if let remote {
+            let submittedDraft = SubmittedDraft.matching(current: draft, message: text, source: sourceDraft)
+            let submitted = await remote.submit(text)
+            if submitted, let submittedDraft, draft == submittedDraft {
+                draft = ""
+                await saveDraft()
+            }
+            jumpToLiveEnd()
+            return submitted
+        }
         guard !isWorkspaceArchiving else { return false }
         if usesInteractiveTerminal {
             app.alert = BloomAlert(
@@ -809,6 +855,7 @@ final class TranscriptModel {
     /// business knowing, and because a caption that disagrees with the drain is the one thing this
     /// queue may not do: both read `DeliveryHold`. See `DeliveryHold.sentence(on:)`.
     var holdSentence: String? {
+        if let remoteQueueError { return remoteQueueError }
         if history.isCapturing || history.isFinalisingTurn { return "Saving this turn's file changes." }
         if pendingDeliveries.first?.state == .uncertain {
             return "Bloom could not confirm delivery. Check the conversation before sending again."
@@ -919,13 +966,22 @@ final class TranscriptModel {
 
     /// Whether this delivery is at the front of an idle queue and can be attempted now.
     func canRetry(_ delivery: Delivery) -> Bool {
-        pendingDeliveries.first?.id == delivery.id
+        if let remote {
+            return remote.supportsAuthenticationChecks && remoteQueueError.map(AgentAuthenticationStatus.isSignInFailure) == true
+                && pendingDeliveries.first?.id == delivery.id
+        }
+        return pendingDeliveries.first?.id == delivery.id
             && dispatchingDeliveryID != delivery.id && drainState == .idle
             && deliveryHold.allowsDelivery(on: session.agentKind)
     }
 
     /// Attempts the front of the queue again without changing its order or duplicating its text.
     func retryPending() async {
+        if let remote {
+            guard let first = pendingDeliveries.first, canRetry(first) else { return }
+            _ = await remote.retryAuthenticationPaused(first)
+            return
+        }
         guard let candidate = pendingDeliveries.first, canRetry(candidate) else { return }
         if let first = pendingDeliveries.first, first.state == .uncertain {
             do { try await store?.restoreDelivery(id: first.id) } catch { return }
@@ -959,6 +1015,10 @@ final class TranscriptModel {
     /// whether the sentence can go back into it.
     func confirmDiscard(_ delivery: Delivery) async {
         discarding = nil
+        if let remote {
+            if await remote.cancel(delivery.id) { pendingDeliveries.removeAll { $0.id == delivery.id } }
+            return
+        }
         guard dispatchingDeliveryID != delivery.id else { return }
         guard let store else { return }
         let recovery = PendingMessageDiscard.recovery(of: delivery, composerDraft: draft)
@@ -993,6 +1053,15 @@ final class TranscriptModel {
     /// The join is worked out after the row is gone rather than before, so the words go in front
     /// of whatever the box holds by then rather than in front of what it held a round trip ago.
     func editPending(_ delivery: Delivery) async {
+        if let remote {
+            if await remote.cancel(delivery.id) {
+                pendingDeliveries.removeAll { $0.id == delivery.id }
+                draft = PendingMessageEdit.draft(taking: delivery, into: draft)
+                composerFocusRequests += 1
+                await saveDraft()
+            }
+            return
+        }
         guard dispatchingDeliveryID != delivery.id, PendingMessageEdit.canEdit(delivery), let store else { return }
         let removed = (try? await store.cancelDelivery(id: delivery.id)) ?? false
         await refreshQueue()
@@ -1052,7 +1121,7 @@ final class TranscriptModel {
 
     /// Whether this queued message may be sent in place of the turn that is running.
     func canSteer(_ delivery: Delivery) -> Bool {
-        DeliverySteer.canSteer(delivery, hold: deliveryHold, on: session.agentKind)
+        remote == nil && DeliverySteer.canSteer(delivery, hold: deliveryHold, on: session.agentKind)
     }
 
     /// Stops the turn that is running and sends this queued message into the space it makes.
@@ -1154,7 +1223,7 @@ final class TranscriptModel {
         if startsATurn {
             activeInteractionMode = delivery.interactionMode ?? session.interactionMode
             turnStartedAt = Date()
-            hasReportedTurnEnded = false
+            turnReportClaim.start()
             // **The clearing rule.** The last turn's FINISHED subagents go here, at the one place
             // a turn starts, and nowhere else. Clearing them when they finish is the option that
             // reads well in a screenshot and badly in use: three rows leaving one by one take
@@ -1248,6 +1317,7 @@ final class TranscriptModel {
     }
 
     func saveDraft() async {
+        if let remote { remote.saveDraft(draft); return }
         guard let store else { return }
         try? await store.saveDraft(sessionID: session.id, body: draft)
     }
@@ -1274,7 +1344,7 @@ final class TranscriptModel {
         // Not this turn, whatever the last one was. A Stop the owner pressed belongs to the turn
         // it stopped, and leaving it set would make the next result skip the queue drain.
         wasStoppedByHand = false
-        hasReportedTurnEnded = false
+        turnReportClaim.start()
         subagents.turnStarted()
         setRunning(true)
     }
@@ -1312,6 +1382,7 @@ final class TranscriptModel {
     /// turn still emits its own result, and that event is what writes the final state back into the
     /// session row. Tearing the pump down here used to strand the session until the next launch.
     func stop() {
+        if let remote { Task { await remote.stop() }; return }
         steering = nil
         cancelTurn()
 
@@ -1470,33 +1541,7 @@ final class TranscriptModel {
         store: Store,
         bridge: BridgeHandle? = nil
     ) -> any SessionRunner {
-        switch session.agentKind {
-        case .codex:
-            return CodexRunner(
-                workspacePath: workspacePath,
-                session: session,
-                store: store,
-                bridge: bridge?.attachment
-            )
-        case .grok:
-            return GrokRunner(
-                workspacePath: workspacePath,
-                session: session,
-                store: store,
-                bridge: bridge?.attachment
-            )
-        // Cursor and OpenCode have no runner, and `AgentKind.canRunWorkspaces` is what stops a
-        // chat ever being on one. A chat that somehow is falls back to Claude Code rather than
-        // refusing to start, because a transcript that cannot be typed into is a worse answer
-        // than one running the backend every existing chat already runs.
-        case .claudeCode, .cursor, .openCode:
-            return AgentRunner(
-                workspacePath: workspacePath,
-                session: session,
-                store: store,
-                mcpConfigPath: bridge?.mcpConfigPath
-            )
-        }
+        SessionRunnerFactory.make(session: session, workspacePath: workspacePath, store: store, bridge: bridge)
     }
 
     private func startIdleEviction() {
@@ -1769,9 +1814,9 @@ final class TranscriptModel {
             // Both endings report, and this is the one that would otherwise be silent: an
             // orchestrator waiting on a crew member that died looks exactly like one waiting on a
             // crew member that is still thinking. See `Crew.failedSentence`.
-            await reportToOrchestrator(
-                CrewMessage.failed(name: session.title, reason: failure.message)
-            )
+            if let report = CrewTurnEnd.failed(failure.message).report(name: session.title, continuing: false) {
+                await reportToOrchestrator(report)
+            }
             await app.noteWorkspaceTurnEnded(.failed(reason: failure.message), in: session)
             // An agent that died is an agent whose turn has ended, so a workspace it had asked to
             // archive is due now. `notifyFinished` is not on this path and never was: it is about
@@ -1833,10 +1878,10 @@ final class TranscriptModel {
             // is about to be superseded. `drain` is awaited to completion above, `runner.send` and
             // all, and `deliver` sets `isRunning` before that send, so by this line the flag is
             // already describing the turn that has just begun rather than the one that ended.
+            if !isReconcilingPresentation, let report = CrewTurnEnd.completed(result.summary).report(name: session.title, continuing: isRunning) {
+                await reportToOrchestrator(report)
+            }
             if !isReconcilingPresentation, !isRunning {
-                await reportToOrchestrator(
-                    CrewMessage.stopped(name: session.title, lastMessage: result.summary)
-                )
                 // The same moment, one workspace further out: a chat elsewhere that asked
                 // `workspace_say` or `workspace_start` to tell it when this came to rest.
                 await app.noteWorkspaceTurnEnded(
@@ -1960,6 +2005,7 @@ final class TranscriptModel {
     /// buttons stop being pressable the moment one of them is, and a slow store cannot leave two
     /// answers on their way to the same question.
     func answer(requestID: String, decision: PermissionDecision) async {
+        if let remote { await remote.answer(requestID: requestID, decision: decision); return }
         if case .approvePlan = decision {
             // Saving the implementation mode can fail. Keep the card answerable until the
             // runner confirms it, rather than showing a settled plan above a blocked agent.
@@ -2158,7 +2204,7 @@ final class TranscriptModel {
     ///
     /// A chat nobody started returns on the first line, which is nearly every chat in the app.
     ///
-    /// At most one report per turn, whichever ending gets here first. See `hasReportedTurnEnded`.
+    /// At most one report per turn, whichever ending gets here first. See `turnReportClaim`.
     ///
     /// A `CrewMessage` rather than a sentence, because the two readers want different lengths of
     /// it: the orchestrator is handed the paragraph with the agent's last words and the hint about
@@ -2166,7 +2212,7 @@ final class TranscriptModel {
     /// string to both is what put an instruction addressed to a model in the owner's own bubble.
     private func reportToOrchestrator(_ message: CrewMessage) async {
         guard let parentID = session.parentSessionID, let store, let workspace else { return }
-        guard !hasReportedTurnEnded else { return }
+        guard turnReportClaim.claim() else { return }
         // **Claimed here rather than after the read below, and the difference is the promise this
         // method makes.** The doc says at most one report per turn, whichever ending gets here
         // first, and with the flag set after the `await` that held only because the event pump is
@@ -2178,7 +2224,6 @@ final class TranscriptModel {
         // three guards above have already established that there is a parent to report to, and a
         // report abandoned because that parent turned out to be closed is a report that must not
         // be tried again anyway.
-        hasReportedTurnEnded = true
 
         // Read before the enqueue, and dropped when the chat above has been closed. `session(id:)`
         // answers for an archived row where `sessions(workspaceID:)` and `crew(of:)` do not, and

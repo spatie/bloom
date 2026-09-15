@@ -32,6 +32,7 @@ import BloomCore
 /// ground the list gives it.
 struct WorkspaceRow: View {
     var workspace: Workspace
+    var remote: ServerWindowModel?
     /// Whether an agent is mid turn in this workspace. Passed in rather than read here, so the row
     /// stays a pure function of its inputs.
     var isRunning: Bool
@@ -51,7 +52,7 @@ struct WorkspaceRow: View {
     @Environment(AppModel.self) private var app
 
     /// How many of this turn's subagents failed, whichever of them still have rows of their own.
-    private var subagentFailures: Int { app.subagentFailures(of: workspace.id) }
+    private var subagentFailures: Int { remote == nil ? app.subagentFailures(of: workspace.id) : 0 }
     /// Whether this row sits on an accent fill, which in the sidebar it never does.
     ///
     /// `sidebarSelection(_:)` pins this to standard, because the sidebar's selection is grey in
@@ -79,7 +80,7 @@ struct WorkspaceRow: View {
         // five, because the sentence reaches both and is asked for twice, by the tooltip and by
         // VoiceOver, which get the same words on purpose. GitHub's answer is read straight from the
         // shared store rather than passed in, because the sidebar's row builder cannot reach it.
-        let pullRequest = WorkspacePullRequests.shared.pullRequest(for: workspace.id)
+        let pullRequest = remote == nil ? WorkspacePullRequests.shared.pullRequest(for: workspace.id) : nil
         let status = WorkspaceStatus.resolve(
             workspace: workspace,
             isRunning: isRunning,
@@ -210,6 +211,7 @@ struct WorkspaceRow: View {
         .task(id: PullRequestQuestion(
             workspace: workspace.id, branch: workspace.branch, hasDiff: workspace.hasDiff
         )) {
+            guard remote == nil else { return }
             await WorkspacePullRequests.shared.track(workspace, store: app.store)
         }
         // The list inverts the row's text for us, but a label that carries its own colour, such as
@@ -341,7 +343,7 @@ struct WorkspaceRow: View {
     /// `SidebarWorkspaceRow.confirmRowArchive`.
     private var moreMenu: some View {
         Menu {
-            WorkspaceMenuItems(workspace: workspace, onArchive: onMenuArchive) { renaming = $0 }
+            WorkspaceMenuItems(workspace: workspace, remote: remote, onArchive: onMenuArchive) { renaming = $0 }
         } label: {
             // Still the CIRCLED ellipsis, which is not what the colour complaint looked like it
             // was asking for. A bare `ellipsis` was the obvious partner for `archivebox`, on the
@@ -423,7 +425,9 @@ struct WorkspaceRow: View {
         guard case .commit(let name) = InPlaceRename.outcome(
             ending, draft: draft, current: workspace.name
         ) else { return }
-        Task { await app.rename(workspace, to: name) }
+        Task {
+            if let remote { await remote.updateWorkspace(workspace, action: .rename(name)) } else { await app.rename(workspace, to: name) }
+        }
     }
 }
 

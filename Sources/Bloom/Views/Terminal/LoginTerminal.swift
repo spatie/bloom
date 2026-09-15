@@ -20,7 +20,7 @@ final class LoginTerminalSession {
 
     /// Nil when the program is not on this Mac at all, which is the one case that cannot be a
     /// terminal because there is nothing to run in it.
-    init?(
+    convenience init?(
         executable: String,
         arguments: [String],
         directory: String,
@@ -30,8 +30,7 @@ final class LoginTerminalSession {
 
         let variables = Shell.terminalEnvironment(inheriting: Shell.environment())
 
-        label = ([executable] + arguments).joined(separator: " ")
-        launch = TerminalLaunch(
+        let launch = TerminalLaunch(
             executable: path,
             execName: executable,
             arguments: arguments,
@@ -41,6 +40,14 @@ final class LoginTerminalSession {
                 ? directory
                 : AgentScratchDirectory.current()
         )
+
+        self.init(launch: launch, label: ([executable] + arguments).joined(separator: " "), onExit: onExit)
+    }
+
+    /// Remote sign-in supplies an SSH launch, but shares the same terminal lifetime as local login.
+    init(launch: TerminalLaunch, label: String, onExit: @escaping @MainActor (TerminalExit) -> Void) {
+        self.label = label
+        self.launch = launch
 
         terminal = BloomTerminalView(frame: .zero)
         // Keep the output visible after exit so the sheet can offer retry or completion.
@@ -66,6 +73,64 @@ final class LoginTerminalSession {
         guard isRunning else { return }
         isRunning = false
         terminal.shutdown()
+    }
+}
+
+/// The framed terminal every sign-in sheet shows: what is running along the top, the live terminal
+/// under it. One view, so this Mac's sign-ins and a server's look like the same feature rather
+/// than three copies of the same frame drifting apart.
+struct LoginTerminalPanel<Accessory: View>: View {
+    let session: LoginTerminalSession
+    let title: String?
+    let height: CGFloat
+    let accessory: () -> Accessory
+
+    init(
+        session: LoginTerminalSession,
+        title: String? = nil,
+        height: CGFloat = 280,
+        @ViewBuilder accessory: @escaping () -> Accessory
+    ) {
+        self.session = session
+        self.title = title
+        self.height = height
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: InspectorLayout.gap) {
+                Text(title ?? session.label)
+                    .font(Typo.codeSmall)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(title ?? session.label)
+
+                Spacer(minLength: 0)
+
+                accessory()
+            }
+            .padding(.horizontal, InspectorLayout.inset)
+            .frame(height: InspectorLayout.barHeight)
+            .background(Palette.surfaceSunken)
+
+            Hairline()
+
+            LoginTerminal(session: session)
+                .frame(height: height)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
+        .overlay(
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
+        )
+    }
+}
+
+extension LoginTerminalPanel where Accessory == EmptyView {
+    init(session: LoginTerminalSession, title: String? = nil, height: CGFloat = 280) {
+        self.init(session: session, title: title, height: height) { EmptyView() }
     }
 }
 

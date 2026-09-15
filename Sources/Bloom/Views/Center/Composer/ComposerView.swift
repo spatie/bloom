@@ -36,6 +36,7 @@ struct ComposerView: View {
     var onSelectDestination: ((SessionID) -> Void)?
 
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
 
     /// The space a short pane keeps for the conversation when the draft grows.
     private static let minTranscriptHeight: CGFloat = 120
@@ -76,6 +77,15 @@ struct ComposerView: View {
                 )
             }
 
+            if RemoteServerAvailability.shared.isEnabled, let remote = transcript.remote, let message = remote.signInMessage {
+                HStack {
+                    Text(message).font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                    Spacer()
+                    Button("Sign In on Server…") {
+                        if remote.isCurrentServer { openWindow(id: ServerAccountsWindow.id) }
+                    }
+                }.padding(.vertical, Metrics.spacing)
+            }
             PaneDivider(
                 axis: .vertical,
                 length: Binding(
@@ -124,8 +134,8 @@ struct ComposerView: View {
             text: $transcript.draft,
             caret: $caret,
             isFocused: $isFocused,
-            mentionRoot: transcript.cwd,
-            attachmentRoot: transcript.cwd,
+            mentionRoot: transcript.remote == nil ? transcript.cwd : "",
+            attachmentRoot: transcript.remote?.attachmentCache ?? transcript.cwd,
             attachmentKey: transcript.session.id.rawValue,
             reviewComments: reviewComments,
             onRemoveReviewComment: remove(reviewComment:),
@@ -138,7 +148,8 @@ struct ComposerView: View {
             onKey: handle(key:),
             onOpenAttachment: open(attachment:),
             onOpenCommand: open(commandPath:),
-            isFloating: true
+            isFloating: true,
+            remote: transcript.remote
         ) { actions in
             ComposerFooterView(
                 controls: controls,
@@ -147,7 +158,7 @@ struct ComposerView: View {
                 isRunning: transcript.isRunning,
                 queues: transcript.queuesNextMessage,
                 canSend: canSend,
-                project: transcript.cwd,
+                project: transcript.remote == nil ? transcript.cwd : nil,
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
                 // Read off the workspace model, which is where the Workspace menu reads its run
@@ -156,12 +167,18 @@ struct ComposerView: View {
                 onOpenQuickPrompts: { [model] in model?.refreshSettings() },
                 onSend: send,
                 onStop: transcript.stop,
-                onSideConversation: canOpenSideConversation ? openSideConversation : nil
+                onSideConversation: canOpenSideConversation ? openSideConversation : nil,
+                remote: transcript.remote
             )
         }
+        .id(transcript.remote?.sessionID.rawValue ?? "local")
         .task(id: transcript.session.id) { await prepare() }
+        .task(id: app.remoteServer.agentAuthenticationRevision) {
+            guard app.remoteServer.agentAuthenticationRevision > 0 else { return }
+            await transcript.remote?.refreshAuthentication()
+        }
         .task(id: "planning:\(transcript.session.id):\(transcript.rows.last?.seq ?? -1)") {
-            if let store = app.store { await ComposerPlanningSupport.shared.refresh(from: store) }
+            if transcript.remote == nil, let store = app.store { await ComposerPlanningSupport.shared.refresh(from: store) }
         }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
@@ -203,7 +220,7 @@ struct ComposerView: View {
     }
 
     private var controls: ComposerControls {
-        ComposerControls(
+        transcript.remote?.controls ?? ComposerControls(
             session: transcript.session,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
@@ -238,7 +255,7 @@ struct ComposerView: View {
     /// Review comments alone are a turn for the same reason: each one already says which file,
     /// which line and what to do, and the payload spells out that the comments are the whole
     /// request when nothing else was typed. See `ReviewPromptContext.noMessage`.
-    private var canSend: Bool { hasBody || !reviewComments.isEmpty }
+    private var canSend: Bool { (transcript.remote?.canSend ?? true) && (hasBody || !reviewComments.isEmpty) }
 
     // MARK: - Keys
 
@@ -289,6 +306,17 @@ struct ComposerView: View {
     /// Writes the footer's choices back where a conversation keeps them: the four that are columns
     /// go on the session row, and fast mode and the output style go in the store's key value table.
     private func apply(controls new: ComposerControls) {
+        if let remote = transcript.remote {
+            let draft = transcript.draft
+            Task {
+                if let session = await remote.apply(new) {
+                    remote.saveDraft(draft, for: session)
+                    app.selectRemoteSession(session.id)
+                }
+            }
+            return
+        }
+
         if new.codexFastMode != codexFastMode {
             codexFastMode = new.codexFastMode
             if let store = app.store {
@@ -423,7 +451,7 @@ struct ComposerView: View {
             // The whole point of the press, and what was missing. A fork nobody is shown is
             // indistinguishable from a picker that does nothing: the reported bug was a menu
             // dismissed, a chat made off screen, and a composer still saying Sonnet 5.
-            WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model)
+            model.paneStores.tabs.reveal(.chat(session.id), in: model)
             app.notice = BloomNotice(message: BackendChange.forkNotice(title: title, from: from))
         }
     }
@@ -448,7 +476,9 @@ struct ComposerView: View {
 
         if let question = SideConversation.question(in: transcript.draft) {
             guard canOpenSideConversation, let model else {
-                app.notice = BloomNotice(message: "Use /btw in a workspace chat to open a side conversation.")
+                app.notice = BloomNotice(message: transcript.remote == nil
+                    ? "Use /btw in a workspace chat to open a side conversation."
+                    : "Side conversations are not available on remote servers yet.")
                 return
             }
             // The command itself belongs to Bloom. Leave review comments on the main chat.
@@ -472,6 +502,17 @@ struct ComposerView: View {
 
         if ChatClearCommand.matches(transcript.draft) {
             startFreshChat()
+            return
+        }
+
+        if transcript.remote != nil {
+            let sourceDraft = transcript.draft
+            let comments = Dictionary(attachments.compactMap { attachment in
+                attachment.imageComment.map { (attachment.path, $0) }
+            }, uniquingKeysWith: { first, _ in first })
+            let text = BrowserImageComment.expand(sourceDraft, comments: comments)
+            caret = 0
+            Task { await self.transcript.submit(text, clearingDraft: sourceDraft) }
             return
         }
 
@@ -550,7 +591,7 @@ struct ComposerView: View {
     /// cases, because `QuickPromptPanelRow.delivery` asks `ProjectQuickPrompt` rather than the
     /// owner's rule, and that one has no send to answer with.
     private func fire(_ prompt: QuickPromptPanelRow, insert: @MainActor (QuickPromptPanelRow) -> Void) {
-        switch prompt.delivery(canSend: true, canOpenNewChat: model != nil) {
+        switch prompt.delivery(canSend: true, canOpenNewChat: model != nil || transcript.remote != nil) {
         case .compose:
             insert(prompt)
         case .send:
@@ -576,6 +617,15 @@ struct ComposerView: View {
     /// Both are written, so a load that had already finished is not left holding nothing, and the
     /// two agree because the store now says the same words.
     private func openChat(for prompt: QuickPromptPanelRow, sending: Bool) {
+        if let remote = transcript.remote {
+            Task {
+                guard let session = await remote.newChat() else { return }
+                remote.saveDraft(prompt.text, for: session)
+                app.selectRemoteSession(session.id)
+                if sending, await remote.submit(prompt.text, to: session.id) { remote.saveDraft("", for: session) }
+            }
+            return
+        }
         guard let model else { return }
         let text = prompt.text
         Task { @MainActor in
@@ -596,11 +646,22 @@ struct ComposerView: View {
         let controls = controls
         Task { @MainActor in
             defer { isClearingChat = false }
+            if let remote = previous.remote {
+                guard let session = await remote.newChat() else { return }
+                let closedPrevious = closingPrevious ? await remote.close() : false
+                if !closingPrevious || closedPrevious,
+                   ChatClearCommand.matches(previous.draft) || ChatCloseCommand.matches(previous.draft) {
+                    previous.draft = ""
+                    await previous.saveDraft()
+                }
+                app.selectRemoteSession(session.id)
+                return
+            }
             if let model {
                 if !closingPrevious {
                     guard await model.clearConversation(previous.session, controls: controls) != nil else { return }
                 } else {
-                    let tabs = WorkspaceTabsStore.shared
+                    let tabs = model.paneStores.tabs
                     let order = tabs.entries(in: model)
                     let owner = order.first { tab in
                         tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
@@ -653,6 +714,7 @@ struct ComposerView: View {
     /// `FileReview`. An attachment is not a special kind of file and does not get a special kind
     /// of tab.
     private func open(attachment: PromptAttachment) {
+        if let remote = transcript.remote { remote.openFile(attachment.path); app.isInspectorVisible = true; return }
         guard let model else { return }
         FileReview.open(path: attachment.path, in: model)
     }
@@ -718,6 +780,12 @@ struct ComposerView: View {
     /// All of it is only interesting once, hence the `task(id:)`. The precedence rules live in
     /// `ComposerDefaults`.
     private func prepare() async {
+        if let remote = transcript.remote {
+            isFocused = true
+            caret = (transcript.draft as NSString).length
+            await remote.prepare()
+            return
+        }
         // A `defer`, because this function has five ways out and every one of them is a composer
         // that is ready: the common one by far is the early return below for a session whose
         // defaults were applied on an earlier launch, which is exactly the path a return to a chat

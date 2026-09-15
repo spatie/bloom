@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// The patches a workspace has already asked git for, and the rule for when one may be reused.

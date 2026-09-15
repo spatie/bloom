@@ -10,9 +10,9 @@ import Foundation
 /// `message` is shown as it is, so it is short and plain and names the entry the way the file
 /// does. `line` is there when the parser could say where the entry starts, which is a table header
 /// or a `key = value` line, and nil for anything written inline.
-public struct SettingsIssue: Sendable, Hashable {
+public struct SettingsIssue: Sendable, Hashable, Codable {
     /// Which part of the file the sentence is about.
-    public enum Entry: Sendable, Hashable {
+    public enum Entry: Sendable, Hashable, Codable {
         /// The whole file, which was skipped because it would not parse.
         case file
         /// A run script, by its table name under `scripts.run`.

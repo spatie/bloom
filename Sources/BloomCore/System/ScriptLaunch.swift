@@ -69,7 +69,7 @@ public enum ScriptLaunch: Sendable, Hashable {
     public var executable: String {
         switch self {
         case .executable(let path): path
-        case .source, .missing: "/bin/zsh"
+        case .source, .missing: LoginShell.fallback
         }
     }
 

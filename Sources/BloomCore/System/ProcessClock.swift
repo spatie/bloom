@@ -12,6 +12,7 @@ public enum ProcessClock {
         Int((Date().timeIntervalSince1970 - start) * 1000)
     }
 
+    #if canImport(Darwin)
     private static let start: TimeInterval = {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride
@@ -20,4 +21,9 @@ public enum ProcessClock {
         let started = info.kp_proc.p_starttime
         return TimeInterval(started.tv_sec) + TimeInterval(started.tv_usec) / 1_000_000
     }()
+    #else
+    /// Linux has no `kinfo_proc`. Only the Mac app measures its launch, and the server this core is
+    /// also built into has no Dock icon to wait on, so the first time it is asked is honest enough.
+    private static let start: TimeInterval = Date().timeIntervalSince1970
+    #endif
 }

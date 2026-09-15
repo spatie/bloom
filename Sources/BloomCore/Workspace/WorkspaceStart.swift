@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// Everything a caller has to say to get a workspace with an agent ready to work in it.

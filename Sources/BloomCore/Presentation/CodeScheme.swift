@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 public struct CodeScheme: Codable, Hashable, Sendable, Identifiable {
     public var id: String

@@ -1,6 +1,5 @@
 import Foundation
 import Synchronization
-import os
 
 // MARK: - Process seam
 
@@ -81,6 +80,7 @@ public actor AgentRunner {
     /// new runner with a new file and a new token, which is exactly what a token held only in
     /// memory needs.
     private let mcpConfigPath: String?
+    private let bridge: BridgeAttachment?
     /// Whether the composer's Fast toggle is on for this session.
     ///
     /// Read from the store rather than passed in, because it is the one composer control with no
@@ -89,6 +89,7 @@ public actor AgentRunner {
     /// effect on the next thing sent rather than on the next launch of the app.
     private var isFastMode = false
     /// The executable selected in Settings, or the ordinary command name when none was selected.
+    private var execution = WorkspaceExecution()
     private var configuredExecutable = AgentKind.claudeCode.executableName
     /// Which output style the composer's picker is on for this session, or nil for the default.
     ///
@@ -149,6 +150,7 @@ public actor AgentRunner {
         session: Session,
         store: Store,
         mcpConfigPath: String? = nil,
+        bridge: BridgeAttachment? = nil,
         shutdownBudget: Duration = .seconds(5),
         makeProcess: @escaping @Sendable (AgentLaunch) -> any AgentProcessing = AgentRunner.spawn
     ) {
@@ -157,6 +159,7 @@ public actor AgentRunner {
         self.session = session
         self.store = store
         self.mcpConfigPath = mcpConfigPath
+        self.bridge = bridge
         self.shutdownBudget = shutdownBudget
         self.makeProcess = makeProcess
         self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
@@ -305,23 +308,27 @@ public actor AgentRunner {
     /// How this runner would spawn right now. Recomputed per start, because the agent session id
     /// only exists after the first run and a restart has to resume rather than begin again.
     public func launch() -> AgentLaunch {
-        AgentLaunch(
+        execution.wrapping(AgentLaunch(
             executable: configuredExecutable,
             arguments: Self.argv(
                 session: session,
                 resume: session.agentSessionID,
                 isFastMode: isFastMode,
                 outputStyle: outputStyle,
-                mcpConfigPath: mcpConfigPath
+                mcpConfigPath: execution.supportsBridge ? mcpConfigPath : nil
             ),
             cwd: workspacePath,
-            environment: Shell.environment()
-        )
+            environment: Shell.environment(extra: execution.bridgeEnvironment(bridge, configPath: mcpConfigPath))
+        ))
     }
 
     // MARK: State
 
     public var isRunning: Bool { alive }
+
+    /// Cancelling marks the turn idle before SIGTERM has reaped its child. Server shutdown must
+    /// wait for the actual process, otherwise its SIGKILL fallback dies with the server.
+    public nonisolated var isProcessAlive: Bool { handle.current?.isRunning ?? false }
 
     public var currentSession: Session { session }
 
@@ -402,6 +409,7 @@ public actor AgentRunner {
         await refreshFastMode()
         await refreshOutputStyle()
         await refreshExecutable()
+        if !alive { execution = try await WorkspaceExecution.resolve(store: store, session: session) }
         try await waitForCancelledRunToExit()
         start()
 
@@ -755,7 +763,7 @@ public actor AgentRunner {
         }
     }
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "agent-runner"
     )
@@ -960,7 +968,8 @@ public actor AgentRunner {
             sawResult: sawResult,
             state: session.state,
             stderr: stderrTail.joined(separator: "\n"),
-            command: launchedCommand
+            command: launchedCommand,
+            execution: execution.missingAgentContext(cli: configuredExecutable)
         ) {
             Self.log.error("""
                 the agent for \(self.session.id.rawValue, privacy: .public) ended on status \

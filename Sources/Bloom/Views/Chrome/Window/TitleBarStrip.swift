@@ -143,7 +143,7 @@ struct TitleBarStrip: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            if let model = shown, inspector.isVisible {
+            if let model = shown, inspector.isVisible, !app.selection.isRemote {
                 PullRequestBar(model: model)
                     // As wide as the pane below it, so the band ends where the pane does and the
                     // split divider runs out of the bottom of it. `bandWidth` rather than `width`

@@ -294,8 +294,8 @@ struct WorkspaceManagerTests {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
         // Ignores SIGTERM, which is what a Stop has to get past as well as the ordinary case.
-        // The loop is timed by `SECONDS`, a zsh builtin, and forks nothing whose death could end
-        // it early. It used to be `for _ in $(seq 1 6000)` after the echo, and the test cancels
+        // The loop counts down in shell arithmetic, which `/bin/sh` on Linux understands where it
+        // keeps no `SECONDS`, and forks nothing whose death could end it early. It used to be `for _ in $(seq 1 6000)` after the echo, and the test cancels
         // the moment it reads that line: the SIGTERM reached `seq` while it was still running,
         // because `trap ''` does not carry into a command substitution, the loop came out empty
         // and `touch` ran straight away. A stop that does not work still fails, on the time limit.
@@ -303,8 +303,12 @@ struct WorkspaceManagerTests {
         [scripts]
         setup = '''
         trap '' TERM
+        remaining=600
         echo "seeding"
-        while (( SECONDS < 300 )); do sleep 0.05; done
+        while [ "$remaining" -gt 0 ]; do
+          sleep 0.05
+          remaining=$((remaining - 1))
+        done
         touch finished.txt
         '''
         """)
@@ -331,6 +335,38 @@ struct WorkspaceManagerTests {
         #expect(stored.setupLog.contains("seeding"))
         #expect(stored.setupLog.contains(WorkspaceManager.setupStoppedNote))
         #expect(!TempRepo(existing: workspace.path).exists("finished.txt"), Comment(rawValue: stored.setupLog))
+    }
+
+    @Test("a cancelled setup with a successful TERM handler is still filed as stopped", .tags(.subprocess), .timeLimit(.minutes(1)))
+    func cancellingSetupWithSuccessfulExitRemainsStopped() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try repo.write(".conductor/settings.toml", """
+        [scripts]
+        setup = '''
+        trap 'exit 0' TERM
+        echo "waiting for cancellation"
+        while :; do sleep 0.05; done
+        '''
+        """)
+        let store = try makeTestStore("wm")
+        let manager = WorkspaceManager(store: store)
+        let registered = try await manager.addRepository(at: repo.path)
+        let workspace = try await manager.createWorkspace(repo: registered, prompt: "Stop gracefully")
+        let collector = LineCollector()
+        let exits = LineCollector()
+        let run = Task {
+            await manager.runSetup(workspace: workspace, repo: registered, port: 0,
+                                   onExit: { exits.append(String($0)) }) { collector.append($0) }
+        }
+        await waitUntil("the TERM handler is installed") { collector.joined.contains("waiting for cancellation") }
+        run.cancel()
+        let succeeded = await run.value
+        #expect(!succeeded)
+        #expect(exits.joined == "0")
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.setupState == .failed)
+        #expect(stored.setupLog.contains(WorkspaceManager.setupStoppedNote))
     }
 
     @Test(

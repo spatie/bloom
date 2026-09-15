@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Reports distinct installations and coarse setup metrics about once a day.
 /// Includes the computer name, which may contain a person's name.

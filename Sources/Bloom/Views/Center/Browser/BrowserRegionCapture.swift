@@ -60,7 +60,7 @@ final class BrowserRegionCapture {
         }
     }
 
-    func saveEdit(in model: WorkspaceModel) {
+    func saveEdit(in model: some WorkspacePaneModel) {
         guard let note = focusedComment, editingCommentPath == note.id,
               !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let transcript = model.existingTranscript(for: sessionID),
@@ -73,10 +73,11 @@ final class BrowserRegionCapture {
         cancelEdit()
     }
 
-    func remove(_ note: BrowserRegionComment, from model: WorkspaceModel) {
+    func remove(_ note: BrowserRegionComment, from model: some WorkspacePaneModel) {
         guard let transcript = model.existingTranscript(for: sessionID) else { return }
         let draft = AttachmentDraft.parse(transcript.draft).keeping { $0 != note.path }
         transcript.draft = draft
+        transcript.remote?.saveDraft(draft)
         comments.removeAll { $0.id == note.id }
         editDrafts[note.id] = nil
         if focusedCommentPath == note.id {
@@ -118,7 +119,7 @@ final class BrowserRegionCapture {
         )
     }
 
-    func add(to model: WorkspaceModel, completion: @escaping @MainActor () -> Void) {
+    func add(to model: some WorkspacePaneModel, completion: @escaping @MainActor () -> Void) {
         guard canAdd, let selection,
               let rect = BrowserRegion.pixels(selection, image: imageSize),
               let crop = image.cropping(to: rect),

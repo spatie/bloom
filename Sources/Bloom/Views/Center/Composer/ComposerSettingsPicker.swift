@@ -69,7 +69,7 @@ struct ComposerSettingsPicker: View {
 
     private var summary: String {
         let effort = ComposerOption.label(for: controls.effort, in: efforts)
-        return "\(modelLabel), \(effort), \(controls.permissionMode.label)"
+        return "\(modelLabel), \(effort), \(controls.permissionMode.label(on: controls.agentKind))"
     }
 }
 
@@ -152,31 +152,37 @@ private struct ComposerSettingsPanel: View {
             }
             .padding(Metrics.gutter)
 
-            Hairline()
+            // Codex as well as the shared rule. This footer reads Codex's own speed configuration,
+            // which `offersFastMode` cannot assume of every client, and for a workspace on a server
+            // takes the speed that server reported, unavailable when it reported none. See
+            // `ComposerFooterView.codexSpeedReading`.
+            if controls.offersFastMode || controls.agentKind == .codex {
+                Hairline()
 
-            HStack(spacing: Metrics.spacing) {
-                Text(fastModeLabel)
-                    .font(Typo.label)
-
-                Spacer(minLength: Metrics.spacing)
-
-                if controls.agentKind == .codex, codexSpeed == nil {
-                    Text(codexSpeedFailed ? "Unavailable" : "Loading…")
+                HStack(spacing: Metrics.spacing) {
+                    Text(fastModeLabel)
                         .font(Typo.label)
-                        .foregroundStyle(Palette.textSecondary)
-                } else {
-                    Toggle(fastModeLabel, isOn: fastBinding)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .disabled(controls.agentKind == .codex && codexSpeed?.supportsFast != true)
+
+                    Spacer(minLength: Metrics.spacing)
+
+                    if controls.agentKind == .codex, codexSpeed == nil {
+                        Text(codexSpeedFailed ? "Unavailable" : "Loading…")
+                            .font(Typo.label)
+                            .foregroundStyle(Palette.textSecondary)
+                    } else {
+                        Toggle(fastModeLabel, isOn: fastBinding)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .disabled(controls.agentKind == .codex && codexSpeed?.supportsFast != true)
+                    }
                 }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.vertical, Metrics.inset)
+                .help(controls.agentKind == .codex
+                      ? "Faster replies use more of your Codex allowance. Changes apply to this conversation."
+                      : "Disable thinking for faster replies.")
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.vertical, Metrics.inset)
-            .help(controls.agentKind == .codex
-                  ? "Faster replies use more of your Codex allowance. Changes apply to this conversation."
-                  : "Disable thinking for faster replies.")
         }
         .frame(width: Self.width)
     }

@@ -9,6 +9,8 @@ import BloomCore
 /// reported it, and a block covering the whole viewport drew nothing. See `ReviewViewport`.
 struct ReviewDiffBlock<Content: View>: View {
     var height: CGFloat
+    /// Names the block for the review probe's section report, and does nothing otherwise.
+    var probeName: String?
     @ViewBuilder var content: () -> Content
 
     @State private var frame: CGRect?
@@ -27,6 +29,7 @@ struct ReviewDiffBlock<Content: View>: View {
             } action: {
                 frame = $0
             }
+            .reviewProbeGeometry(probeName, nearViewport: isNearViewport)
     }
 
     private var isNearViewport: Bool {

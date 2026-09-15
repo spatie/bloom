@@ -1,6 +1,5 @@
 import Foundation
 import Synchronization
-import os
 
 /// Supervises one `grok agent stdio` connection for one Bloom chat.
 ///
@@ -512,7 +511,7 @@ public actor GrokRunner: SessionRunner {
 
     var transcriptWasRemoved: Bool { trouble.hasStopped }
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "grok-runner"
     )

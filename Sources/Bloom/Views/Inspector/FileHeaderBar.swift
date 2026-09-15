@@ -33,8 +33,8 @@ import BloomCore
 /// The control cluster collapses into a menu when the pane is too narrow for it. A segmented
 /// control and a row of toggle buttons do not truncate: they overflow and get clipped, which is
 /// how a control ends up half visible at the edge of a narrow inspector.
-struct FileHeaderBar: View {
-    let model: WorkspaceModel
+struct FileHeaderBar<Model: WorkspaceFileReview>: View {
+    let model: Model
     let file: ChangedFile
     let session: FileEditSession
     /// The parsed patch, for the share text. Nil while it is still being read.
@@ -202,7 +202,7 @@ struct FileHeaderBar: View {
                 if allowsWorktreeActions {
                     Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
                         isConfirmingRevert = true
-                    }
+                    }.disabled(!model.supportsFileRevert)
                 }
             } label: {
                 Label("File actions", systemImage: "ellipsis.circle")
@@ -247,7 +247,7 @@ struct FileHeaderBar: View {
             Toggle("Viewed", isOn: Binding(
                 get: { model.isViewed(file) },
                 set: { value in Task { await model.setViewed(value, file: file) } }
-            ))
+            )).disabled(!model.supportsViewedMarks)
             Divider()
             Picker(FileBarControls.layout.title, selection: $isSideBySide) {
                 Text(FileBarControls.unified).tag(false)
@@ -263,7 +263,7 @@ struct FileHeaderBar: View {
             if allowsWorktreeActions {
                 Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
                     isConfirmingRevert = true
-                }
+                }.disabled(!model.supportsFileRevert)
             }
         } label: {
             Label(FileBarControls.more.title, systemImage: "ellipsis.circle")
@@ -300,6 +300,7 @@ struct FileHeaderBar: View {
         }
         .fileBarLabelStyle(labelled: labelled)
         .inspectorBarControl()
+        .disabled(!model.supportsFileRevert)
         .fileBarHint(control, into: $hint)
     }
 

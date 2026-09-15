@@ -65,9 +65,12 @@ private struct CreateWorkspaceWindowContent: View {
     let repoID: RepoID?
 
     @Environment(AppModel.self) private var app
-
     var body: some View {
-        CreateWorkspaceView(initialRepo: app.repos.first { $0.id == repoID })
+        // The catalogue can outlive the connection, so a switched off feature must not open on it.
+        let remoteRepo = RemoteServerAvailability.shared.isEnabled
+            ? app.remoteServer.catalogue?.repositories.first { $0.id == repoID } : nil
+        let isRemote = remoteRepo != nil || (repoID == nil && app.selection.isRemote)
+        CreateWorkspaceView(initialRepo: remoteRepo ?? app.repos.first { $0.id == repoID }, initialIsRemote: isRemote)
     }
 }
 

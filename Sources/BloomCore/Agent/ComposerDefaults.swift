@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// What a session that has never been opened starts out as.
 ///

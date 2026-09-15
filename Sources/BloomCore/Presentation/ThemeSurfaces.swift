@@ -1,3 +1,5 @@
+import BloomClient
+
 public struct ThemeSurfaces: Codable, Sendable, Hashable {
     public let surface: PaletteInk.Pair
     public let raised: PaletteInk.Pair

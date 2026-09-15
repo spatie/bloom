@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Worktree and staging are distinct snapshots. Only the worktree tree is read now, by a turn's
 /// footer; the two staging refs were for restoring files, which was removed. They are still

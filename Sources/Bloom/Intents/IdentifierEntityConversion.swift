@@ -8,13 +8,13 @@ import BloomCore
 /// the system is exactly the sort of list that gets passed to a lookup expecting the other kind.
 /// AppIntents ships this conformance for `String`, `Int` and `UUID` only, so a typed id needs it
 /// spelled out.
-extension RepoID: EntityIdentifierConvertible {
+extension RepoID: @retroactive EntityIdentifierConvertible {
     public var entityIdentifierString: String { rawValue }
 
     public static func entityIdentifier(for string: String) -> RepoID? { RepoID(string) }
 }
 
-extension WorkspaceID: EntityIdentifierConvertible {
+extension WorkspaceID: @retroactive EntityIdentifierConvertible {
     public var entityIdentifierString: String { rawValue }
 
     public static func entityIdentifier(for string: String) -> WorkspaceID? { WorkspaceID(string) }

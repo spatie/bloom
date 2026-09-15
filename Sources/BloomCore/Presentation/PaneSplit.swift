@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// What kind of thing a centre tab that is not a conversation is showing.
@@ -11,14 +12,7 @@ import Foundation
 /// **The raw values are a file format.** They are what `center.tabs.<workspaceID>` was written
 /// with, and moving the type between modules must not change a byte of it, which is why the cases
 /// keep their spellings and the `String` raw type.
-public enum CenterTabKind: String, Codable, Sendable, CaseIterable {
-    case terminal
-    case browser
-    /// The changed files of this workspace, read one at a time.
-    case review
-    /// The workspace's scratch text.
-    case notes
-}
+public typealias CenterTabKind = BloomClient.CenterTabKind
 
 /// What goes in the half a split opens, worked out from the pane being split.
 ///

@@ -36,6 +36,7 @@ import Foundation
 public enum WorktreeScratch {
     /// Copies of files somebody dropped, pasted or picked into a prompt.
     public static let attachments = ".bloom/attachments"
+    public static let ignoreContents = "*\n"
 
     /// Files Bloom generates for its own use, that no project asked for and no reviewer wants to
     /// read: the default pull request instructions, and whatever comes after them.
@@ -72,6 +73,6 @@ public enum WorktreeScratch {
         // stop. `SettingsWriter.prepareFolder` still lays it down the first time somebody writes
         // a setting, whether or not `.bloom` already exists by then.
         try? manager.createDirectory(atPath: full, withIntermediateDirectories: true)
-        try? "*\n".write(toFile: ignore, atomically: true, encoding: .utf8)
+        try? ignoreContents.write(toFile: ignore, atomically: true, encoding: .utf8)
     }
 }

@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// The thicknesses the main window's minimum width is built out of, and what has to move when the
 /// inspector opens in a window too narrow for it.

@@ -3,7 +3,7 @@ import BloomCore
 
 @MainActor
 enum TerminalExcerptHandoff {
-    static func attach(_ excerpt: TerminalExcerpt, to model: WorkspaceModel, sessionID: SessionID) async -> String? {
+    static func attach(_ excerpt: TerminalExcerpt, to model: some WorkspacePaneModel, sessionID: SessionID) async -> String? {
         guard excerpt.workspaceID == model.workspace.id else {
             return "This terminal belongs to another workspace."
         }

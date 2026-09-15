@@ -26,6 +26,8 @@ public struct BrowserAddressDisplay: Equatable, Sendable {
         case none
         /// A server on this Mac, which is what this pane is mostly pointed at.
         case local
+        /// A workspace service reached through its remote server connection.
+        case remote(server: String)
         /// Plain http somewhere else.
         case insecure
         case secure
@@ -34,6 +36,7 @@ public struct BrowserAddressDisplay: Equatable, Sendable {
             switch self {
             case .none: nil
             case .local: "desktopcomputer"
+            case .remote: "server.rack"
             case .insecure: "globe"
             case .secure: "lock.fill"
             }
@@ -43,6 +46,7 @@ public struct BrowserAddressDisplay: Equatable, Sendable {
             switch self {
             case .none: nil
             case .local: "A server on this Mac"
+            case .remote(let server): "A preview on \(server)"
             case .insecure: "This connection is not encrypted"
             case .secure: "This connection is encrypted"
             }
@@ -53,7 +57,7 @@ public struct BrowserAddressDisplay: Equatable, Sendable {
     /// would otherwise be laid out in full behind a field 300 points wide.
     public static let limit = 512
 
-    public static func of(_ address: String) -> BrowserAddressDisplay {
+    public static func of(_ address: String, remoteServer: String? = nil) -> BrowserAddressDisplay {
         let text = sanitised(address)
         // `encodedHost` rather than the host itself, so a name written with percent escapes or in
         // punycode is drawn as the parser sees it. Decoding is how two different hosts come to
@@ -87,7 +91,11 @@ public struct BrowserAddressDisplay: Equatable, Sendable {
             leading: leading,
             host: host + (parts.port.map { ":\($0)" } ?? ""),
             trailing: trailing,
-            security: security(scheme: scheme, host: host)
+            security: remoteServer.flatMap { server in
+                guard let url = URL(string: text), ServerPreview.isLoopback(url),
+                      scheme == "http" || scheme == "https" else { return nil }
+                return .remote(server: sanitised(server))
+            } ?? security(scheme: scheme, host: host)
         )
     }
 

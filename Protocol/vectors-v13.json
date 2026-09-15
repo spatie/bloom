@@ -1,0 +1,341 @@
+[
+  {
+    "name": "request-hello",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "hello": {}
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-catalogue",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "catalogue": {}
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-transcript",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "transcript": {
+          "afterSeq": 0,
+          "sessionID": "session-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-snapshot",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "reviewSnapshot": {
+          "scope": "branch",
+          "wait": true,
+          "workspaceID": "workspace-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-patch",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "reviewPatch": {
+          "knownRevision": "revision-1",
+          "path": "README.md",
+          "scope": "uncommitted",
+          "workspaceID": "workspace-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-file",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "file": {
+          "path": "README.md",
+          "workspaceID": "workspace-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-files",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "workspace": {
+          "action": {
+            "files": {}
+          },
+          "workspaceID": "workspace-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-upload",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "workspace": {
+          "action": {
+            "uploadFile": {
+              "data": "AAH/",
+              "name": "note.txt"
+            }
+          },
+          "workspaceID": "workspace-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-clearColour",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "workspace": {
+          "action": {
+            "setColour": {}
+          },
+          "workspaceID": "workspace-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-settings",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "project": {
+          "action": {
+            "settings": {}
+          },
+          "repoID": "repo-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-context",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "creation": {
+          "_0": {
+            "workspaceContext": {
+              "_0": "repo-example"
+            }
+          }
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "request-answer",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "operation": {
+        "answer": {
+          "answer": {
+            "question": {
+              "input": {
+                "choice": "yes"
+              }
+            }
+          },
+          "requestID": "ask-example",
+          "sessionID": "session-example"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-hello",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "hello": {
+          "name": "example-server"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-accepted",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "accepted": {}
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-failure",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "failure": {
+          "_0": "Example refusal"
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-snapshot",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "reviewSnapshot": {
+          "_0": {
+            "files": [
+              {
+                "additions": 2,
+                "change": "M",
+                "deletions": 1,
+                "hasIncompleteStats": false,
+                "isBinary": false,
+                "path": "README.md"
+              }
+            ],
+            "revision": "revision-1"
+          }
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-unchangedSnapshot",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "reviewSnapshot": {
+          "_0": {
+            "revision": "revision-1"
+          }
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-unchangedPatch",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "reviewPatch": {
+          "_0": {
+            "revision": "revision-1"
+          }
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-file",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "file": {
+          "_0": {
+            "path": "README.md",
+            "revision": "90f8ec5669cd34183b9b0fdf8b94f5efb4c3672876330f4aa76088c2b4ad17be",
+            "text": "# Hello\n"
+          }
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-download",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "download": {
+          "_0": {
+            "data": "AAH/",
+            "path": "note.txt"
+          }
+        }
+      },
+      "version": 13
+    }
+  },
+  {
+    "name": "reply-transcript",
+    "value": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "result": {
+        "transcript": {
+          "_0": {
+            "isBusy": false,
+            "messages": [
+              {
+                "createdAt": 0,
+                "id": 7,
+                "kind": "assistantText",
+                "payload": "eyJ0ZXh0IjoiSGVsbG9cbndvcmxkIn0=",
+                "seq": 1,
+                "sessionID": "session-example"
+              }
+            ],
+            "pendingQuestions": [
+              "e30="
+            ],
+            "permissionDecisions": {},
+            "queuedPrompts": [],
+            "session": {
+              "agentKind": "claudeCode",
+              "contextTokens": 0,
+              "costUSD": 0,
+              "createdAt": 0,
+              "effort": "medium",
+              "id": "session-example",
+              "inputTokens": 0,
+              "lastReadSeq": 0,
+              "model": "example-model",
+              "outputTokens": 0,
+              "permissionMode": "bypassPermissions",
+              "sortOrder": 0,
+              "state": "idle",
+              "title": "Chat",
+              "updatedAt": 0,
+              "workspaceID": "workspace-example"
+            },
+            "streamingText": ""
+          }
+        }
+      },
+      "version": 13
+    }
+  }
+]
