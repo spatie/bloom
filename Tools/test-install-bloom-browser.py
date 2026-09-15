@@ -215,5 +215,47 @@ class BrowserTests(unittest.TestCase):
             dependencies.assert_not_called()
 
 
+class BrowserRetentionTests(unittest.TestCase):
+    """Every pinned version used to leave a full Chrome behind for good."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.releases = self.root / "releases"
+
+    def test_repair_of_the_same_version_keeps_the_real_predecessor(self):
+        new = self.releases / "0.37.1-153.0.8010.36-x64"
+        old = self.releases / "0.36.0-150.0.1-x64"
+        self.assertEqual(browser.replaced_release({"agentBrowser": str(old / "agent-browser")}, new), str(old))
+        self.assertEqual(browser.replaced_release({"agentBrowser": str(new / "agent-browser"), "previousRelease": str(old)}, new), str(old))
+        self.assertIsNone(browser.replaced_release({}, new))
+        self.assertIsNone(browser.replaced_release({"agentBrowser": "/elsewhere/agent-browser"}, new))
+
+    def test_verified_install_keeps_the_active_and_previous_tools_only(self):
+        names = ["0.35.0-148.0.1-x64", "0.36.0-150.0.1-x64", "0.37.1-153.0.8010.36-x64", "0.34.0-140.0.1-arm64"]
+        for name in names:
+            (self.releases / name / "chrome-linux64").mkdir(parents=True)
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "keep").write_text("keep")
+        (self.releases / "0.33.0-139.0.1-x64").symlink_to(outside, target_is_directory=True)
+        (self.releases / names[0] / "escape").symlink_to(outside, target_is_directory=True)
+        (self.releases / "unrelated").mkdir()
+        with mock.patch.object(browser, "protected"), mock.patch.object(browser, "emit") as emit:
+            browser.retire_browser_releases(self.releases / names[2], str(self.releases / names[1]))
+        self.assertEqual(sorted(path.name for path in self.releases.iterdir()),
+                         sorted([names[1], names[2], "0.33.0-139.0.1-x64", "unrelated"]))
+        self.assertEqual((outside / "keep").read_text(), "keep")
+        messages = [call.kwargs.get("message") for call in emit.call_args_list]
+        self.assertIn("Removed the older browser tools " + names[0], messages)
+        self.assertIn("Removed the older browser tools " + names[3], messages)
+
+    def test_retention_failure_is_reported_and_never_fails_setup(self):
+        with mock.patch.object(browser, "protected"), mock.patch.object(browser, "emit") as emit:
+            browser.retire_browser_releases(self.releases / "0.37.1-153.0.8010.36-x64", None)
+        self.assertIn("could not be removed", emit.call_args.kwargs["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

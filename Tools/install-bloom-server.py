@@ -31,7 +31,7 @@ if "read_swap_status" not in globals():
     from bloom_swap_state import read_swap_status
 
 if "MaintenanceInstallation" not in globals():
-    from bloom_maintenance_install import MaintenanceInstallation, MaintenanceInstallFailure
+    from bloom_maintenance_install import RELEASE_DIRECTORY, MaintenanceInstallation, MaintenanceInstallFailure, retire_releases
 
 CURRENT_STEP = None
 SYSTEM_PATH = "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -1054,7 +1054,12 @@ def install(args):
         backup = None
         if account_operation(account, lambda: database.exists()):
             backup = backup_database(database, staging, account)
-        details = {**configuration(args), "sha256": args.sha256.lower(), "phase": "prepared"}
+        # The package this one replaces, kept by retention. Reinstalling the same package carries the
+        # older record forward rather than forgetting the real predecessor.
+        prior = (existing or {}).get("sha256")
+        previous_sha = prior if prior != args.sha256.lower() else (existing or {}).get("previousSHA256")
+        details = {**configuration(args), "sha256": args.sha256.lower(), "phase": "prepared",
+                   **({"previousSHA256": previous_sha} if isinstance(previous_sha, str) and re.fullmatch(r"[0-9a-f]{64}", previous_sha) else {})}
         save_marker(args, details)
         emit("progress", step="service", message="Starting Bloom Server")
         release = args.install_root / "releases" / args.sha256.lower()
@@ -1091,7 +1096,42 @@ def install(args):
             raise
     details["phase"] = "installed"
     save_marker(args, details)
+    retire_old_releases(args, account, supervised, previous, details.get("previousSHA256"))
     emit("complete", unchanged=False, **({"maintenanceKeyAccepted": supervised.key_accepted} if supervised is not None and getattr(args, "maintenance_key_sha256", None) else {}), **metadata(args))
+
+
+def retire_old_releases(args, account, supervised, previous_link, previous_sha):
+    """Remove release directories a completed installation no longer needs, in both places.
+
+    Every installation added a directory of about 80 MB under each releases directory and nothing
+    removed one. This runs only once the new service answered and the marker says installed, since
+    before that the installer's own rollback may still point `current` back at the old release.
+    Kept: the release `current` points at, the one it pointed at before, and the previous package
+    in the marker. The account's releases are removed as the account, like uninstall, so a link
+    planted in its home cannot aim a root deletion elsewhere. A failure is reported and never fails
+    an installation that succeeded.
+    """
+    def account_releases():
+        releases = args.install_root / "releases"
+        references = [previous_link, str(releases / previous_sha) if previous_sha else None]
+        return retire_releases(releases, str(args.install_root / "current"), references, RELEASE_DIRECTORY)
+
+    removed = []
+    for label, operation in (("program files", lambda: account_operation(account, account_releases)),
+                             ("protected releases", (lambda: maintenance_call(supervised.retire_releases)) if supervised is not None else None)):
+        if operation is None:
+            continue
+        try:
+            removed += operation()
+        except InstallError as error:
+            if error.code == "cancelled":
+                raise
+            emit("output", message=f"Older Bloom Server {label} could not be removed: {error.message}", step="service")
+        except (MaintenanceInstallFailure, OSError) as error:
+            emit("output", message=f"Older Bloom Server {label} could not be removed: {install_exception_details(error)}", step="service")
+    for name in removed:
+        emit("output", message="Removed the older Bloom Server release " + name, step="service")
+    return removed
 
 
 def replace_maintenance_key(args):

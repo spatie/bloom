@@ -97,6 +97,9 @@ sudo ls /var/lib/bloom-maintenance/bloom-server/releases
 
 `current.json` names the new version and an executable under `releases/<sha256>/`, and that
 directory name is the published digest. `transaction.json` exists only while an update is in flight.
+`releases` holds at most three directories after a successful update: the running release, the one it
+replaced (`previous` in `current.json`) and the one the installation configured. The job log names each
+older release removed. After a rollback the failed candidate is still there until the next success.
 
 Rollback cannot be exercised safely with a real release. `Tools/maintenance-supervisor-smoke.py`
 installs a broken package in a disposable container in the Server workflow and checks the previous

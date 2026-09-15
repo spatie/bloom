@@ -310,6 +310,11 @@ def verify(binary, account):
                     payload = dict(action=action, credential=credential, **fields)
                     return rpc(sockets[0], {'maintenance': {'_0': payload}}, request_id)['maintenance']['_0']
 
+                digests = {}
+
+                def release_directories():
+                    return {path.name for path in releases.iterdir() if re.fullmatch(r'[0-9a-f]{64}', path.name)}
+
                 def publish(version, broken=False, protocol=None, manifest_protocol=None):
                     protocol = protocol or WIRE
                     staged, archive = root / ('candidate-' + version), root / (version + '.tar.gz')
@@ -317,6 +322,7 @@ def verify(binary, account):
                     with tarfile.open(archive, 'w:gz', compresslevel=1) as output:
                         output.add(staged, arcname='bloom-server-linux-x86_64')
                     package = archive.read_bytes()
+                    digests[version] = hashlib.sha256(package).hexdigest()
                     shutil.rmtree(staged); archive.unlink()
                     # The published description, as the release workflow writes it. Only its
                     # protocol differs from the package's own manifest in the incompatible case,
@@ -353,6 +359,11 @@ def verify(binary, account):
                     require(job['phase'] == expected, f'Expected {expected}, got {job}')
                     settled(expected, installed, package_id)
                     print(f'Supervisor {version}: {expected} through the GitHub lookup and download, same-ID replay and database verified.', flush=True)
+
+                # A rollback removes nothing: the restored release keeps its predecessor, and the
+                # candidate that failed stays for a retry until the next successful update.
+                require(release_directories() == {digests['v0.0.2'], digests['v0.0.3']}, f'Unexpected releases after rollback: {release_directories()}')
+                require(supervisor.current.get('previous') == str(original / 'bin/bloom-server'), f'The restored release lost its predecessor: {supervisor.current}')
 
                 package_id = publish('v0.0.4', protocol=WIRE - 1)
                 refused = request('prepare', component='server')
@@ -391,6 +402,8 @@ def verify(binary, account):
                 require(observed['job']['phase'] == 'succeeded', f'The dropped update did not succeed: {observed["job"]}')
                 wait_for(lambda: supervisor.worker is not None and not supervisor.worker.is_alive(), 'Update worker did not finish', timeout=60)
                 settled('succeeded', 'v0.0.5', package_id)
+                require(release_directories() == {digests['v0.0.5'], digests['v0.0.2']},
+                        f'Retention did not keep exactly the running and replaced releases: {release_directories()}')
                 print('Supervisor v0.0.5: completed after its requesting client disconnected, observed by a new client.', flush=True)
             finally:
                 if supervisor:

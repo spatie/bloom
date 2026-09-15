@@ -585,6 +585,39 @@ class InstallerTests(unittest.TestCase):
         installer.install_dependencies.assert_called_once_with(args)
         installer.verify_node_tools.assert_called_once()
 
+    def retention_fixture(self):
+        args = self.installation_fixture(maintenance=True)
+        releases = args.install_root / "releases"
+        for name in ("c", "d", "e"):
+            (releases / (name * 64) / "bin").mkdir(parents=True)
+        (args.install_root / "current").symlink_to(releases / ("c" * 64))
+        protected = self.root / "maintenance/bloom-server/releases"
+        (protected / ("e" * 64)).mkdir(parents=True)
+        args.data_dir.mkdir()
+        installer.marker.return_value = {**installer.configuration(args), "sha256": "d" * 64, "previousSHA256": "f" * 64, "phase": "installed"}
+        for name in ("service_running", "active_work"):
+            patch = mock.patch.object(installer, name, return_value=False)
+            patch.start(); self.addCleanup(patch.stop)
+        return args, releases, protected
+
+    def test_completed_install_retires_older_releases_in_both_release_directories(self):
+        args, releases, protected = self.retention_fixture()
+        installer.install(args)
+        new = args.sha256.lower()
+        # Kept: the release now running, the one `current` pointed at before, and the package the marker recorded.
+        self.assertEqual(sorted(path.name for path in releases.iterdir()), sorted([new, "c" * 64, "d" * 64]))
+        self.assertEqual([path.name for path in protected.iterdir()], [new])
+        self.assertEqual(json.loads(installer.marker_path(args).read_text())["previousSHA256"], "d" * 64)
+        messages = [call.kwargs.get("message") for call in installer.emit.call_args_list]
+        self.assertEqual(messages.count("Removed the older Bloom Server release " + "e" * 64), 2)
+
+    def test_failed_install_retires_nothing(self):
+        args, releases, protected = self.retention_fixture()
+        installer.wait_ready.side_effect = installer.InstallError("startup_failed", "Failed", "Inspect server")
+        self.assert_error("startup_failed", lambda: installer.install(args))
+        self.assertTrue((releases / ("e" * 64)).is_dir())
+        self.assertTrue((protected / ("e" * 64)).is_dir())
+
     def test_supervised_install_accepts_digest_only_after_successful_start(self):
         args = self.installation_fixture(maintenance=True)
         installer.install(args)
@@ -1226,6 +1259,15 @@ class UninstallTests(unittest.TestCase):
         self.assertFalse(any(arguments[0] in ("userdel", "pkill", "apt-get", "dpkg") for arguments in self.commands))
         self.assertTrue(any("Docker" in item and "Git" in item for item in result["kept"]))
         self.assertTrue(any(str(self.home) in item for item in result["kept"]))
+
+    def test_uninstall_removes_retained_and_partly_retired_releases(self):
+        maintenance = self.install_fixture()
+        for root in (self.args.install_root / "releases", maintenance.releases):
+            (root / ("e" * 64)).mkdir()
+            (root / (".retired-" + "f" * 64 + "-" + "0" * 16) / "lib").mkdir(parents=True)
+        installer.uninstall(self.args)
+        self.assertFalse(self.args.install_root.exists())
+        self.assertFalse(maintenance.state.exists())
 
     def test_uninstall_can_be_repeated_without_changing_anything_more(self):
         self.install_fixture()

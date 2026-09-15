@@ -306,6 +306,31 @@ class MaintenanceInstallTests(unittest.TestCase):
         self.assertFalse(self.installation.process_module.exists())
         self.assertTrue((self.installation.releases / ('b' * 64)).is_dir())
 
+    def test_publish_records_the_release_it_replaced_and_a_repair_keeps_it(self):
+        self.publish()
+        first = json.loads(self.installation.current_path.read_text())
+        self.assertNotIn('previous', first)
+        self.installation.publish(self.bundle, 'd' * 64, self.account, '# Trusted supervisor\n', '# Trusted Docker adapter\n', '# Trusted output redactor\n')
+        self.assertEqual(json.loads(self.installation.current_path.read_text())['previous'], first['executable'])
+        self.installation.publish(self.bundle, 'd' * 64, self.account, '# Trusted supervisor\n', '# Trusted Docker adapter\n', '# Trusted output redactor\n')
+        self.assertEqual(json.loads(self.installation.current_path.read_text())['previous'], first['executable'])
+
+    def test_retirement_keeps_running_and_replaced_releases_and_waits_for_idle(self):
+        self.publish()
+        stale = self.installation.releases / ('c' * 64)
+        (stale / 'bin').mkdir(parents=True)
+        self.installation.publish(self.bundle, 'd' * 64, self.account, '# Trusted supervisor\n', '# Trusted Docker adapter\n', '# Trusted output redactor\n')
+        marker = self.installation.state / 'transaction.json'
+        marker.write_text('{}'); marker.chmod(0o600)
+        self.assertEqual(self.installation.retire_releases(), [])
+        marker.unlink()
+        self.database('installing')
+        self.assertEqual(self.installation.retire_releases(), [])
+        self.assertTrue(stale.is_dir())
+        (self.installation.state / 'maintenance.sqlite').unlink()
+        self.assertEqual(self.installation.retire_releases(), ['c' * 64])
+        self.assertEqual(sorted(path.name for path in self.installation.releases.iterdir()), ['b' * 64, 'd' * 64])
+
     def test_supervised_unit_recreates_runtime_directory_after_reboot(self):
         unit = self.installation.unit_contents()
         self.assertIn('User=root\nGroup=root\n', unit)
@@ -325,6 +350,7 @@ class MaintenanceInstallTests(unittest.TestCase):
         self.assertEqual(namespace['maintenance_source'](), path.with_name('bloom-maintenance.py').read_text())
         self.assertEqual(namespace['maintenance_docker_source'](), path.with_name('bloom_maintenance_docker.py').read_text())
         self.assertEqual(namespace['maintenance_process_source'](), path.with_name('bloom_install_process.py').read_text())
+        self.assertTrue(callable(namespace['retire_releases']))
         self.assertEqual(source, standalone_installer_source(path, source))
 
 

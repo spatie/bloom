@@ -14,6 +14,8 @@ from contextlib import closing
 # MAINTENANCE_PROTOCOL_VERSION in bloom-maintenance.py, which test-maintenance-install.py holds
 # them to. The app wire protocol is deliberately absent: see validate_bundle.
 MAINTENANCE_PROTOCOL_VERSION = 1
+# Release directories are named by package SHA-256, as in bloom-maintenance.py.
+RELEASE_DIRECTORY = r'[0-9a-f]{64}'
 
 
 class MaintenanceInstallFailure(Exception):
@@ -24,6 +26,55 @@ class MaintenanceInstallFailure(Exception):
 
 def maintenance_refuse(code, message):
     raise MaintenanceInstallFailure(code, message, 'Inspect the managed maintenance service as an administrator. Finish or recover pending updates before retrying setup.')
+
+
+def retire_releases(root, current, references, pattern, idle=lambda: True):
+    """Delete release directories under `root` except the running one and those referenced.
+
+    A copy of retire_releases in bloom-maintenance.py, which documents the rules. The supervisor
+    is installed as a standalone file that cannot import this module, and install-bloom-server.py
+    runs it as the service account on its own releases, so each keeps its own copy and
+    test-bloom-maintenance.py holds all of them to the same attacks.
+    """
+    root = pathlib.Path(root)
+    if not root.is_absolute() or root.is_symlink() or not root.is_dir():
+        maintenance_refuse('untrusted_maintenance', 'The release directory is not a real directory.')
+    base = root.resolve(strict=True)
+
+    def release_name(value):
+        if not isinstance(value, str) or not value or '\x00' in value:
+            return None
+        path = pathlib.Path(value)
+        for candidate, parent in ((path, root), (path.resolve(), base)):
+            try:
+                parts = candidate.relative_to(parent).parts
+            except ValueError:
+                continue
+            if parts and re.fullmatch(pattern, parts[0]):
+                return parts[0]
+        return None
+
+    running = release_name(current)
+    if running is None or not (root / running).is_dir() or (root / running).is_symlink():
+        maintenance_refuse('retention_unavailable', 'The running release is not in the release directory, so no release was removed.')
+    keep = {running, *(name for name in map(release_name, references) if name)}
+    removed = []
+    for name in sorted(os.listdir(root)):
+        leftover = re.fullmatch(r'\.retired-(' + pattern + r')-[0-9a-f]{16}', name)
+        if name in keep or not (leftover or re.fullmatch(pattern, name)):
+            continue
+        path = root / name
+        if not stat.S_ISDIR(os.lstat(path).st_mode) or path.resolve(strict=True).parent != base:
+            continue
+        if not idle():
+            break
+        target = path
+        if not leftover:
+            target = root / ('.retired-' + name + '-' + os.urandom(8).hex())
+            os.rename(path, target)
+        shutil.rmtree(target)
+        removed.append(leftover[1] if leftover else name)
+    return removed
 
 
 class MaintenanceInstallation:
@@ -248,9 +299,49 @@ class MaintenanceInstallation:
         self.atomic_write(self.process_module, process_source.encode(), mode=0o644)
         self.atomic_write(self.docker_module, docker_source.encode(), mode=0o644)
         self.atomic_write(self.launcher, supervisor_source.encode(), mode=0o755)
+        # The release this installation replaces stays as `previous`, which retention keeps. When
+        # the same package is installed again the older pointer carries over, or a repair would
+        # quietly make the real predecessor eligible for deletion.
+        pointer = dict(executable=executable, version=version)
+        try:
+            prior = json.loads(self.previous[self.current_path]) if self.previous[self.current_path] else {}
+        except ValueError:
+            prior = {}
+        prior = prior if isinstance(prior, dict) else {}
+        previous = prior.get('executable') if prior.get('executable') != executable else prior.get('previous')
+        if isinstance(previous, str) and previous:
+            pointer['previous'] = previous
         self.atomic_write(self.config_path, (json.dumps(config) + '\n').encode())
-        self.atomic_write(self.current_path, (json.dumps(dict(executable=executable, version=version)) + '\n').encode())
+        self.atomic_write(self.current_path, (json.dumps(pointer) + '\n').encode())
         self.key_accepted = getattr(self.args, 'maintenance_key_sha256', None) == digest
+
+    def retire_releases(self):
+        """Remove protected releases no longer needed, after a successful installation.
+
+        The same rule as a supervised update: keep the release now running, the one it replaced
+        and the one the configuration names. Nothing is removed while an update, rollback or
+        unfinished job exists, checked again before each directory, since the supervisor is
+        already running and could accept a job while this runs.
+        """
+        config = self.existing_config()
+        if config is None:
+            return []
+
+        def idle():
+            try:
+                self.ensure_idle()
+                return True
+            except MaintenanceInstallFailure:
+                return False
+
+        if not idle():
+            return []
+        current = json.loads(self.private_file(self.current_path))
+        if not isinstance(current, dict):
+            maintenance_refuse('untrusted_maintenance', 'The current release pointer is invalid.')
+        self.protect(self.releases)
+        return retire_releases(self.releases, current.get('executable'), [current.get('previous'), config.get('executable')],
+                               RELEASE_DIRECTORY, idle)
 
     def rollback(self):
         if self.previous is None:

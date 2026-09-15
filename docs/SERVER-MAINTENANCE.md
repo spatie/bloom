@@ -146,6 +146,36 @@ installed release's, or which needs another maintenance protocol, is refused thi
 wire protocol installs in place; a maintenance protocol change reaches a server through the
 administrator installer instead. Startup verification failures after installation end in `rolledBack`.
 
+### Retained releases and job history
+
+Each server release is extracted once into the supervisor's `releases/`, in a directory named by
+its package's SHA-256, of about 80 MB. Once an update commits, which is the point after which its
+rollback can no longer be needed, the supervisor removes every release directory except three: the
+running release, the release it replaced, and the release the supervisor's configuration names.
+The last is there because the administrator installer writes that configuration, an update never
+rewrites it, and the supervisor will not start without its executable. `current.json` records the
+replaced release as `previous`, and a rollback restores that pointer with its release, so the
+restored release and its predecessor are both kept by the next removal.
+
+Nothing is removed while a transaction checkpoint or an unfinished job exists, and a rollback or
+a failed update removes nothing. A candidate that rolled back stays until the next successful
+update, which may reuse it. Only real directories directly inside `releases/` with a SHA-256 name
+are considered; a symbolic link is never followed or removed, and nothing happens when the running
+release is not inside `releases/`. Each removed release is written to the job's log. A failure to
+remove one is logged too and does not change the job's outcome.
+
+The administrator installer applies the same rule once an installation has started successfully,
+to the protected releases and to the Bloom account's own `releases/` beside `current`, where the
+package it replaced is kept in the installation marker as `previousSHA256`. Optional browser tools
+under `/opt/bloom-browser/releases` keep the verified version and the one it replaced, recorded as
+`previousRelease` in its configuration. `--uninstall` removes all of these directories, as before.
+
+Job history keeps the newest 20 jobs. Older finished jobs are deleted with their logs and recovery
+requests, except the newest job of each component, any job that has not finished, the job a
+transaction checkpoint names, and any job whose plan has not yet expired. A status request for a
+deleted job answers `job_missing`, and a replayed start for one fails with `plan_missing` rather
+than starting another update. Expired plans that no kept job refers to are deleted as well.
+
 ## Shared Apple client
 
 `ServerMaintenanceSession` in BloomClient owns authentication state, plan review, mutation

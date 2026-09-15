@@ -356,6 +356,265 @@ class FakeRuntime:
         return dict(ready=True, busy=False)
 
 
+class TrialRuntime(FakeRuntime):
+    """Fails the trial of one chosen executable and lets a test look inside every trial."""
+    def __init__(self):
+        super().__init__()
+        self.failing = None
+        self.observe = None
+
+    def wait_ready(self):
+        if self.expected_trial and self.observe:
+            self.observe()
+        if self.expected_trial and self.starts[-1][0] == self.failing:
+            raise maintenance.MaintenanceError('runtime_not_ready', 'Trial startup failed.')
+
+
+class ReleaseRetentionTests(Fixture):
+    """Every update added an 80 MB release directory and nothing ever removed one."""
+
+    def setUp(self):
+        super().setUp()
+        self.config['executable'] = self.release('a')
+        self.runtime = TrialRuntime()
+        self.supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=self.runtime)
+        self.supervisor.database_snapshot = mock.Mock(return_value=str(self.state / 'snapshot-fixture.tar'))
+        self.supervisor.database_restore = mock.Mock()
+
+    def release(self, letter):
+        path = self.releases / (letter * 64)
+        (path / 'bin').mkdir(parents=True, exist_ok=True)
+        return str(path / 'bin/bloom-server')
+
+    def present(self):
+        return ''.join(sorted(path.name[0] for path in self.releases.iterdir()))
+
+    def update(self, letter, version, fail=False):
+        executable = self.release(letter)
+        self.runtime.failing = executable if fail else None
+        self.supervisor.download = mock.Mock(return_value=executable)
+        value = job()
+        self.store.accept(fresh_id(), {}, value)
+        plan = dict(id=value['planID'], component='server', fromVersion=self.supervisor.current['version'], targetVersion=version)
+        self.supervisor.run_job(value, plan, 'now')
+        return self.store.get(value['id'])
+
+    def test_success_keeps_the_running_release_and_the_one_it_replaced(self):
+        self.release('f')
+        value = self.update('b', 'v2')
+        self.assertEqual(value['phase'], 'succeeded')
+        self.assertEqual(self.present(), 'ab')
+        self.assertEqual(self.supervisor.current['previous'], self.release('a'))
+        self.assertIn('Removed the older server release ' + 'f' * 12 + '.', [line['message'] for line in self.store.logs(value['id'])])
+        self.update('c', 'v3')
+        # `a` stays as well: the configuration names it, and the supervisor refuses to start without it.
+        self.assertEqual(self.present(), 'abc')
+        self.update('d', 'v4')
+        self.assertEqual(self.present(), 'acd')
+
+    def test_nothing_is_removed_during_a_trial_or_while_work_is_unfinished(self):
+        self.release('f')
+        seen = []
+        self.runtime.observe = lambda: seen.append(self.present())
+        self.assertEqual(self.update('b', 'v2')['phase'], 'succeeded')
+        self.assertEqual(seen, ['abf'])
+        self.release('e')
+        maintenance.atomic_json(self.supervisor.marker, dict(jobID=fresh_id(), stage='committed'))
+        self.supervisor.retire_releases(job())
+        self.assertEqual(self.present(), 'abe')
+        self.supervisor.marker.unlink()
+        self.store.accept(fresh_id(), {}, job())
+        self.supervisor.retire_releases(job())
+        self.assertEqual(self.present(), 'abe')
+
+    def test_rollback_removes_nothing_and_keeps_the_restored_release_and_its_predecessor(self):
+        self.update('b', 'v2')
+        self.update('c', 'v3')
+        self.release('e')
+        self.assertEqual(self.update('d', 'v4', fail=True)['phase'], 'rolledBack')
+        self.assertEqual(self.present(), 'abcde')
+        self.assertEqual((self.supervisor.current['executable'], self.supervisor.current['previous']), (self.release('c'), self.release('b')))
+        self.supervisor.retire_releases(job())
+        self.assertEqual(self.present(), 'abc')
+
+    def test_recovered_commit_retires_old_releases_but_a_recovered_rollback_does_not(self):
+        self.release('f')
+        value = job()
+        self.store.accept(fresh_id(), {}, value)
+        transaction = dict(jobID=value['id'], stage='committed', outcome='rolledBack', old=self.supervisor.current, new=self.supervisor.current)
+        maintenance.atomic_json(self.supervisor.marker, transaction)
+        self.supervisor.recover()
+        self.assertEqual(self.present(), 'af')
+        value = job()
+        self.store.accept(fresh_id(), {}, value)
+        transaction = dict(jobID=value['id'], stage='committed', old=self.supervisor.current,
+                           new=dict(executable=self.release('b'), version='v2', previous=self.release('a')))
+        maintenance.atomic_json(self.supervisor.marker, transaction)
+        self.runtime.alive = False
+        self.supervisor.recover()
+        self.assertEqual(self.store.get(value['id'])['phase'], 'succeeded')
+        self.assertEqual(self.present(), 'ab')
+
+    def test_a_retention_failure_is_logged_and_the_update_still_succeeded(self):
+        with mock.patch.object(maintenance, 'retire_releases', side_effect=OSError('read-only file system')):
+            value = self.update('b', 'v2')
+        self.assertEqual(value['phase'], 'succeeded')
+        self.assertIn('could not be removed', self.store.logs(value['id'])[-1]['message'])
+
+
+def load_retention_copies():
+    import bloom_maintenance_install
+    spec = importlib.util.spec_from_file_location('bloom_browser_retention', SOURCE.with_name('install-bloom-browser.py'))
+    browser = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(browser)
+    return [('supervisor', maintenance.retire_releases, maintenance.RELEASE_DIRECTORY, maintenance.MaintenanceError, lambda n: '%064x' % n),
+            ('installer', bloom_maintenance_install.retire_releases, bloom_maintenance_install.RELEASE_DIRECTORY,
+             bloom_maintenance_install.MaintenanceInstallFailure, lambda n: '%064x' % n),
+            ('browser', browser.retire_releases, browser.RELEASE_DIRECTORY, browser.BrowserError, lambda n: f'0.{n}.0-153.0.{n}-x64')]
+
+
+class RetentionCopiesTests(unittest.TestCase):
+    """The three copies of retire_releases, held to the same rules and the same attacks."""
+    copies = load_retention_copies()
+
+    def each(self):
+        for label, retire, pattern, error, name in self.copies:
+            with self.subTest(copy=label):
+                temporary = tempfile.TemporaryDirectory()
+                self.addCleanup(temporary.cleanup)
+                base = pathlib.Path(temporary.name)
+                root = base / 'releases'
+                for number in range(1, 5):
+                    (root / name(number) / 'bin').mkdir(parents=True)
+                yield lambda current, references=(), idle=lambda: True: retire(root, current, list(references), pattern, idle), root, base, name, error
+
+    def test_keeps_the_running_and_referenced_releases_and_removes_the_rest(self):
+        for retire, root, _, name, _ in self.each():
+            removed = retire(str(root / name(4) / 'bin/server'), [str(root / name(3)), None, 'relative/path', 42])
+            self.assertEqual(sorted(removed), sorted([name(1), name(2)]))
+            self.assertEqual(sorted(path.name for path in root.iterdir()), sorted([name(3), name(4)]))
+
+    def test_symbolic_links_are_neither_followed_nor_removed(self):
+        for retire, root, base, name, _ in self.each():
+            outside = base / 'outside'
+            outside.mkdir()
+            (outside / 'keep').write_text('keep')
+            (root / name(5)).symlink_to(outside, target_is_directory=True)
+            (root / name(1) / 'escape').symlink_to(outside, target_is_directory=True)
+            retire(str(root / name(4)), [str(root / name(3))])
+            self.assertTrue((root / name(5)).is_symlink())
+            self.assertFalse((root / name(1)).exists())
+            self.assertEqual((outside / 'keep').read_text(), 'keep')
+
+    def test_a_linked_root_or_a_running_release_outside_it_is_refused(self):
+        for retire, root, base, name, error in self.each():
+            linked = base / 'linked'
+            linked.symlink_to(root, target_is_directory=True)
+            (root / name(6)).symlink_to(root / name(4), target_is_directory=True)
+            copy = self.copies[[item[0] for item in self.copies].index(self._subtest.params['copy'])]
+            for attempt in (lambda: copy[1](linked, str(linked / name(4)), [], copy[2]),
+                            lambda: retire(str(base / 'elsewhere' / name(4))),
+                            lambda: retire(str(root / name(6))),
+                            lambda: retire(None)):
+                with self.assertRaises(error):
+                    attempt()
+            self.assertEqual(len(list(root.iterdir())), 5)
+
+    def test_a_running_release_named_through_a_link_is_kept(self):
+        for retire, root, base, name, _ in self.each():
+            current = base / 'current'
+            current.symlink_to(root / name(4), target_is_directory=True)
+            self.assertEqual(sorted(retire(str(current / 'bin/server'))), sorted([name(1), name(2), name(3)]))
+            self.assertTrue((root / name(4)).is_dir())
+
+    def test_other_names_stay_and_interrupted_deletions_are_finished(self):
+        for retire, root, _, name, _ in self.each():
+            (root / '.staging-job').mkdir()
+            (root / 'notes').mkdir()
+            (root / 'file').write_text('')
+            leftover = root / ('.retired-' + name(7) + '-' + '0' * 16)
+            (leftover / 'lib').mkdir(parents=True)
+            removed = retire(str(root / name(4)), [str(root / name(3))])
+            self.assertIn(name(7), removed)
+            self.assertFalse(leftover.exists())
+            self.assertTrue(all((root / item).exists() for item in ('.staging-job', 'notes', 'file')))
+
+    def test_idle_is_asked_again_before_every_deletion(self):
+        for retire, root, _, name, _ in self.each():
+            answers = iter([True, False])
+            self.assertEqual(len(retire(str(root / name(4)), idle=lambda: next(answers))), 1)
+            self.assertEqual(len(list(root.iterdir())), 3)
+
+
+class JobHistoryTests(Fixture):
+    """Logs were capped per job, but job rows, plans and recovery commands were kept forever."""
+
+    def finished(self, component='server', expires_in=-60, phase='succeeded'):
+        value = job()
+        value.update(component=component, phase=phase)
+        self.store.plan(dict(id=value['planID'], component=component, _expires=time.time() + expires_in))
+        request = fresh_id()
+        self.store.accept(request, {}, value)
+        self.store.log(value['id'], 'line')
+        with self.store.lock:
+            self.store.db.execute('INSERT INTO commands VALUES (?,?,?)', (fresh_id(), 'intent', value['id']))
+        return value, request
+
+    def remaining(self):
+        with self.store.lock:
+            return {row[0] for row in self.store.db.execute('SELECT id FROM jobs')}
+
+    def test_keeps_the_newest_twenty_and_every_job_a_client_may_still_hold(self):
+        docker, _ = self.finished('docker')
+        reviewable, _ = self.finished(expires_in=600)
+        protected, _ = self.finished()
+        interrupted, _ = self.finished(phase='interrupted')
+        many = [self.finished()[0] for _ in range(25)]
+        unstarted, pending = fresh_id(), fresh_id()
+        self.store.plan(dict(id=unstarted, _expires=time.time() - 60))
+        self.store.plan(dict(id=pending, _expires=time.time() + 600))
+        removed = self.store.prune_history([protected['id']])
+        self.assertEqual(set(removed), {value['id'] for value in many[:5]})
+        self.assertEqual(self.remaining(), {value['id'] for value in [*many[5:], docker, reviewable, protected, interrupted]})
+        with self.assertRaises(maintenance.MaintenanceError):
+            self.store.get(many[0]['id'])
+        self.assertEqual(self.store.logs(many[0]['id']), [])
+        with self.store.lock:
+            self.assertIsNone(self.store.db.execute('SELECT 1 FROM commands WHERE job_id=?', (many[0]['id'],)).fetchone())
+            plans = {row[0] for row in self.store.db.execute('SELECT id FROM plans')}
+        self.assertNotIn(unstarted, plans)
+        self.assertNotIn(many[0]['planID'], plans)
+        self.assertIn(pending, plans)
+        self.assertIn(many[-1]['planID'], plans)
+
+    def test_a_replayed_start_for_a_pruned_job_never_starts_another_update(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock())
+        first, request = self.finished()
+        for _ in range(20):
+            self.finished()
+        self.store.prune_history()
+        with mock.patch.object(threading.Thread, 'start') as started:
+            response = supervisor.handle(request, dict(action='start', credential='fixture-admin-credential', planID=first['planID'], mode='now'))
+        self.assertEqual(response['error']['code'], 'plan_missing')
+        started.assert_not_called()
+        self.assertIsNone(self.store.active())
+
+    def test_starting_a_job_caps_history_but_keeps_the_checkpoint_job(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock())
+        checkpoint, _ = self.finished()
+        older, _ = self.finished()
+        for _ in range(19):
+            self.finished()
+        maintenance.atomic_json(supervisor.marker, dict(jobID=checkpoint['id'], stage='committed'))
+        plan = dict(id=fresh_id(), component='server', targetVersion='v2', fromVersion='v1', _expires=time.time() + 60)
+        self.store.plan(plan)
+        with mock.patch.object(threading.Thread, 'start'):
+            supervisor.start_job(fresh_id(), plan['id'], 'now')
+        self.assertIn(checkpoint['id'], self.remaining())
+        self.assertNotIn(older['id'], self.remaining())
+        self.assertEqual(len(self.remaining()), 21)
+
+
 class RecoveryTests(Fixture):
     def supervisor(self, fail_trial=False):
         runtime = FakeRuntime(fail_trial)

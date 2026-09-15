@@ -31,6 +31,13 @@ TERMINAL_STATES = ('succeeded', 'failed', 'cancelled', 'rolledBack')
 # release once BloomWire moved to 15. The installed release's manifest says which wire protocol is
 # running, and the runtime alone decides which clients it accepts.
 MAINTENANCE_PROTOCOL_VERSION = 1
+# A release directory is named by its package's SHA-256. Every update added one of about 80 MB and
+# nothing ever removed one, so a server updated weekly filled its disk with releases it could never
+# run again. Retention keeps the running release and the one before it; see retire_releases.
+RELEASE_DIRECTORY = r'[0-9a-f]{64}'
+# Job rows were never deleted either. The newest twenty are what any client lists (jobs() reads ten),
+# and the rules in JobStore.prune_history keep anything a client could still be holding by ID.
+JOB_HISTORY_LIMIT = 20
 
 
 class MaintenanceError(Exception):
@@ -178,6 +185,50 @@ class JobStore:
         with self.lock:
             return [dict(sequence=seq, message=body) for seq, body in
                     self.db.execute('SELECT seq,body FROM logs WHERE job_id=? ORDER BY seq', (identifier(job_id),))]
+
+    def prune_history(self, protected=(), limit=JOB_HISTORY_LIMIT, now=None):
+        """Delete old finished jobs, their logs, recovery commands and expired plans.
+
+        Kept regardless of age: the newest `limit` jobs, every job that is not finished (including
+        `interrupted`, which still needs Recover), the newest job of each component because
+        ServerUpdateNotice reads it to know what the last update installed, the jobs in `protected`
+        (the transaction checkpoint's), and any job whose plan has not expired. That last rule is
+        what keeps a start idempotent: a replayed request UUID finds its job while the plan could
+        still be accepted, and after expiry a replay without its job fails as `plan_missing`
+        instead of starting a second update.
+        """
+        now = time.time() if now is None else now
+        with self.lock:
+            rows = [(job_id, state, json.loads(body)) for job_id, state, body in
+                    self.db.execute('SELECT id,state,body FROM jobs ORDER BY rowid DESC').fetchall()]
+            plans = {plan_id: json.loads(body) for plan_id, body in self.db.execute('SELECT id,body FROM plans').fetchall()}
+            keep, components = set(protected), set()
+            for index, (job_id, state, value) in enumerate(rows):
+                if index < limit or state not in TERMINAL_STATES or value.get('component') not in components:
+                    keep.add(job_id)
+                components.add(value.get('component'))
+                plan = plans.get(value.get('planID'))
+                if plan is not None and plan.get('_expires', 0) >= now:
+                    keep.add(job_id)
+            doomed = [job_id for job_id, _, _ in rows if job_id not in keep]
+            referenced = {value.get('planID') for job_id, _, value in rows if job_id in keep}
+            stale_plans = [plan_id for plan_id, plan in plans.items()
+                           if plan_id not in referenced and plan.get('_expires', 0) < now]
+            if not doomed and not stale_plans:
+                return []
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                for job_id in doomed:
+                    self.db.execute('DELETE FROM logs WHERE job_id=?', (job_id,))
+                    self.db.execute('DELETE FROM commands WHERE job_id=?', (job_id,))
+                    self.db.execute("DELETE FROM jobs WHERE id=? AND state IN ('succeeded','failed','cancelled','rolledBack')", (job_id,))
+                for plan_id in stale_plans:
+                    self.db.execute('DELETE FROM plans WHERE id=?', (plan_id,))
+                self.db.execute('COMMIT')
+            except BaseException:
+                self.db.execute('ROLLBACK')
+                raise
+            return doomed
 
 
 class RuntimeProcess:
@@ -696,6 +747,61 @@ def release_incompatibility(metadata, asset, installed_protocol=None, host=None)
     return None
 
 
+def retire_releases(root, current, references, pattern, idle=lambda: True):
+    """Delete release directories under `root` except the running one and those referenced.
+
+    The same function, with its own error type, is in bloom_maintenance_install.py and
+    install-bloom-browser.py. Each is deployed as a standalone file with no shared module it could
+    import this from, and test-bloom-maintenance.py runs the same attacks against every copy.
+
+    Only a real directory directly inside `root` whose name matches `pattern` is a candidate.
+    A symbolic link is never followed or removed, whatever it is called, and a name that resolves
+    anywhere but `root` is left alone. When the running release cannot be found inside `root`
+    nothing is removed, because the references are then not describing this directory. A
+    candidate is first renamed to `.retired-<name>-<random>`, so an interrupted deletion never
+    leaves a half-deleted directory under a release's name for a later update to reuse as cached,
+    and the next run finishes those leftovers. `idle` is asked again before every deletion.
+    """
+    import re
+    import shutil
+    root = pathlib.Path(root)
+    require(root.is_absolute() and not root.is_symlink() and root.is_dir(), 'unsafe_path', 'The release directory is not a real directory.')
+    base = root.resolve(strict=True)
+
+    def release_name(value):
+        if not isinstance(value, str) or not value or '\x00' in value:
+            return None
+        path = pathlib.Path(value)
+        for candidate, parent in ((path, root), (path.resolve(), base)):
+            with contextlib.suppress(ValueError):
+                parts = candidate.relative_to(parent).parts
+                if parts and re.fullmatch(pattern, parts[0]):
+                    return parts[0]
+        return None
+
+    running = release_name(current)
+    require(running is not None and (root / running).is_dir() and not (root / running).is_symlink(),
+            'retention_unavailable', 'The running release is not in the release directory, so no release was removed.')
+    keep = {running, *(name for name in map(release_name, references) if name)}
+    removed = []
+    for name in sorted(os.listdir(root)):
+        leftover = re.fullmatch(r'\.retired-(' + pattern + r')-[0-9a-f]{16}', name)
+        if name in keep or not (leftover or re.fullmatch(pattern, name)):
+            continue
+        path = root / name
+        if not stat.S_ISDIR(os.lstat(path).st_mode) or path.resolve(strict=True).parent != base:
+            continue
+        if not idle():
+            break
+        target = path
+        if not leftover:
+            target = root / ('.retired-' + name + '-' + os.urandom(8).hex())
+            os.rename(path, target)
+        shutil.rmtree(target)
+        removed.append(leftover[1] if leftover else name)
+    return removed
+
+
 def fsync_directory(path):
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -1046,7 +1152,49 @@ class Supervisor:
                 self.cancelled.clear()
                 self.worker = threading.Thread(target=self.run_job, args=(accepted, plan, mode), daemon=True)
                 self.worker.start()
+                self.prune_history()
             return self.job_view(accepted)
+
+    def prune_history(self):
+        """Cap job history when a job is added, which is the only time it grows.
+
+        Best effort: the job is already accepted and running, so a failure here must not turn its
+        acceptance into an error reply a client would retry. An unreadable checkpoint means the
+        job it protects is unknown, so nothing is deleted.
+        """
+        try:
+            protected = []
+            if self.marker.exists():
+                protected.append(identifier(json.loads(self.marker.read_bytes())['jobID']))
+            self.store.prune_history(protected)
+        except (MaintenanceError, OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+            pass
+
+    def retire_releases(self, job):
+        """Remove server releases that neither the running release nor a rollback can need.
+
+        Called only after a server update is committed and its checkpoint cleared, which is the
+        point the supervisor's own state machine stops being able to restore `old`. Kept: the
+        running release, the one it replaced (`previous`, which a rollback of the next update
+        restores along with it), and the release the configuration names, because load_config
+        refuses to start without that executable and an update never rewrites the configuration.
+        A rolled-back candidate stays until the next success, when a retried update may reuse it.
+        Nothing is removed while a transaction or an unfinished job exists. A failure is logged
+        and never changes the job's outcome: the update itself succeeded.
+        """
+        def idle():
+            return not self.marker.exists() and self.store.active() is None and not self.recovery_failed
+        try:
+            if not idle():
+                return
+            removed = retire_releases(self.config['install_root'], self.current.get('executable'),
+                                      [self.current.get('previous'), self.config.get('executable')], RELEASE_DIRECTORY, idle)
+            for name in removed:
+                # A prefix, because the log redactor replaces any 40 character run, and a whole
+                # digest arrived in the job log as "[long value redacted]".
+                self.job_log(job['id'], 'Removed the older server release ' + name[:12] + '.')
+        except Exception:
+            self.job_log(job['id'], 'Older server releases could not be removed. They stay on disk until the next successful update.')
 
     def recover_job(self, request_id, job_id):
         request_id, job_id = identifier(request_id), identifier(job_id)
@@ -1099,6 +1247,8 @@ class Supervisor:
                     self.phase(job, 'rolledBack' if restored else 'succeeded',
                                'The restored server is running.' if restored else 'The committed update is running and verified.')
                     self.clear_marker(job['id'])
+                    if not restored:
+                        self.retire_releases(job)
             else:
                 if self.runtime.running():
                     response = self.runtime.control('resume')
@@ -1283,6 +1433,8 @@ class Supervisor:
                     self.phase(job, 'rolledBack' if restored else 'succeeded',
                                'The restored server resumed safely.' if restored else 'The committed server update resumed after maintenance restarted.')
                     self.clear_marker(job['id'])
+                    if not restored:
+                        self.retire_releases(job)
                 else:
                     self.rollback(job, transaction)
                 return
@@ -1335,8 +1487,11 @@ class Supervisor:
                 self.check_cancelled()
                 self.phase(job, 'installing', 'Preparing the reviewed update. Installation can no longer be cancelled.')
             if plan['component'] == 'server':
+                # `previous` travels with the release pointer, so a rollback, which restores `old`
+                # whole, restores the predecessor retention must keep along with it.
                 transaction = dict(jobID=job['id'], stage='snapshot_pending', old=dict(self.current),
-                                   new=dict(executable=executable, version=plan['targetVersion']))
+                                   new=dict(executable=executable, version=plan['targetVersion'],
+                                            previous=self.current.get('executable')))
                 atomic_json(self.marker, transaction)
             self.runtime.stop()
             runtime_stopped = True
@@ -1359,6 +1514,7 @@ class Supervisor:
                 require(response['ready'], 'commit_unconfirmed', 'The updated runtime did not confirm activation.')
                 self.phase(job, 'succeeded', 'Bloom Server was updated and verified.')
                 self.clear_marker(job['id'])
+                self.retire_releases(job)
             else:
                 if plan['component'] == 'docker':
                     self.phase(job, 'installing', 'Installing the reviewed Docker package versions. Docker services and containers may restart.')
@@ -1389,6 +1545,7 @@ class Supervisor:
                     require(response['ready'], 'commit_unconfirmed', 'Activation could not be confirmed.')
                     self.phase(job, 'succeeded', 'The updated server confirmed activation after retrying.')
                     self.clear_marker(job['id'])
+                    self.retire_releases(job)
                 except Exception:
                     # Leave the committed marker for restart recovery. Never roll back accepted work.
                     self.phase(job, 'interrupted', 'The release was committed but activation is unconfirmed. Restarting the supervisor resumes this release safely.')

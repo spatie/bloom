@@ -361,6 +361,93 @@ def smoke(config, account):
             pass
 
 
+# A release is named `<agent-browser version>-<Chrome version>-<architecture>`, as install() writes it.
+RELEASE_DIRECTORY = r"[0-9]+(?:\.[0-9]+)*-[0-9]+(?:\.[0-9]+)*-(?:x64|arm64)"
+
+
+def release_of(executable, releases):
+    """The release directory an executable in configuration.json belongs to, or None."""
+    if not isinstance(executable, str) or not executable:
+        return None
+    try:
+        return str(releases / Path(executable).relative_to(releases).parts[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def replaced_release(previous, release):
+    """The release an installation of `release` replaces, from the previous configuration.
+
+    Repairing the same version carries the older record forward, or a repair would quietly make
+    the real predecessor eligible for deletion.
+    """
+    replaced = release_of(previous.get("agentBrowser"), release.parent)
+    return replaced if replaced != str(release) else previous.get("previousRelease")
+
+
+def retire_releases(root, current, references, pattern, idle=lambda: True):
+    """Delete release directories under `root` except the running one and those referenced.
+
+    A copy of retire_releases in bloom-maintenance.py, which documents the rules. This installer
+    is sent to a server as one standalone file with only the process helper embedded, so it
+    cannot import that module; test-bloom-maintenance.py holds every copy to the same attacks.
+    """
+    root = Path(root)
+    if not root.is_absolute() or root.is_symlink() or not root.is_dir():
+        fail("unsafe_path", "The browser release directory is not a real directory.", "Review the browser installation before retrying.")
+    base = root.resolve(strict=True)
+
+    def release_name(value):
+        if not isinstance(value, str) or not value or "\x00" in value:
+            return None
+        path = Path(value)
+        for candidate, parent in ((path, root), (path.resolve(), base)):
+            try:
+                parts = candidate.relative_to(parent).parts
+            except ValueError:
+                continue
+            if parts and re.fullmatch(pattern, parts[0]):
+                return parts[0]
+        return None
+
+    running = release_name(current)
+    if running is None or not (root / running).is_dir() or (root / running).is_symlink():
+        fail("retention_unavailable", "The active browser release is not in the release directory, so no release was removed.", "Run browser setup again.")
+    keep = {running, *(name for name in map(release_name, references) if name)}
+    removed = []
+    for name in sorted(os.listdir(root)):
+        leftover = re.fullmatch(r"\.retired-(" + pattern + r")-[0-9a-f]{16}", name)
+        if name in keep or not (leftover or re.fullmatch(pattern, name)):
+            continue
+        path = root / name
+        if not stat.S_ISDIR(os.lstat(path).st_mode) or path.resolve(strict=True).parent != base:
+            continue
+        if not idle():
+            break
+        target = path
+        if not leftover:
+            target = root / (".retired-" + name + "-" + os.urandom(8).hex())
+            os.rename(path, target)
+        shutil.rmtree(target)
+        removed.append(leftover[1] if leftover else name)
+    return removed
+
+
+def retire_browser_releases(release, previous_release):
+    """Remove browser tool versions other than the verified one and the one it replaced.
+
+    Each pinned version added a directory with a full Chrome of several hundred megabytes and none
+    was ever removed. This runs after the sandbox smoke passed and readiness names the new release,
+    under the installation lock. A failure is reported and never fails a verified installation.
+    """
+    try:
+        protected(release.parent)
+        for name in retire_releases(release.parent, str(release), [previous_release], RELEASE_DIRECTORY):
+            emit("output", message="Removed the older browser tools " + name, step=CURRENT_STEP)
+    except (BrowserError, OSError) as error:
+        emit("output", message="Older browser tools could not be removed: " + (str(error) if isinstance(error, BrowserError) else install_exception_details(error)), step=CURRENT_STEP)
+
+
 def launcher_source():
     # The wizard compiles stdin with __bloom_browser_source and deliberately has no file.
     # Avoid even evaluating __file__ on that path; copied launchers already include the helper.
@@ -387,6 +474,7 @@ def install(options):
     protected(ROOT)
     marker = ROOT / "configuration.json"
     protected(marker)
+    previous = {}
     if marker.exists():
         previous = json.loads(marker.read_text())
         if previous.get("uid") != account.pw_uid or previous.get("serviceHome") != str(home):
@@ -438,12 +526,16 @@ def install(options):
                   chromeGuard=str(binary_dir / "bloom-chrome"), agentBrowser=str(release / "agent-browser"), emptyConfig=str(empty),
                   agentVersion=AGENT_VERSION, chromeVersion=CHROME_VERSION, agentURL=agent_url, chromeURL=chrome_url,
                   agentSHA256=agent_hash, chromeSHA256=chrome_hash, chromeExecutableSHA256=CHROME_EXECUTABLE_HASHES[platform.machine()], apparmor=policy, hostOnly=True)
+    previous_release = replaced_release(previous, release)
+    if isinstance(previous_release, str) and previous_release:
+        config["previousRelease"] = previous_release
     atomic_json(marker, config)
     emit("progress", step="browser_smoke", message="Verifying Chrome sandbox and rendering a test page")
     evidence = smoke(config, account)
     readiness = dict(ready=True, **config, **evidence, executable=str(binary_dir / "agent-browser"),
                      containerSupport=False, concurrencyGuidance="Keep one workspace browser open at a time on small servers; run agent-browser close when finished.")
     atomic_json(ROOT / "readiness.json", readiness)
+    retire_browser_releases(release, config.get("previousRelease"))
     return readiness
 
 
