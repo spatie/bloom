@@ -3,7 +3,7 @@ import Foundation
 enum ServerWorkspaceOperations {
     static func perform(_ action: ServerWorkspaceAction, workspace: Workspace, store: Store, terminals: ServerTerminalService) async throws -> ServerResult {
         switch action {
-        case .archivePreview, .archive, .restore:
+        case .archivePreview, .archive, .restore, .setupOutput:
             throw ServerFailure("Workspace lifecycle actions must go through the owning runtime.")
         case .rename(let title):
             let name = try ServerSidebar.name(title)

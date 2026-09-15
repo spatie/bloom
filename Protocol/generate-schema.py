@@ -43,7 +43,7 @@ R = ref("DomainRecord")
 SCOPE = {"enum": ["branch", "uncommitted"]}
 workspace_actions = {
     "rename": payload(S), "setPinned": payload(B), "setUnread": payload(B), "setColour": obj({"_0": optional(S)}, []),
-    **{name: obj() for name in ["runSetup", "archivePreview", "restore", "files", "pullRequest", "runScripts", "browserAddress", "push", "notes"]},
+    **{name: obj() for name in ["runSetup", "setupOutput", "archivePreview", "restore", "files", "pullRequest", "runScripts", "browserAddress", "push", "notes"]},
     "archive": obj({"confirmation": U}), "runScript": obj({"id": S}), "download": obj({"path": S}),
     "writeFile": obj({"path": S, "text": S, "revision": S}), "uploadFile": obj({"name": S, "data": D}),
     "commit": obj({"message": S}), "createPullRequest": obj({"title": S, "body": S, "draft": B}),
@@ -110,6 +110,8 @@ results = {
     "creation": payload(ref("CreationResult")), "terminal": payload(obj({"executable": S, "socket": S, "session": S})),
     "terminalPane": payload(obj({"id": S, "title": S})), "runScripts": payload(array(R)),
     "archivePreview": payload(ref("ArchivePreview")),
+    "setupOutput": payload(obj({"state": {"enum": ["pending", "running", "succeeded", "failed", "skipped"]}, "log": S,
+                                "startedAt": optional({"type": "number"}), "durationMS": optional(I)}, ["state", "log"])),
     "diagnostics": payload(ref("ServerDiagnostics")),
     "storage": payload(ref("ServerStorageReport")), "storageCleanup": payload(ref("ServerStorageCleanupResult")),
     "maintenance": payload(ref("ServerMaintenanceResponse")),

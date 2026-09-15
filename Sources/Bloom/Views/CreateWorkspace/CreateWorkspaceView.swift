@@ -31,7 +31,13 @@ struct CreateWorkspaceView: View {
     @State private var isRemote: Bool
     @State private var showsGitHub = false
     @State private var creationProblem: String?
-    @State private var isCreatingRemote = false
+    /// The create on a server that this window is waiting for. See `RemoteWorkspaceCreation`.
+    @State private var remoteCreation = RemoteWorkspaceCreation()
+    private var isCreatingRemote: Bool { remoteCreation.isRunning }
+    /// What the waiting screen says the server is doing, fixed when Create was pressed.
+    @State private var remoteActivity = ""
+    /// Said under the form after Cancel, because cancelling stops the waiting and not the server.
+    @State private var creationNotice: String?
     @State private var creationSource = CreationComposerSource()
 
     init(initialRepo: Repo? = nil, initialIsRemote: Bool = false) {
@@ -256,11 +262,32 @@ struct CreateWorkspaceView: View {
                         .padding(.horizontal, Metrics.gutter)
                         .padding(.bottom, Metrics.spacingWide)
                 }
+                if let creationNotice {
+                    Callout(text: creationNotice, symbol: "info.circle", tone: .warning)
+                        .padding(.horizontal, Metrics.gutter)
+                        .padding(.bottom, Metrics.spacingWide)
+                }
                 consequence
             }
         }
         .frame(width: Self.width)
         .background(Palette.surface)
+        // Over the form rather than instead of it, so the window keeps its size and a cancelled
+        // wait comes back to exactly what was typed.
+        .overlay {
+            if isRemote, remoteCreation.isRunning {
+                RemoteCreationWaitView(
+                    creation: remoteCreation, server: app.remoteServer, activity: remoteActivity,
+                    runsSetup: hasSetupScript && runSetupScript,
+                    onCancel: {
+                        remoteCreation.cancel()
+                        creationNotice = "Bloom stopped waiting for \(app.remoteServer.displayName). If the server "
+                            + "finishes creating the workspace anyway, it appears in the sidebar."
+                    },
+                    onCloseWindow: { dismiss() }
+                )
+            }
+        }
         // One task keyed on the project, not a task plus an onChange: the pair ran `load` twice on
         // every open (the first pass writes `repoID`, which fired the onChange), and a load left
         // in flight when the project changed could land another project's branches on this one's
@@ -1246,15 +1273,21 @@ struct CreateWorkspaceView: View {
         }
         let staged = StagedAttachments(directory: directory, attachments: ready)
         if isRemote {
-            isCreatingRemote = true
-            Task {
-                defer { isCreatingRemote = false }
-                do {
-                    try await backend.startWorkspace(repo: repo, text: text, mode: chosen, base: base, checkout: source,
-                        controls: chosenControls, runSetup: shouldRunSetup, staged: staged)
-                    dismiss()
-                    openWindow(id: BloomApp.mainWindowID)
-                } catch { creationProblem = error.localizedDescription }
+            creationNotice = nil
+            remoteActivity = RemoteCreationWait.activity(checkout: source, baseBranch: base)
+            let backend = backend
+            // Through a model the waiting screen can cancel and retry, not a bare task. See
+            // `RemoteWorkspaceCreation` for the frozen window that replaced.
+            remoteCreation.start {
+                try await backend.startWorkspace(repo: repo, text: text, mode: chosen, base: base, checkout: source,
+                    controls: chosenControls, runSetup: shouldRunSetup, staged: staged)
+            } finished: { failure in
+                if let failure {
+                    creationProblem = failure.localizedDescription
+                    return
+                }
+                dismiss()
+                openWindow(id: BloomApp.mainWindowID)
             }
             return
         }

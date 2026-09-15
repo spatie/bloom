@@ -130,6 +130,7 @@ public enum ServerResult: Codable, Sendable {
     case download(ServerDownload)
     case terminal(ServerTerminal)
     case runScripts([RunScript])
+    case setupOutput(ServerSetupOutput)
     case terminalPane(ServerTerminalPane)
     case archivePreview(ServerArchivePreview)
     case projectSettings(ServerProjectSettings)

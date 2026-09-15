@@ -37,6 +37,12 @@ public final class ServerDaemon: Sendable {
         let store = try Store(path: database)
         try await store.resetRunningSessions()
         _ = try await store.abandonPendingPermissionAsks()
+        // A setup script is a child of this process, so a row still `running` now is a run that
+        // was killed with the old one. The Mac app has always filed these at launch; the server did
+        // not, and since setup outlives the create reply a restart mid build left a workspace that
+        // said "Setting up" for ever. Safe in a maintenance trial too: the old process only hands
+        // over once it has no setup running.
+        try await store.recoverInterruptedSetups()
         let runtime = ServerRuntime(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner, maintenanceTrial: maintenanceTrial, runnerExitGrace: runnerExitGrace)
         do {
             let bridge = try await runtime.startBridge(socketPath: mcpSocketPath(directory: directory))

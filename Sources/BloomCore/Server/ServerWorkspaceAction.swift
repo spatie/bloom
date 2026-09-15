@@ -6,6 +6,8 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
     case setUnread(Bool)
     case setColour(String?)
     case runSetup
+    /// Protocol 15. See `ServerSetupOutput`.
+    case setupOutput
     case archivePreview
     case archive(confirmation: UUID)
     case restore
@@ -28,7 +30,7 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .archivePreview, .files, .download, .pullRequest, .runScripts, .browserAddress, .notes: false
+        case .archivePreview, .files, .download, .pullRequest, .runScripts, .browserAddress, .notes, .setupOutput: false
         default: true
         }
     }

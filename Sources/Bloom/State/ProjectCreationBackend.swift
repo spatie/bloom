@@ -58,6 +58,9 @@ struct ProjectCreationBackend {
                 data: try Data(contentsOf: attachment.url(in: staged.directory)))
         }
         let server = app.remoteServer
+        // Try Again on the waiting screen comes here after a dropped connection, and `perform`
+        // with no client answers nil with nothing to say.
+        if !server.isConnected, !server.isConnecting { server.connectionMode = .remote; await server.connect() }
         guard let result = await server.perform(.create(request)),
             case .creation(.workspaceStarted(let workspace, let session, _, let draft)) = result else {
             throw ServerFailure(server.error ?? "Could not create the workspace.")

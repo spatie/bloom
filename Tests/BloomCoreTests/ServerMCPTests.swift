@@ -96,7 +96,7 @@ struct ServerMCPTests {
                 try await service.uiBridge(.attach(workspaceID: WorkspaceID("fixture"), clientID: UUID(), actions: []))
             }
             let requests = received.values.withLock { $0 }
-            #expect(requests.map(\.version) == [14, version, version])
+            #expect(requests.map(\.version) == [BloomWire.version, version, version])
             #expect(requests.last?.id == command.id)
             #expect(requests.filter { $0.id == command.id }.count == 1)
             await client.disconnect()

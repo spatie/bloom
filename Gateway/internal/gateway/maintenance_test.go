@@ -36,7 +36,7 @@ func TestMaintenancePreservesIntentBehindControlAuthentication(t *testing.T) {
 			}}},
 		})
 	})
-	body := `{"version":14,"id":"00000000-0000-4000-8000-000000000001","operation":{"maintenance":{"_0":{"action":"start","credential":"fixture-maintenance-key","planID":"reviewed-plan","mode":"whenIdle"}}}}`
+	body := `{"version":15,"id":"00000000-0000-4000-8000-000000000001","operation":{"maintenance":{"_0":{"action":"start","credential":"fixture-maintenance-key","planID":"reviewed-plan","mode":"whenIdle"}}}}`
 	for _, token := range []string{"", f.token(t, "workspace-a", nil), f.token(t, "control", map[string]any{"scope": "bloom:read"})} {
 		response := f.request("POST", f.config.APIHost, "/v1/rpc", token, "", body)
 		if response.Code != http.StatusUnauthorized || count.Load() != 0 {

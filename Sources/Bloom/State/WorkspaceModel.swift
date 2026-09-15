@@ -277,6 +277,7 @@ final class WorkspaceModel {
             logWrites: setupLogWrites,
             durationMS: setupDurationMS,
             exitStatus: setupExitStatus,
+            startedAt: setupStartedAt,
             recorded: events
         )
         if let timelineMemo, timelineMemo.key == key { return timelineMemo.events }
@@ -285,7 +286,8 @@ final class WorkspaceModel {
             state: running ? .running : workspace.setupState,
             log: setupOutput,
             durationMS: setupDurationMS,
-            status: setupExitStatus
+            status: setupExitStatus,
+            startedAt: setupStartedAt
         )
         let built = [setup].compactMap { $0 } + events
         timelineMemo = (key, built)
@@ -310,6 +312,7 @@ final class WorkspaceModel {
         var logWrites: Int
         var durationMS: Int?
         var exitStatus: Int?
+        var startedAt: Date?
         var recorded: [WorkspaceEvent]
     }
 

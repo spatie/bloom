@@ -44,8 +44,12 @@ struct WorkspaceSetupStatusView<Model: WorkspacePaneModel>: View {
         if let local = model.localWorkspaceModel {
             return local.timeline(isRunningSetup: model.isRunningSetup).first { $0.kind == .setup }
         }
+        // The live copy the server streams while this workspace sets up, for its start time and
+        // the length of the last run. The state and log are already on the row. See
+        // `ServerWindowModel.refreshSetupOutput`.
+        let live = model.remoteServer?.liveSetup[model.workspace.id]
         return WorkspaceEvent.setup(state: model.workspace.setupState, log: model.workspace.setupLog,
-                                    durationMS: nil)
+                                    durationMS: live?.durationMS, startedAt: live?.startedAt)
     }
 
     private var dockerAction: (@MainActor () -> Void)? {

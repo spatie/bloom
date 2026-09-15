@@ -55,7 +55,7 @@ func TestRPCRequiresAuthenticationBeforeConnectingAndPreservesIDs(t *testing.T) 
 	count := runtimeFixture(t, f, func(connection net.Conn, request rpcRequest) {
 		json.NewEncoder(connection).Encode(map[string]any{"version": protocolVersion, "id": request.ID, "result": map[string]any{"hello": map[string]string{"name": "test"}}})
 	})
-	body := `{"version":14,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`
+	body := `{"version":15,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`
 	if response := f.request("POST", f.config.APIHost, "/v1/rpc", "", "", body); response.Code != 401 {
 		t.Fatal(response.Code)
 	}
@@ -76,8 +76,8 @@ func TestRPCRejectsMalformedAndOversizedBodies(t *testing.T) {
 	token := f.token(t, "control", nil)
 	for _, body := range []string{
 		`{}`, `{"version":8,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`,
-		`{"version":14,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{},"catalogue":{}}}`,
-		`{"version":14,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}{"extra":true}`,
+		`{"version":15,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{},"catalogue":{}}}`,
+		`{"version":15,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}{"extra":true}`,
 	} {
 		if response := f.request("POST", f.config.APIHost, "/v1/rpc", token, "", body); response.Code != 400 {
 			t.Fatal(response.Code)
@@ -95,10 +95,10 @@ func TestRPCKeepsNegotiatedVersionsAndLimitsHelloDowngrades(t *testing.T) {
 	}{
 		{"legacy12", "catalogue", `{"catalogue":{}}`, 12, 12, 200},
 		{"legacy13", "catalogue", `{"catalogue":{}}`, 13, 13, 200},
-		{"helloNegotiation", "hello", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 14, 13, 200},
-		{"noMutationDowngrade", "send", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 14, 13, 502},
-		{"unknownVersion", "hello", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 14, 15, 502},
-		{"wrongHelloVersion", "hello", `{"hello":{"name":"test"}}`, 14, 13, 502},
+		{"helloNegotiation", "hello", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 15, 13, 200},
+		{"noMutationDowngrade", "send", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 15, 13, 502},
+		{"unknownVersion", "hello", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 15, 16, 502},
+		{"wrongHelloVersion", "hello", `{"hello":{"name":"test"}}`, 15, 13, 502},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newFixture(t)

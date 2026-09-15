@@ -2,11 +2,11 @@
 
 Start with [the server protocol guide](../docs/SERVER-PROTOCOL.md).
 
-- `bloom-v14.schema.json`: JSON Schema draft 2020-12 for envelopes, all method/action names and portable payloads.
+- `bloom-v15.schema.json`: JSON Schema draft 2020-12 for envelopes, all method/action names and portable payloads.
 - `generate-schema.py`: regenerates the schema and checks version, method inventories and argument names against the Swift source.
-- `vectors-v14.json`: checked-in output from production Swift encoding, with synthetic identifiers/data.
+- `vectors-v15.json`: checked-in output from production Swift encoding, with synthetic identifiers/data.
 - `verify.py`: validates vectors encoded by the production Swift Codable types.
-- `maintenance-v1.schema.json`: capability-gated supervisor maintenance payloads, included in protocol 14.
+- `maintenance-v1.schema.json`: capability-gated supervisor maintenance payloads, included in protocols 14 and 15.
 - `verify-maintenance.py`: validates maintenance DTO exports and malformed request/outcome regressions.
 - `examples/bloom_client.py`: read-only SSH/HTTPS Python client with strict host/TLS verification.
 - `examples/test_bloom_client.py`: framing, negotiation and credential-boundary regressions.
@@ -20,7 +20,8 @@ The scripts run locally and do not deploy a server. Schema verification requires
 `jsonschema` package; the example client and its unit tests require only the standard library.
 The SSH example uses POSIX nonblocking pipes and a locally installed OpenSSH client.
 
-Version 13 schema and vectors remain checked in for existing clients. Version 14 adds the leased UI bridge.
+Version 13 and 14 schemas and vectors remain checked in for existing clients. Version 14 adds the leased UI bridge.
+Version 15 replies to `create` before setup runs and adds the `setupOutput` workspace action.
 
 Supervised updates require `diagnostics.maintenanceManagement: true` and separate maintenance
 authentication. See [maintenance lifecycle and client rules](../docs/SERVER-MAINTENANCE.md).

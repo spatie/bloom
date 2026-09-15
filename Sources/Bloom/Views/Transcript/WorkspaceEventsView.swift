@@ -290,7 +290,20 @@ struct WorkspaceEventRow: View {
         }
     }
 
+    /// A running setup counts up once a second, in the same place a finished one shows how long it
+    /// took. Only the header is inside the timeline, so the log below is not redrawn each tick.
+    @ViewBuilder
     private func header(showsLog: Bool) -> some View {
+        if event.isRunning, let startedAt = event.startedAt {
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                headerRow(showsLog: showsLog, durationMS: max(1, Int(context.date.timeIntervalSince(startedAt) * 1000)))
+            }
+        } else {
+            headerRow(showsLog: showsLog, durationMS: event.durationMS)
+        }
+    }
+
+    private func headerRow(showsLog: Bool, durationMS: Int?) -> some View {
         var presentation = event.presentation
         // The visible log already contains this detail in full. Repeating a truncated copy in
         // the header leaves less room for the failure label and its recovery actions.
@@ -302,7 +315,7 @@ struct WorkspaceEventRow: View {
             // empty `Workspace` with a blank `RepoID` every pass to satisfy the type.
             home: model.map { TranscriptHome($0.workspace) } ?? TranscriptHome(),
             isError: event.isFailure,
-            durationMS: event.durationMS,
+            durationMS: durationMS,
             isExpanded: isExpanded,
             isHovered: isHovered,
             showsDisclosure: canExpand

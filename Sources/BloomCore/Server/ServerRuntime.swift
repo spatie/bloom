@@ -31,6 +31,12 @@ public actor ServerRuntime {
     private var closingSessions: Set<SessionID> = []
     private var changingWorkspaces: Set<WorkspaceID> = []
     private var settingUpWorkspaces: Set<WorkspaceID> = []
+    /// Setup runs that began after a create had already replied. See `setUpInBackground`.
+    private var backgroundSetups: [WorkspaceID: Task<Void, Never>] = [:]
+    /// Chats whose queued prompts wait for their workspace's setup to end. See `ServerPromptQueue.held`.
+    private var setupHeldSessions: Set<SessionID> = []
+    /// When each setup this process watched began, and how long it took once it ended.
+    private var setupClock: [WorkspaceID: (startedAt: Date, durationMS: Int?)] = [:]
     private var archivePreviews: [UUID: ServerArchivePreview] = [:]
     private var isClosed = false
     private var shutdownTask: Task<Void, Never>?
@@ -82,6 +88,8 @@ public actor ServerRuntime {
             return try await self.authenticatedSession(id)
         }, settled: { [weak self] id, ending in
             await self?.bridgeTurnEnded(sessionID: id, ending: ending)
+        }, held: { [weak self] id in
+            await self?.isHeldForSetup(id) ?? false
         })
         promptQueue = queue
         return queue
@@ -137,6 +145,9 @@ public actor ServerRuntime {
                 return ServerReply(id: request.id, result: .failure("Storage management requires Bloom protocol 13 and the storageManagement capability."))
             default: break
             }
+        }
+        if case .workspace(_, .setupOutput) = request.operation, request.version < 15 {
+            return ServerReply(id: request.id, result: .failure("Live setup output requires Bloom protocol 15."))
         }
         if case .diagnostics = request.operation, request.version < 13 {
             return ServerReply(id: request.id, result: .failure("Server diagnostics require Bloom protocol 13."))
@@ -331,13 +342,22 @@ public actor ServerRuntime {
             case .newSession(let agent, _, _, _):
                 try ServerAgentAvailability.require(agent, in: await installedAgents(store))
                 return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
+            case .setupOutput:
+                let selected = try await workspace(id, readingDuringSetup: true)
+                let clock = setupClock[id]
+                return .setupOutput(ServerSetupOutput(state: selected.setupState, log: selected.setupLog,
+                    startedAt: clock?.startedAt, durationMS: clock?.durationMS))
             case .runSetup:
                 let selected = try await workspace(id)
+                guard backgroundSetups[id] == nil else { throw ServerFailure("Workspace setup is already running.") }
                 guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
                 settingUpWorkspaces.insert(id)
+                let startedAt = Date()
+                setupClock[id] = (startedAt, nil)
                 defer {
                     changingWorkspaces.remove(id)
                     settingUpWorkspaces.remove(id)
+                    setupClock[id] = (startedAt, Int(Date().timeIntervalSince(startedAt) * 1000))
                 }
                 let chats = try await store.sessions(workspaceID: id)
                 for chat in chats {
@@ -488,6 +508,13 @@ public actor ServerRuntime {
         // Both RPC and MCP mutations hold tickets, including work paused before its first
         // Store write. Capture sessions only once those accepted operations have settled.
         try await transition.drain()
+        // A setup that began after its create replied holds no ticket. Stop it before the worktree
+        // it is building goes, which files the run as stopped rather than leaving a script writing
+        // into a deleted directory.
+        if let setup = backgroundSetups[id] {
+            setup.cancel()
+            await setup.value
+        }
         let fresh = try await prepareArchive(workspace, keepingBranch: bridgeSafe)
         guard fresh.report == accepted.report, fresh.hazards == accepted.hazards else { return .archivePreview(fresh) }
         let chats = try await store.sessions(workspaceID: id)
@@ -576,24 +603,39 @@ public actor ServerRuntime {
             name: suppliedName ?? (mode.runsAnAgent ? nil
                 : WorkspaceStartPlan.terminalName(userSuppliedBranch: nil, claimedSea: sea?.pick.ocean.name)),
             checkout: request.checkout, controls: controls,
-            opensSession: mode.runsAnAgent, setupPolicy: request.runSetupScript == false ? .skip : .run
+            // Deferred, never `.run`. `.run` awaited the whole setup script inside this request,
+            // so the reply, and the create window waiting on it, waited too: the owner's Docker
+            // based project compiles PHP extensions from source during setup, and the window sat
+            // greyed out with a tiny spinner for many minutes and no way out. Setup now starts
+            // below once the worktree and the rows exist, exactly as the Mac's own create does.
+            opensSession: mode.runsAnAgent, setupPolicy: request.runSetupScript == false ? .skip : .deferred
         ))
+        // `.deferred` leaves a project with something to run at `pending`, and one with nothing at
+        // `skipped`, so the row already says whether there is a run to wait for.
+        let runsSetup = started.workspace.setupState == .pending
         var prompt = request.prompt ?? ""
         for attachment in attachments {
             let uploaded = try ServerFileOperations.upload(workspace: started.workspace, name: attachment.name, data: attachment.data)
             prompt = prompt.replacingOccurrences(of: attachment.sourcePath, with: uploaded)
         }
-        var keptDraft = started.setupSucceeded == false ? prompt : nil
+        var keptDraft: String?
         if let session = started.session {
             try await ServerComposer.save(controls, session: session, store: store)
-            if !prompt.isEmpty, started.setupSucceeded != false {
-                let status = await authentication(controls.agentKind, store, started.workspace)
-                if status.requiresSignIn, request.mode != nil {
+            // Held before the prompt is queued, so no drain can start in between.
+            if runsSetup { setupHeldSessions.insert(session.id) }
+            if !prompt.isEmpty {
+                // With setup still to run, the sign-in check waits for the drain: a workspace that
+                // runs its agent inside a container cannot be asked about sign-in before setup has
+                // built that container, and the queue already pauses on a sign-in failure with the
+                // retry the client offers for it.
+                let status = runsSetup ? nil : await authentication(controls.agentKind, store, started.workspace)
+                if status?.requiresSignIn == true, request.mode != nil {
                     keptDraft = prompt
                     try await store.saveDraft(sessionID: session.id, body: prompt)
                 } else { try await queue().enqueue(prompt, sessionID: session.id) }
             }
         }
+        if runsSetup { setUpInBackground(started.workspace, repo: repo, heldSession: started.session?.id) }
         if request.mode != nil {
             return .creation(.workspaceStarted(workspace: started.workspace, session: started.session,
                 setupSucceeded: started.setupSucceeded, draft: keptDraft))
@@ -601,6 +643,42 @@ public actor ServerRuntime {
         guard let session = started.session else { throw ServerFailure("The workspace has no session.") }
         return .created(session: session, workspace: started.workspace, setupSucceeded: started.setupSucceeded)
     }
+
+    /// Runs a new workspace's setup script after its create has replied, and lets its chat's queue
+    /// move once the script ends.
+    ///
+    /// Whatever the outcome, the queue moves, because that is what the Mac does
+    /// (`WorkspaceModel.runSetupThenSend`): a failed setup is something the agent can read the log
+    /// of and fix, and holding the prompt back left a workspace silent for good. The server used
+    /// to keep the prompt as a draft instead, which only worked because the reply waited for the
+    /// script and could hand the draft back.
+    ///
+    /// Not a lifecycle change. The workspace is not put in `changingWorkspaces`, so terminals,
+    /// file reads and new messages all keep working during the run, as they do locally, while
+    /// Run Setup refuses and archive stops the run before removing the worktree.
+    private func setUpInBackground(_ workspace: Workspace, repo: Repo, heldSession: SessionID?) {
+        let id = workspace.id
+        let startedAt = Date()
+        setupClock[id] = (startedAt, nil)
+        let store = store
+        backgroundSetups[id] = Task { [weak self] in
+            let manager = WorkspaceManager(store: store)
+            let port = await manager.ensurePort(for: workspace)
+            _ = await manager.runSetup(workspace: workspace, repo: repo, port: port, onOutput: { _ in })
+            await self?.finishBackgroundSetup(id, startedAt: startedAt, heldSession: heldSession)
+        }
+    }
+
+    private func finishBackgroundSetup(_ id: WorkspaceID, startedAt: Date, heldSession: SessionID?) async {
+        backgroundSetups.removeValue(forKey: id)
+        setupClock[id] = (startedAt, Int(Date().timeIntervalSince(startedAt) * 1000))
+        guard let heldSession else { return }
+        setupHeldSessions.remove(heldSession)
+        guard !isClosed else { return }
+        try? await queue().resumeStoredDeliveries(heldSession)
+    }
+
+    private func isHeldForSetup(_ id: SessionID) -> Bool { setupHeldSessions.contains(id) }
 
     private func authenticatedSession(_ id: SessionID) async throws -> ServerSession {
         if await sessions[id]?.isBusy != true {
@@ -682,6 +760,11 @@ public actor ServerRuntime {
         for command in runningCommands { command.cancel() }
         let archiving = Array(bridgeArchives.values)
         for task in archiving { task.cancel() }
+        // Cancelling stops each script and files its run as stopped. Awaited before the queue
+        // shuts down, so none of them resumes a prompt into a queue that is going away.
+        let setups = Array(backgroundSetups.values)
+        for task in setups { task.cancel() }
+        for task in setups { await task.value }
         await uiBroker.shutdown()
         await bridge?.shutdown()
         await reviewCache.shutdown()
@@ -740,7 +823,7 @@ extension ServerRuntime {
         }
         let draining = await promptQueue?.activeDrainCount ?? 0
         var busy = draining > 0 || maintenanceWorkspaceStarts > 0 || maintenanceBridgeCalls > 0 || !commands.isEmpty || !creating.isEmpty
-            || !changingWorkspaces.isEmpty || !settingUpWorkspaces.isEmpty || !bridgeArchives.isEmpty
+            || !changingWorkspaces.isEmpty || !settingUpWorkspaces.isEmpty || !backgroundSetups.isEmpty || !bridgeArchives.isEmpty
             || workspaceAdmissions.hasActiveOperations
         for session in Array(sessions.values) {
             busy = await session.isBusy || busy

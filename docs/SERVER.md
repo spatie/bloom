@@ -625,8 +625,15 @@ clones the selected repository there. Credentials are never copied between machi
 
 Remote workspace creation carries the selected base or checkout, composer controls, setup
 choice and staged attachments to the server. Chat creation queues its opening prompt once;
-terminal and browser creation do not create an agent session. A failed setup retains the prompt
-as a draft. Project folder inspection and creation use the same core planner on both machines,
+terminal and browser creation do not create an agent session. From protocol 15 the server replies
+as soon as the worktree exists and runs the setup script afterwards, so the New Workspace window
+closes and the workspace shows setup progress, as it does on the Mac. The opening prompt waits in
+the chat's queue and is sent when setup ends, whether it succeeded or failed. If a create is still
+waiting after two seconds (a large pull request fetch, for instance), the window shows what the
+server is doing with a clock, Cancel and Close Window. It reports the server as not responding only
+when the connection has gone or nothing has come back from the server for 20 seconds, never
+because the create itself is slow. Cancel stops waiting; it cannot stop work the server has
+already started, and a workspace that finishes anyway appears in the sidebar. Project folder inspection and creation use the same core planner on both machines,
 and the server refuses creation if the inspected folder facts have changed.
 
 ### Remote review performance
@@ -667,7 +674,10 @@ controls, project creation and archived workspaces are available from the server
 ### Setup and server checks
 
 Setup output is saved as a bounded tail while the script runs, including its last line before a
-quiet download. Reconnecting clients see the current attempt. Retry clears the old failure and
+quiet download. The selected workspace streams it once a second through `setupOutput`, with the run's start time,
+and the setup row names the current step when the output says it (building the Docker image,
+compiling PHP extensions, installing Composer or npm packages) with the live log beneath. A server
+restart files a run it was killed during as interrupted. Reconnecting clients see the current attempt. Retry clears the old failure and
 runs once even when a connection resends the same command. The server refuses a new setup while
 agents are running, awaiting approval or have queued prompts. Read-only workspace queries keep
 working during setup.

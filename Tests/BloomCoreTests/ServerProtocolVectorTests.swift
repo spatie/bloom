@@ -48,6 +48,7 @@ struct ServerProtocolVectorTests {
             ("file", .file(workspaceID: workspace, path: "README.md")),
             ("files", .workspace(workspaceID: workspace, action: .files)),
             ("browserAddress", .workspace(workspaceID: workspace, action: .browserAddress)),
+            ("setupOutput", .workspace(workspaceID: workspace, action: .setupOutput)),
             ("upload", .workspace(workspaceID: workspace, action: .uploadFile(name: "note.txt", data: Data([0, 1, 255])))),
             ("clearColour", .workspace(workspaceID: workspace, action: .setColour(nil))),
             ("settings", .project(repoID: RepoID("repo-example"), action: .settings)),
@@ -85,6 +86,7 @@ struct ServerProtocolVectorTests {
             ("unchangedPatch", .reviewPatch(.init(revision: "revision-1", patch: nil))),
             ("file", .file(.init(path: "README.md", text: "# Hello\n"))),
             ("browserAddress", .text("http://localhost:8000/admin")),
+            ("setupOutput", .setupOutput(.init(state: .running, log: "Installing dependencies from lock file\n", startedAt: epoch))),
             ("download", .download(.init(path: "note.txt", data: Data([0, 1, 255])))),
             ("transcript", .transcript(.init(session: session, messages: [message], pendingQuestions: [Data("{}".utf8)], isBusy: false,
                                            streamingText: "", permissionDecisions: ["ask-example": "allowed"], queuedPrompts: [.init(id: DeliveryID("delivery-example"), text: "Next task")], queueError: nil)))

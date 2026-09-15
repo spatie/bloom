@@ -400,25 +400,97 @@ struct ServerRuntimeTests {
         await runtime.shutdown()
     }
 
-    @Test func failedRemoteSetupRetainsThePromptWithoutStartingAnAgent() async throws {
+    /// The create window used to wait for the whole setup script, because this reply did: the
+    /// owner's Docker setup compiled PHP extensions from source for many minutes while the window
+    /// showed a greyed out form and a tiny spinner. The reply now comes once the worktree exists,
+    /// the prompt waits in the queue where the client can see it, output streams while the script
+    /// runs, and the prompt goes when setup ends whether it succeeded or not, as it does locally.
+    @Test(arguments: [0, 3])
+    func sharedCreationRepliesBeforeSetupAndSendsThePromptWhenSetupEnds(exitStatus: Int) async throws {
         let repository = try await TempRepo()
         defer { repository.cleanUp() }
-        try repository.write(".conductor/settings.toml", "[scripts]\nsetup = \"exit 3\"\n")
+        try repository.write(".conductor/settings.toml", """
+        [scripts]
+        setup = "echo Installing dependencies from lock file; while [ ! -f setup-release ]; do sleep 0.05; done; exit \(exitStatus)"
+        """)
         let fixture = try await ServerFixture()
-        let runtime = fixture.runtime()
-        var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "Setup failure")
+        let captured = Mutex<ServerTestRunner?>(nil)
+        let runtime = ServerRuntime(store: fixture.store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in [.claudeCode] }, makeRunner: { session, _, store in
+            let runner = ServerTestRunner(sessionID: session.id, store: store)
+            captured.withLock { $0 = runner }
+            return runner
+        })
+        var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "Setup in the background")
         request.mode = .chat
         request.prompt = "Keep this task"
         request.runSetupScript = true
         let reply = await runtime.respond(to: ServerRequest(.create(request)))
         guard case .creation(.workspaceStarted(let workspace, let session, let succeeded, let draft)) = reply.result else {
-            Issue.record("Missing failed setup result"); await runtime.shutdown(); return
+            Issue.record("Missing creation result: \(String(describing: reply.result))"); await runtime.shutdown(); return
         }
         defer { try? FileManager.default.removeItem(atPath: workspace.path) }
-        #expect(succeeded == false)
-        #expect(session != nil)
-        #expect(draft == "Keep this task")
+        #expect(succeeded == nil)
+        #expect(draft == nil)
+        let sessionID = try #require(session?.id)
+
+        let live = ServerRequest(.workspace(workspaceID: workspace.id, action: .setupOutput))
+        await waitUntil("setup output streams while the script runs") {
+            guard case .setupOutput(let output) = await runtime.respond(to: live).result else { return false }
+            return output.state == .running && output.log.contains("Installing dependencies")
+        }
+        guard case .setupOutput(let output) = await runtime.respond(to: live).result else { Issue.record("No setup output"); return }
+        #expect(output.startedAt != nil)
+        #expect(SetupStep.read(log: output.log)?.activity == .installingComposerPackages)
+
+        let transcript = await runtime.respond(to: ServerRequest(.transcript(sessionID: sessionID, afterSeq: -1)))
+        guard case .transcript(let value) = transcript.result else { Issue.record("No transcript"); return }
+        #expect(value.queuedPrompts.map(\.text) == ["Keep this task"])
+        #expect(value.queueError == nil)
+        let rerun = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .runSetup)))
+        #expect(!rerun.isAccepted)
+        #expect(try await runtime.maintenanceControl("status").busy)
+        if let runner = captured.withLock({ $0 }) { #expect(await runner.sends.isEmpty) }
+
+        FileManager.default.createFile(atPath: workspace.path + "/setup-release", contents: nil)
+        await waitUntil("the prompt goes once setup ends", within: .seconds(10)) {
+            guard let runner = captured.withLock({ $0 }) else { return false }
+            return await runner.sends == ["Keep this task"]
+        }
+        #expect(try await fixture.store.workspace(id: workspace.id)?.setupState == (exitStatus == 0 ? .succeeded : .failed))
+        guard case .setupOutput(let finished) = await runtime.respond(to: live).result else { Issue.record("No setup output"); return }
+        #expect(finished.durationMS != nil)
+        await runtime.shutdown()
+    }
+
+    @Test func shutdownStopsABackgroundSetupWithoutSendingItsPrompt() async throws {
+        let repository = try await TempRepo()
+        defer { repository.cleanUp() }
+        try repository.write(".conductor/settings.toml", "[scripts]\nsetup = \"echo waiting; sleep 30\"\n")
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "Stopped setup")
+        request.mode = .chat
+        request.prompt = "Never sent"
+        request.runSetupScript = true
+        let reply = await runtime.respond(to: ServerRequest(.create(request)))
+        guard case .creation(.workspaceStarted(let workspace, _, _, _)) = reply.result else {
+            Issue.record("Missing creation result"); await runtime.shutdown(); return
+        }
+        defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+        await waitUntil("setup is running") { (try? await fixture.store.workspace(id: workspace.id))?.setupState == .running }
+        await runtime.shutdown()
+        #expect(try await fixture.store.workspace(id: workspace.id)?.setupState == .failed)
         #expect(await fixture.runner.sends.isEmpty)
+    }
+
+    @Test func liveSetupOutputNeedsProtocolFifteen() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let workspaceID = try #require(fixture.session.workspaceID)
+        let old = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspaceID, action: .setupOutput), version: 14))
+        #expect(old.failure?.contains("protocol 15") == true)
+        let current = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspaceID, action: .setupOutput)))
+        if case .setupOutput(let output) = current.result { #expect(output.startedAt == nil) } else { Issue.record("No setup output") }
         await runtime.shutdown()
     }
 

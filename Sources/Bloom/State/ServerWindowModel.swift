@@ -122,6 +122,12 @@ final class ServerWindowModel {
     var isConnecting = false
     var isMaintainingServer = false
     var isPerformingCommand = false
+    /// When anything last came back from the server on this connection. The create window's
+    /// liveness rule reads it, so a create waiting on a slow `git fetch` over a server that keeps
+    /// answering is "still working", and only silence is "not responding". See `RemoteCreationWait`.
+    private(set) var lastHeardAt: Date?
+    /// The setup output streamed for the selected workspace while it sets up. See `refreshSetupOutput`.
+    private(set) var liveSetup: [WorkspaceID: ServerSetupOutput] = [:]
     var error: String?
     var connectionGeneration = 0
     private(set) var agentAuthenticationRevision = 0
@@ -569,6 +575,7 @@ final class ServerWindowModel {
                 sidebarCollapsed = []
                 archiveConfirmations = [:]
                 uncertainRequest = nil
+                liveSetup = [:]
                 if lastEndpoint != nil {
                     for terminal in terminals.values { terminal.shutdown() }
                     terminals.removeAll()
@@ -612,6 +619,7 @@ final class ServerWindowModel {
                 client = connected
                 serverName = name
                 catalogue = value
+                lastHeardAt = Date()
                 connectionRecovery.connected()
                 error = nil
                 connectionGeneration += 1
@@ -887,7 +895,7 @@ final class ServerWindowModel {
                 if tick % 3 == 0 {
                     let reply = try await client.request(ServerRequest(.catalogue), timeout: .seconds(15))
                     guard generation == connectionGeneration else { return }
-                    if case .catalogue(let value) = reply.result { catalogue = value }
+                    if case .catalogue(let value) = reply.result { catalogue = value; lastHeardAt = Date() }
                     if let workspace = selectedWorkspace {
                         let scripts = try await client.request(ServerRequest(.workspace(workspaceID: workspace.id, action: .runScripts)), timeout: .seconds(15))
                         if generation == connectionGeneration, selectedWorkspace?.id == workspace.id,
@@ -895,6 +903,7 @@ final class ServerWindowModel {
                     }
                 }
                 try await refreshTranscript(client: client, generation: generation)
+                await refreshSetupOutput(client: client, generation: generation)
                 tick += 1
                 try await Task.sleep(for: .seconds(1))
             } catch {
@@ -949,6 +958,29 @@ final class ServerWindowModel {
                 streamingText = value.streamingText
             }
         }
+    }
+
+    /// Streams the selected workspace's setup output once a second while it sets up.
+    ///
+    /// The catalogue carries the same log every three seconds, which is how a setup row used to
+    /// move: in jumps, with no start time to count from. This asks for one workspace only, and only
+    /// while its row says setup is running, or is pending and has not been asked yet, which is the
+    /// moment after a create before the server has launched the script. It runs inside the same
+    /// sequential poll as the catalogue, so whichever copy arrived last is the newest one and
+    /// nothing has to be merged.
+    ///
+    /// A server older than protocol 15 refuses the action; that is swallowed here and the row
+    /// falls back to the catalogue's copy. A transport failure is left for the next catalogue read
+    /// to notice, which already knows how to reconnect.
+    private func refreshSetupOutput(client: ServerClient, generation: Int) async {
+        guard let workspace = selectedWorkspace,
+              workspace.setupState == .running || workspace.setupState == .pending && liveSetup[workspace.id] == nil,
+              let reply = try? await client.request(ServerRequest(.workspace(workspaceID: workspace.id, action: .setupOutput)), timeout: .seconds(10)),
+              generation == connectionGeneration, case .setupOutput(let output) = reply.result else { return }
+        lastHeardAt = Date()
+        liveSetup[workspace.id] = output
+        guard let index = catalogue?.workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
+        catalogue?.workspaces[index].mirrorSetup(output)
     }
 
     func createWorkspace() async {

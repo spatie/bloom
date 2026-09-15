@@ -14,10 +14,20 @@ actor ServerPromptQueue {
     private var closed = false
     private var endings: [SessionID: CrewTurnEnd] = [:]
     private let settled: @Sendable (SessionID, CrewTurnEnd) async -> Void
+    /// Whether a session's deliveries must wait, without that being an error or a pause.
+    ///
+    /// A workspace created on the server runs its setup script after the create has replied, and
+    /// its opening prompt is queued straight away so the pending bubble is on screen for the whole
+    /// of the run, as it is on the Mac. Loading the session during setup refuses, and a refused
+    /// load used to be filed as a queue error and a pause, so the prompt would have sat there for
+    /// good behind "Queue paused". A held session is simply not drained yet; the runtime resumes
+    /// it when setup ends, whatever the outcome, which is `WorkspaceModel.runSetupThenSend`'s rule.
+    private let held: @Sendable (SessionID) async -> Bool
 
     init(store: Store, load: @escaping LoadSession,
-         settled: @escaping @Sendable (SessionID, CrewTurnEnd) async -> Void = { _, _ in }) {
-        self.store = store; self.load = load; self.settled = settled
+         settled: @escaping @Sendable (SessionID, CrewTurnEnd) async -> Void = { _, _ in },
+         held: @escaping @Sendable (SessionID) async -> Bool = { _ in false }) {
+        self.store = store; self.load = load; self.settled = settled; self.held = held
     }
 
     func turnEnded(_ id: SessionID, ending: CrewTurnEnd) async {
@@ -136,7 +146,9 @@ actor ServerPromptQueue {
     }
 
     private func restartIfPending(_ id: SessionID) async throws {
-        guard !closed, !Task.isCancelled, errors[id] == nil, tasks[id] == nil,
+        // Held is checked here as well as in `drain`, or a held drain returning would restart
+        // itself at once and spin for the whole of the setup run.
+        guard !closed, !Task.isCancelled, errors[id] == nil, tasks[id] == nil, await !held(id),
               try await store.setting(Self.pauseKey(id)) != "true",
               try await !store.pendingDeliveries(sessionID: id).isEmpty else { return }
         start(id)
@@ -153,6 +165,7 @@ actor ServerPromptQueue {
             while !Task.isCancelled, !closed, errors[id] == nil,
                   try await store.setting(Self.pauseKey(id)) != "true",
                   let delivery = try await store.pendingDeliveries(sessionID: id).first {
+                if await held(id) { return }
                 if let receipt = try await store.setting(key(delivery)) {
                     if receipt == "delivered" { try await store.markDelivered(id: delivery.id); continue }
                     errors[id] = "A previous delivery has an uncertain outcome. Check the conversation, then remove that queued message before continuing."

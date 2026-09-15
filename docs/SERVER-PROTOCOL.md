@@ -1,10 +1,10 @@
 # Bloom server protocol
 
-This is the public client contract for Bloom Server protocol 14. A client can be written in any
+This is the public client contract for Bloom Server protocol 15. A client can be written in any
 language. It sends JSON requests to the owning server; it never opens the server's SQLite database.
 The same operations serve macOS, iPhone, iPad and other clients.
 
-The checked-in [JSON Schema](../Protocol/bloom-v14.schema.json) describes the envelopes, every
+The checked-in [JSON Schema](../Protocol/bloom-v15.schema.json) describes the envelopes, every
 operation and nested action, and the review/transcript framing. The
 [Python example](../Protocol/examples/bloom_client.py) uses the standard library and supports
 SSH and HTTPS. It makes only read-only requests. No server deployment or Swift runtime is needed
@@ -49,7 +49,7 @@ Authorization: Bearer <access-token>
 ```
 
 The body is exactly the same JSON envelope, without needing a trailing LF. Success and application
-failures both use HTTP 200 with a Bloom reply. The current gateway accepts protocols 12, 13 and 14. Older gateways that reject a newer hello before it reaches the runtime need a gateway update.
+failures both use HTTP 200 with a Bloom reply. The current gateway accepts protocols 12, 13, 14 and 15. Older gateways that reject a newer hello before it reaches the runtime need a gateway update.
 It rejects HTTP redirects in native clients so bearer credentials cannot move to another origin.
 A custom client must also refuse redirects and verify TLS normally.
 
@@ -70,11 +70,11 @@ within one runtime. Deploy separate runtimes/accounts when that isolation is req
 This is a tagged JSON protocol, not JSON-RPC 2.0. There is no `jsonrpc`, `method` or `params` field.
 
 ```json
-{"version":14,"id":"00000000-0000-4000-8000-000000000001","operation":{"hello":{}}}
+{"version":15,"id":"00000000-0000-4000-8000-000000000001","operation":{"hello":{}}}
 ```
 
 ```json
-{"version":14,"id":"00000000-0000-4000-8000-000000000001","result":{"hello":{"name":"example-server"}}}
+{"version":15,"id":"00000000-0000-4000-8000-000000000001","result":{"hello":{"name":"example-server"}}}
 ```
 
 Each request contains `version`, a UUID `id`, and exactly one operation tag. Each reply contains
@@ -120,17 +120,18 @@ Other encoding rules:
 
 ## Version negotiation
 
-Current clients support versions 14, 13 and 12. Version 14 adds the leased `uiBridge`; version 13 adds `diagnostics`; the existing workspace
+Current clients support versions 15, 14, 13 and 12. Version 15 replies to `create` before the setup
+script runs and adds the `setupOutput` workspace action (see below); version 14 adds the leased `uiBridge`; version 13 adds `diagnostics`; the existing workspace
 operations retain their version-12 encoding. This is an explicit compatibility exception, not a
 promise that any older or newer version is compatible.
 
-1. Send a read-only version-14 `hello` with a fresh UUID.
-2. Validate the reply ID. If the reply is version 14, require a successful `hello` with a `name`.
-3. Only if the reply is version 12 or 13 and its result is exactly
+1. Send a read-only version-15 `hello` with a fresh UUID.
+2. Validate the reply ID. If the reply is version 15, require a successful `hello` with a `name`.
+3. Only if the reply is version 12, 13 or 14 and its result is exactly
    `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`,
    resend that same hello ID with the version named by the reply.
 4. Require a successful hello at that exact version. Pin it for this connection. Do not call
-   `diagnostics` on version 12, or `uiBridge` below version 14.
+   `diagnostics` on version 12, `uiBridge` below version 14, or `setupOutput` below version 15.
 5. Refuse all other version mismatches and reconnect after a server upgrade.
 
 Never probe compatibility with a mutation. Never resend a mutation with a different wire version.
@@ -286,6 +287,16 @@ choices. `WorkspaceRequest` requires `repositoryPath`, `name`, `agent`, `model`,
 `permissionMode`. Optional fields are `prompt`, `baseBranch`, `checkout`, `controls`, `mode`
 (`chat`, `terminal`, `browser`), `runSetupScript`, and `attachments` (each has `sourcePath`, `name`,
 Base64 `data`). Copy server-provided controls and checkout values rather than inventing them.
+
+From protocol 15, `create` replies as soon as the worktree, the workspace record and any chat exist.
+It does not wait for the setup script: the workspace comes back with `setupState` `pending` when
+there is a script to run, and the server starts it straight afterwards. The opening prompt is queued
+at once and appears in the chat's `queuedPrompts`, and it is sent when setup ends, whether the script
+succeeded or failed. `workspaceStarted.setupSucceeded` is therefore null. While `setupState` is
+`running`, poll `workspace.action.setupOutput` about once a second for the selected workspace: it
+returns that one workspace's `setupState`, bounded `setupLog` tail, the run's `startedAt` (seconds
+since 2001-01-01, as every date here) and, once finished, `durationMS`. Both timing fields are null
+for a run the current server process did not watch. The catalogue carries the same state and log.
 The `startProject.expected` facts prevent applying a stale inspection to a changed folder.
 
 ### ProjectAction
@@ -310,7 +321,8 @@ Wrap these inside `workspace.action` alongside the workspace ID.
 | `rename` | `_0: name` | `accepted` | M |
 | `setPinned`, `setUnread` | `_0: bool` | `accepted` | M |
 | `setColour` | optional `_0: hex`, null/omitted clears | `accepted` | M |
-| `runSetup` | none | `accepted` | M |
+| `runSetup` | none | `accepted` once the script has ended | M |
+| `setupOutput` | none, protocol 15 or later | `setupOutput._0: {state, log, startedAt?, durationMS?}` | R |
 | `archivePreview` | none | `archivePreview._0` | R |
 | `archive` | `confirmation` UUID from archive preview | `accepted` | M |
 | `restore` | none | `accepted` | M |
@@ -508,7 +520,7 @@ python3 Protocol/verify.py /tmp/bloom-wire-vectors.json
 python3 -m unittest discover -s Protocol/examples -p 'test_*.py'
 ```
 
-The checked-in [vectors](../Protocol/vectors-v14.json) contain only synthetic identifiers and data.
+The checked-in [vectors](../Protocol/vectors-v15.json) contain only synthetic identifiers and data.
 The verifier also compares freshly encoded values with these examples so encoding drift requires
 reviewing and updating the published samples. The vector test includes unnamed/nested enums, optional omission, opaque IDs, Base64 bytes and the
 2001 date epoch. The verifier checks every vector against the schema and checks that the schema
@@ -534,7 +546,7 @@ message is refused. Ordinary `send` calls without this field retain distinct ide
 
 ### Storage inspection and cleanup
 
-Storage management is an additive capability on protocol 13 and 14. Read `diagnostics` first and
+Storage management is an additive capability on protocol 13, 14 and 15. Read `diagnostics` first and
 require `diagnostics._0.storageManagement == true` before sending either operation. A missing or
 false flag means this server needs an update. Never probe support by attempting cleanup. The
 shared Swift wire session performs this check and keeps the existing connection usable on older
