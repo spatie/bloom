@@ -115,11 +115,11 @@ places: the listing, the dispatch and the gate.
 | `project_hide` | Take a project out of the sidebar. A view preference and nothing more | | | ✓ |
 | `project_unhide` | Put it back, in the place it already had | | | ✓ |
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
-| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request | ✓ | | ✓ |
+| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request. With `notify_when_done`, Bloom tells the calling chat once when the new agent's first turn finishes, fails or blocks on the owner | ✓ | | ✓ |
 | `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
 | `workspace_archive` | Archive a workspace through normal safety checks, keeping its branch and history. Its own, and only when the turn asking for it has ended, for a workspace agent; any of them, named out loud and at once, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
-| `workspace_say` | Put a message in another workspace's chat, with the owner's authority, headed with the workspace, project and chat it came from. Cancellable from either end while queued. A child may write only to the workspace that started it or to one whose message has reached it | ✓ | ✓ | ✓ |
+| `workspace_say` | Put a message in another workspace's chat, with the owner's authority, headed with the workspace, project and chat it came from. The owner can delete it from the receiving chat while it is queued. With `notify_when_done`, Bloom tells the calling chat once when the turn it caused finishes, fails or blocks on the owner. Refused past six messages to one workspace in ten minutes, or for the same words twice in that window, except from the owner's own client. A child may write only to the workspace that started it or to one whose message has reached it | ✓ | ✓ | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
 | `pane_split` | Add a pane inside the calling chat's tab, defaulting to a new chat on its right | ✓ | | |
@@ -475,6 +475,32 @@ is active there. A message from the owner's own client says there is no workspac
 **A child may write to the workspace that started it, and to one whose message has reached it.** It
 cannot open a conversation with a workspace that never spoke to it, and a child whose own row
 cannot be read is refused rather than let through.
+
+**"Tell me when you are done" is Bloom's job, not the other agent's.** Written into a message, it
+was forgotten often enough, and an agent that failed or sat on a permission prompt could not say
+so at all, which from the calling side looks exactly like one still working. So `workspace_say`
+and `workspace_start` take `notify_when_done`, and Bloom puts one fact in the calling chat when the
+turn that call caused comes to rest: finished, with the other agent's last message fenced and cut
+at 4,000 characters; failed, with the reason; stopped by the owner; blocked on a permission prompt
+or a question for the owner; or the workspace archived first. It is the same delivery
+`reportToOrchestrator` makes for a subagent, one workspace further out. The promise is a
+`workspace_done_watches` row, written in the same transaction as the message, so it survives a
+relaunch mid turn, and spent by an `UPDATE ... WHERE notified_at IS NULL`, so it is kept at most
+once. A message's watch waits until the message is delivered, so the turn it was queued behind does
+not count; a start's watches the new workspace's first chat. A message the owner deletes is told
+by the cancelled notice and nothing more, and a calling chat closed in the meantime is told
+nothing. The owner's own client has no chat to tell, so the flag is ignored there and the answer
+says so. The rules and every sentence are `WorkspaceDoneWatch` and `WorkspaceDoneNotice`; the app
+only reports turn endings.
+
+**Two agents answering each other is a loop, so it is braked.** Each message starts a turn, and an
+agent told to answer with `workspace_say` answers "thanks" too. From a workspace, a seventh message
+to the same workspace inside ten minutes is refused, and so is the same text, whitespace aside,
+sent to the same workspace inside that window. A real exchange is four messages over the minutes a
+turn takes; a loop sends one a turn and reaches six well inside the window. Counted from
+`workspace_messages`, so a relaunch does not reset it, with deleted messages left out. The refusal
+tells the model not to retry and to wait for the answer or tell the owner. The owner's own client
+is exempt, because a person is typing there. See `WorkspaceSayThrottle`.
 
 **One thing on the bridge can now be destroyed, and it is a few lines of the owner's own writing.**
 `quick_prompt_update` overwrites a prompt and `quick_prompt_delete` removes one, and Bloom keeps no

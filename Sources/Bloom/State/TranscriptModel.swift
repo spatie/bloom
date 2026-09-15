@@ -1615,6 +1615,9 @@ final class TranscriptModel {
         } else if !wasStoppedByHand { await drain() }
         if !isRunning {
             await reportToOrchestrator(CrewMessage.stopped(name: session.title, lastMessage: result.summary))
+            await app.noteWorkspaceTurnEnded(
+                WorkspaceTurnEnding.ofResult(result, stoppedByOwner: wasStoppedByHand), in: session
+            )
         }
     }
 
@@ -1760,6 +1763,7 @@ final class TranscriptModel {
             await reportToOrchestrator(
                 CrewMessage.failed(name: session.title, reason: failure.message)
             )
+            await app.noteWorkspaceTurnEnded(.failed(reason: failure.message), in: session)
             // An agent that died is an agent whose turn has ended, so a workspace it had asked to
             // archive is due now. `notifyFinished` is not on this path and never was: it is about
             // a result, and there is none. The recheck decides as it does everywhere else.
@@ -1824,6 +1828,11 @@ final class TranscriptModel {
                 await reportToOrchestrator(
                     CrewMessage.stopped(name: session.title, lastMessage: result.summary)
                 )
+                // The same moment, one workspace further out: a chat elsewhere that asked
+                // `workspace_say` or `workspace_start` to tell it when this came to rest.
+                await app.noteWorkspaceTurnEnded(
+                    WorkspaceTurnEnding.ofResult(result, stoppedByOwner: wasStoppedByHand), in: session
+                )
             }
 
         case .permissionAsk:
@@ -1836,6 +1845,12 @@ final class TranscriptModel {
             await refreshSession()
             if let workspaceNow {
                 NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
+            }
+            // A turn stuck on the owner looks, from another workspace, exactly like one still
+            // working. Not while replaying: an ask read back after a relaunch may have been
+            // answered long ago, and the watch is spent by whatever it says.
+            if !isReconcilingPresentation, !isReplayingPastTurn, let ask = pendingPermissionAsks.last {
+                await app.noteWorkspaceTurnEnded(WorkspaceTurnEnding.ofAsk(ask), in: session)
             }
 
         case .permissionDecided(let resolution):

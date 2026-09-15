@@ -103,6 +103,13 @@ public struct WorkspaceMessageID: Identifier {
     public init(_ rawValue: String) { self.rawValue = rawValue }
 }
 
+/// A chat's standing request to be told once when another workspace's turn comes to rest. See
+/// `WorkspaceDoneWatch`.
+public struct WorkspaceDoneWatchID: Identifier {
+    public let rawValue: String
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}
+
 /// A standing "yes" to a tool the agent asked about, remembered per project.
 public struct PermissionGrantID: Identifier {
     public let rawValue: String

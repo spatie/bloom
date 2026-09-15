@@ -462,4 +462,101 @@ struct WorkspaceSayToolTests {
         #expect(row.source.workspaceID == nil)
         #expect(row.crewMessage.sent.contains("nothing to answer it with workspace_say"))
     }
+
+    // MARK: - Ping-pong
+
+    @Test("a workspace is refused past the limit to the same workspace, and may still write to another")
+    func throttledPastTheLimit() async throws {
+        let f = try await fixture("say-throttle-limit")
+        let bystander = try await f.store.upsert(Workspace(
+            repoID: f.fixer.repoID, name: "docs", branch: "bloom/docs", path: TestScratch.unique("docs"), baseBranch: "main"
+        ))
+        var chats = f.chats
+        chats[bystander.id] = try await f.store.upsert(Session(workspaceID: bystander.id, title: "Docs"))
+        let window = Window(store: f.store, chats: chats)
+        let tool = window.tool()
+
+        for index in 0..<WorkspaceSayThrottle.limit {
+            let result = await say("Update \(index)", to: f.releaser, as: f.fixerIdentity, with: tool, store: f.store)
+            #expect(!result.isError, "\(result.text)")
+        }
+        let refused = await say("One more", to: f.releaser, as: f.fixerIdentity, with: tool, store: f.store)
+        let elsewhere = await say("One more", to: bystander, as: f.fixerIdentity, with: tool, store: f.store)
+
+        #expect(refused.isError)
+        #expect(refused.text.contains("Do not retry"))
+        #expect(!elsewhere.isError, "\(elsewhere.text)")
+        #expect(window.sent.count == WorkspaceSayThrottle.limit + 1)
+    }
+
+    @Test("the same words to the same workspace are refused, unless the first was cancelled")
+    func throttledRepeat() async throws {
+        let f = try await fixture("say-throttle-repeat")
+        let window = Window(store: f.store, chats: f.chats)
+        let tool = window.tool()
+
+        _ = await say("Thanks!", to: f.releaser, as: f.fixerIdentity, with: tool, store: f.store)
+        let again = await say(" Thanks! ", to: f.releaser, as: f.fixerIdentity, with: tool, store: f.store)
+        #expect(again.isError)
+        #expect(again.text.contains("already sent exactly that message"))
+
+        _ = try await f.store.cancelWorkspaceMessage(id: try #require(window.sent.first?.id))
+        let afterCancel = await say("Thanks!", to: f.releaser, as: f.fixerIdentity, with: tool, store: f.store)
+        #expect(!afterCancel.isError, "\(afterCancel.text)")
+    }
+
+    @Test("messages sent long ago do not count towards either rule")
+    func throttleWindowRolls() async throws {
+        let f = try await fixture("say-throttle-window")
+        let old = Date().addingTimeInterval(-WorkspaceSayThrottle.window - 60)
+        for _ in 0..<WorkspaceSayThrottle.limit {
+            _ = try await f.store.enqueueWorkspaceMessage(
+                WorkspaceMessage(
+                    source: WorkspaceMessageEnd(workspaceID: f.fixer.id, workspace: "fix-the-bug", sessionID: f.fixerChat.id),
+                    target: WorkspaceMessageEnd(workspaceID: f.releaser.id, workspace: "release"),
+                    text: "Release it.",
+                    createdAt: old
+                ),
+                into: f.releaserChat
+            )
+        }
+        let window = Window(store: f.store, chats: f.chats)
+
+        let result = await say("Release it.", to: f.releaser, as: f.fixerIdentity, with: window.tool(), store: f.store)
+
+        #expect(!result.isError, "\(result.text)")
+    }
+
+    @Test("the owner's own client is not braked")
+    func ownerIsNotThrottled() async throws {
+        let f = try await fixture("say-throttle-owner")
+        let window = Window(store: f.store, chats: f.chats)
+        let tool = window.tool()
+
+        for _ in 0...(WorkspaceSayThrottle.limit + 1) {
+            let result = await say("Status?", to: f.releaser, as: .owner, with: tool, store: f.store)
+            #expect(!result.isError, "\(result.text)")
+        }
+        #expect(window.sent.count == WorkspaceSayThrottle.limit + 2)
+    }
+
+    @Test("a workspace asking to be told gets a watch, and the answer says so")
+    func notifyWhenDoneIsRecorded() async throws {
+        let f = try await fixture("say-notify")
+        let window = Window(store: f.store, chats: f.chats)
+
+        let result = await window.tool().call(
+            MCPRequest(id: .number(1), method: "workspace_say", params: .object([
+                "workspace": .string(f.releaser.id.rawValue), "message": .string("Release it."),
+                "notify_when_done": .bool(true),
+            ])),
+            as: f.fixerIdentity, store: f.store
+        )
+
+        #expect(!result.isError, "\(result.text)")
+        #expect(JSONValue.parse(result.text)?["notify_when_done"]?.boolValue == true)
+        #expect(result.text.contains("Bloom will tell this chat once"))
+        let watch = try #require(try await f.store.unspentWorkspaceDoneWatches(targetWorkspaceID: f.releaser.id).first)
+        #expect(watch.watcherSessionID == f.fixerChat.id)
+    }
 }
