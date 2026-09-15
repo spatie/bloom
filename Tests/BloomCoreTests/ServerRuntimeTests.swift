@@ -336,6 +336,11 @@ struct ServerRuntimeTests {
             Issue.record("Missing workspace: \(String(describing: response.result))"); await runtime.shutdown(); return
         }
         defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+        // The create window's note says a typed name "names the workspace and its branch". With no
+        // agent the request carries no prompt, so the server has to read the name as the task and
+        // cut both from it, exactly as the local route does, rather than falling back to a default.
+        #expect(workspace.name == "Explore")
+        #expect(workspace.branch == "explore" || workspace.branch.hasSuffix("/explore"))
         #expect(session == nil)
         #expect(try await fixture.store.sessions(workspaceID: workspace.id).isEmpty)
         #expect(await fixture.runner.sends.isEmpty)
