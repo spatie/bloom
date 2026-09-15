@@ -27,7 +27,9 @@ the repository root.
 ## Before publishing
 
 1. The Server workflow is green on the commit being tagged. A green run on another commit is not
-   evidence.
+   evidence. Pull requests build debug, so also dispatch the release build on that commit's branch,
+   `gh workflow run server.yml --repo spatie/bloom --ref <branch> -f release_build=true`, and wait
+   for its `release-package` job. Dispatching is a CI run, not a release, but ask before doing it.
 2. Compare `version = ` in `Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift` with the
    previous release's tag. If the wire protocol changed, every installed supervisor will refuse the
    new package with `incompatible_release`. That is not a reason to stop the release, but

@@ -3,6 +3,11 @@ name: Server
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_build:
+        description: Also build and package the server in release configuration, as a release does
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -60,6 +65,52 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: bloom-server-linux-x86_64
+          path: |
+            .build/server-release/bloom-server-linux-x86_64.tar.gz
+            .build/server-release/bloom-server-linux-x86_64.tar.gz.sha256
+            .build/server-release/bloom-server-linux-x86_64.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Pull requests build debug, so without this the first release-mode Linux build with
+  # -warnings-as-errors would be the release itself, found out after the tag is published.
+  # Dispatch with release_build before tagging to ask that question on its own: the same build,
+  # packaging and description as the server-package job in release.yml, without the upload.
+  release-package:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_build
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf
+      - name: Build the server in release configuration
+        run: |
+          set -euo pipefail
+          swift build -c release --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+          swift build -c release --product bloom-bridge -j 4 -Xswiftc -warnings-as-errors
+      - name: Package and describe the server
+        env:
+          BLOOM_SERVER_VERSION: v0.0.0-release-check.${{ github.run_number }}
+          TAG: v0.0.0-release-check.${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          bin="$(swift build -c release --show-bin-path)"
+          out=.build/server-release
+          python3 Tools/package-linux-server.py "$bin/bloom-server" "$out/bloom-server-linux-x86_64.tar.gz"
+          python3 Tools/server-release-assets.py describe "$out/bloom-server-linux-x86_64.tar.gz" \
+            --tag "$TAG" --output-dir "$out"
+          (cd "$out" && sha256sum -c bloom-server-linux-x86_64.tar.gz.sha256)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bloom-server-linux-x86_64-release
           path: |
             .build/server-release/bloom-server-linux-x86_64.tar.gz
             .build/server-release/bloom-server-linux-x86_64.tar.gz.sha256

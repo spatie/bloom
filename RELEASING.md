@@ -165,6 +165,10 @@ The Server workflow runs the same packaging and `describe` on every pull request
 build and with a `v0.0.0-ci.<run>` tag, then checks and runs that package on Ubuntu 24.04 and 26.04
 without Swift installed. `Tools/test-server-release-assets.py` covers the checks themselves.
 
+Pull requests build debug, so before tagging, ask for the release build on its own:
+`gh workflow run server.yml --repo spatie/bloom --ref <branch> -f release_build=true`. Its
+`release-package` job runs the release job's build, packaging and description without uploading.
+
 ### How compatibility is decided
 
 The supervisor looks at `releases/latest` for `spatie/bloom`, which GitHub defines as the release

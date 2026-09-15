@@ -171,6 +171,10 @@ class WorkflowTests(unittest.TestCase):
     def test_pull_requests_describe_the_package_they_build(self):
         self.contains('server.yml', 'server-release-assets.py describe', assets.CHECKSUM)
 
+    def test_a_release_build_can_be_checked_before_tagging(self):
+        self.contains('server.yml', 'release_build', 'swift build -c release --product bloom-server',
+                      'swift build -c release --product bloom-bridge')
+
 
 if __name__ == '__main__':
     unittest.main()
