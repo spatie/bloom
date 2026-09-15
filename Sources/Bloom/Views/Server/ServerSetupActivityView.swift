@@ -20,24 +20,23 @@ struct ServerSetupActivityView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             if compact {
-                // A long failure must not push the live, selectable output below the window.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Metrics.gutter) {
-                        if let failure { ServerSetupFailureView(failure: failure) }
-                        // Down the left column and then down the right, because the stages run in
-                        // that order. A grid fills across, which ticked them off left, right, left.
-                        HStack(alignment: .top, spacing: Metrics.gutter) {
-                            ForEach(Array(stageColumns.enumerated()), id: \.offset) { _, column in
-                                VStack(alignment: .leading, spacing: Metrics.spacing) {
-                                    ForEach(column) { stage in stageRow(stage) }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+                // The failure and the stages take their natural height and the output pane gives
+                // way. They used to share a scroll view capped at 180 points, so a two line failure
+                // clipped the stages mid row while the output below sat half empty. The output's
+                // lines are also in Copy Output and in the failure's Copy Error, so it is the part
+                // that can afford to shrink.
+                if let failure { ServerSetupFailureView(failure: failure).fixedSize(horizontal: false, vertical: true) }
+                // Down the left column and then down the right, because the stages run in that
+                // order. A grid fills across, which ticked them off left, right, left.
+                HStack(alignment: .top, spacing: Metrics.gutter) {
+                    ForEach(Array(stageColumns.enumerated()), id: \.offset) { _, column in
+                        VStack(alignment: .leading, spacing: Metrics.spacing) {
+                            ForEach(column) { stage in stageRow(stage) }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .scrollBounceBehavior(.basedOnSize)
-                .frame(maxHeight: failure == nil ? CGFloat((visibleStages.count + 1) / 2) * 30 : 180)
+                .fixedSize(horizontal: false, vertical: true)
                 output
             } else {
                 if let failure { ServerSetupFailureView(failure: failure) }
@@ -83,7 +82,7 @@ struct ServerSetupActivityView: View {
                 .buttonStyle(.bordered).controlSize(.small).help("Copy server output").accessibilityLabel("Copy server output")
             }
             ServerSetupOutputView(lines: activity.lines)
-                .frame(minHeight: compact ? 180 : 240, maxHeight: .infinity)
+                .frame(minHeight: compact ? 120 : 240, maxHeight: .infinity)
             if failure == nil {
                 Text(activity.currentMessage)
                     .font(Typo.caption).foregroundStyle(.secondary)
@@ -112,27 +111,37 @@ struct ServerSetupFailureView: View {
             failure.exitStatus.map { "Exit status: \($0)" }, failure.details].compactMap { $0 }.joined(separator: "\n\n"))
     }
 
+    /// "ssh · exit 1" on one line. The exit status used to sit in a column of its own beside the
+    /// title and wrapped to "Exit" over "1" whenever the message ran to two lines.
+    private var commandLine: String? {
+        let parts = [failure.command, failure.exitStatus.map { "exit \($0)" }].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacing) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(failure.message, systemImage: "exclamationmark.triangle.fill")
-                    .font(Typo.labelEmphasis).foregroundStyle(Palette.warning)
-                    .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
-                Spacer(minLength: 0)
-                if let status = failure.exitStatus {
-                    Text("Exit \(status)").font(Typo.codeSmall).foregroundStyle(.secondary)
-                }
-            }
-            if let command = failure.command {
-                Text(command).font(Typo.codeSmall).foregroundStyle(.secondary).lineLimit(2).help(command)
-            }
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+            // Three lines at most: the whole message is in Copy Error and in the server output, and
+            // a box that grows with it pushes everything below off the page.
+            Label(failure.message, systemImage: "exclamationmark.triangle.fill")
+                .font(Typo.labelEmphasis).foregroundStyle(Palette.warning)
+                .lineLimit(3).help(failure.message)
+                .fixedSize(horizontal: false, vertical: true)
             Text(failure.recovery).font(Typo.caption).foregroundStyle(.secondary)
-            Button(copiedError ? "Copied" : "Copy Error") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(diagnostic, forType: .string)
-                copiedError = true
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
+                if let commandLine {
+                    Text(commandLine).font(Typo.codeSmall).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(commandLine)
+                }
+                Spacer(minLength: 0)
+                Button(copiedError ? "Copied" : "Copy Error") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(diagnostic, forType: .string)
+                    copiedError = true
+                }
+                .controlSize(.small).fixedSize()
             }
-            .controlSize(.small)
+            .padding(.top, 2)
         }
         .textSelection(.enabled)
         .padding(Metrics.gutter)

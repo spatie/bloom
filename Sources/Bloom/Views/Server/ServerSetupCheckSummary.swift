@@ -9,8 +9,21 @@ struct ServerSetupCheckSummary: View {
     /// What a check with no blockers is called. The Installation page, which the wizard moves to
     /// on its own after a clean check, says the connection worked rather than what comes next.
     var readyTitle = "Ready for setup"
+    /// Off on the Installation page, where a clean result is one line of status above the plan and
+    /// the padded box cost the height the optional extras needed.
+    var boxed = true
 
     var body: some View {
+        if boxed {
+            content
+                .padding(Metrics.gutter)
+                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         HStack(alignment: .top, spacing: Metrics.spacingWide) {
             Image(systemName: check.blockers.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle")
                 .foregroundStyle(check.blockers.isEmpty ? Palette.controlAccent : Palette.warning)
@@ -35,8 +48,6 @@ struct ServerSetupCheckSummary: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(Metrics.gutter)
-        .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
     }
 
     private var status: some View {

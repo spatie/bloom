@@ -1,8 +1,9 @@
 import SwiftUI
 import BloomCore
 
-/// What installation adds and where, as a list to scan before choosing Install. Paths used to
-/// live only in help popovers; the everyday ones are in the rows now and the full set is one click away.
+/// What installation adds, as a list to scan before choosing Install. The rows say what each part
+/// is for in a line; every path and the finer print are in the help popover beside the heading,
+/// because with paths and a footnote in the list the optional extras fell below the window.
 struct ServerSetupInstallPlan: View {
     var installationRoot: String?
     var serviceHome: String?
@@ -23,12 +24,9 @@ struct ServerSetupInstallPlan: View {
             }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: Metrics.gutter * 1.5, alignment: .topLeading),
                                 GridItem(.flexible(), alignment: .topLeading)],
-                      alignment: .leading, spacing: Metrics.gutter * 1.5) {
-                ForEach(summary.rows) { row in ServerSummaryRow(row: row) }
+                      alignment: .leading, spacing: Metrics.gutter) {
+                ForEach(summary.rows) { row in ServerSummaryRow(row: row, showsLocation: false) }
             }
-            Text("This Mac’s private key never leaves this Mac. Existing projects, conversations and sign-ins are kept.")
-                .font(Typo.label).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

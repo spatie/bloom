@@ -231,20 +231,25 @@ struct ServerSetupView: View {
     private var installationSummary: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
             // The Server page moves on by itself once every check passes, so what the check found
-            // is said here instead of on the page that was left behind.
+            // is said here instead of on the page that was left behind. One unboxed line rather
+            // than a padded box: with the box, the optional extras fell below the window.
             if let check = model.check {
-                ServerSetupCheckSummary(check: check, showAdvanced: showAdvanced, readyTitle: "Connected to your server")
+                ServerSetupCheckSummary(check: check, showAdvanced: showAdvanced, readyTitle: "Connected to your server", boxed: false)
             }
             ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome,
                                    dataDirectory: model.check?.dataDirectory, serviceUser: model.check?.serviceUser,
                                    alreadyInstalled: model.hasInstalledServer)
             if !model.hasInstalledServer {
                 Divider()
-                Text("Optional extras").font(Typo.bodyEmphasis)
                 VStack(alignment: .leading, spacing: Metrics.gutter) {
-                    optionalPart(.docker, isOn: $model.installsDocker)
-                    optionalPart(.browser, isOn: $model.installsBrowserTools)
-                    swapOption
+                    Text("Optional extras").font(Typo.bodyEmphasis)
+                    // Side by side, because stacked with a line of summary each they took the height
+                    // of the whole install plan again.
+                    HStack(alignment: .top, spacing: Metrics.gutter * 1.5) {
+                        optionalPart(.docker, isOn: $model.installsDocker)
+                        optionalPart(.browser, isOn: $model.installsBrowserTools)
+                        swapOption.frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
                 }
             }
             if model.hasInstalledServer {
@@ -256,33 +261,47 @@ struct ServerSetupView: View {
 
     private func optionalPart(_ part: ServerInstallationSummary.OptionalPart, isOn: Binding<Bool>) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            HStack(spacing: Metrics.spacing) {
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                 Toggle(part.title, isOn: isOn).disabled(model.hasInstalledServer)
+                    .fixedSize(horizontal: false, vertical: true)
                 ServerSetupHelpButton(title: part.title,
                                       details: part.details(serviceUser: model.check?.serviceUser ?? "bloom", serviceHome: model.check?.serviceHome))
             }
-            Text(part.summary).font(Typo.label).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            optionalSummary(part.summary)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Indented to the toggle's title rather than its checkbox, so each column reads as one choice.
+    private func optionalSummary(_ text: String) -> some View {
+        Text(text).font(Typo.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 20)
     }
 
     @ViewBuilder private var swapOption: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacing) {
-            if model.check?.shouldOfferSwapInstall == true {
-                optionalPart(.swap, isOn: $model.installsSwap)
-            } else if let bytes = model.check?.activeSwapBytes, bytes > 0 {
-                Label("Swap is already active", systemImage: "checkmark.circle")
-                    .font(Typo.label).foregroundStyle(Palette.controlAccent)
-                Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .memory) + " of swap. Existing swap will be kept.")
-                    .font(Typo.caption).foregroundStyle(.secondary)
-            } else if model.check?.configuredSwap == true {
-                Label("Existing swap configuration", systemImage: "internaldrive")
-                    .font(Typo.label)
-                Text("Swap is configured but not active. Bloom will keep your settings and will not add another swap file.")
-                    .font(Typo.caption).foregroundStyle(.secondary)
-            } else {
-                Text("Swap could not be checked. Setup will leave it unchanged.")
-                    .font(Typo.caption).foregroundStyle(.secondary)
+        if model.check?.shouldOfferSwapInstall == true {
+            optionalPart(.swap, isOn: $model.installsSwap)
+        } else {
+            // The first line is held to the toggle rows' height, which the help button sets, so the
+            // three columns start on one line whichever swap state this is.
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                if let bytes = model.check?.activeSwapBytes, bytes > 0 {
+                    Label("Swap is already active", systemImage: "checkmark.circle")
+                        .font(Typo.label).foregroundStyle(Palette.controlAccent).frame(minHeight: 24)
+                    Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .memory) + " of swap. Existing swap will be kept.")
+                        .font(Typo.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else if model.check?.configuredSwap == true {
+                    Label("Existing swap configuration", systemImage: "internaldrive")
+                        .font(Typo.label).frame(minHeight: 24)
+                    Text("Swap is configured but not active. Bloom keeps your settings and adds no swap file.")
+                        .font(Typo.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Label("Swap unchanged", systemImage: "internaldrive")
+                        .font(Typo.label).frame(minHeight: 24)
+                    Text("Swap could not be checked, so setup leaves it as it is.")
+                        .font(Typo.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

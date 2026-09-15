@@ -338,6 +338,23 @@ final class ServerSetupModel {
         phase = .readyToInstall
     }
 
+    #if DEBUG
+    /// Puts the wizard on "Setup stopped" for `ServerSetupLayoutProbe`, with the same activity
+    /// lines `perform` writes for a failure. A real installation reaches that page only through a
+    /// server package, a new client key and the Keychain, and a check of where things sit on a
+    /// page has no business touching any of the three.
+    func showFailureForLayoutProbe(_ failure: ServerSetupFailure, events: [ServerInstallEvent]) {
+        phase = .installing
+        activity.begin(browser: installsBrowserTools, docker: installsDocker, swap: willInstallSwap)
+        events.forEach { receive($0) }
+        self.failure = failure
+        activity.fail(message: failure.message)
+        record(failure.message)
+        if let command = failure.command { activity.append("Command: " + command) }
+        if let status = failure.exitStatus { activity.append("Exit status: \(status)") }
+    }
+    #endif
+
     func install(restartingExistingServer: Bool = false) async {
         guard phase == .readyToInstall, let connection, inputsUnchanged,
               restartingExistingServer ? canMaintainExistingServer : check?.blockers.isEmpty == true else { return }

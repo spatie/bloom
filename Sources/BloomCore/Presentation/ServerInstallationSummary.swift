@@ -20,7 +20,8 @@ public struct ServerInstallationSummary: Sendable, Equatable {
 
         public var title: String {
             switch self {
-            case .docker: "Docker for container projects"
+            // Short enough for one line in a third of the setup page, where the three sit side by side.
+            case .docker: "Docker for containers"
             case .browser: "Browser testing tools"
             case .swap: "Add 2 GB of swap"
             }
@@ -29,9 +30,9 @@ public struct ServerInstallationSummary: Sendable, Equatable {
         /// What it is for, then what it costs, because a toggle that is on by default should say both.
         public var summary: String {
             switch self {
-            case .docker: "Runs each project’s app and databases in containers. Uses a few hundred megabytes, plus space for images."
-            case .browser: "Lets agents open and test websites in a sandboxed Chrome. Uses a few hundred megabytes."
-            case .swap: "Keeps the server responsive when memory runs short. Uses 2 GB of disk space."
+            case .docker: "Runs apps and databases in containers. A few hundred megabytes, plus images."
+            case .browser: "Lets agents test websites in a sandboxed Chrome. A few hundred megabytes."
+            case .swap: "Keeps the server responsive when memory runs short. Uses 2 GB of disk."
             }
         }
 
@@ -85,49 +86,57 @@ public struct ServerInstallationSummary: Sendable, Equatable {
 
     // MARK: What gets installed
 
+    // One short sentence each. The setup page has to show these, the optional extras and the Install
+    // button in one window without scrolling, and three line details pushed the extras below the
+    // fold. What the details used to add (package sources, keys, where sign-ins live) is in
+    // `locationDetails`, one click away.
+
     public var software: Row {
         Row(symbol: "hammer", title: "Development tools",
-            detail: "Git, GitHub CLI, tmux, Node.js and npm, from Ubuntu’s packages. Tools already on the server are reused.",
+            detail: "Git, GitHub CLI, tmux, Node.js and npm. Tools already there are reused.",
             location: nil)
     }
 
     public var account: Row {
         Row(symbol: "person.crop.circle", title: "A separate \(serviceUser) account",
-            detail: "Runs Bloom Server, your agents and your projects. It has no administrator rights, and this Mac signs in to it with its own key.",
+            detail: "Runs Bloom Server, your agents and projects, without administrator rights.",
             location: serviceHome)
     }
 
     public var data: Row {
         Row(symbol: "folder", title: "Your projects and data",
-            detail: "Repositories, workspaces, conversations and the server database. Sign-ins stay in the account’s own settings folders.",
+            detail: "Repositories, workspaces, conversations and the server database.",
             location: serviceHome + "/bloom")
     }
 
     public var services: [Row] {
         [
             Row(symbol: "server.rack", title: "Bloom Server",
-                detail: "Starts with the server, so agents keep working while this Mac sleeps or is offline.",
+                detail: "Starts with the server, so agents keep working while this Mac sleeps.",
                 location: nil),
             Row(symbol: "wrench.and.screwdriver", title: "Maintenance service",
-                detail: "Runs with administrator rights to install updates and recover from a failed one. It doesn’t run your projects.",
+                detail: "Installs and recovers updates as administrator. It doesn’t run projects.",
                 location: "/var/lib/bloom-maintenance"),
         ]
     }
 
     public var rows: [Row] { [software, account, data] + services }
 
-    /// Every path, for the one reader who wants them all, kept out of the list itself.
+    /// Every path, for the one reader who wants them all, kept out of the list itself. The rows no
+    /// longer carry paths or the finer print, so everything they dropped has to be here.
     public var locationDetails: String {
-        "Bloom Server program: " + installationRoot
+        "Account home: " + serviceHome
+            + "\nProjects and data: " + serviceHome + "/bloom"
+            + "\nBloom Server program: " + installationRoot
             + "\nServer database: " + dataDirectory
             + "\nWorkspaces: " + serviceHome + "/bloom/workspaces.noindex"
-            + "\nAccount home: " + serviceHome
             + "\n\nMaintenance programs: /usr/local/libexec"
             + "\nMaintenance settings, update history and saved releases: /var/lib/bloom-maintenance/bloom-server"
             + "\n\nStartup service: /etc/systemd/system/bloom-server.service"
             + "\nOptional browser tools: /opt/bloom-browser"
             + "\nOptional swap file: /var/lib/bloom/swapfile"
-            + "\n\nCodex and Claude Code are installed in the account when you sign in to them. PHP and databases are set up per project, often with Docker."
+            + "\n\nDevelopment tools come from Ubuntu’s packages. Codex and Claude Code are installed in the account when you sign in to them, and their sign-ins stay in the account’s own settings folders. PHP and databases are set up per project, often with Docker."
+            + "\n\nThis Mac signs in to the \(serviceUser) account with its own key, and that private key never leaves this Mac. Existing projects, conversations and sign-ins are kept."
     }
 
     // MARK: Limits
