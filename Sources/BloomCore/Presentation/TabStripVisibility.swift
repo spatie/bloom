@@ -2,28 +2,24 @@ import Foundation
 
 /// Whether the centre column draws its tab strip.
 ///
-/// **Safari's rule, with one exception for a split.** A window with one tab shows no tab bar,
-/// because a lone tab repeats the title already above it and costs a row of height to say so. The
-/// strip used to stay up regardless, and the only reason was the `+` at its end: a control nobody
-/// can reach is not a control. The `+` lives in the title bar now, so that reason is gone.
+/// **Safari's rule.** A window with one tab shows no tab bar, because a lone tab repeats the title
+/// already above it and costs a row of height to say so. The strip used to stay up regardless, and
+/// the only reason was the `+` at its end: a control nobody can reach is not a control. The `+`
+/// lives in the title bar now, so that reason is gone.
 ///
-/// **A split keeps the strip up, even on a single tab.** The strip is one row for the whole
-/// workspace rather than one per pane, and a tab that has been split is an arrangement: its entry
-/// is what names it, renames it, closes it and is dragged to rearrange it, and a tab dropped onto a
-/// pane comes from here. Hiding that the moment the second tab was absorbed into a pane would take
-/// the arrangement's only handle away at exactly the point it became something worth handling. So
-/// the strip goes only when there is one tab showing one pane, which is the case where it says
-/// nothing the title bar does not.
+/// **A split does not change that.** It used to: a single tab split into panes kept the strip, on
+/// the argument that its entry was the arrangement's handle. What the owner saw was a strip holding
+/// one tab named "Chat" above a chat and a browser side by side, which is the lone tab Safari's
+/// rule exists to hide, and the panes already carry their own close and split menus.
 ///
-/// **A rename in progress keeps it up too.** Rename Tab in the File menu opens its field on the
-/// strip, and a field on a row that is not drawn is a menu item that does nothing.
+/// **A rename in progress keeps it up.** Rename Tab in the File menu opens its field on the strip,
+/// and a field on a row that is not drawn is a menu item that does nothing.
 public enum TabStripVisibility {
     /// - Parameters:
     ///   - tabCount: the entries the strip would draw.
-    ///   - paneCount: how many panes the selected tab is split into, one for a tab nobody split.
     ///   - isRenaming: whether a tab's name field is open.
-    public static func isShown(tabCount: Int, paneCount: Int, isRenaming: Bool = false) -> Bool {
+    public static func isShown(tabCount: Int, isRenaming: Bool = false) -> Bool {
         if isRenaming { return tabCount > 0 }
-        return tabCount > 1 || (tabCount == 1 && paneCount > 1)
+        return tabCount > 1
     }
 }

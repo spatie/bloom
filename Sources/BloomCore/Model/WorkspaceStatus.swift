@@ -115,7 +115,9 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
             case .failing: return .checksFailing
             case .pending: return .checksRunning
             case .passing: return .checksPassed
-            case .none: return .pullRequestOpen
+            // Open and nothing more, rather than a guess about checks nobody could read. The
+            // detail line carries "Checks unavailable".
+            case .none, .unavailable: return .pullRequestOpen
             }
         }
 

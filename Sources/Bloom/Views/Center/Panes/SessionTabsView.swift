@@ -9,9 +9,9 @@ import BloomCore
 /// is always one click along the same row.
 ///
 /// Whether the strip is drawn at all is `CenterColumnView`'s to decide, by `TabStripVisibility`:
-/// a workspace with one tab showing one pane has no strip, the way a Safari window with one tab
-/// has no tab bar. The `+` that used to end this row is `NewTabMenu`, in the title bar, which is
-/// what lets the row go.
+/// a workspace with one tab has no strip, however that tab is split, the way a Safari window with
+/// one tab has no tab bar. The `+` that used to end this row is `NewTabMenu`, in the title bar,
+/// which is what lets the row go.
 struct SessionTabsView<Model: WorkspacePaneModel>: View {
     @Bindable var model: Model
     /// The tab whose name field is open. Owned by the column rather than by this view, because

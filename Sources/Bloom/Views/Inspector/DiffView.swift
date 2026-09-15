@@ -678,6 +678,10 @@ struct DiffView<Model: WorkspacePaneModel>: View {
     /// already thrash it by being scrolled.
     private static var primeLimit: Int { 600 }
 
+    /// Vertically centred on a row, horizontally at the start of the sheet. See the anchors on
+    /// `standaloneDiff` for why it is not `.center`.
+    private static var leadingCentre: UnitPoint { UnitPoint(x: 0, y: 0.5) }
+
     /// Highlight the top of the diff off the main thread, so the rows a reader actually reaches
     /// are a lookup rather than a lex.
     ///
@@ -896,21 +900,26 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                         if let line = rows.first(where: { $0.id == id })?.sourceLines.compactMap(\.newNumber).first {
                             state.diffLine = line
                         }
-                    }), anchor: .top)
+                    }), anchor: .topLeading)
+                    // Every anchor here is leading, never `.top` or `.center`. Both of those are
+                    // x = 0.5, and on a scroller with two axes that scrolls sideways as well: restoring
+                    // the row put the middle of the sheet in view, which in the split layout of a file
+                    // with long lines is the hairline with the new side's code off to the right, or
+                    // blank padding with no code at all.
                     .defaultScrollAnchor(.topLeading)
                     .scrollBounceBehavior(.basedOnSize)
                     .onChange(of: SourceEditorState.file(absolutePath).diffRevision, initial: true) { _, _ in
-                        if let row = rows.first(where: isDiffDestination) { reader.scrollTo(row.id, anchor: .center) }
+                        if let row = rows.first(where: isDiffDestination) { reader.scrollTo(row.id, anchor: Self.leadingCentre) }
                     }
                     .onChange(of: rowRevision) { _, _ in
-                        if pendingDiffNavigation, let row = rows.first(where: isDiffDestination) { reader.scrollTo(row.id, anchor: .center) }
+                        if pendingDiffNavigation, let row = rows.first(where: isDiffDestination) { reader.scrollTo(row.id, anchor: Self.leadingCentre) }
                     }
                     .onScrollPhaseChange { _, phase in
                         if phase == .tracking || phase == .interacting || phase == .decelerating { pendingDiffNavigation = false }
                     }
                     .onChange(of: findRevision) { _, _ in
                         if let match = selectedFind, let row = rows.first(where: { $0.sourceLines.contains { $0.index == match.index } }) {
-                            reader.scrollTo(row.id, anchor: .center)
+                            reader.scrollTo(row.id, anchor: Self.leadingCentre)
                         }
                     }
                 }

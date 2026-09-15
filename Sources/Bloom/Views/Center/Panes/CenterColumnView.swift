@@ -30,13 +30,10 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
 
     private var store: WorkspaceTabsStore { .shared }
 
-    /// Whether the strip is drawn, which is Safari's rule plus a split. The reasoning, and the
-    /// exception for a single tab split into panes, is `TabStripVisibility`'s.
-    private func isStripShown(entries: [PaneContent], selected: PaneContent?) -> Bool {
-        let paneCount = selected.map { store.layout(of: $0).paneCount } ?? 1
-        return TabStripVisibility.isShown(
-            tabCount: entries.count, paneCount: paneCount, isRenaming: renamingID != nil
-        )
+    /// Whether the strip is drawn, which is Safari's rule. The reasoning, including why a split
+    /// tab no longer keeps the strip up, is `TabStripVisibility`'s.
+    private func isStripShown(entries: [PaneContent]) -> Bool {
+        TabStripVisibility.isShown(tabCount: entries.count, isRenaming: renamingID != nil)
     }
 
     var body: some View {
@@ -45,7 +42,7 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
         let space = Self.space
         let entries = store.entries(in: model)
         let selected = store.selectedTab(in: model, entries: entries)
-        let isStripShown = isStripShown(entries: entries, selected: selected)
+        let isStripShown = isStripShown(entries: entries)
         // One answer for the column's top edge and for every tab. See `BusySignalPlacement`.
         let busy = store.busySignal(
             in: model, entries: entries, selected: selected, isStripShown: isStripShown

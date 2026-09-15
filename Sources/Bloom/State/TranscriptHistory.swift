@@ -6,16 +6,19 @@ import BloomCore
 @Observable
 final class TranscriptHistory {
     var checkpoints: [TurnCheckpoint] = []
-    var failure: String?
     private(set) var isCapturing = false
     var isFinalisingTurn = false
     var hasActiveTurn: Bool { active != nil }
     @ObservationIgnored private var active: TurnCheckpoint?
+    /// Where a failure is said. A toast rather than a strip above the composer: the strip sat
+    /// under "Running Bash" while the turn carried on, and read as part of the work in progress
+    /// rather than as a note that this turn's file list would be missing.
+    @ObservationIgnored var report: (String) -> Void = { _ in }
 
     func load(store: Store, sessionID: SessionID) async {
         do {
             checkpoints = try await store.turnCheckpoints(sessionID: sessionID)
-        } catch { failure = "Could not load turn history: \(error.localizedDescription)" }
+        } catch { report("Could not load this conversation's turn history. \(error.readableMessage)") }
     }
 
     func begin(delivery: Delivery, store: Store, cwd: String) async {
@@ -28,8 +31,7 @@ final class TranscriptHistory {
             active = try await TurnCheckpointStore(store: store).begin(
                 sessionID: delivery.targetSessionID, cwd: cwd, startSeq: seq
             )
-            failure = nil
-        } catch { failure = "Could not capture this turn's starting state: \(error)" }
+        } catch { report("This turn's file changes will not be listed. \(error.readableMessage)") }
     }
 
     func finish(store: Store, cwd: String, endSeq: Int, captureFiles: Bool = true) async {
@@ -43,14 +45,14 @@ final class TranscriptHistory {
                 closed.endSeq = max(endSeq, checkpoint.startSeq)
                 try await store.saveTurnCheckpoint(closed)
                 merge(try await store.turnCheckpoints(sessionID: checkpoint.sessionID))
-                failure = "This turn's final file snapshot is unavailable because another turn had already started."
+                report("This turn's file changes will not be listed. Another turn had already started before it finished.")
                 return
             }
             _ = try await TurnCheckpointStore(store: store).finish(
                 id: checkpoint.id, sessionID: checkpoint.sessionID, cwd: cwd, endSeq: max(endSeq, checkpoint.startSeq)
             )
             merge(try await store.turnCheckpoints(sessionID: checkpoint.sessionID))
-        } catch { failure = "Could not capture this turn's final state: \(error)" }
+        } catch { report("This turn's file changes will not be listed. \(error.readableMessage)") }
     }
 
     private func merge(_ records: [TurnCheckpoint]) {
