@@ -39,8 +39,6 @@ struct ServerSetupSteps: View {
                 .accessibilityValue(step == current ? "Current step" : step.rawValue < current.rawValue ? "Complete" : "Not started")
             }
             Spacer()
-            Text("Step \(current.rawValue + 1) of \(Step.allCases.count)")
-                .font(Typo.caption).foregroundStyle(.secondary)
         }
         .padding(Metrics.gutter)
         .frame(width: 170, alignment: .leading)
