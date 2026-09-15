@@ -1,9 +1,13 @@
 #!/bin/bash
 # Build without launching Simulator or touching an installed Bloom application.
 set -euo pipefail
+# Checked as its own input, as every script is, so the source is not followed.
+# shellcheck source=/dev/null
 source "$(dirname "$0")/prepare-ios.sh"
 bloom_ios_begin
 bloom_ios_prepare
+project_dir="$(bloom_ios_path project)"
+build_dir="$(bloom_ios_path build)"
 # prepare-ios.sh verifies the sole reviewed build plugin before this invocation-only bypass.
 xcodebuild -skipPackagePluginValidation -project "$project_dir/Bloom.xcodeproj" -scheme Bloom \
     -configuration Debug -destination 'generic/platform=iOS Simulator' \
