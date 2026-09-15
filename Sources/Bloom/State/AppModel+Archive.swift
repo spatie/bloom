@@ -436,6 +436,9 @@ extension AppModel {
             forgetWorkspace(workspace.id)
             // One more workspace is archived now, so anything holding the old answer is wrong.
             invalidateArchived()
+            // A chat in another workspace that asked to hear when this one finished will not hear
+            // it any other way now. See `WorkspaceDoneWatch`.
+            await noteWorkspaceArchivedForWatchers(workspace.id)
             await offerUndo(of: workspace, repo: repo, report: report)
             if let path = report?.preservedFolderPath {
                 notice = BloomNotice(

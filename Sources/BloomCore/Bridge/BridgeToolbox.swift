@@ -51,6 +51,9 @@ public struct BridgeToolbox: Sendable {
         WorkspaceListTool(),
         ChatListTool(),
         ChatReadTool(),
+        // A worktree read through git and nothing else, so no seam: the review pane's own
+        // functions, called from here. See `WorkspaceDiffTool`.
+        WorkspaceDiffTool(),
         // A name is one column of one row, so this needs no seam into the window either: the
         // sidebar hears about it through the store's update hook, the way it hears about a rename
         // typed into the row itself. See `WorkspaceRenameTool`.

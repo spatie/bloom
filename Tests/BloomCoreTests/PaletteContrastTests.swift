@@ -131,6 +131,35 @@ struct PaletteContrastTests {
         }
     }
 
+    /// A message from another workspace is the reverse of the owner's bubble: a light fill with dark
+    /// ink rather than a dark fill with white, so its ink is a pair of its own and is checked here
+    /// rather than in the white-on-fill table above.
+    ///
+    /// The second half is the report the colour was changed for. A filled periwinkle beside the
+    /// owner's teal read as a second blue, so the fill is held as far from `accentFill` as the two
+    /// meaning colours this app most deliberately draws apart are from each other.
+    @Test("a message from another workspace is readable, and is not the owner's bubble in another blue")
+    func workspaceMessagesAreTheirOwnBubble() {
+        for (appearance, isDark) in Self.appearances {
+            let fill = PaletteInk.workspaceMessageFill.member(dark: isDark)
+            let ratio = Contrast.ratio(PaletteInk.workspaceMessageInk.member(dark: isDark), fill)
+            #expect(
+                ratio >= Contrast.textFloor,
+                "ink on workspaceMessageFill, \(appearance): \(ratio.rounded(to: 2)) to 1"
+            )
+
+            let owner = PaletteInk.accentFill.member(dark: isDark)
+            let bar = Contrast.deltaE(
+                PaletteInk.warning.member(dark: isDark), PaletteInk.negative.member(dark: isDark)
+            )
+            let apart = Contrast.deltaE(fill, owner)
+            #expect(
+                apart >= bar,
+                "workspaceMessageFill against accentFill, \(appearance): \(apart.rounded(to: 1)) against \(bar.rounded(to: 1))"
+            )
+        }
+    }
+
     /// The accent stopped being only Bloom's business the day `NSAccentColorName` went into the
     /// bundle, and this is the floor that came with it.
     ///

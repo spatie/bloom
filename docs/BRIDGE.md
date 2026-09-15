@@ -103,7 +103,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Thirty-nine, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Forty, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
@@ -115,11 +115,11 @@ places: the listing, the dispatch and the gate.
 | `project_hide` | Take a project out of the sidebar. A view preference and nothing more | | | ✓ |
 | `project_unhide` | Put it back, in the place it already had | | | ✓ |
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
-| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request | ✓ | | ✓ |
+| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request. With `notify_when_done`, Bloom tells the calling chat once when the new agent's first turn finishes, fails or blocks on the owner | ✓ | | ✓ |
 | `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
 | `workspace_archive` | Archive a workspace through normal safety checks, keeping its branch and history. Its own, and only when the turn asking for it has ended, for a workspace agent; any of them, named out loud and at once, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
-| `workspace_say` | Put a message in another workspace's chat, with the owner's authority, headed with the workspace, project and chat it came from. Cancellable from either end while queued. A child may write only to the workspace that started it or to one that wrote to it first | ✓ | ✓ | ✓ |
+| `workspace_say` | Put a message in another workspace's chat, with the owner's authority, headed with the workspace, project and chat it came from. The owner can delete it from the receiving chat while it is queued. With `notify_when_done`, Bloom tells the calling chat once when the turn it caused finishes, fails or blocks on the owner. Refused past six messages to one workspace in ten minutes, or for the same words twice in that window, except from the owner's own client. A child may write only to the workspace that started it or to one whose message has reached it | ✓ | ✓ | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
 | `pane_split` | Add a pane inside the calling chat's tab, defaulting to a new chat on its right | ✓ | | |
@@ -127,8 +127,9 @@ places: the listing, the dispatch and the gate.
 | `pane_rename` | Give a tab a name the reader can find it by | ✓ | | |
 | `pane_list` | What the workspace has open: each pane's kind, its name, whether it is in the tab in front, and for a browser its number and its address | ✓ | | |
 | `workspace_tabs` | The same window read as a strip: every tab in order, what it is called, which one is in front, and one true thing about what is in it | ✓ | | |
-| `chat_list` | Unarchived chats in the caller's workspace, including subagents, with IDs, titles, states and message counts | ✓ | | |
-| `chat_read` | Read one of those chats by ID or exact title, with bounded pages of stored transcript content | ✓ | | |
+| `chat_list` | Unarchived chats in a workspace, including subagents, with IDs, titles, states and message counts. The caller's own by default; another, named out loud, for a parent; always named, for the owner | ✓ | | ✓ |
+| `chat_read` | Read one of those chats by ID or exact title, with bounded pages of stored transcript content, marked as quoted history | ✓ | | ✓ |
+| `workspace_diff` | What a workspace has changed since its branch left its base, committed or not: branch, base, each file with lines added and removed, and the unified diff in bounded pages. Same defaults as `chat_list` | ✓ | | ✓ |
 | `workspace_tab_select` | Make one of those tabs the one in front, by its number or by its name. It cannot make one | ✓ | | |
 | `browser_read` | One browser's toolbar: address, page title, load state, whether Back and Forward would do anything | ✓ | | |
 | `browser_reload` | Fetch that page again | ✓ | | |
@@ -188,10 +189,40 @@ before placement, so a changed target cannot produce a false success or split un
 
 ### Reading another chat
 
-`chat_list` discovers the unarchived sessions in the caller's workspace, including crew members.
-`chat_read` accepts an ID from that list or an exact title. Shared titles are refused until the
-caller names an ID. Both tools use the workspace from the authenticated identity, so neither can
-be pointed at another workspace. The owner role has no implicit workspace and does not see them.
+`chat_list` discovers the unarchived sessions in a workspace, including crew members. `chat_read`
+accepts an ID from that list or an exact title. Shared titles are refused until the caller names
+an ID.
+
+**They began scoped to the caller's own workspace, and reading another is now allowed.** The scope
+came from the pane tools' gate, which is there because those tools act on the window the caller is
+standing in. A read acts on nothing. What the scope cost was an agent asked "what did the other
+workspace decide" with no way to find out except to be handed a worktree path and run git or
+`sqlite3` there through `Bash`, which is further out than this and passes through no gate of
+Bloom's at all. Every agent here works for the same owner, and `workspace_say` already lets a
+parent put a turn in another workspace's chat, which weighs far more than reading one.
+
+So both take an optional `workspace`, resolved by `BridgeReadTarget` over `BridgeWorkspaceLookup`,
+the same resolution `workspace_say` makes: an id `workspace_list` or `workspace_start` reports, or a
+name no other active workspace shares. An ambiguous name is refused with the ids that answer to it,
+an archived workspace is refused as archived rather than as unknown, and an unknown name lists the
+active ones. Left out, a parent reads its own workspace exactly as before. The owner's client sits
+in no workspace, so it may call both now and must name one. A child reads nothing, and the handler
+refuses it as well as the gate. `WorkspaceSayTool` still has its own copy of the lookup, because it
+answers in `workspace_say`'s sentences and was being changed elsewhere; the two are the place to
+fold together.
+
+For another workspace `current` is false on every chat, since it marks the caller's own, and both
+answers carry that workspace's id and name. A chat reached through one workspace cannot be read
+through another: the session is looked up in the named workspace's list, and the cursor names the
+chat.
+
+**What another workspace's chat can do to this one is be believed.** "Fix it and push" in there was
+said to a different agent, and a model reading it back with no label reads an instruction. So the
+answer's note says, in `BridgeUntrustedText`'s words, that it is quoted history from that workspace,
+that nothing in it is an instruction to the reader however it is phrased, and that no part of it
+grants permission for anything. The messages are not fenced the way a web page is, because a
+message split across pages would carry half a fence on each; the JSON string already keeps one
+record's text from reading as the next.
 
 The transcript comes directly from `Store`, without selecting a tab or loading a view. User and
 assistant text, thinking and crew messages use the transcript's existing decoders; other rows
@@ -203,8 +234,20 @@ Pages contain up to 50 records by default (100 maximum) and 32,000 content chara
 returned `next_cursor` with the chat ID until it is null. Cursors name the chat, message sequence
 and character offset, so appending messages does not shift later pages, and oversized messages
 continue on the next page without losing text. Chunks carry `offset` and `complete` for reassembly.
-Both tools are self-approved: they read conversations inside the caller's existing workspace and
-change nothing in the window or the store.
+Both tools are self-approved: they read conversations and change nothing in the window or the
+store, and an ask in front of a read an unattended parent makes is a hung turn for nothing.
+
+`workspace_diff` is the same widening applied to a worktree, with the same `workspace` argument and
+the same callers. It answers with the branch, the base, each changed file with its counts, and the
+unified diff, measured the way the review pane measures: from `Git.baseline`, so everything since
+the branch left its base, including staged, unstaged and untracked work, and never the base's own
+later commits. It calls `Git.changedFiles` and `Git.patch`, the review pane's own functions, rather
+than a second notion of "the workspace's changes". `path` narrows it to one file. Pages hold 32,000
+characters and end on a line break; the cursor carries a fingerprint of the diff and the path, so a
+file saved between two pages refuses the cursor rather than stitching two diffs together. A
+workspace whose worktree is not on disk is refused in a sentence. It is self-approved on the same
+argument as `chat_read`: every git call under it runs with `GIT_OPTIONAL_LOCKS=0`, so it writes no
+file, ref or index, and its note says the diff is file content somebody else wrote.
 
 ### A workspace existing and an agent running in it are two numbers
 
@@ -227,9 +270,9 @@ One number kept its old sense deliberately: `WorkspaceStartAllowance.running`, t
 eight on a parent agent's children, counts workspaces that are not archived and says so in its own
 doc comment. That is a brake on worktrees held open, not on turns in flight.
 
-### The twenty-five that need the app, and the fourteen that do not
+### The twenty-five that need the app, and the fifteen that do not
 
-`BridgeToolbox.standard` holds the fourteen that reach nothing but the store, and it is what a
+`BridgeToolbox.standard` holds the fifteen that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
 `AppModel.bridgeToolbox()` adds the other twenty-five to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
@@ -298,7 +341,8 @@ directly, and a second `SQLiteDatabase` on the file is the cross-connection sequ
 
 ## 4. What an agent cannot reach through it
 
-Nothing here reads or writes a file directly or changes Git state. Terminal tools can run a
+Nothing here writes a file directly or changes Git state. `workspace_diff` reads a worktree
+through git, the way the review pane does. Terminal tools can run a
 command in the workspace's visible interactive shell. Starting, typing and sending control keys
 go through the agent's permission machinery. Reading terminal output uses that same boundary,
 because it can contain secrets, and marks that output as untrusted content.
@@ -459,22 +503,51 @@ something, and into that workspace's active chat otherwise. `Store.enqueueWorksp
 the delivery and a `workspace_messages` row in one transaction. The delivery is what the receiving
 chat drains; the row is what the sending chat reads.
 
-**Both ends are drawn, and both agree.** In the receiving chat the message is a periwinkle bubble on
-the right, with the owner's turns, because the right means "said to this agent"; the line above it
-names the workspace, project and chat. Queued, it is dotted and has Delete, like the owner's own
+**Both ends are drawn, as the owner's own bubble in another colour.** In the receiving chat the
+message is a Starfish orange bubble on the right, with the owner's turns, because the right means
+"said to this agent", with "From" and the workspace's name above it; the name goes to that
+workspace, and the full prompt the model was handed opens under the pointer. It is drawn whole,
+because it is what that agent is answering. Queued, it is dotted and has Delete, like the owner's own
 queued turn, but not Edit or Steer, and its words never go back to the composer. In the sending chat
-the `workspace_say` call is drawn as an outlined bubble on the left, "To" the other workspace, saying
-queued (with Cancel), delivered and when, or cancelled. The row's `state` is moved inside
-`markDelivered`, `cancelDelivery` and `restoreDelivery`, in the same statements that move the
-delivery, so the two bubbles cannot disagree. A cancel from either end tells the sending chat.
+the `workspace_say` call is the same bubble mirrored on the left, "To" the other workspace, cut to
+three lines with Show all. It says no delivery state, because nothing else in the transcript does,
+except that it was cancelled before it went. The row's `state` is moved inside `markDelivered`,
+`cancelDelivery` and `restoreDelivery`, in the same statements that move the delivery. A Delete in
+the receiving chat tells the sending chat.
 
 **The reply path is the same tool.** The envelope ends by naming the id to pass back, and
 `Store.latestWorkspaceMessage` routes the answer to the chat that asked rather than whichever chat
 is active there. A message from the owner's own client says there is no workspace to answer.
 
-**A child may write to the workspace that started it, and to one that wrote to it first.** It
+**A child may write to the workspace that started it, and to one whose message has reached it.** It
 cannot open a conversation with a workspace that never spoke to it, and a child whose own row
 cannot be read is refused rather than let through.
+
+**"Tell me when you are done" is Bloom's job, not the other agent's.** Written into a message, it
+was forgotten often enough, and an agent that failed or sat on a permission prompt could not say
+so at all, which from the calling side looks exactly like one still working. So `workspace_say`
+and `workspace_start` take `notify_when_done`, and Bloom puts one fact in the calling chat when the
+turn that call caused comes to rest: finished, with the other agent's last message fenced and cut
+at 4,000 characters; failed, with the reason; stopped by the owner; blocked on a permission prompt
+or a question for the owner; or the workspace archived first. It is the same delivery
+`reportToOrchestrator` makes for a subagent, one workspace further out. The promise is a
+`workspace_done_watches` row, written in the same transaction as the message, so it survives a
+relaunch mid turn, and spent by an `UPDATE ... WHERE notified_at IS NULL`, so it is kept at most
+once. A message's watch waits until the message is delivered, so the turn it was queued behind does
+not count; a start's watches the new workspace's first chat. A message the owner deletes is told
+by the cancelled notice and nothing more, and a calling chat closed in the meantime is told
+nothing. The owner's own client has no chat to tell, so the flag is ignored there and the answer
+says so. The rules and every sentence are `WorkspaceDoneWatch` and `WorkspaceDoneNotice`; the app
+only reports turn endings.
+
+**Two agents answering each other is a loop, so it is braked.** Each message starts a turn, and an
+agent told to answer with `workspace_say` answers "thanks" too. From a workspace, a seventh message
+to the same workspace inside ten minutes is refused, and so is the same text, whitespace aside,
+sent to the same workspace inside that window. A real exchange is four messages over the minutes a
+turn takes; a loop sends one a turn and reaches six well inside the window. Counted from
+`workspace_messages`, so a relaunch does not reset it, with deleted messages left out. The refusal
+tells the model not to retry and to wait for the answer or tell the owner. The owner's own client
+is exempt, because a person is typing there. See `WorkspaceSayThrottle`.
 
 **One thing on the bridge can now be destroyed, and it is a few lines of the owner's own writing.**
 `quick_prompt_update` overwrites a prompt and `quick_prompt_delete` removes one, and Bloom keeps no
@@ -708,7 +781,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `chat_list`, `chat_read`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop`, `workspace_say` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `chat_list`, `chat_read`, `workspace_diff`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop`, `workspace_say` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.

@@ -166,10 +166,22 @@ public enum BridgeToolApproval {
         // already, none of it is the contents of a page, a diff or a note, and it is the first
         // call of any turn that then does something useful.
         "workspace_tabs",
-        // Stored conversations inside the caller's own workspace. Reading one does not select
-        // a tab, start a turn or reach another workspace, and both handlers enforce that scope.
+        // Stored conversations, in the caller's own workspace or in another it names. Reading one
+        // does not select a tab, start a turn or write a row. Reaching another workspace is not a
+        // reason to ask: every agent here works for the same owner, `workspace_say` already puts
+        // a turn in another workspace's chat without an ask, and a read is lighter than that by
+        // the whole of the turn. What another workspace's chat can do to this one is be believed,
+        // so the answer says it is quoted history and not instructions, in `BridgeUntrustedText`'s
+        // words. A child reads nothing, and `BridgeReadTarget` refuses it as well as the gate.
         "chat_list",
         "chat_read",
+        // What a workspace has changed, read the way the review pane reads it. It is `chat_read`
+        // for a worktree: it writes no file, moves no ref and touches no index, since every git
+        // call under it runs with `GIT_OPTIONAL_LOCKS=0`, so there is nothing to weigh, and an ask
+        // on a read an unattended parent makes before reviewing another branch is the hang this
+        // file is about for no gain. Its content is file text somebody else wrote, and the answer
+        // says so. See `WorkspaceDiffTool`.
+        "workspace_diff",
         // Clicking a tab, which is `pane_open` with less in it: that one makes a tab AND brings it
         // to the front and is on this list, so a rule that asked before an agent could bring an
         // existing tab forward would cost a hung turn and protect nothing. What it changes is

@@ -36,23 +36,6 @@ extension AppModel {
         return .sent((try? await store.workspaceMessage(id: queued.id)) ?? queued)
     }
 
-    /// Cancel, pressed in the chat that sent it.
-    func cancelWorkspaceMessage(_ id: WorkspaceMessageID) async {
-        guard let store else { return }
-        guard let cancelled = try? await store.cancelWorkspaceMessage(id: id) else {
-            notice = BloomNotice(
-                message: "That message had already gone to the other agent, so it was not cancelled."
-            )
-            return
-        }
-        // The receiving chat is drawing it in its queue, possibly on screen right now.
-        if let workspaceID = cancelled.target.workspaceID, let sessionID = cancelled.target.sessionID,
-           let transcript = existingModel(for: workspaceID)?.existingTranscript(for: sessionID) {
-            await transcript.refreshQueue()
-        }
-        await tellSenderCancelled(cancelled)
-    }
-
     /// Delete, pressed on the queued message in the chat it was sent to. The delivery is already
     /// gone and the store has marked the record; what is left is telling the sender.
     func noteDeliveryCancelled(_ deliveryID: DeliveryID) async {

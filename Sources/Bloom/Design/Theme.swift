@@ -502,15 +502,24 @@ enum Palette {
     /// findable at all.
     static let mergedFill = dynamic(PaletteInk.mergedFill)
 
-    /// A message from another workspace, and nothing else.
+    /// A message from another workspace, as ink: the name above it under the pointer, and the
+    /// dotted edge of one still queued.
     ///
-    /// Periwinkle, because every nearer hue is already a word: teal is the accent and an agent
-    /// speaking, blue is running, violet is merged and amber is caution. The owner's own turns are
-    /// the filled teal on the right; a message from another workspace sits on the same side,
-    /// because both are said TO this agent, and this colour is what says who wrote it.
+    /// **Starfish orange, and it was periwinkle first.** A filled periwinkle bubble beside the
+    /// owner's filled teal one read as a second blue, which is the confusion the colour exists to
+    /// prevent, and a round of deep berry, aubergine, graphite and copper fills all read as the
+    /// same dark plate in another hue. What separates it is lightness as much as hue: this is a
+    /// light fill with dark ink, where the owner's turn is a dark fill with white. The warm side of
+    /// the wheel was free apart from caution, and caution is a small glyph where this is a bubble.
+    ///
+    /// The fill itself is too light to be ink on white, at 2 to 1, so the ink is the same hue taken
+    /// down until it clears the text floor. `PaletteContrastTests` holds both.
     static let workspaceMessage = dynamic(PaletteInk.workspaceMessage)
-    /// The ground of a delivered message from another workspace. Text on it is `textPrimary`.
+    /// The ground of a message from another workspace, on either side of the transcript.
     static let workspaceMessageFill = dynamic(PaletteInk.workspaceMessageFill)
+    /// The words on that ground. One value in both appearances, because the fill barely moves
+    /// between them and white on it would be under the floor in both.
+    static let workspaceMessageInk = dynamic(PaletteInk.workspaceMessageInk)
 
     // MARK: Diffs
     //

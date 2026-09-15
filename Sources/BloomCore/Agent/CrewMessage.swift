@@ -30,6 +30,10 @@ public struct CrewMessage: Sendable, Equatable, Codable {
         case relayed
         /// Bloom reporting that the owner cancelled a message this agent sent another workspace.
         case cancelled
+        /// Bloom reporting that the turn a `workspace_say` or `workspace_start` asked to hear
+        /// about has come to rest in the other workspace: finished, failed, stuck on the owner,
+        /// or archived. A fact, like `.stopped`. See `WorkspaceDoneNotice`.
+        case workspaceDone = "workspace_done"
     }
 
     /// Who is speaking, which is what the rule down the left is coloured by. A fact is Bloom's own

@@ -242,6 +242,11 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             it from here, so do not ask for one and then sit idle: say what you started and get on \
             with your own work.
 
+            Pass notify_when_done: true to have Bloom tell this chat once, by itself, when the new \
+            agent's first turn comes to rest: finished (with its last message), failed (with the \
+            reason), or blocked waiting on the owner for a permission prompt or a question. With \
+            it, there is no need to tell the new agent to report back when it is done.
+
             The task you give it is all it gets. It cannot see this conversation, so write the \
             prompt as if to someone who has just opened the project for the first time.
 
@@ -313,6 +318,13 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                             + "example gpt-5.6-sol. Do not use a Claude Code model with codex or "
                             + "a Codex model with claudeCode. Leave this out to use the selected "
                             + "agent's default model."
+                    ),
+                ]),
+                WorkspaceDoneWatch.argument: .object([
+                    "type": .string("boolean"),
+                    "description": .string(
+                        "Have Bloom tell this chat once when the new agent's first turn comes to "
+                            + "rest: finished, failed, or waiting on the owner. Defaults to false."
                     ),
                 ]),
             ]),
@@ -435,13 +447,31 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         do {
             let started = try await start(order, project, identity, origin)
 
+            let wantsNotice = WorkspaceDoneWatch.isRequested(request.param(WorkspaceDoneWatch.argument))
+            var note = startedNote(for: identity.role, notifying: false)
+            var notifying = false
+            if wantsNotice {
+                switch await watch(started, from: identity, store: store) {
+                case .watching:
+                    notifying = true
+                    note = startedNote(for: identity.role, notifying: true)
+                case .noChat:
+                    note += " notify_when_done was ignored: this connection is not a chat in a "
+                        + "Bloom workspace, so there is nowhere to deliver the notice."
+                case .failed(let reason):
+                    note += " Bloom could not record notify_when_done, so it will not tell you when "
+                        + "the new agent is done: \(reason)"
+                }
+            }
+
             return .json(.object([
                 "workspace_id": .string(started.workspaceID.rawValue),
                 "name": .string(started.name),
                 "branch": .string(started.branch),
                 "path": .string(started.path),
                 "state": .string("starting"),
-                "note": .string(startedNote(for: identity.role)),
+                WorkspaceDoneWatch.argument: .bool(notifying),
+                "note": .string(note),
             ]))
         } catch {
             let trouble = await WorkspaceStartTrouble.diagnose(
@@ -600,11 +630,49 @@ public struct WorkspaceStartTool: BridgeToolHandling {
     /// because without it "you cannot wait for it from here" means "and there is nothing else to
     /// call either". A parent does not, because `workspace_list` is not in its `tools/list` and
     /// naming a tool a caller cannot reach is worse than naming none.
-    private func startedNote(for role: BridgeRole) -> String {
-        let opening = "It is setting up and will start on its own. It does not report back, and "
-            + "you cannot wait for it from here. Carry on with your own work."
+    private func startedNote(for role: BridgeRole, notifying: Bool) -> String {
+        let opening = notifying
+            ? "It is setting up and will start on its own. Bloom will tell this chat once, by "
+                + "itself, when its first turn comes to rest: finished, failed, or waiting on the "
+                + "owner. You cannot wait for it from here, so carry on with your own work."
+            : "It is setting up and will start on its own. It does not report back, and "
+                + "you cannot wait for it from here. Carry on with your own work."
         guard role == .owner else { return opening }
         return opening + " When you want to know what became of it, call workspace_list."
+    }
+
+    enum WatchOutcome {
+        case watching
+        /// The owner's own client, which has no chat for a notice to go into.
+        case noChat
+        case failed(String)
+    }
+
+    /// Records `notify_when_done` for a workspace that has just been started.
+    ///
+    /// The first chat is read now, because the app has written it by the time `start` returns and
+    /// the task goes into that chat; watching every chat would let a second one the owner opens
+    /// spend the watch on the wrong turn. A workspace whose chat cannot be read is watched as a
+    /// whole, subagents aside, which is the next best reading of "its first turn".
+    func watch(_ started: StartedWorkspaceSummary, from identity: BridgeIdentity, store: Store) async -> WatchOutcome {
+        guard let watcher = identity.sessionID, identity.workspaceID != nil else { return .noChat }
+        do {
+            let chat = try await store.sessions(workspaceID: started.workspaceID)
+                .first { $0.parentSessionID == nil }
+            try await store.addWorkspaceDoneWatch(WorkspaceDoneWatch(
+                cause: .start,
+                watcherSessionID: watcher,
+                target: WorkspaceMessageEnd(
+                    workspaceID: started.workspaceID,
+                    workspace: started.name,
+                    sessionID: chat?.id,
+                    chat: chat?.title ?? ""
+                )
+            ))
+            return .watching
+        } catch {
+            return .failed(error.readableMessage)
+        }
     }
 
     /// The workspace an earlier run of this same call produced, if there is one and it is still

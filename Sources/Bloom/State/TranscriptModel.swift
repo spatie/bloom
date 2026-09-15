@@ -610,7 +610,16 @@ final class TranscriptModel {
         // drawn twice. Retired here rather than after the send returns, because the pump can read
         // the row first: only one turn is ever in flight, so a user row landing while something is
         // sending is that sentence. See `sending`.
-        if message.kind == .user { sending = nil }
+        //
+        // A crew row is the same retirement for a message an agent wrote: the runner records it
+        // as `.crew` instead of `.user`. Checking only `.user` left a message from another
+        // workspace drawn a second time, as the owner's teal bubble under the turn it started,
+        // until something else cleared the slot. Only when what is sending IS a crew message,
+        // because Bloom writes some crew rows directly, and one of those landing mid send must not
+        // take the owner's own sentence off the screen early.
+        if message.kind == .user || (message.kind == .crew && sending?.crewMessage != nil) {
+            sending = nil
+        }
     }
 
     /// The turn somebody stopped, named by the `seq` of the row that closed it.
@@ -1660,6 +1669,9 @@ final class TranscriptModel {
         } else if !wasStoppedByHand { await drain() }
         if !isRunning {
             await reportToOrchestrator(CrewMessage.stopped(name: session.title, lastMessage: result.summary))
+            await app.noteWorkspaceTurnEnded(
+                WorkspaceTurnEnding.ofResult(result, stoppedByOwner: wasStoppedByHand), in: session
+            )
         }
     }
 
@@ -1805,6 +1817,7 @@ final class TranscriptModel {
             if let report = CrewTurnEnd.failed(failure.message).report(name: session.title, continuing: false) {
                 await reportToOrchestrator(report)
             }
+            await app.noteWorkspaceTurnEnded(.failed(reason: failure.message), in: session)
             // An agent that died is an agent whose turn has ended, so a workspace it had asked to
             // archive is due now. `notifyFinished` is not on this path and never was: it is about
             // a result, and there is none. The recheck decides as it does everywhere else.
@@ -1868,6 +1881,13 @@ final class TranscriptModel {
             if !isReconcilingPresentation, let report = CrewTurnEnd.completed(result.summary).report(name: session.title, continuing: isRunning) {
                 await reportToOrchestrator(report)
             }
+            if !isReconcilingPresentation, !isRunning {
+                // The same moment, one workspace further out: a chat elsewhere that asked
+                // `workspace_say` or `workspace_start` to tell it when this came to rest.
+                await app.noteWorkspaceTurnEnded(
+                    WorkspaceTurnEnding.ofResult(result, stoppedByOwner: wasStoppedByHand), in: session
+                )
+            }
 
         case .permissionAsk:
             // The row goes in where the call would have been, and the composer stops looking like
@@ -1879,6 +1899,12 @@ final class TranscriptModel {
             await refreshSession()
             if let workspaceNow {
                 NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
+            }
+            // A turn stuck on the owner looks, from another workspace, exactly like one still
+            // working. Not while replaying: an ask read back after a relaunch may have been
+            // answered long ago, and the watch is spent by whatever it says.
+            if !isReconcilingPresentation, !isReplayingPastTurn, let ask = pendingPermissionAsks.last {
+                await app.noteWorkspaceTurnEnded(WorkspaceTurnEnding.ofAsk(ask), in: session)
             }
 
         case .permissionDecided(let resolution):

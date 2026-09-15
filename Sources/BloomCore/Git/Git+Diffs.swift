@@ -231,6 +231,23 @@ extension Git {
         ).stdout
     }
 
+    /// Every file's patch at once, measured from where the branch left `base`, including what is
+    /// staged, unstaged and untracked: the text of what `changedFiles` lists, for the whole branch.
+    ///
+    /// One `git diff` for everything tracked rather than `patch(file:)` once per file, because
+    /// `workspace_diff` asks this on every page it serves and a branch touching two hundred files
+    /// would otherwise be two hundred processes a page. Untracked files never appear in `git diff`,
+    /// so each of those still costs one, exactly as the review pane pays it. `files` is the list
+    /// the caller has already read, so the untracked half agrees with what it was told.
+    public static func patch(worktree: String, base: String, files: [ChangedFile]) async throws -> String {
+        let mergeBase = try await baseline(base, in: worktree)
+        var whole = try await check(["diff"] + patchOptions + ["-M", mergeBase, "--"], in: worktree).stdout
+        for file in files where file.change == .untracked {
+            whole += try await patch(worktree: worktree, base: base, file: file)
+        }
+        return whole
+    }
+
     /// A patch is a data format here. Personal diff tools and text converters can replace it
     /// with arbitrary output, while mnemonic prefixes change the paths the parser reads.
     private static let patchOptions = [
