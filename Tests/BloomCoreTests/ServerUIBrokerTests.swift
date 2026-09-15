@@ -15,12 +15,26 @@ struct ServerUIBrokerTests {
         return batch
     }
 
+    /// Polls until the agent's request is queued, and a broker whose request and lease outlive a stall.
+    /// The broker's own long poll gives up after ten seconds, and on macOS CI (job 104413145532) a
+    /// runner stalled for about 28 seconds per test had not queued the request by then, so five
+    /// tests failed on an empty batch. None of them is about timing, so they wait on the request.
+    private func nextRequest(_ broker: ServerUIBroker, lease: RemoteUILease) async throws -> RemoteUIRequest {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(300))
+        while ContinuousClock.now < deadline {
+            if let request = try await poll(broker, lease: lease, wait: true).requests.first { return request }
+        }
+        throw ServerFailure("No UI request was queued within five minutes.")
+    }
+    private func stallTolerantBroker() -> ServerUIBroker {
+        ServerUIBroker(leaseDuration: 120, requestTimeout: .seconds(600))
+    }
+
     @Test func onlyTheAttachedWorkspaceReceivesAndAnswersItsRequest() async throws {
-        let broker = ServerUIBroker()
+        let broker = stallTolerantBroker()
         let one = try await attach(broker), two = try await attach(broker, workspace: "two")
         let work = Task { await broker.perform(.init(name: "pane_open"), workspaceID: one.workspaceID) }
-        let batch = try await poll(broker, lease: one, wait: true)
-        let request = try #require(batch.requests.first)
+        let request = try await nextRequest(broker, lease: one)
         #expect(try await poll(broker, lease: two).requests.isEmpty)
         await #expect(throws: ServerFailure.self) {
             try await broker.handle(.respond(leaseID: two.id, token: two.token, requestID: request.id, result: .init(text: "wrong")), registrationID: UUID())
@@ -61,9 +75,9 @@ struct ServerUIBrokerTests {
     }
 
     @Test func detachmentCancelsPendingActionsAndRejectsLateResponses() async throws {
-        let broker = ServerUIBroker(), lease = try await attach(broker)
+        let broker = stallTolerantBroker(), lease = try await attach(broker)
         let work = Task { await broker.perform(.init(name: "pane_open"), workspaceID: lease.workspaceID) }
-        let request = try #require(try await poll(broker, lease: lease, wait: true).requests.first)
+        let request = try await nextRequest(broker, lease: lease)
         _ = try await broker.handle(.detach(leaseID: lease.id, token: lease.token), registrationID: UUID())
         #expect(await work.value.isError)
         let replacement = try await attach(broker)
@@ -74,9 +88,9 @@ struct ServerUIBrokerTests {
     }
 
     @Test func cancelledAgentRequestCannotBeAnsweredLater() async throws {
-        let broker = ServerUIBroker(), lease = try await attach(broker)
+        let broker = stallTolerantBroker(), lease = try await attach(broker)
         let work = Task { await broker.perform(.init(name: "pane_open"), workspaceID: lease.workspaceID) }
-        let request = try #require(try await poll(broker, lease: lease, wait: true).requests.first)
+        let request = try await nextRequest(broker, lease: lease)
         work.cancel()
         #expect(await work.value.isError)
         await #expect(throws: ServerFailure.self) {
@@ -86,9 +100,9 @@ struct ServerUIBrokerTests {
     }
 
     @Test func claimingIsScopedAndCancelledQueuedRequestsCannotBeClaimed() async throws {
-        let broker = ServerUIBroker(), one = try await attach(broker), two = try await attach(broker, workspace: "two")
+        let broker = stallTolerantBroker(), one = try await attach(broker), two = try await attach(broker, workspace: "two")
         let work = Task { await broker.perform(.init(name: "pane_open"), workspaceID: one.workspaceID) }
-        let request = try #require(try await poll(broker, lease: one, wait: true).requests.first)
+        let request = try await nextRequest(broker, lease: one)
         #expect(try await broker.handle(.claim(leaseID: two.id, token: two.token, requestID: request.id), registrationID: UUID()) == .claimed(false))
         await #expect(throws: ServerFailure.self) {
             try await broker.handle(.respond(leaseID: one.id, token: one.token, requestID: request.id, result: .init()), registrationID: UUID())
@@ -111,9 +125,9 @@ struct ServerUIBrokerTests {
     }
 
     @Test func duplicateResultIsIdempotentButDifferentResultIsRejected() async throws {
-        let broker = ServerUIBroker(), lease = try await attach(broker)
+        let broker = stallTolerantBroker(), lease = try await attach(broker)
         let work = Task { await broker.perform(.init(name: "pane_open"), workspaceID: lease.workspaceID) }
-        let request = try #require(try await poll(broker, lease: lease, wait: true).requests.first)
+        let request = try await nextRequest(broker, lease: lease)
         #expect(try await broker.handle(.claim(leaseID: lease.id, token: lease.token, requestID: request.id), registrationID: UUID()) == .claimed(true))
         let answer = RemoteUIBridgeOperation.respond(leaseID: lease.id, token: lease.token, requestID: request.id, result: .init(text: "opened"))
         _ = try await broker.handle(answer, registrationID: UUID())

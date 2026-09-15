@@ -32,7 +32,7 @@ public final class ServerDaemon: Sendable {
         maintenanceTrial: Bool = false,
         runnerExitGrace: Duration = .seconds(6)
     ) async throws -> ServerDaemon {
-        let lock = try ServerLock(directory: directory)
+        let lock = try await ServerLock(directory: directory)
         let database = databasePath(directory: directory)
         let store = try Store(path: database)
         try await store.resetRunningSessions()
@@ -107,10 +107,12 @@ extension ServerDaemon {
     }
 }
 
-private final class ServerLock: Sendable {
+final class ServerLock: Sendable {
     private let descriptor: Mutex<Int32?>
 
-    init(directory: String) throws {
+    /// A held lock is waited on for `wait.window` before it counts as another server, retrying on
+    /// the same descriptor. `ServerLockWait` says why a restart must not refuse on the first try.
+    init(directory: String, wait: ServerLockWait = ServerLockWait()) async throws {
         guard directory.hasPrefix("/") else { throw ServerFailure("The server data directory must be an absolute path.") }
         try FileManager.default.createDirectory(
             atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
@@ -124,7 +126,7 @@ private final class ServerLock: Sendable {
         let path = URL(fileURLWithPath: directory).appendingPathComponent("server.lock").path
         let opened = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard opened >= 0 else { throw ServerFailure("Cannot open the server lock in \(directory).") }
-        if let code = Self.lock(opened) {
+        if let code = await wait.acquire(on: ContinuousClock(), attempt: { Self.lock(opened) }) {
             close(opened)
             throw ServerDaemon.lockRefusal(code: code, directory: directory)
         }

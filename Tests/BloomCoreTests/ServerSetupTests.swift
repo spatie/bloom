@@ -81,9 +81,10 @@ import Testing
         let fakeID = directory.appendingPathComponent("id")
         try Data("#!/bin/sh\nprintf '0\\n'\n".utf8).write(to: fakeID)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeID.path)
+        // Not a timing test: macOS CI (job 104397819725) stalled for about 25 seconds and a 5 second limit failed it.
         let result = try await Shell.run("/bin/sh", ["-c", ServerSetupConnection.stopServerCommand],
             env: ["PATH": directory.path + ":/usr/bin:/bin"],
-            stdin: "import sys\nprint(sys.argv[1])\n", timeout: .seconds(5))
+            stdin: "import sys\nprint(sys.argv[1])\n", timeout: .seconds(120))
         #expect(result.ok)
         #expect(result.trimmed == "--stop-server")
         #expect(ServerSetupConnection.stopServerCommand.contains("sudo -n python3 - --stop-server"))
@@ -141,7 +142,8 @@ import Testing
         case "swap": try ServerSetupConnection.swapInstallerCommand(user: "bloom", serviceHome: home)
         default: try ServerSetupConnection.dockerInstallerCommand(user: "bloom", serviceHome: home)
         }
-        let result = try await Shell.run("/bin/sh", ["-c", rootID + command], env: ["PATH": "/usr/bin:/bin"], stdin: source, timeout: .seconds(5))
+        // Not a timing test: macOS CI (job 104397819725) stalled for about 25 seconds and a 5 second limit failed all three cases.
+        let result = try await Shell.run("/bin/sh", ["-c", rootID + command], env: ["PATH": "/usr/bin:/bin"], stdin: source, timeout: .seconds(120))
         #expect(result.ok)
         let decoded = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8))
         #expect(decoded["source"] == .bool(installer == "browser"))

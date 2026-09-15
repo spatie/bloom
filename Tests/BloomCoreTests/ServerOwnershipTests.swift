@@ -35,6 +35,9 @@ struct ServerOwnershipTests {
         fixture.runner.allowExit()
         // Returns as soon as the replacement starts. The limit is long for the reason the
         // fixture's runner exit grace is: CI's executor stalls outlast the default six seconds.
+        // A refused start now waits out `ServerLockWait`'s three seconds before it returns false,
+        // so this polls less often than its step suggests, and a release during that wait is
+        // taken by the same attempt rather than the next.
         await waitUntil("daemon deinit releases ownership after cleanup", within: .seconds(600)) {
             do {
                 let replacement = try await fixture.start()
@@ -124,7 +127,9 @@ private struct OwnershipFixture: Sendable {
     }
 
     /// A start refused because this directory is owned, and for no other reason. Checking only
-    /// the error type let a start that failed on something else pass as a refusal.
+    /// the error type let a start that failed on something else pass as a refusal. The refusal
+    /// comes after the three second lock wait, which the held runner outlasts: shutdown cannot
+    /// release the lock until `allowExit()`, and the grace it would otherwise end on is ten minutes.
     func expectOwnershipRefused(sourceLocation: SourceLocation = #_sourceLocation) async throws {
         do {
             let unexpected = try await start()
