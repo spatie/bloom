@@ -49,7 +49,7 @@ struct ModelGatewayTests {
         #expect(sent["model"] as? String == "gpt-5-codex")
         let modelRequest = try #require(sent["model_request"] as? [String: Any])
         #expect(modelRequest["input"] as? String == "Hello")
-        #expect(modelRequest["model"] == nil)
+        #expect(modelRequest["model"] as? String == "gpt-5-codex")
         #expect(modelRequest["stream"] == nil)
         #expect(modelRequest["store"] == nil)
         #expect(modelRequest["background"] == nil)
@@ -86,6 +86,16 @@ struct ModelGatewayTests {
         let sent = try #require(fake.requests("POST", "/model-gateway/streams").first?.json)
         #expect(sent["anthropic_beta"] as? [String] == ["claude-code-20250219", "context-management-2025-06-27"])
         await gateway.shutdown()
+    }
+
+    @Test("the model Claude resolves from its grant is accepted, and nothing outside it")
+    func acceptsResolvedModels() {
+        #expect(ModelGateway.allows(requested: "claude-opus-5", granted: "claude-opus-5[1m]"))
+        #expect(ModelGateway.allows(requested: "claude-opus-5", granted: "opus[1m]"))
+        #expect(ModelGateway.allows(requested: "gpt-5-codex", granted: "gpt-5-codex"))
+        #expect(!ModelGateway.allows(requested: "claude-sonnet-4-5", granted: "opus[1m]"))
+        #expect(!ModelGateway.allows(requested: "claude-opus-4-1", granted: "claude-opus-5[1m]"))
+        #expect(!ModelGateway.allows(requested: "claude-opus-5[1m]", granted: "claude-opus-5[1m]"))
     }
 
     @Test("a beta name that is not a plain token, or one sent for another provider, is refused")

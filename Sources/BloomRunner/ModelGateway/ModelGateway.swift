@@ -276,8 +276,8 @@ actor ModelGateway {
         for key in ["grant", "operation", "provider", "request_id", "version"] where object[key] != nil {
             throw Refusal(status: 422, message: "The model request contains a reserved field.")
         }
-        if let value = object.removeValue(forKey: "model") {
-            guard let model = value as? String, model == grant.model else {
+        if let value = object["model"] {
+            guard let model = value as? String, Self.allows(requested: model, granted: grant.model) else {
                 throw Refusal(status: 403, message: "The model request does not match its grant.")
             }
         }
@@ -294,6 +294,19 @@ actor ModelGateway {
             }
         }
         return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    /// A grant names the model as it was picked, and Claude resolves that before it sends:
+    /// `claude-opus-5[1m]` goes out as `claude-opus-5` with the window named as a beta, and the
+    /// alias `opus[1m]` as whichever `claude-opus-…` it currently means. Comparing them exactly
+    /// refused every turn on either. runbloom.app applies the same rule before it sends the
+    /// resolved model upstream, so this is the early answer rather than the only one.
+    static func allows(requested: String, granted: String) -> Bool {
+        guard !requested.isEmpty, !requested.contains("[") else { return false }
+        let base = granted.firstIndex(of: "[").map { String(granted[..<$0]) } ?? granted
+        if requested == base { return true }
+        guard !base.contains("-") else { return false }
+        return requested.hasPrefix("claude-\(base)-")
     }
 
     /// Claude Code names the request fields it sends in `anthropic-beta`, and Anthropic refuses a
