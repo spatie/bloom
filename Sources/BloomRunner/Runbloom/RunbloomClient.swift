@@ -257,10 +257,10 @@ public struct RunbloomClient: Sendable {
     }
 
     func startModelStream(
-        grant: OpaqueModelGrant, requestID: UUID, modelRequest: Data
+        grant: OpaqueModelGrant, requestID: UUID, modelRequest: Data, anthropicBeta: [String] = []
     ) async throws -> ModelStreamResponse {
         let request = try JSONSerialization.jsonObject(with: modelRequest)
-        let body = try JSONSerialization.data(withJSONObject: [
+        var fields: [String: Any] = [
             "version": "opaque_model_grant_v1",
             "grant": grant.token,
             "request_id": requestID.uuidString.lowercased(),
@@ -268,7 +268,9 @@ public struct RunbloomClient: Sendable {
             "provider": grant.provider.rawValue,
             "model": grant.model,
             "model_request": request,
-        ], options: [.sortedKeys])
+        ]
+        if !anthropicBeta.isEmpty { fields["anthropic_beta"] = anthropicBeta }
+        let body = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
         return try await sendStreamingOnce(.POST, "/model-gateway/streams", body: body)
     }
 

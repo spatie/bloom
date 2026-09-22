@@ -81,7 +81,10 @@ final class ModelGatewayServer: @unchecked Sendable {
         }
 
         do {
-            let stream = try await gateway.open(token: token, path: request.uri.path, body: body)
+            let stream = try await gateway.open(
+                token: token, path: request.uri.path, body: body,
+                betas: request.headers[values: HTTPField.Name("anthropic-beta")!]
+            )
             guard stream.response.status == 200 else {
                 _ = try? await stream.response.body.collect(upTo: 64 * 1_024)
                 await gateway.complete(token: token, requestID: stream.requestID)

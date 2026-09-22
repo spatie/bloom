@@ -57,6 +57,48 @@ struct ModelGatewayTests {
         await gateway.shutdown()
     }
 
+    @Test("Claude's beta names reach runbloom.app, so a request using them is not refused upstream")
+    func forwardsAnthropicBetas() async throws {
+        let fake = try await FakeControlServer.start()
+        defer { Task { await fake.stop() } }
+        fake.script("POST", "/model-gateway/streams", .init(
+            status: 200, body: "data: {}\n\n", headers: ["Content-Type": "text/event-stream"]
+        ))
+        let client = RunbloomClient(
+            baseURL: fake.baseURL, workspaceID: fake.workspaceID, secret: fake.secret, http: .shared
+        )
+        let gateway = ModelGateway(client: client)
+        let grant = Self.grant(provider: .anthropic, operation: .anthropicMessagesStream, model: "claude-opus-5")
+        let environment = try await gateway.install(
+            turnID: "turn-1", grants: [.claudeCode: grant], baseURL: "http://127.0.0.1:8123"
+        )
+        let token = try #require(environment[.claudeCode]?["ANTHROPIC_API_KEY"])
+        let request = try JSONSerialization.data(withJSONObject: [
+            "messages": [], "context_management": [:] as [String: Any],
+        ])
+        let stream = try await gateway.open(
+            token: token, path: "/v1/messages", body: request,
+            betas: ["claude-code-20250219, context-management-2025-06-27", "context-management-2025-06-27"]
+        )
+        _ = try await stream.response.body.collect(upTo: 1_024)
+        await gateway.complete(token: token, requestID: stream.requestID)
+
+        let sent = try #require(fake.requests("POST", "/model-gateway/streams").first?.json)
+        #expect(sent["anthropic_beta"] as? [String] == ["claude-code-20250219", "context-management-2025-06-27"])
+        await gateway.shutdown()
+    }
+
+    @Test("a beta name that is not a plain token, or one sent for another provider, is refused")
+    func refusesUnsafeBetas() throws {
+        #expect(try ModelGateway.anthropicBetas([], provider: .openai).isEmpty)
+        #expect(throws: ModelGateway.Refusal.self) {
+            try ModelGateway.anthropicBetas(["x\r\ninjected: 1"], provider: .anthropic)
+        }
+        #expect(throws: ModelGateway.Refusal.self) {
+            try ModelGateway.anthropicBetas(["files-api-2025-04-14"], provider: .openai)
+        }
+    }
+
     @Test("a model override is refused before any upstream request")
     func refusesModelOverride() async throws {
         let fake = try await FakeControlServer.start()
