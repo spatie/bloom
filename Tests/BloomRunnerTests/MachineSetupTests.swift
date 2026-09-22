@@ -10,6 +10,23 @@ import Testing
 /// Setup against a bare repository on disk standing in for GitHub, with real git and real scripts.
 @Suite("Setting a machine's workspace up")
 struct MachineSetupTests {
+    @Test("a privileged script leaves what it writes group writable, whatever the Runner's umask")
+    func privilegedScriptsUseTheSharedUmask() throws {
+        let command = MachineSetup.withSharedUmask("/bin/sh", ["-c", "umask; echo \"$0\" \"$1\"", "one two", "three"])
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: command.executable)
+        process.arguments = command.arguments
+        process.standardOutput = output
+        let previous = umask(0o077)
+        defer { umask(previous) }
+        try process.run()
+        process.waitUntilExit()
+        let printed = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+
+        #expect(printed.split(separator: "\n") == ["0002", "one two three"])
+    }
+
     @Test("a privileged script is launched with the groups its user is really in")
     func privilegedScriptsResolveTheirGroups() {
         // A supplementary group is fixed when a process starts and the Runner starts without any,

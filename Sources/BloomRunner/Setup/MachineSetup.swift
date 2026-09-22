@@ -776,13 +776,32 @@ public actor MachineSetup {
             processEnvironment = environment
         }
         let launched = privileged
-            ? Self.asThisUserWithItsGroups(command.executable, command.arguments)
+            ? Self.asThisUserWithItsGroups(Self.withSharedUmask(command.executable, command.arguments))
             : (executable: command.executable, arguments: command.arguments)
         let succeeded = await runProcess(launched.executable, launched.arguments, directory: layout.worktree, timeout: timeout,
                                          environment: processEnvironment, log: log, step: step, privileged: privileged)
         if step == "setup" { await log.redact([]) }
         await log.endStep()
         return succeeded
+    }
+
+    /// The command under a group-writable umask, set after any sudo hop because sudo replaces it.
+    ///
+    /// **A privileged setup is followed by scripts that are not.** It runs as the machine's user,
+    /// and the Runner's umask is 077, so `composer install` left `vendor/` at 2700 and `.env` at
+    /// 600, owned by that user. The resume script after the next restart runs as the sandbox user,
+    /// could read neither, and failed on `file_put_contents(.env)`, as would the agent itself. The
+    /// shared group exists so both of them can work in one checkout; this is what lets it.
+    static func withSharedUmask(
+        _ executable: String, _ arguments: [String]
+    ) -> (executable: String, arguments: [String]) {
+        ("/bin/sh", ["-c", "umask 002 && exec \"$@\"", "sh", executable] + arguments)
+    }
+
+    static func asThisUserWithItsGroups(
+        _ command: (executable: String, arguments: [String])
+    ) -> (executable: String, arguments: [String]) {
+        asThisUserWithItsGroups(command.executable, command.arguments)
     }
 
     /// The same user this process runs as, but with the groups that user is actually in.

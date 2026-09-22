@@ -172,6 +172,16 @@ enum PersonBoundSandboxExec {
             return refuse("the home or provenance directory could not be given its owner and mode")
         }
 
+        // **The agent user keeps its own home; only a numeric uid gets the throwaway one.** Claude
+        // keeps every conversation under `$HOME/.claude`, and a home removed when its launch ended
+        // took the conversation with it: the next message in that chat resumed a session id that
+        // no longer existed, Claude exited before making a single request, and the chat never
+        // answered again. Every launch shares the agent's uid, so a home per launch kept nothing
+        // apart that the uid had not already joined. Looked up before the fork, because getpwuid
+        // is not safe in the child of a threaded process.
+        let persistentHome = uid == MachineSandbox.agentUID() ? getpwuid(uid).map { entry in
+            (String(cString: entry.pointee.pw_dir), String(cString: entry.pointee.pw_name))
+        } : nil
         let child = fork()
         guard child >= 0 else { return refuse("this host would not fork") }
         if child == 0 {
@@ -207,9 +217,9 @@ enum PersonBoundSandboxExec {
             // network git command has to name it as a safe directory, having had the system-wide
             // config turned off, and without it every push refused as "dubious ownership".
             childEnvironment["BLOOM_WORKTREE"] = worktree
-            childEnvironment["HOME"] = home
-            childEnvironment["USER"] = String(uid)
-            childEnvironment["LOGNAME"] = String(uid)
+            childEnvironment["HOME"] = persistentHome?.0 ?? home
+            childEnvironment["USER"] = persistentHome?.1 ?? String(uid)
+            childEnvironment["LOGNAME"] = persistentHome?.1 ?? String(uid)
             // The same shared group umask the Runner uses, so whatever the agent writes in the
             // worktree the Runner can still change, and the other way round.
             umask(0o002)
