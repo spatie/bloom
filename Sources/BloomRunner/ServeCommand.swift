@@ -357,7 +357,13 @@ public enum ServeCommand {
         let server = WorkspaceHTTPServer(dependencies: .init(
             runtime: runtime, verifier: verifier, gate: gate, control: supervisor, store: store,
             allowedOrigins: configuration.allowedOrigins, version: version, streams: streams, terminals: terminals,
-            terminalsEnabled: false,
+            // On again, as the sandbox user every agent already runs as. It was switched off until
+            // terminals had a person-bound identity of their own, nobody built that, and a Cloud
+            // workspace had no shell at all: the client read the empty refusal as a dropped
+            // connection and said "Still trying to get back to your shell" for ever. A pane is not
+            // an attested process, so network git and gh in it are refused rather than handed a
+            // person's credential. Agreed with Freek on 23 September 2026.
+            terminalsEnabled: true,
             services: { await services.status },
             appPort: layout.appPort,
             reservedPorts: layout.reservedPorts.map(\.port) + [modelGatewayServer.port]

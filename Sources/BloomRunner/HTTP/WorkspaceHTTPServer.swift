@@ -29,8 +29,9 @@ public struct WorkspaceHTTPServer: Sendable {
         public var version: String
         public var streams: EventStreams
         public var terminals: TerminalConnections
-        /// False until persistent terminals use the mandatory person-bound process lifecycle. A
-        /// missing WebSocket route is a refusal.
+        /// Whether the terminal WebSocket is routed at all. A missing route is a refusal, and a
+        /// client cannot tell it from a dropped connection, so switching it off leaves a client
+        /// retrying rather than saying why.
         public var terminalsEnabled: Bool
         /// The project's services as the supervisor has them, for the page somebody sees when the
         /// preview has nothing to show.
