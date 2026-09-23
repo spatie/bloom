@@ -256,7 +256,9 @@ public actor ServiceSupervisor {
             let process = SupervisedProcess(
                 command: {
                     let scoped = try await scopedEnvironment(id, baseEnvironment)
-                    let command = sandbox.map { $0.wrap(executable: "/bin/sh", arguments: ["-c", service.command]) }
+                    let command = sandbox.map {
+                        $0.wrap(executable: "/bin/sh", arguments: ["-c", service.command], path: scoped.values["PATH"])
+                    }
                         ?? (executable: "/bin/sh", arguments: ["-c", service.command])
                     return .init(
                         executable: command.executable,

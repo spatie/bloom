@@ -383,6 +383,7 @@ public actor MachineSetup {
                 succeeded = await runScript(name, launch, timeout: timeout, environment: environment, log: log,
                                             continuing: interrupted, privileged: privileged)
             }
+            if privileged { await shareWorktreeWithTheGroup() }
             if !privileged, sandbox != nil {
                 await log.note("Setup ran as \(sandbox?.user ?? "the sandbox user"), which cannot install system packages, "
                     + "because this workspace did not start from \(configuration.baseBranch) as it stands.")
@@ -785,6 +786,30 @@ public actor MachineSetup {
         return succeeded
     }
 
+    /// **What a privileged setup wrote, handed to the group whatever umask it chose.** The Runner
+    /// sets 002 before a script starts, and There There's own setup opens with `umask 077`, which
+    /// is a sensible line on a laptop: `vendor/` came out 2700 and `.env` 600, owned by the
+    /// machine's user, and every service, which runs as the sandbox user, died on
+    /// `require(vendor/autoload.php): Permission denied`. A script cannot undo this, because it runs
+    /// after the script has finished. Files the sandbox user owns are not ours to change and are
+    /// skipped, which is what the ignored status is for.
+    private func shareWorktreeWithTheGroup() async {
+        #if canImport(Glibc)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+        process.arguments = ["-R", "g+rwX", layout.worktree]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                process.waitUntilExit()
+                continuation.resume()
+            }
+        }
+        #endif
+    }
+
     /// The command under a group-writable umask, set after any sudo hop because sudo replaces it.
     ///
     /// **A privileged setup is followed by scripts that are not.** It runs as the machine's user,
@@ -886,7 +911,7 @@ public actor MachineSetup {
         // The machine's own work (git, the clone, provisioning) is privileged by default; a script
         // from the repository asks for it explicitly and almost never gets it.
         let command = privileged ? nil : sandbox
-        let launch = command.map { $0.wrap(executable: executable, arguments: arguments) }
+        let launch = command.map { $0.wrap(executable: executable, arguments: arguments, path: environment["PATH"]) }
             ?? (executable: executable, arguments: arguments)
         let base = AgentLaunch(
             executable: launch.executable, arguments: launch.arguments,

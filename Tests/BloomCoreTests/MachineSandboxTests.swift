@@ -18,6 +18,13 @@ struct MachineSandboxTests {
         #expect(!wrapped.arguments.contains { $0.contains("ANTHROPIC") })
     }
 
+    @Test("the PATH it is given survives sudo, which would otherwise replace it")
+    func path() throws {
+        let wrapped = sandbox.wrap(executable: "/bin/sh", arguments: ["-c", "bun run dev"], path: "/home/sprite/.local/bin:/usr/bin")
+        let script = try #require(wrapped.arguments.last)
+        #expect(script.contains("&& export PATH='/home/sprite/.local/bin:/usr/bin' && exec '/usr/bin/setpriv'"))
+    }
+
     @Test("an argument that tries to end the quoting cannot")
     func quoting() {
         let wrapped = sandbox.wrap(executable: "/bin/echo", arguments: ["'; rm -rf / #", "$(whoami)", "a b"])

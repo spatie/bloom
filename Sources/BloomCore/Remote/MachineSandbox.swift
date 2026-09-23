@@ -50,10 +50,18 @@ public struct MachineSandbox: Sendable, Hashable {
     }
 
     /// The command to run instead of `executable`, so that it runs as the sandbox's user.
-    public func wrap(executable: String, arguments: [String]) -> (executable: String, arguments: [String]) {
+    ///
+    /// **`path` is set inside the script, because sudo throws the one in the environment away.**
+    /// `secure_path` replaces PATH even under `-E`, so a service started this way looked for its
+    /// tools in the system directories only: There There's Vite service died with "bun: not found"
+    /// on a machine where the sandbox user could run bun perfectly well by its full path.
+    public func wrap(
+        executable: String, arguments: [String], path: String? = nil
+    ) -> (executable: String, arguments: [String]) {
         let masks = maskedPaths.map { "mount --bind /dev/null \(Self.quoted($0))" }
+        let exports = path.map { ["export PATH=" + Self.quoted($0)] } ?? []
         let dropping = [setpriv, "--reuid=" + user, "--regid=" + user, "--init-groups", executable] + arguments
-        let script = (masks + ["exec " + dropping.map(Self.quoted).joined(separator: " ")]).joined(separator: " && ")
+        let script = (masks + exports + ["exec " + dropping.map(Self.quoted).joined(separator: " ")]).joined(separator: " && ")
         return (sudo, ["-E", unshare, "--mount", "--propagation", "private", "--", shell, "-c", script])
     }
 
@@ -69,7 +77,7 @@ public struct MachineSandbox: Sendable, Hashable {
 
     /// The same command, as the launch every runner spawns through.
     public func wrap(_ launch: AgentLaunch) -> AgentLaunch {
-        let command = wrap(executable: launch.executable, arguments: launch.arguments)
+        let command = wrap(executable: launch.executable, arguments: launch.arguments, path: launch.environment["PATH"])
         return AgentLaunch(executable: command.executable, arguments: command.arguments, cwd: launch.cwd,
                            environment: environment(launch.environment))
     }
