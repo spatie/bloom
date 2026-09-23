@@ -248,7 +248,11 @@ public enum ServeCommand {
             addressed: { _ in await addressedReporter.start() },
             createCloudWorkspace: { await client.createCloudWorkspace($0) },
             peers: RunbloomPeers.peers(client: client, http: http),
-            sandbox: nil,
+            // **What a terminal runs as.** Agents reach the sandbox through the person-bound launcher
+            // above, so this is only the terminals' now, and it was nil: the first shell after
+            // terminals came back opened as `sprite`, the Runner's own user, with passwordless sudo
+            // and the workspace secret one `sudo cat` away. The sandbox user has neither.
+            sandbox: sandbox,
             sharedDirectory: MachineSandbox.sharedDirectory
         )
         let host: any MachineHost = SpriteMachineHost.isAvailable ? SpriteMachineHost(http: http) : LocalMachineHost()
