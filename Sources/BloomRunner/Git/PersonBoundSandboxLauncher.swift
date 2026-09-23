@@ -78,6 +78,7 @@ final class PersonBoundSandboxLauncher: @unchecked Sendable {
         environment["BLOOM_PERSON_BOUND_PROVENANCE"] = MachineSandbox.personBoundProvenanceRoot + "/"
             + reservation.id.uuidString.lowercased()
         environment["BLOOM_PERSON_BOUND_WORKTREE"] = worktree
+        environment["BLOOM_PERSON_BOUND_PATH"] = environment["PATH"]
         if let supervisor {
             environment["BLOOM_PERSON_BOUND_SUPERVISOR_PID"] = String(supervisor.pid)
             environment["BLOOM_PERSON_BOUND_SUPERVISOR_START"] = String(supervisor.startTime)
@@ -123,6 +124,31 @@ enum PersonBoundSandboxExec {
     private enum ProtectedOperation {
         case git
         case gh
+    }
+
+    /// What the sandboxed command inherits: everything the Runner handed over, less the launch's
+    /// own `BLOOM_PERSON_BOUND_` internals, with the Runner's PATH put back.
+    ///
+    /// **PATH travels under another name because sudo throws it away.** `secure_path` replaces
+    /// PATH even under `-E`, so an agent's shell started with the system directories only: Bloom's
+    /// `git` and `gh` wrappers, which the Runner puts first, were gone, the real gh in `/.sprite/bin`
+    /// with them, and an agent asked to open a pull request reported "gh is not installed" and a
+    /// push that could not read a username. Services lost PATH the same way and were fixed in the
+    /// sandbox wrapper; this is the same fix for everything the person-bound launcher starts.
+    static func childEnvironment(from environment: [String: String]) -> [String: String] {
+        var childEnvironment = environment
+        let foundationSelfTest = childEnvironment["BLOOM_PERSON_BOUND_FOUNDATION_SELF_TEST"] == "1"
+        let carriedPath = childEnvironment["BLOOM_PERSON_BOUND_PATH"]
+        for key in childEnvironment.keys where key.hasPrefix("BLOOM_PERSON_BOUND_") {
+            childEnvironment.removeValue(forKey: key)
+        }
+        if foundationSelfTest {
+            childEnvironment["BLOOM_PERSON_BOUND_FOUNDATION_SELF_TEST"] = "1"
+        }
+        if let carriedPath, !carriedPath.isEmpty {
+            childEnvironment["PATH"] = carriedPath
+        }
+        return childEnvironment
     }
 
     static func run(_ arguments: [String], environment: [String: String] = ProcessInfo.processInfo.environment) -> Int32 {
@@ -202,14 +228,7 @@ enum PersonBoundSandboxExec {
             let answer: PersonBoundLaunchAnswer? = LocalCredentialClient.exchange(request, over: gate)
             guard answer?.execute == true else { childRefusal("the launch gate did not answer execute for this nonce"); _exit(126) }
 
-            var childEnvironment = environment
-            let foundationSelfTest = childEnvironment["BLOOM_PERSON_BOUND_FOUNDATION_SELF_TEST"] == "1"
-            for key in childEnvironment.keys where key.hasPrefix("BLOOM_PERSON_BOUND_") {
-                childEnvironment.removeValue(forKey: key)
-            }
-            if foundationSelfTest {
-                childEnvironment["BLOOM_PERSON_BOUND_FOUNDATION_SELF_TEST"] = "1"
-            }
+            var childEnvironment = Self.childEnvironment(from: environment)
             // Everything BLOOM_PERSON_BOUND_ is stripped above because it carries the launch
             // nonce and the machine's internals, and none of that belongs in an agent's
             // environment. The worktree is not one of those: it is the directory the agent is
