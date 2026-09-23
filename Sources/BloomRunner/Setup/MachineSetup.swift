@@ -793,11 +793,23 @@ public actor MachineSetup {
     /// `require(vendor/autoload.php): Permission denied`. A script cannot undo this, because it runs
     /// after the script has finished. Files the sandbox user owns are not ours to change and are
     /// skipped, which is what the ignored status is for.
+    ///
+    /// **The group as well as the mode.** bun hard-links a package out of its cache, which lives in
+    /// the machine user's own 0700 directory, so 53,624 files under `node_modules` kept the group
+    /// `sprite` whatever directory they were linked into. Made group writable, they were writable
+    /// by the wrong group, and Vite died with "node_modules/.bin/vite: Permission denied".
     private func shareWorktreeWithTheGroup() async {
         #if canImport(Glibc)
+        await Self.runQuietly("/bin/chgrp", ["-R", MachineSandbox.sharedGroup, layout.worktree])
+        await Self.runQuietly("/bin/chmod", ["-R", "g+rwX", layout.worktree])
+        #endif
+    }
+
+    #if canImport(Glibc)
+    private static func runQuietly(_ executable: String, _ arguments: [String]) async {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/chmod")
-        process.arguments = ["-R", "g+rwX", layout.worktree]
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return }
@@ -807,8 +819,8 @@ public actor MachineSetup {
                 continuation.resume()
             }
         }
-        #endif
     }
+    #endif
 
     /// The command under a group-writable umask, set after any sudo hop because sudo replaces it.
     ///
