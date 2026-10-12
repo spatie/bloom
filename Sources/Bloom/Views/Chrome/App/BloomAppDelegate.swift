@@ -45,6 +45,8 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         TabCycleShortcut.attach(model)
         // A selected passage in the current transcript answers plain R by moving into the reply.
         SelectionToChat.attachReplyShortcut()
+        // Typing with nothing focused goes to the chat composer.
+        TypeToComposer.attach(model)
         // The suppression rule needs to know which workspace the window is showing, and this is
         // the first moment there is a window to ask.
         NotificationService.shared.attach(model)

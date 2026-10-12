@@ -241,6 +241,7 @@ struct ComposerPrompt<Footer: View>: View {
         // and then draw them under every session the window visited afterwards. See
         // `CentrePaneMeasure.soloPane`.
         .task(id: attachmentKey) {
+            TypeToComposer.register(editor, showing: attachmentKey)
             PromptAttachmentStore.shared.load(sessionID: attachmentKey)
             adoptAttachmentsKeptBesideTheDraft()
             applyCaptureDraft()

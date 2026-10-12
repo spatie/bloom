@@ -217,6 +217,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.setAccessibilityLabel(accessibilityLabel)
 
         handle?.textView = textView
+        handle?.coordinator = context.coordinator
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
@@ -231,6 +232,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? ComposerTextView else { return }
         context.coordinator.parent = self
         handle?.textView = textView
+        handle?.coordinator = context.coordinator
         let theme = ColourThemePreference.shared.choice
         if let previous = context.coordinator.lastTheme, previous != theme {
             textView.needsDisplay = true
@@ -520,6 +522,17 @@ struct ComposerTextEditor: NSViewRepresentable {
 @MainActor
 final class ComposerEditorHandle {
     fileprivate weak var textView: ComposerTextView?
+    fileprivate weak var coordinator: ComposerTextEditor.Coordinator?
+
+    /// The binding is set first: the deferred focus report would let a redraw in between read
+    /// "not focused" and take the keyboard back.
+    func takeKeyboard(in window: NSWindow) -> Bool {
+        guard let textView, let coordinator, textView.window === window,
+              !textView.isHiddenOrHasHiddenAncestor else { return false }
+        coordinator.parent.isFocused = true
+        textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+        return window.makeFirstResponder(textView)
+    }
 
     /// Writes files into the draft at `range`, measured in the draft's own units.
     ///
