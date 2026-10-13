@@ -416,11 +416,11 @@ struct DiffView: View {
     }
 
     private var markdownPreviewAction: (() -> Void)? {
-        // A section of the all-files review previews Markdown natively, at a fixed height. An HTML
+        // A section of the all-files review previews Markdown and SVG at a fixed height. An HTML
         // report in a box that size is not a way to read one, so it gets its preview in the file tab.
         let kind = DocumentPreview.kind(path: file.path)
         guard allowsWorktreeActions,
-              kind == .markdown || (kind == .html && embeddedWidth == nil),
+              kind == .markdown || kind == .svg || (kind == .html && embeddedWidth == nil),
               !file.isBinary, file.change != .deleted else {
             return nil
         }
@@ -432,7 +432,7 @@ struct DiffView: View {
 
     @ViewBuilder
     private var fileContent: some View {
-        // The preview renders a Markdown or HTML file by reading it off this Mac, and the links
+        // The preview renders a Markdown, HTML or SVG file by reading it off this Mac, and the links
         // inside it open other files the same way, so it belongs to a worktree. Without one
         // `markdownPreviewAction` is nil as well, so nothing offers a preview that cannot be made.
         if embeddedWidth == nil {
@@ -444,10 +444,18 @@ struct DiffView: View {
                 sourceContent
             }
         } else if showsMarkdownPreview {
-            MarkdownFilePreview(path: fileKey, revision: model.changesGeneration) {
-                showsMarkdownPreview = false
+            if DocumentPreview.kind(path: file.path) == .svg {
+                DocumentPreviewView(
+                    path: fileKey, worktree: model.workspace.path, revision: model.changesGeneration,
+                    openFile: { model.openSource(at: CodeLocation(path: $0)) }
+                )
+                .frame(height: 480)
+            } else {
+                MarkdownFilePreview(path: fileKey, revision: model.changesGeneration) {
+                    showsMarkdownPreview = false
+                }
+                .frame(height: 480)
             }
-            .frame(height: 480)
         } else {
             sourceContent
         }

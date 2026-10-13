@@ -59,9 +59,12 @@ final class DocumentPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
                 let document = try MarkdownFileDocument.read(path: file.path, draft: draft)
                 let page = MarkdownPreviewPage.html(for: document, title: file.lastPathComponent)
                 return Answer(status: 200, type: type, body: Data(page.utf8))
-            case .html where draft != nil:
-                return Answer(status: 200, type: type, body: Data((draft ?? "").utf8))
-            case .html, nil:
+            case .html, .svg:
+                if let draft {
+                    return Answer(status: 200, type: type, body: Data(draft.utf8))
+                }
+                return Answer(status: 200, type: type, body: try Data(contentsOf: file, options: .mappedIfSafe))
+            case nil:
                 return Answer(status: 200, type: type, body: try Data(contentsOf: file, options: .mappedIfSafe))
             }
         } catch {

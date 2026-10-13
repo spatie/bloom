@@ -126,6 +126,9 @@ struct ReviewPaneView: View {
                 navigationRevision: tab.reviewNavigationRevision
             )
                 .id(model.workspace.id)
+        } else if isPresent, !model.diffScope.isHistorical, DocumentPreview.kind(path: tab.path) == .svg {
+            model.filePane(path: tab.path)
+                .id(tab.path)
         } else if let changed {
             // A path can exist in several workspaces. Include the workspace so switching
             // checkouts cannot reuse another workspace's diff, selection or expanded context.

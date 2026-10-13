@@ -13,13 +13,14 @@ struct DocumentPreviewTests {
         return URL(filePath: root).resolvingSymlinksInPath().path
     }
 
-    @Test("Markdown and HTML have a preview, other files do not")
+    @Test("Markdown, HTML and SVG have a preview, other files do not")
     func kinds() {
         #expect(DocumentPreview.kind(path: "README.md") == .markdown)
         #expect(DocumentPreview.kind(path: "docs/Architecture.HTML") == .html)
         #expect(DocumentPreview.kind(path: "index.htm") == .html)
         #expect(DocumentPreview.kind(path: "main.swift") == nil)
-        #expect(DocumentPreview.kind(path: "logo.svg") == nil)
+        #expect(DocumentPreview.kind(path: "logo.svg") == .svg)
+        #expect(DocumentPreview.kind(path: "public/LOGO.SVG") == .svg)
     }
 
     @Test("a file's address resolves back to the same file, spaces and hashes included")
@@ -81,6 +82,7 @@ struct DocumentPreviewTests {
         #expect(DocumentPreview.contentType(forFile: "plan.md") == "text/html; charset=utf-8")
         #expect(DocumentPreview.contentType(forFile: "app.css") == "text/css; charset=utf-8")
         #expect(DocumentPreview.contentType(forFile: "app.mjs") == "text/javascript; charset=utf-8")
+        #expect(DocumentPreview.contentType(forFile: "logo.svg") == "image/svg+xml; charset=utf-8")
         #expect(DocumentPreview.contentType(forFile: "flow.png") == "image/png")
         #expect(DocumentPreview.contentType(forFile: "blob.unknownextension") == "application/octet-stream")
     }

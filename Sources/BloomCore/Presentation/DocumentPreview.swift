@@ -3,8 +3,8 @@ import Foundation
 import UniformTypeIdentifiers
 #endif
 
-/// A file drawn as the document it describes rather than as its source: Markdown rendered, and an
-/// HTML report run with its styles, its SVG and its scripts.
+/// A file drawn as the document it describes rather than as its source: Markdown rendered, an
+/// HTML report run with its styles and scripts, or an SVG drawn at its native resolution.
 ///
 /// # Why a scheme of its own, and not `file://`
 ///
@@ -24,6 +24,7 @@ public enum DocumentPreview {
     public enum Kind: Sendable, Equatable {
         case markdown
         case html
+        case svg
     }
 
     public static let scheme = "bloom-preview"
@@ -34,6 +35,7 @@ public enum DocumentPreview {
         switch (path as NSString).pathExtension.lowercased() {
         case "md", "markdown", "mdown", "mkd": .markdown
         case "html", "htm", "xhtml": .html
+        case "svg": .svg
         default: nil
         }
     }
@@ -82,12 +84,15 @@ public enum DocumentPreview {
     /// no `<meta charset>` in it and every accented letter comes out as two.
     public static func contentType(forFile path: String) -> String {
         let fileExtension = (path as NSString).pathExtension.lowercased()
-        if kind(path: path) != nil { return "text/html; charset=utf-8" }
+        switch kind(path: path) {
+        case .markdown, .html: return "text/html; charset=utf-8"
+        case .svg: return "image/svg+xml; charset=utf-8"
+        case nil: break
+        }
         switch fileExtension {
         case "js", "mjs", "cjs": return "text/javascript; charset=utf-8"
         case "json", "map": return "application/json; charset=utf-8"
         case "css": return "text/css; charset=utf-8"
-        case "svg": return "image/svg+xml; charset=utf-8"
         case "wasm": return "application/wasm"
         default: break
         }

@@ -14,10 +14,8 @@ import Foundation
 public enum LocalPage {
     /// The extensions a browser opening is offered for.
     ///
-    /// `html` and `htm` are the request. `svg` is in because the review pane is the reason it
-    /// would be wanted: `FileMediaView.isMedia` refuses an SVG on purpose, since it conforms to
-    /// `.sourceCode` as well as to `.image`, so the pane draws its XML and a browser is the only
-    /// place in this window that draws the picture.
+    /// `html` and `htm` are the request. `svg` also has a browser opening, for inspecting the
+    /// image as a standalone page beyond the review pane's own preview.
     ///
     /// Not `md`, and not `markdown`: Bloom has a Markdown viewer of its own, and WebKit handed a
     /// `.md` file shows the asterisks. Not `pdf`, and none of the images or the video: the review
