@@ -16,6 +16,9 @@ enum TypeToComposer {
         self.model = model
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // File review handles Option+V after local monitors run. Moving focus first would
+            // make its shortcut think somebody is typing and leave the file unmarked.
+            if ViewedShortcutHostView.isViewedShortcut(event) { return event }
             let characters = event.characters?.isEmpty == false
                 ? event.characters : event.charactersIgnoringModifiers
             let modifiers = modifiers(of: event)
