@@ -74,6 +74,10 @@ struct InspectorToolbar: View {
 
             }
 
+            // Keyed by repository so its `@AppStorage` key follows a switch of workspace.
+            PreferredEditorButton(workspace: model.workspace)
+                .id(model.workspace.repoID)
+
             // No Refresh. The list keeps itself current: `AppModel`'s poll re-reads the selected
             // workspace's changed files while the app is frontmost, and a finished turn re-reads
             // them at once. A button asking the reader to do the app's job was only ever covering
