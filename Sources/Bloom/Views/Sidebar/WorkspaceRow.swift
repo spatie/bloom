@@ -173,7 +173,7 @@ struct WorkspaceRow: View {
                             .monospacedDigit()
                             .labelStyle(SubagentFailureLabelStyle())
                             .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.negative)
-                            .opacity(isHovered ? 0 : 1)
+                            .opacity(controlsShown ? 0 : 1)
                             .accessibilityLabel(subagentFailures == 1
                                 ? "1 subagent failed this turn"
                                 : "\(subagentFailures) subagents failed this turn")
@@ -181,19 +181,19 @@ struct WorkspaceRow: View {
 
                     if subagentCount > 0 {
                         subagentCountButton
-                            .opacity(isHovered ? 0 : 1)
+                            .opacity(controlsShown ? 0 : 1)
                             // The one yielding thing here that is a control, and an invisible
                             // control still takes clicks: hovering a row put a "Show subagents"
                             // hit target nobody could see just inboard of the archive box, so
                             // reaching for the archive occasionally folded a fan-out instead. The
                             // counts and the tile beside it need no such line, because a label
                             // takes nothing either way.
-                            .allowsHitTesting(!isHovered)
+                            .allowsHitTesting(!controlsShown)
                     }
 
                     // In the layout, not overlaid, so a name shares the row with real counts
-                    // rather than running underneath them. Hidden while the pointer is here,
-                    // which is when the controls draw in their place.
+                    // rather than running underneath them. Hidden whenever the archive control
+                    // is shown, including while its confirmation stays open after hover ends.
                     //
                     // **Quiet, where it used to be green and red.** Two coloured numbers on every
                     // row of a dozen made the diff the loudest thing in a pane whose job is to say
@@ -206,7 +206,7 @@ struct WorkspaceRow: View {
                             compact: true,
                             quiet: true
                         )
-                        .opacity(isHovered ? 0 : 1)
+                        .opacity(controlsShown ? 0 : 1)
                     }
 
                     if let trailingRepo {
@@ -217,7 +217,7 @@ struct WorkspaceRow: View {
                             // sat three points inboard of the archive box below it, which is the
                             // near miss the owner photographed.
                             .frame(width: SidebarMetrics.rowButton)
-                            .opacity(isHovered ? 0 : 1)
+                            .opacity(controlsShown ? 0 : 1)
                             .accessibilityHidden(true)
                     }
                 }
