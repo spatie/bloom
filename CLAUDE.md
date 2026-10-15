@@ -31,6 +31,10 @@ line as the core.
 `Sources/bloom-sleep-helper` is a separate privileged helper for Keep Awake. It does not
 import a UI framework. `BloomCoreTests` exercises the core module.
 
+`Sources/bloom-mail-server` supervises the bundled test inbox. Its stdin pipe is held by Bloom;
+EOF stops the server after a clean quit or crash. `Tools/mailpit-binary.sh` verifies the pinned
+release archive before `Tools/build.sh` puts the binary and licence into the signed app bundle.
+
 `make lint` holds that line for both, and it looks for the framework rather than for a literal,
 because `import Cocoa` re-exports the whole of AppKit and `import class AppKit.NSView` names
 AppKit without containing the words next to each other. SwiftTerm and Sparkle need no rule: only
@@ -238,6 +242,7 @@ in `Tools/house-rules.sh` is back to the three helper types it was meant to hold
     Git/            git itself, and everything read out of a diff
     GitHub/         gh, pull requests, checks
     Workspace/      creating, starting, archiving, restoring, and a project's own settings
+    Mail/           Mailpit: its API, the app-wide mailbox, and connection state
     Transcript/     what a turn is made of: rows, tools, subagents, attachments, prompts
     Persistence/    Store, SQLite, the settings file, the old app's leftovers
     Model/          the row types, the typed ids, and the lifecycle rules over them
@@ -263,11 +268,16 @@ directory per region of the window (`Sidebar`, `Center`, `Inspector`, `Home`, `T
 two that outgrew a single directory are split by what they are for rather than by what they are:
 `Center/Composer`, `Center/Panes`, `Center/Attachments`, `Center/Browser`; `Chrome/Window`,
 `Chrome/Settings`, `Chrome/MenuBar`, `Chrome/App`, `Chrome/Feedback`, `Chrome/Notices`.
+`Incoming mails` is an app-wide destination opened from the sidebar footer. Its list and reader
+share one connection to Mailpit, so they live together rather than under workspace panes. By
+default Bloom starts the bundled server on loopback when the feature is enabled. Dev uses separate
+ports and application data. The SMTP port can be changed in Settings; the API port stays internal.
 
 Four directories sit beside `Views/` and are not panes, because none of them is drawn in one
 place. `Design/` is the theme and the snapshot galleries, `State/` is `AppModel` with its
-extensions and the two models under it, `Intents/` is App Intents, Shortcuts and the Services menu,
-and `System/` is the app target's half of talking to this Mac.
+extensions, the models under it and `Mailbox`, the app's one connection to Mailpit, `Intents/` is
+App Intents, Shortcuts and the Services menu, and `System/` is the app target's half of talking to
+this Mac.
 
 A directory with one file in it is not a subject. Leave it at the folder's root and give it one
 when a second arrives. `Tools/house-rules.sh` names about twenty of these paths in its allow-lists,

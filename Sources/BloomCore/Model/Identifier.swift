@@ -149,3 +149,13 @@ public struct WorkspaceDoneWatchID: Identifier {
     public let rawValue: String
     public init(_ rawValue: String) { self.rawValue = rawValue }
 }
+
+/// One message in a Mailpit mailbox, as Mailpit names it.
+///
+/// Not a Bloom row: Mailpit assigns it, Bloom never makes one, and it means nothing once the
+/// mailbox is cleared. It has a type anyway, because the API and the selected message both use it;
+/// a bare string could be mistaken for a workspace id or an attachment part.
+public struct MailpitMessageID: Identifier {
+    public let rawValue: String
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}

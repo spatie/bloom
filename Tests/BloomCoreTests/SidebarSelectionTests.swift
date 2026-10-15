@@ -120,7 +120,7 @@ struct SidebarSelectionTests {
 
         // `.archived` is the deliberate nil: its worktree is gone, so everything that hangs off
         // this hides or greys itself, which is the whole reason it is not a flag on `.workspace`.
-        let carryingNone: [SidebarSelection] = [.home, .archived(workspace)]
+        let carryingNone: [SidebarSelection] = [.home, .mail, .archived(workspace)]
         #expect(carryingNone.allSatisfy { $0.workspaceID == nil })
         #expect(SidebarSelection.archived(workspace).archivedWorkspaceID == workspace)
     }

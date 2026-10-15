@@ -31,6 +31,9 @@ struct InspectorFilterField: View {
     /// inside its own field editor and nothing outside sees the event. `MenuSearchField` is the
     /// way out if the arrows are ever wanted here too, and its head is where that is written up.
     var onReturn: @MainActor () -> Void
+    /// The words in the empty field, and what VoiceOver calls it. The two file tabs take the
+    /// default; Mail searches rather than filters, and says so.
+    var placeholder = "Filter files"
 
     @FocusState private var isFocused: Bool
 
@@ -43,7 +46,7 @@ struct InspectorFilterField: View {
                 .frame(width: InspectorLayout.glyphWidth, alignment: .leading)
                 .accessibilityHidden(true)
 
-            TextField("Filter files", text: $query)
+            TextField(placeholder, text: $query)
                 .textFieldStyle(.plain)
                 .font(Typo.body)
                 .focused($isFocused)
@@ -52,7 +55,7 @@ struct InspectorFilterField: View {
                 // Read here rather than by the pane around it, because the field is what holds the
                 // keyboard at the moment Escape is pressed.
                 .onExitCommand(perform: onEscape)
-                .accessibilityLabel("Filter files")
+                .accessibilityLabel(placeholder)
 
             if !query.isEmpty {
                 Button(action: clear) {

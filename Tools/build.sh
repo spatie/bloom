@@ -34,6 +34,7 @@ swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product Bloom
 swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-bridge
 # The privileged daemon that holds the lid, for the same reason: one product per invocation.
 swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-sleep-helper
+swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-mail-server
 
 BIN_DIR="$(swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --show-bin-path)"
 APP="$BIN_DIR/Bloom.app"
@@ -49,6 +50,11 @@ cp "$BIN_DIR/bloom-bridge" "$APP/Contents/MacOS/bloom-bridge"
 # `SMAppService.daemon(plistName:)` reads this one path and no other, and the plist's BundleProgram
 # points back at the executable beside it. Both are signed by the pass at the foot of this file.
 cp "$BIN_DIR/bloom-sleep-helper" "$APP/Contents/MacOS/bloom-sleep-helper"
+cp "$BIN_DIR/bloom-mail-server" "$APP/Contents/MacOS/bloom-mail-server"
+# An app-owned SMTP inbox. The pinned release and its licence are part of the signed bundle, so
+# a user enabling Incoming mails never needs a package manager or a runtime download.
+mailpit_binary="$("${0:A:h}/mailpit-binary.sh")"
+cp "$mailpit_binary" "$APP/Contents/MacOS/mailpit"
 mkdir -p "$APP/Contents/Library/LaunchDaemons"
 cp Resources/be.spatie.bloom.sleep.plist "$APP/Contents/Library/LaunchDaemons/"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
@@ -196,7 +202,7 @@ embed_sparkle() {
 
 embed_sparkle
 
-zsh Tools/package-licences.sh "$APP" "$(spm_scratch_containing checkouts)/checkouts"
+zsh Tools/package-licences.sh "$APP" "$(spm_scratch_containing checkouts)/checkouts" "${mailpit_binary:h}/LICENSE"
 
 # The accent Bloom hands to AppKit, checked against the one Bloom draws with itself.
 #

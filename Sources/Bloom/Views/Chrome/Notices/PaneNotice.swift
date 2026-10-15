@@ -1,14 +1,12 @@
 import SwiftUI
 
-/// What a press on the pull request strip left to say.
+/// What an inline pane action left to say, either in the inspector or in Mail.
 ///
-/// A value on `WorkspaceModel` rather than `@State` inside the strip, because the strip and the
-/// notice are no longer in the same SwiftUI root: the strip is a title bar accessory and the
-/// notice is the first row of the inspector column, and a title bar accessory is hosted in a
-/// window of its own. The one thing they have to agree about is this.
-struct PullRequestNotice: Identifiable, Equatable {
+/// The pull request strip's notice lives on `WorkspaceModel`: the strip is a title bar accessory
+/// and the notice is in the inspector, so the two views do not share SwiftUI state.
+struct PaneNoticeContent: Identifiable, Equatable {
     let id = UUID()
-    var tone: InspectorNotice.Tone
+    var tone: PaneNotice.Tone
     var title: String
     var message: String
     /// The command and its output, for someone who wants to see it. Nil when there is nothing
@@ -16,8 +14,7 @@ struct PullRequestNotice: Identifiable, Equatable {
     var details: String?
 }
 
-/// Something the inspector has to say about what a button just did, said in the column rather than
-/// in a modal.
+/// Something a pane has to say about what an action did, in the pane rather than a modal.
 ///
 /// A merge that mostly worked must not stop the app. The alert it replaces was titled "Something
 /// went wrong" and carried a shell command and a line of raw git output as its message, which is
@@ -25,10 +22,9 @@ struct PullRequestNotice: Identifiable, Equatable {
 /// it put a command line in front of someone who had pressed a button.
 ///
 /// So the sentence is the message, and the command that produced it is behind a disclosure for the
-/// one reader in twenty who wants it. Nothing here is ever a token: `gh` holds credentials and
-/// never prints them, and the only text that reaches `details` is a command line and the stderr of
-/// git or gh.
-struct InspectorNotice: View {
+/// one reader in twenty who wants it. The pull request details are a command line and git or gh
+/// stderr. Mail notices carry no details.
+struct PaneNotice: View {
     enum Tone {
         /// It worked, with something worth knowing.
         case info
@@ -50,7 +46,7 @@ struct InspectorNotice: View {
         }
     }
 
-    let notice: PullRequestNotice
+    let notice: PaneNoticeContent
     let onDismiss: () -> Void
 
     @State private var isShowingDetails = false

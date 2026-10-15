@@ -501,7 +501,18 @@ final class CenterTabStore {
     /// answers with none: most workspaces have never opened a terminal or a browser.
     private static func restore(workspaceID: WorkspaceID) -> [CenterTab]? {
         guard let data = UserDefaults.standard.data(forKey: key(workspaceID)) else { return [] }
-        return try? JSONDecoder().decode([CenterTab].self, from: data)
+        if let tabs = try? JSONDecoder().decode([CenterTab].self, from: data) { return tabs }
+
+        // Earlier builds of this PR stored a mail tab beside terminal and browser tabs. Mail is
+        // now app-wide. Discard only those old rows so their unknown kind does not make decoding
+        // fail for every other tab in the workspace.
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let rows = object as? [[String: Any]],
+              rows.contains(where: { $0["kind"] as? String == "mail" }),
+              let kept = try? JSONSerialization.data(withJSONObject: rows.filter {
+                  $0["kind"] as? String != "mail"
+              }) else { return nil }
+        return try? JSONDecoder().decode([CenterTab].self, from: kept)
     }
 
     /// "Terminal", then "Terminal 2", by the same rule a chat is named by.

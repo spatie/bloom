@@ -14,11 +14,12 @@ cp LICENSE.md "$fixture/checkouts/Sparkle/LICENSE"
 cp LICENSE.md "$fixture/checkouts/swift-argument-parser/LICENSE.txt"
 cp LICENSE.md "$fixture/checkouts/flare-client-swift/LICENSE.md"
 cp LICENSE.md "$fixture/checkouts/plcrashreporter/LICENSE"
-zsh Tools/package-licences.sh "$fixture/Bloom.app" "$fixture/checkouts"
-for notice in Bloom SwiftTerm Sparkle SwiftArgumentParser Flare PLCrashReporter MarkdownEngine; do
+cp LICENSE.md "$fixture/mailpit-LICENSE"
+zsh Tools/package-licences.sh "$fixture/Bloom.app" "$fixture/checkouts" "$fixture/mailpit-LICENSE"
+for notice in Bloom SwiftTerm Sparkle SwiftArgumentParser Flare PLCrashReporter MarkdownEngine Mailpit; do
   cmp LICENSE.md "$fixture/Bloom.app/Contents/Resources/Licences/$notice.txt"
 done
-if zsh Tools/package-licences.sh "$fixture/Incomplete.app" "$fixture/missing" >/dev/null 2>&1; then
+if zsh Tools/package-licences.sh "$fixture/Incomplete.app" "$fixture/missing" "$fixture/mailpit-LICENSE" >/dev/null 2>&1; then
   echo "Packaging accepted missing dependency notices" >&2
   exit 1
 fi

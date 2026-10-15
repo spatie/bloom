@@ -28,7 +28,7 @@ struct InspectorView: View {
             // to a button a few points above it, and an answer that appears under the tabs reads
             // as something about the list.
             if let notice = model.pullRequestNotice {
-                InspectorNotice(notice: notice) { model.pullRequestNotice = nil }
+                PaneNotice(notice: notice) { model.pullRequestNotice = nil }
                 Hairline()
             }
             if let failure = model.pullRequestRefreshFailure {

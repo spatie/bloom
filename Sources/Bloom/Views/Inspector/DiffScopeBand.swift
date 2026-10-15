@@ -12,7 +12,7 @@ import BloomCore
 /// not there, and has room to say what a filter chip can only abbreviate.
 ///
 /// It is drawn under the tabs rather than over them because it is a fact about the list beneath
-/// it. `InspectorNotice` sits above the tab row for the opposite reason: it is the answer to a
+/// it. `PaneNotice` sits above the tab row for the opposite reason: it is the answer to a
 /// button in the strip above.
 /// Nothing is read off a model here on purpose. Every one of its four inputs is a decision made
 /// in the core and tested there, which is what lets this page be photographed in each of its

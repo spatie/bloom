@@ -5,6 +5,7 @@ set -euo pipefail
 
 bundle="${1:?app bundle required}"
 checkouts="${2:?SwiftPM checkouts directory required}"
+mailpit_notice="${3:?Mailpit licence required}"
 source_root="$(cd "$(dirname "$0")/.." && pwd)"
 notices="$bundle/Contents/Resources/Licences"
 mkdir -p "$notices"
@@ -22,3 +23,4 @@ copy_notice "$checkouts/swift-argument-parser/LICENSE.txt" SwiftArgumentParser.t
 copy_notice "$checkouts/flare-client-swift/LICENSE.md" Flare.txt
 copy_notice "$checkouts/plcrashreporter/LICENSE" PLCrashReporter.txt
 copy_notice "$checkouts/swift-markdown-engine/LICENSE" MarkdownEngine.txt
+copy_notice "$mailpit_notice" Mailpit.txt

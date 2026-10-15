@@ -38,7 +38,7 @@ struct PullRequestBar: View {
     @State private var isVisible = false
 
     /// Where an answer goes. Set here, drawn in the column: see the note on the type.
-    private var report: PullRequestNotice? {
+    private var report: PaneNoticeContent? {
         get { model.pullRequestNotice }
         nonmutating set { model.pullRequestNotice = newValue }
     }
@@ -183,19 +183,19 @@ struct PullRequestBar: View {
             switch route {
             case .agent:
                 if let refusal = await model.requestPullRequest() {
-                    report = PullRequestNotice(
+                    report = PaneNoticeContent(
                         tone: .info, title: "Nothing was sent", message: refusal
                     )
                 }
             case .direct:
                 do {
                     let created = try await model.createPullRequestDirectly()
-                    report = PullRequestNotice(
+                    report = PaneNoticeContent(
                         tone: .info, title: "Pull request created",
                         message: "Opened #\(created.number) on GitHub."
                     )
                 } catch {
-                    report = PullRequestNotice(
+                    report = PaneNoticeContent(
                         tone: .failure, title: "Could not create the pull request",
                         message: String(describing: error)
                     )
@@ -214,7 +214,7 @@ struct PullRequestBar: View {
             do {
                 try await model.markReadyForReview(pullRequest)
             } catch {
-                report = PullRequestNotice(
+                report = PaneNoticeContent(
                     tone: .failure, title: "Could not mark ready for review",
                     message: String(describing: error)
                 )
@@ -234,7 +234,7 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             if let refusal = await model.requestPush() {
-                report = PullRequestNotice(
+                report = PaneNoticeContent(
                     tone: .info, title: "Nothing was sent", message: refusal
                 )
             }
@@ -259,7 +259,7 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             if let refusal = await model.requestFixConflicts(pullRequest) {
-                report = PullRequestNotice(
+                report = PaneNoticeContent(
                     tone: .info, title: "Nothing was sent", message: refusal
                 )
             }
@@ -286,11 +286,11 @@ struct PullRequestBar: View {
             case .continued:
                 break
             case .refused(let refusal):
-                report = PullRequestNotice(
+                report = PaneNoticeContent(
                     tone: .info, title: "Nothing was changed", message: refusal.sentence
                 )
             case .failed(let reason):
-                report = PullRequestNotice(
+                report = PaneNoticeContent(
                     tone: .failure,
                     title: "Could not continue",
                     // The reassurance used to be appended here, which read as a contradiction
@@ -335,7 +335,7 @@ struct PullRequestBar: View {
             switch execution {
             case .agent:
                 if let refusal = await model.requestMerge(pullRequest, method: method, squashMessage: squashMessage) {
-                    report = PullRequestNotice(
+                    report = PaneNoticeContent(
                         tone: .info, title: "Nothing was sent", message: refusal
                     )
                 }
@@ -353,13 +353,13 @@ struct PullRequestBar: View {
                     case .acceptedUnverified:
                         message = "gh accepted the command, but Bloom could not verify #\(pullRequest.number)'s final status."
                     }
-                    report = PullRequestNotice(
+                    report = PaneNoticeContent(
                         tone: .info,
                         title: outcome == .merged ? "Merged on GitHub" : "GitHub accepted the merge",
                         message: message
                     )
                 } catch {
-                    report = PullRequestNotice(
+                    report = PaneNoticeContent(
                         tone: .failure, title: "Could not merge on GitHub",
                         message: String(describing: error)
                     )

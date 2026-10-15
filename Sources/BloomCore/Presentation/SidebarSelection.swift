@@ -13,6 +13,8 @@ import Foundation
 /// still costs, is on that scope's own rows. See `HomeScope.showsFootprints`.
 public enum SidebarSelection: Hashable, Sendable {
     case home
+    /// The one Mailpit inbox for the app, independent of any workspace.
+    case mail
     case workspace(WorkspaceID)
     /// A saved conversation whose session has no project or worktree.
     case conversation(SessionID)
@@ -88,7 +90,7 @@ public enum SidebarSelection: Hashable, Sendable {
     public var workspaceID: WorkspaceID? {
         switch self {
         case .workspace(let id), .subagent(let id, _), .subagentCall(let id, _), .crew(let id, _): id
-        case .home, .archived, .conversation, .archivedConversation: nil
+        case .home, .mail, .archived, .conversation, .archivedConversation: nil
         }
     }
 

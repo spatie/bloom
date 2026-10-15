@@ -30,6 +30,7 @@ struct WindowTitle: ViewModifier {
     @State private var window: NSWindow?
 
     private var title: String {
+        if app.selection == .mail { return "Incoming mails" }
         if let workspace = app.selectedWorkspace { return workspace.name }
         if case .conversation(let id) = app.selection,
            let conversation = app.ask.sessions.first(where: { $0.id == id }) {

@@ -2,7 +2,7 @@ import SwiftUI
 import BloomCore
 
 /// The strip pinned to the bottom of the sidebar: a transient note at the leading edge, then
-/// Archive (`SidebarDock`) and filter together at the trailing edge.
+/// the app-wide destinations (`SidebarDock`) and filter at the trailing edge.
 ///
 /// The filter lives down here rather than in a header, which is where Xcode and Finder put the
 /// controls that narrow a source list.

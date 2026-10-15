@@ -227,7 +227,7 @@ final class WorkspaceModel {
     /// in the title bar now. A title bar accessory is laid out from a frame set by hand, one row
     /// tall, so a notice added under the strip was drawn into a band with no room for it and cut
     /// off mid sentence. See `TitleBarStrip` and `InspectorView`.
-    var pullRequestNotice: PullRequestNotice?
+    var pullRequestNotice: PaneNoticeContent?
     /// The branch this workspace was carried on to when its pull request merged, while the strip
     /// is still drawing that branch and nothing has been committed to it.
     ///

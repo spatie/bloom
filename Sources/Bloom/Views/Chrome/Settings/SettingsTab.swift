@@ -13,6 +13,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
     case browserAccess
     case passwords
     case commandLine
+    case mail
 
     var title: String {
         switch self {
@@ -29,6 +30,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .browserAccess: "Browser Access"
         case .passwords: "Passwords"
         case .commandLine: "Command Line"
+        case .mail: "Incoming mails"
         }
     }
 
@@ -47,6 +49,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .browserAccess: "network"
         case .passwords: "key"
         case .commandLine: "link"
+        case .mail: "envelope"
         }
     }
 }

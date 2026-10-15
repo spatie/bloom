@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "Bloom", targets: ["Bloom"]),
         .executable(name: "bloom-bridge", targets: ["bloom-bridge"]),
         .executable(name: "bloom-sleep-helper", targets: ["bloom-sleep-helper"]),
+        .executable(name: "bloom-mail-server", targets: ["bloom-mail-server"]),
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
@@ -40,6 +41,11 @@ let package = Package(
         .executableTarget(
             name: "bloom-sleep-helper",
             path: "Sources/bloom-sleep-helper",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "bloom-mail-server",
+            path: "Sources/bloom-mail-server",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
