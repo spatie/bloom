@@ -58,7 +58,7 @@ struct MailReadToolTests {
         let fixture = MailFixture()
         let store = try makeTestStore("mail-read-parts")
         let tool = MailReadTool(client: { fixture.client })
-        let first = await tool.call(request("mail_read", ["id": .string("m1")]), as: .workspace, store: store)
+        let first = await tool.call(request("mail_read", ["id": .string("m1")]), as: workspaceIdentity, store: store)
         #expect(!first.isError)
         let firstFields = parsed(first)
         #expect(firstFields["subject"] == .string("Welcome"))
@@ -74,14 +74,14 @@ struct MailReadToolTests {
 
         let rest = await tool.call(
             request("mail_read", ["id": .string("m1"), "offset": .integer(20_000)]),
-            as: .workspace, store: store
+            as: workspaceIdentity, store: store
         )
         #expect(parsed(rest)["body"] == .string("AAAAAAAAAA"))
         #expect(parsed(rest)["next_offset"] == .null)
 
         let html = await tool.call(
             request("mail_read", ["id": .string("m1"), "part": .string("html")]),
-            as: .workspace, store: store
+            as: workspaceIdentity, store: store
         )
         #expect(parsed(html)["body"] == .string("<p>Welcome</p>"))
     }
@@ -104,6 +104,10 @@ struct MailReadToolTests {
 
     private func request(_ method: String, _ params: [String: JSONValue]) -> MCPRequest {
         MCPRequest(id: .integer(1), method: method, params: .object(params))
+    }
+
+    private var workspaceIdentity: BridgeIdentity {
+        BridgeIdentity(sessionID: SessionID("mail-reader"), workspaceID: WorkspaceID("mail-workspace"), role: .workspace)
     }
 
     private func parsed(_ result: BridgeToolResult) -> [String: JSONValue] {
