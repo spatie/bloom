@@ -20,8 +20,7 @@ public struct ProjectSetupGuideTool: BridgeToolHandling {
         let defaults = UserDefaults.standard
         let port = defaults.object(forKey: MailpitSettings.smtpPortKey) as? Int
             ?? MailpitSettings.bundledPorts(forBundleIdentifier: Bundle.main.bundleIdentifier).smtp
-        let enabled = defaults.object(forKey: MailpitSettings.enabledKey) as? Bool
-            ?? MailpitSettings.isOnByDefault
+        let enabled = MailpitSettings.isEnabled(in: defaults)
         return MailSettings(isEnabled: enabled, smtpPort: port)
     }) {
         self.mailSettings = mailSettings

@@ -32,8 +32,8 @@ struct ProjectSetupGuideToolTests {
 
     @Test("an off inbox is called out before an agent configures the project")
     func disabledMail() {
-        let guide = ProjectSetupGuideTool.guide(mail: .init(isEnabled: false, smtpPort: 1026))
+        let guide = ProjectSetupGuideTool.guide(mail: .init(isEnabled: false, smtpPort: 2256))
         #expect(guide.contains("Incoming mails is off"))
-        #expect(guide.contains("port 1026"))
+        #expect(guide.contains("port 2256"))
     }
 }

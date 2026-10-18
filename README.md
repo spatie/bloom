@@ -49,12 +49,12 @@ for the full list.
 
 ### Incoming mails
 
-In **Settings > Incoming mails**, enable the built-in inbox. Point your local app's SMTP host to
-`127.0.0.1` and port to `1025`, with no encryption or authentication. Bloom Dev uses port `1026` so
+The built-in inbox is enabled by default. Point your local app's SMTP host to
+`127.0.0.1` and port to `2255`, with no encryption or authentication. Bloom Dev uses port `2256` so
 it can run beside the regular app. The inbox runs while Bloom is open and keeps its messages in
-Bloom's application data between launches. You can change the SMTP port in Settings. The sidebar
-footer opens the message list. Agents running in Bloom can use its `mail_send` bridge tool to put
-plain text test messages in the same inbox, including from projects with no mail setup.
+Bloom's application data between launches. You can turn it off or change the SMTP port in Settings.
+The sidebar footer opens the message list. Agents running in Bloom can use its `mail_send` bridge
+tool to put plain text test messages in the same inbox, including from projects with no mail setup.
 
 ### Browser access (alpha)
 

@@ -22,8 +22,8 @@ public enum MailpitSettings {
     /// An unbundled run is treated as development for the same reason.
     public static func bundledPorts(forBundleIdentifier identifier: String?) -> Ports {
         identifier == Store.primaryBundleIdentifier
-            ? Ports(smtp: 1025, api: 8025)
-            : Ports(smtp: 1026, api: 8026)
+            ? Ports(smtp: 2255, api: 8025)
+            : Ports(smtp: 2256, api: 8026)
     }
 
     public static func bundledAddress(forBundleIdentifier identifier: String?) -> String {
@@ -40,7 +40,11 @@ public enum MailpitSettings {
         (1024...65535).contains(port) && port != apiPort
     }
 
-    /// Off until somebody switches it on in Settings > Incoming mails. The bundled server should
-    /// not open an SMTP port, or add a sidebar destination, without that choice.
-    public static let isOnByDefault = false
+    /// A copy without a saved choice can receive test mail immediately. An explicit Off choice
+    /// stays in UserDefaults and still prevents the server from opening a port.
+    public static let isOnByDefault = true
+
+    public static func isEnabled(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: enabledKey) as? Bool ?? isOnByDefault
+    }
 }

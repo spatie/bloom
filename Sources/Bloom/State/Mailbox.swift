@@ -482,7 +482,7 @@ final class Mailbox {
     }
 
     private static var storedEnabled: Bool {
-        UserDefaults.standard.object(forKey: MailpitSettings.enabledKey) as? Bool ?? MailpitSettings.isOnByDefault
+        MailpitSettings.isEnabled(in: .standard)
     }
 
     private static var storedSMTPPort: Int {

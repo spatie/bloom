@@ -74,24 +74,35 @@ private func page(_ ids: [String], start: Int = 0, matching: Int? = nil, unread:
     )
 }
 
-// MARK: - Bundled ports
+// MARK: - Bundled settings
 
-@Suite("Bundled mail ports")
+@Suite("Bundled mail settings")
 struct BundledMailPortTests {
+    @Test("incoming mails starts enabled but honours a saved Off choice")
+    func enabledSetting() throws {
+        let domain = "BundledMailPortTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+
+        #expect(MailpitSettings.isEnabled(in: defaults))
+        defaults.set(false, forKey: MailpitSettings.enabledKey)
+        #expect(!MailpitSettings.isEnabled(in: defaults))
+    }
+
     @Test("the bundled server keeps production and development ports separate")
     func bundledPorts() {
         #expect(MailpitSettings.bundledPorts(forBundleIdentifier: Store.primaryBundleIdentifier)
-            == .init(smtp: 1025, api: 8025))
+            == .init(smtp: 2255, api: 8025))
         #expect(MailpitSettings.bundledPorts(forBundleIdentifier: Store.devBundleIdentifier)
-            == .init(smtp: 1026, api: 8026))
+            == .init(smtp: 2256, api: 8026))
         #expect(MailpitSettings.bundledPorts(forBundleIdentifier: nil)
-            == .init(smtp: 1026, api: 8026))
+            == .init(smtp: 2256, api: 8026))
         #expect(MailpitSettings.bundledAddress(forBundleIdentifier: Store.devBundleIdentifier)
             == "http://127.0.0.1:8026")
     }
 
     @Test("SMTP ports must be unprivileged, distinct from the API, and no larger than 65535", arguments: [
-        (0, false), (1023, false), (1024, true), (1026, true),
+        (0, false), (1023, false), (1024, true), (2255, true), (2256, true),
         (8026, false), (65535, true), (65536, false),
     ])
     func validates(_ port: Int, _ expected: Bool) {
