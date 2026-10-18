@@ -328,8 +328,10 @@ struct TranscriptListView: View {
 
     /// The row the reader has asked for by name, if there is one: a search result, or the unread
     /// mark a session opens on. A scroll can only find a row the table is drawing, so the window
-    /// is opened wide enough to hold it whatever the tail said.
+    /// is opened wide enough to hold it whatever the tail said. Once positioned, this target must
+    /// stop widening the window: a new unread row can otherwise undo a jump to the live end.
     private var mustReachIndex: Int? {
+        guard !didPosition else { return nil }
         let seqs = transcript.rows.lazy.map(\.seq)
         if let target = app.pendingTranscriptTarget,
            target.workspaceID == transcript.workspace?.id {
@@ -1636,12 +1638,13 @@ struct TranscriptListView: View {
     /// of leaving a session and coming back to it, and otherwise on its live end.
     private func position() {
         guard !transcript.rows.isEmpty, !didPosition else { return }
+        let openingWindow = drawnWindow
         didPosition = true
 
         // The window this opening is resolved against, pinned before anything below can take the
         // reason for it away. `drawnWindow` moves to hold a search result or an unread mark, and
         // both of those are gone moments from now.
-        drawn = Drawn(session: transcript.session.id, window: drawnWindow, rowCount: transcript.rows.count)
+        drawn = Drawn(session: transcript.session.id, window: openingWindow, rowCount: transcript.rows.count)
         TranscriptDrawn.note(drawn.window.count, session: transcript.session.id)
 
         // A pane coming back to a session it has already drawn is put back where the reader left
