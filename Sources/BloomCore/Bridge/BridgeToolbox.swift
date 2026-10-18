@@ -46,9 +46,8 @@ public struct BridgeToolbox: Sendable {
     /// `ChatCreating`, `ChatClosing`, `ChatRenaming`, `PaneOpening`, `PaneSplitting`, `PaneClosing`, `PaneRenaming`, `PaneListing`,
     /// `BrowserPaneCommanding`, `MediaShowing`, `WorkspaceTabListing`,
     /// `WorkspaceTabSelecting`, `CrewStarting`, `CrewSaying` and `CrewStopping`.
-    /// Four of those are the ones that read: a `WKWebView` is as much a part of the UI graph as a
-    /// tab strip is, so seeing a pane crosses the same line as opening one, and which tab a
-    /// workspace is in is held nowhere but in memory on the main actor.
+    /// The pane and browser readers need the window too: a `WKWebView` is part of the UI graph,
+    /// as is the tab strip. Which tab a workspace is in exists only in memory on the main actor.
     public static let standard = BridgeToolbox(handlers: [
         WhoamiTool(),
         ProjectSetupGuideTool(),
