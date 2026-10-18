@@ -153,6 +153,8 @@ places: the listing, the dispatch and the gate.
 | `whoami` | What this connection is: the workspace and its branch, the worktree path, the project, and whether the workspace was created by the owner or by another agent. From the owner's own client, which copy of Bloom was reached and how much it is holding | ✓ | ✓ |
 | `project_setup_guide` | The supported `.bloom/settings.toml` shape, setup and run scripts, and this copy of Bloom's current local SMTP settings. Read only | ✓ | ✓ |
 | `mail_send` | Send a plain text test email into this copy of Bloom's local Incoming mails inbox, using its current SMTP port. The addresses are labels in a captured message, not internet destinations | ✓ | ✓ |
+| `mail_list` | List and search the app-wide Incoming mails inbox, with counts and paginated message summaries | ✓ | ✓ |
+| `mail_read` | Read a captured message's headers, attachments and paginated text or HTML body by ID. Opening it marks it read | ✓ | ✓ |
 | `project_list` | Every project in the sidebar: name, path, default branch, how many workspaces it has, how many of those have an agent mid turn and how many have one stopped on a question, whether it is still where Bloom recorded it, whether it is hidden | ✓ | ✓ |
 | `project_add` | Register a git repository that **already exists** as a project | ✓ | ✓ |
 | `project_hide` | Take a project out of the sidebar. A view preference and nothing more | | ✓ |
@@ -842,7 +844,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `project_setup_guide`, `mail_send`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `chat_list`, `chat_read`, `chat_create`, `chat_close`, `chat_rename`, `workspace_diff`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop`, `workspace_say`, `project_list`, `workspace_list` | everything else |
+| `whoami`, `project_setup_guide`, `mail_send`, `mail_list`, `mail_read`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `chat_list`, `chat_read`, `chat_create`, `chat_close`, `chat_rename`, `workspace_diff`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop`, `workspace_say`, `project_list`, `workspace_list` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.

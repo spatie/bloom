@@ -36,17 +36,18 @@ public struct BridgeToolbox: Sendable {
     /// where that was answered, and its head says which tools Bloom answers for and why the rest
     /// are not on the list. See `LiveBridgeTests`.
     ///
-    /// `mail_send`, `workspace_start`, `workspace_archive`, `workspace_merge`, `reveal`, the chat mutation tools and the pane and tab tools are the
-    /// exceptions and are added by `AppModel.bridgeToolbox()`, because starting a workspace has to
+    /// `mail_send`, `mail_list`, `mail_read`, `workspace_start`, `workspace_archive`,
+    /// `workspace_merge`, `reveal`, the chat mutation tools and the pane and tab tools are the
+    /// exceptions and are added by `AppModel.bridgeToolbox()`, because the mail tools must reach
+    /// this app's live bundled inbox, and starting a workspace has to
     /// reach the main-actor graph that runs one, asking one to merge has to reach the same path
     /// the Merge button takes, moving the selection is the window's own, and a pane is a thing the
     /// window owns; see `WorkspaceStarting`, `WorkspaceMergeRequesting`, `Revealing`,
     /// `ChatCreating`, `ChatClosing`, `ChatRenaming`, `PaneOpening`, `PaneSplitting`, `PaneClosing`, `PaneRenaming`, `PaneListing`,
     /// `BrowserPaneCommanding`, `MediaShowing`, `WorkspaceTabListing`,
     /// `WorkspaceTabSelecting`, `CrewStarting`, `CrewSaying` and `CrewStopping`.
-    /// Four of those are the ones that read: a `WKWebView` is as much a part of the UI graph as a
-    /// tab strip is, so seeing a pane crosses the same line as opening one, and which tab a
-    /// workspace is in is held nowhere but in memory on the main actor.
+    /// The pane and browser readers need the window too: a `WKWebView` is part of the UI graph,
+    /// as is the tab strip. Which tab a workspace is in exists only in memory on the main actor.
     public static let standard = BridgeToolbox(handlers: [
         WhoamiTool(),
         ProjectSetupGuideTool(),

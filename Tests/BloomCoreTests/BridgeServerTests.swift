@@ -129,12 +129,13 @@ struct BridgeServerTests {
         // again: a crew is rows in `sessions` joined by `parent_session_id`, so listing one
         // reaches nothing but the store, while starting, saying and stopping all need the window.
         // `workspace_diff` reads a worktree through git, which needs no window either.
-        // `project_list` is here because a workspace agent may name another project to
+        // `project_setup_guide` reads the app's setup guidance without a window. `project_list`
+        // is here because a workspace agent may name another project to
         // `workspace_start`, and this is how it learns the names; `project_add` registers an
         // existing repository before starting work there. `workspace_list` does the same one
         // level down.
         #expect(names == [
-            "agent_list", "chat_list", "chat_read", "project_add", "project_list", "quick_prompt_create",
+            "agent_list", "chat_list", "chat_read", "project_add", "project_list", "project_setup_guide", "quick_prompt_create",
             "quick_prompt_list", "whoami", "workspace_diff", "workspace_list", "workspace_rename",
         ])
 
