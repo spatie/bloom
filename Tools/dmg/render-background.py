@@ -29,22 +29,31 @@ def complete_png(path: Path, scale: int) -> bool:
 
 
 def stop_chrome(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    signal_chrome(process, signal.SIGTERM)
 
     try:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
         pass
 
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_chrome(process, signal.SIGKILL)
 
     process.wait()
+
+
+def signal_chrome(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS can reject Chrome's group signal even after rendering the PNG.
+        # Fall back to the process we launched.
+        if process.poll() is None:
+            try:
+                process.send_signal(sig)
+            except ProcessLookupError:
+                pass
 
 
 def render(chrome: Path, html: Path, output: Path, scale: int) -> None:
