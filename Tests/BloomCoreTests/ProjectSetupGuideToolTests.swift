@@ -27,7 +27,7 @@ struct ProjectSetupGuideToolTests {
         #expect(result.text.contains("url = \"http://localhost:$BLOOM_PORT\""))
         #expect(result.text.contains("SMTP host 127.0.0.1, port 1039"))
         #expect(result.text.contains("Do not invent a mail table in settings.toml"))
-        #expect(result.text.contains("mail_send bridge tool can check Bloom's inbox"))
+        #expect(result.text.contains("mail_list and mail_read"))
     }
 
     @Test("an off inbox is called out before an agent configures the project")

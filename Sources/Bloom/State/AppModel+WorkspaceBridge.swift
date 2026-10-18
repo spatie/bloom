@@ -45,6 +45,9 @@ extension AppModel {
             guard let self else { return .refused("Bloom is still starting up.") }
             return await self.driveTerminalForBridge(command, in: workspaceID)
         }
+        let mailClient: @Sendable () async -> MailpitClient? = {
+            await MainActor.run { Mailbox.shared.mailReadClient }
+        }
 
         return BridgeToolbox(handlers: BridgeToolbox.standard.handlers + [
             // The configured port alone could belong to another local SMTP service if our inbox
@@ -54,6 +57,8 @@ extension AppModel {
                     Mailbox.shared.mailSendPort.map(MailSendTool.Endpoint.init(port:))
                 }
             },
+            MailListTool(client: mailClient),
+            MailReadTool(client: mailClient),
             WorkspaceStartTool { [weak self] order, project, identity, origin in
                 guard let self else { throw AppNotReady.stillStartingUp }
                 return try await self.startWorkspaceForBridge(

@@ -58,6 +58,12 @@ final class Mailbox {
         return smtpPort
     }
 
+    /// Bridge readers use only this app's live bundled inbox, not another service on its API port.
+    var mailReadClient: MailpitClient? {
+        guard mailSendPort != nil else { return nil }
+        return client
+    }
+
     @ObservationIgnored private var started = false
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var search: Task<Void, Never>?

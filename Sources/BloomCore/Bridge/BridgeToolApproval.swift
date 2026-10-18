@@ -109,6 +109,11 @@ public enum BridgeToolApproval {
         // Captured by Bloom's local inbox, visible in Incoming mails and deletable there. The
         // address is a label, never a destination outside this Mac.
         "mail_send",
+        // Like chat_read, these only read data held for the owner. The inbox is app-wide, so both
+        // roles can inspect its captured test messages without changing workspace selection.
+        // Opening a message marks it read, as opening it in the UI does.
+        "mail_list",
+        "mail_read",
         "workspace_start",
         // A restore rebuilds an archived worktree from its surviving branch. It never writes
         // over an occupied path, and the archived record remains if rebuilding fails. An owner

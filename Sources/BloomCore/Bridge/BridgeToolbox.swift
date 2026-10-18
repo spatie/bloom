@@ -36,8 +36,10 @@ public struct BridgeToolbox: Sendable {
     /// where that was answered, and its head says which tools Bloom answers for and why the rest
     /// are not on the list. See `LiveBridgeTests`.
     ///
-    /// `mail_send`, `workspace_start`, `workspace_archive`, `workspace_merge`, `reveal`, the chat mutation tools and the pane and tab tools are the
-    /// exceptions and are added by `AppModel.bridgeToolbox()`, because starting a workspace has to
+    /// `mail_send`, `mail_list`, `mail_read`, `workspace_start`, `workspace_archive`,
+    /// `workspace_merge`, `reveal`, the chat mutation tools and the pane and tab tools are the
+    /// exceptions and are added by `AppModel.bridgeToolbox()`, because the mail tools must reach
+    /// this app's live bundled inbox, and starting a workspace has to
     /// reach the main-actor graph that runs one, asking one to merge has to reach the same path
     /// the Merge button takes, moving the selection is the window's own, and a pane is a thing the
     /// window owns; see `WorkspaceStarting`, `WorkspaceMergeRequesting`, `Revealing`,

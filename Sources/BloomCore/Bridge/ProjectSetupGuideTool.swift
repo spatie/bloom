@@ -81,8 +81,8 @@ public struct ProjectSetupGuideTool: BridgeToolHandling {
         of shared settings. If the port changes in Bloom Settings, update the project's mail \
         configuration too.
         4. Verify the project's wiring by sending mail through the project's own command or app \
-        and checking Bloom's Incoming mails. The mail_send bridge tool can check Bloom's inbox, \
-        but it bypasses the project's mail configuration.
+        and checking Bloom's Incoming mails with mail_list and mail_read. The mail_send bridge \
+        tool can check Bloom's inbox, but it bypasses the project's mail configuration.
         """
     }
 }
