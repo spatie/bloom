@@ -145,7 +145,26 @@ struct SidebarView: View {
     @State private var childArrival = RowArrival<String>()
 
     var body: some View {
-        answering(observing(animating(list)))
+        answering(observing(pane))
+    }
+
+    /// A native sidebar list draws its last rows behind a bottom safe-area inset. Giving the
+    /// footer its own height keeps those rows out of its transparent controls when the list fills.
+    private var pane: some View {
+        VStack(spacing: 0) {
+            animating(list)
+            statusBar
+        }
+    }
+
+    private var statusBar: some View {
+        SidebarStatusBar(
+            filter: $filter,
+            onCreateWorkspace: { presentCreate(in: $0) },
+            onSelectProject: revealProject,
+            onStartProject: startProject,
+            note: reorderNote?.sentence
+        )
     }
 
     /// The list itself. `body` is four steps (this, `animating`, `observing` and `answering`)
@@ -335,15 +354,6 @@ struct SidebarView: View {
                 onStartProject: startProject,
                 onCreateWorkspace: { presentCreate(in: $0) },
                 recentProjects: recentProjects
-            )
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            SidebarStatusBar(
-                filter: $filter,
-                onCreateWorkspace: { presentCreate(in: $0) },
-                onSelectProject: revealProject,
-                onStartProject: startProject,
-                note: reorderNote?.sentence
             )
         }
     }
