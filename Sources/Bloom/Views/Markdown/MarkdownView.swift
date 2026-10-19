@@ -614,7 +614,7 @@ private final class InlineAttributesBox {
 /// cached value cannot cross between structurally equal text rendered with different presentation,
 /// which now includes the same paragraph seen in two different conversation faces.
 @MainActor
-private enum InlineAttributes {
+enum InlineAttributes {
     private static let values: NSCache<InlineAttributesKey, InlineAttributesBox> = {
         let cache = NSCache<InlineAttributesKey, InlineAttributesBox>()
         cache.countLimit = 1_000
@@ -635,7 +635,7 @@ private enum InlineAttributes {
         return value
     }
 
-    private static func render(
+    static func render(
         _ values: [MarkdownInline],
         font: Font,
         code: Font,

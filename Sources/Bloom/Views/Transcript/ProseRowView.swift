@@ -45,21 +45,12 @@ struct ProseRowView: View {
         .onHover { isHovered = $0 }
     }
 
-    /// **Plain text while it is still arriving, markdown once it has landed.**
-    ///
-    /// Every crash of one shape, `EXC_BAD_ACCESS` and once an impossible allocation inside SwiftUI's
-    /// stack layout with no frame of ours on the stack, landed while a long answer was streaming,
-    /// and the layout frames that were there read back to this row's `MarkdownBlocksView`: a stack
-    /// over a `ForEach` of blocks, several of them `NSTextView`s, whose number and kinds change
-    /// with every delta. A single `Text` has no stack of blocks to change under itself.
-    ///
-    /// It costs the jump `StreamingRowView` describes: a fenced block shows its markers as prose
-    /// until the answer lands and then becomes a code block. That was the reason streaming moved to
-    /// `MarkdownView`, and it is a smaller cost than an app that quits while somebody reads it.
+    /// Keep the live answer in one text view. The full block tree changes shape on every delta,
+    /// which previously crashed SwiftUI's stack layout during long streamed answers.
     @ViewBuilder
     private var prose: some View {
         if isStreaming {
-            Text(verbatim: text)
+            StreamingMarkdownView(text)
         } else {
             MarkdownView(text)
         }
