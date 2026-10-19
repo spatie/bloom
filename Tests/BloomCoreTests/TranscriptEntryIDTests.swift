@@ -41,6 +41,8 @@ struct TranscriptEntryIDTests {
     func aFoldDoesNotRedrawItself() {
         #expect(!TranscriptEntryID.fold(41).redrawsItself)
         #expect(TranscriptEntryID.fold(41).seq == nil)
+        #expect(!TranscriptEntryID.turnFold(41).redrawsItself)
+        #expect(TranscriptEntryID.turnFold(41).seq == nil)
     }
 
     /// This used to read "redrawing itself is exactly having no sequence number", and `fold` is
@@ -48,7 +50,7 @@ struct TranscriptEntryIDTests {
     @Test("every entry that names a stored row draws only what its key says")
     func rowsDoNotRedrawThemselves() {
         let ids: [TranscriptEntryID] = [
-            .setup, .row(7), .fold(7), .sending, .streaming,
+            .setup, .row(7), .fold(7), .turnFold(7), .sending, .streaming,
             .pending(DeliveryID("d2")),
         ]
         for id in ids where id.seq != nil {
@@ -63,5 +65,7 @@ struct TranscriptEntryIDTests {
     func aFoldIsNotItsFirstRow() {
         #expect(TranscriptEntryID.fold(12) != TranscriptEntryID.row(12))
         #expect(TranscriptEntryID.fold(12).description == "fold.12")
+        #expect(TranscriptEntryID.turnFold(12) != TranscriptEntryID.fold(12))
+        #expect(TranscriptEntryID.turnFold(12).description == "turnFold.12")
     }
 }

@@ -27,6 +27,8 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
     var refusalReason = ""
     /// Non-nil when the row came from inside a subagent, so it can be indented under its parent.
     var parentToolUseID: String?
+    /// Empty assistant blocks draw no prose and must not split adjacent activity summaries.
+    var isEmptyAssistantText = false
 
     /// For a `permissionAsk` row: how the question was settled, or nil while it is still open.
     ///
@@ -48,6 +50,12 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
         createdAt = message.createdAt
         durationMS = message.durationMS
         refID = message.refID
+        if kind == .assistantText,
+           case .assistantText(let block)? = AgentEvent.decode(
+               line: String(decoding: payload, as: UTF8.self)
+           ) {
+            isEmptyAssistantText = block.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     nonisolated func foldFact(seq: Int? = nil, isFresh: Bool = false, picturesFromCalls: Bool = true) -> TranscriptFold.Fact {
@@ -64,8 +72,7 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
             featured: isQuestion
                 || (picturesFromCalls && (MediaShowRow.isCall(payload) || CodexImageViewRow.isCall(payload)))
                 || (kind == .toolUse && WorkspaceSayRow.isCall(payload))
-                || (kind == .toolUse && PlanRow.isCall(payload))
-                || TranscriptRowInk.isSessionStart(kind: kind, payload: payload),
+                || (kind == .toolUse && PlanRow.isCall(payload)),
             drawsNothing: TranscriptNoise.isHidden(self)
                 || TranscriptRowInk.drawsNothing(kind: kind, payload: payload),
             settled: settled,
@@ -179,13 +186,6 @@ final class TranscriptModel {
 
     func presentationTurnFolds() -> TranscriptTurnFold.Folds {
         turnFoldCache.resolve(rows.lazy.map { $0.turnFoldFact() })
-    }
-
-    /// Every prompt in the session, for the turn minimap. The same incremental index the pinned
-    /// question reads, so a body asking for this on each pass pays only for rows that are new.
-    func turns() -> [PinnedQuestion] {
-        questionIndex.update(session: session.id, rows: rows)
-        return questionIndex.all
     }
 
     func pinnedQuestion(atOrBefore seq: Int) -> PinnedQuestion? {

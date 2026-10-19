@@ -2,9 +2,9 @@ import Foundation
 
 /// The boundaries and duration of each agent turn.
 ///
-/// `TranscriptFold` owns the activity groups within a turn. This scan only finds where a completed
-/// turn ends, so its duration can be shown after the agent's text and its action groups can be
-/// opened together. It keeps completed turns when new rows arrive and rescans only the live tail.
+/// `TranscriptFold` owns the activity groups within a turn. This scan finds the turn's boundaries
+/// and duration so the work before its final answer can sit under one disclosure after the prompt.
+/// It keeps completed turns when new rows arrive and rescans only the live tail.
 public enum TranscriptTurnFold {
     public struct Fact: Equatable, Sendable {
         public var seq: Int
@@ -85,36 +85,53 @@ public enum TranscriptTurnFold {
         }
     }
 
-    /// The action groups available to a completed turn's disclosure in the drawn window.
-    public struct Disclosures: Sendable {
-        public var hiddenByWork: [Int: Set<Int>]
-        public var turnByWork: [Int: Int]
-        public var expandableTurns: Set<Int>
+    /// The rows before a completed turn's final answer. The answer and anything after it stay
+    /// visible, so the disclosure can sit after the prompt with the work underneath it.
+    public struct Visibility: Sendable {
+        public var seq: Int
+        public var keepsVisible: Bool
+
+        public init(seq: Int, keepsVisible: Bool = false) {
+            self.seq = seq
+            self.keepsVisible = keepsVisible
+        }
     }
 
-    public static func disclosures(
-        work: TranscriptFold.Folds,
-        turns: Folds,
+    public static func hiddenIndices<Rows: RandomAccessCollection>(
+        turn: Turn,
+        answerIndex: Int?,
+        in rows: Rows,
         revealed: Set<Int>,
         drawn: Range<Int>
-    ) -> Disclosures {
+    ) -> Set<Int> where Rows.Element == Visibility, Rows.Index == Int {
+        guard turn.isComplete,
+              let answerIndex,
+              turn.span.lowerBound < answerIndex,
+              answerIndex < turn.span.upperBound,
+              drawn.lowerBound <= turn.span.lowerBound,
+              turn.span.upperBound <= drawn.upperBound
+        else { return [] }
+
+        let work = turn.span.lowerBound..<answerIndex
+        // A search result or an opened tool row needs its context. Keep the whole turn open until
+        // the reader leaves it rather than hiding the target behind a control above the viewport.
+        guard !work.contains(where: { revealed.contains(rows[$0].seq) }) else { return [] }
+        return Set(work.filter { !rows[$0].keepsVisible })
+    }
+
+    /// The activity groups that have rows to hide in the current drawing window.
+    public static func hiddenActivity(
+        work: TranscriptFold.Folds,
+        revealed: Set<Int>,
+        drawn: Range<Int>
+    ) -> [Int: Set<Int>] {
         var hiddenByWork: [Int: Set<Int>] = [:]
-        var turnByWork: [Int: Int] = [:]
-        var expandableTurns: Set<Int> = []
         for group in work.all where drawn.contains(group.span.lowerBound) {
             let hidden = TranscriptFold.hiddenIndices(group, revealed: revealed, drawn: drawn)
             guard !hidden.isEmpty else { continue }
             hiddenByWork[group.firstSeq] = hidden
-            if let turn = turns.turn(containing: group.span.lowerBound), turn.isComplete {
-                turnByWork[group.firstSeq] = turn.firstSeq
-                expandableTurns.insert(turn.firstSeq)
-            }
         }
-        return Disclosures(
-            hiddenByWork: hiddenByWork,
-            turnByWork: turnByWork,
-            expandableTurns: expandableTurns
-        )
+        return hiddenByWork
     }
 
     public static func folds<Facts: RandomAccessCollection>(

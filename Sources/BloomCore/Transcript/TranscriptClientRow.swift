@@ -203,10 +203,6 @@ public struct TranscriptClientRow: Encodable, Sendable {
         case .system:
             guard !TranscriptRowInk.drawsNothing(kind: message.kind, payload: message.payload) else { return nil }
             switch event {
-            case .initialized(let info):
-                return Self(seq: seq, kind: .session, title: "Started with",
-                            detail: [info.agentKind.rawValue, info.model, info.permissionMode]
-                                .filter { !$0.isEmpty }.joined(separator: " · "))
             case .contextCompacted:
                 return Self(seq: seq, kind: .notice, title: "Conversation compacted")
             default:

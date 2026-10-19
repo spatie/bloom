@@ -16,9 +16,9 @@ import Foundation
 /// useful account of what the agent found or intends to do, so every prose row remains visible and
 /// divides the activity before and after it into separate groups.
 ///
-/// The tool's own name is never consulted, here or in the label, and that is not laziness: the
-/// name lives inside the payload, reading it is the decode this whole mechanism exists to avoid,
-/// and the prefix sniff that would find it is Claude Code's line shape rather than Codex's.
+/// The fold boundary never consults a tool's name. The transcript can describe the calls behind
+/// an existing fold using their typed payloads, but that description never decides what stays
+/// visible.
 ///
 /// A prose row closes the activity above it as answered. Activity after that prose starts a fresh
 /// live group. This distinction lets a live group refold when another log row arrives without ever
@@ -80,10 +80,9 @@ import Foundation
 ///    rather than a rearrangement: the call was never on screen to be moved.
 /// 2. **The agent stopping, and a row carrying content of its own.** An `error` row is the agent
 ///    exiting in a way it did not choose. Inline media, agent question cards and a message sent to
-///    another workspace are conversation content wearing activity rows' clothes. The "Started
-///    with" line a turn opens with is held out the same way, so it stands above the turn's group
-///    rather than being its first hidden row: it says what the work under it ran with. They remain visible, including answered questions,
-///    and divide the ordinary activity before and after them into separate compact groups.
+///    another workspace are conversation content wearing activity rows' clothes. They remain
+///    visible, including answered questions, and divide the ordinary activity before and after
+///    them into separate compact groups.
 ///
 ///    **A failed tool call is not one of these, and it used to be.** This rule said that a failed
 ///    command is the one you are scrolling to find, which read well and drew badly: an errored
@@ -121,20 +120,15 @@ public enum TranscriptFold {
 
     /// The fewest rows worth hiding.
     ///
-    /// A fold costs one line for itself, so hiding N rows saves N minus one: at one it saves
-    /// nothing whatsoever, at two it saves a single line in exchange for a control and a decision,
-    /// and at three it starts to pay. Three is also about as much as a reader takes in at a glance
-    /// (read the file, change it, check it), which is a thought rather than a log.
-    public static let leastHidden = 3
+    /// Two file edits are already a useful summary, and the disclosure replaces both tool rows
+    /// with one line. A lone call stays visible until there is a second action to group with it.
+    public static let leastHidden = 2
 
     /// How many rows a turn's work needs before its fold gets an entry in the list at all.
     ///
-    /// **Deliberately less than `leastHidden`, and that gap is load bearing.** The fold's line is
-    /// an entry of its own, and an entry appearing in the middle of the list on the same pass that
-    /// rows leave it is two edits `TranscriptEntryChange` can only answer `.rebuilt` to. In the
-    /// list from the second row of the work onwards, drawing nothing until there is something to
-    /// say, the pass that folds a turn is a removal and nothing else.
-    public static let leastWork = 2
+    /// The invisible entry arrives with the first action. When a second settled action joins it,
+    /// folding only removes rows from the table, preserving the reader's selection and position.
+    public static let leastWork = 1
 
     /// What a fold says to accessibility and places that do not draw the count badge.
     ///
@@ -670,15 +664,16 @@ public enum TranscriptFold {
                 resume = offset + 1
                 continue
             }
+            // A row that draws nothing is not a row the reader can see, so it is swallowed by
+            // whatever is folded around it and counted as nothing. See `TranscriptRowInk`.
+            if fact.drawsNothing { continue }
             // Black assistant prose is content, never log noise. It remains visible and closes the
-            // grey activity above it as answered. Any activity after it starts a fresh group.
+            // grey activity above it as answered. An empty block is skipped above, so two groups
+            // with no visible prose between them stay one group.
             if fact.kind == .assistantText {
                 close(hasAnswer: true)
                 continue
             }
-            // A row that draws nothing is not a row the reader can see, so it is swallowed by
-            // whatever is folded around it and counted as nothing. See `TranscriptRowInk`.
-            if fact.drawsNothing { continue }
             guard fact.isActivity else { continue }
             // Only a nested row whose call was never found gets this far, and it is drawn indented
             // like one, so a fold of it must not reach out to the work around it.

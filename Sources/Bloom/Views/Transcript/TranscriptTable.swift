@@ -402,6 +402,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// Rows whose next height change is a fold the reader just clicked, and may therefore be
         /// animated. Consumed by the pass that applies it. See `willUnfold`.
         private var pendingUnfolds: Set<TranscriptEntryID> = []
+        /// The clicked row's position before its own height changes. An opened command can be
+        /// taller than the viewport, so following the live end would skip straight to its tail.
+        private var pendingUnfoldAnchor: (id: TranscriptEntryID, delta: CGFloat)?
         /// The next row-list change came from a disclosure click rather than from live activity.
         /// Only that change gets the brief cross-fade requested for opening and closing a group.
         private var pendingFoldRows = false
@@ -586,7 +589,9 @@ struct TranscriptTable: NSViewRepresentable {
             // An in-place edit can change a row the idle pass has already walked past. Its next
             // settle starts a fresh pass at the visible row and sees the new content key.
             if !changed.isEmpty { warmWork?.cancel() }
+            let unfoldAnchor = !unfolding.isEmpty ? pendingUnfoldAnchor : nil
             pendingUnfolds.removeAll()
+            pendingUnfoldAnchor = nil
 
             if change == .same, changed.isEmpty, !remeasured, !environmentMoved {
                 // Nothing at all has moved. Not even a geometry report is owed.
@@ -597,8 +602,8 @@ struct TranscriptTable: NSViewRepresentable {
             // A disclosure click is navigation, even when the clicked row happens to be on the
             // last screen. Keep that row where it was instead of treating the new children as
             // live transcript activity and following them to the end.
-            let wasAtEnd = changesFoldRows ? false : isFollowingAlong
-            let anchor = foldAnchor ?? (change.movesRows ? anchorEntry() : nil)
+            let wasAtEnd = changesFoldRows || !unfolding.isEmpty ? false : isFollowingAlong
+            let anchor = foldAnchor ?? unfoldAnchor ?? (change.movesRows ? anchorEntry() : nil)
 
             if !changesFoldRows, !remeasured, !environmentMoved, holdView?.isHolding != true,
                wasAtEnd || isFollowerDriving {
@@ -1155,6 +1160,8 @@ struct TranscriptTable: NSViewRepresentable {
         /// the next pass has to expire rather than animate whatever height change comes next.
         func willUnfold(_ entryID: TranscriptEntryID) {
             pendingUnfolds.insert(entryID)
+            pendingUnfoldAnchor = anchorEntry(entryID)
+            aimingElsewhere()
         }
 
         func willChangeFoldRows(_ entryID: TranscriptEntryID) {

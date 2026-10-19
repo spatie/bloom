@@ -161,6 +161,15 @@ struct MailListPane: View {
                     .onAppear {
                         if summary.id == list.messages.last?.id { mailbox.loadMore() }
                     }
+                    if summary.id != list.messages.last?.id,
+                       mailbox.selection != summary.id {
+                        Rectangle()
+                            .fill(Palette.border)
+                            .frame(height: Metrics.outline)
+                            .padding(.leading, InspectorLayout.tight + Metrics.inset)
+                            .padding(.trailing, InspectorLayout.tight)
+                            .accessibilityHidden(true)
+                    }
                 }
                 if mailbox.isLoadingPage {
                     ProgressView()

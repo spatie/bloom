@@ -14,9 +14,11 @@ enum TranscriptNoise {
     private static let hookMarker = Data("\"hook_".utf8)
 
     static func isHidden(_ row: TranscriptRow) -> Bool {
+        if row.isEmptyAssistantText { return true }
         if row.kind == .notice { return true }
         guard row.kind == .system else { return false }
-        return TranscriptRowInk.isStreamEvent(kind: row.kind, payload: row.payload)
+        return TranscriptRowInk.isSessionStart(kind: row.kind, payload: row.payload)
+            || TranscriptRowInk.isStreamEvent(kind: row.kind, payload: row.payload)
             || row.payload.prefix(probeLength).range(of: hookMarker) != nil
     }
 }

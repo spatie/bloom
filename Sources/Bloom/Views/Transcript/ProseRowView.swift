@@ -39,9 +39,8 @@ struct ProseRowView: View {
             .frame(width: 18, height: 18)
         }
         .padding(.horizontal, TranscriptLayout.inset)
-        // The old rule occupied this boundary. Two clean rungs preserve the separation without
-        // putting a hard line between the work and the response.
-        .padding(.top, TranscriptLayout.block * 2)
+        // Equal air above and below keeps an activity disclosure centred between paragraphs.
+        .padding(.top, TranscriptLayout.block)
         .padding(.bottom, TranscriptLayout.block)
         .onHover { isHovered = $0 }
     }

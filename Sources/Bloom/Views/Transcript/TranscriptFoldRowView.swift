@@ -1,15 +1,6 @@
 import BloomCore
 import SwiftUI
 
-struct CompletedWorkDisclosure {
-    var firstSeq: Int
-    var durationMS: Int
-    var isExpanded: Bool
-    var onToggle: () -> Void
-
-    var label: String { TranscriptTurnFold.label(milliseconds: durationMS) }
-}
-
 /// One disclosure line that stands for hidden transcript work.
 ///
 /// The label keeps the same geometry in both states. The commands belong inside the disclosure,
@@ -28,7 +19,11 @@ struct TranscriptFoldRowView: View {
     @State private var isHovered = false
 
     var body: some View {
-        ExpandableRowHeader(isExpanded: isExpanded, onToggle: onToggle) {
+        ExpandableRowHeader(
+            isExpanded: isExpanded,
+            stablePressAppearance: showsSeparator,
+            onToggle: onToggle
+        ) {
             if showsSeparator {
                 HStack(spacing: TranscriptLayout.block) {
                     separator
@@ -66,8 +61,8 @@ struct TranscriptFoldRowView: View {
             }
         }
         .accessibilityLabel(label)
-        .modifier(ExpandableRow(isHovered: isHovered))
-        .onHover { isHovered = $0 }
+        .modifier(ExpandableRow(isHovered: isHovered && !showsSeparator))
+        .onHover { if !showsSeparator { isHovered = $0 } }
         // Outside the hover treatment, exactly as `TranscriptRowView` puts it outside a row's
         // own: the highlight belongs to the line, not to the gutter the rule is drawn in.
         .padding(.leading, isNested ? TranscriptLayout.nestIndent : 0)

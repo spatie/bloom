@@ -87,6 +87,15 @@ struct TranscriptFoldTests {
         #expect(folds.all.map { hides($0) } == [3, 7])
     }
 
+    @Test("an empty assistant block does not split adjacent commands")
+    func emptyProseDoesNotSplitActivity() {
+        let facts = [user(0), tool(1), tool(2), tool(3),
+                     TranscriptFold.Fact(seq: 4, kind: .assistantText, drawsNothing: true),
+                     tool(5), tool(6), prose(7), footer(8)]
+        let folds = TranscriptFold.folds(in: facts)
+        #expect(folds.all.map { $0.rows.map(\.seq) } == [[1, 2, 3, 5, 6]])
+    }
+
     @Test("thinking, a subagent's rows and the stream events between them all fold")
     func everythingBetweenFolds() throws {
         let facts = [user(0), thinking(1), quiet(2), tool(3), quiet(4), tool(5), prose(6), footer(7)]
@@ -141,7 +150,7 @@ struct TranscriptFoldTests {
     @Test("a notice after the answer keeps the answer out of the fold")
     func noticeAfterTheAnswer() throws {
         let facts = [user(0)] + (1..<6).map { tool($0) } + [prose(6), notice(7), footer(8)]
-        let work = try only(facts)
+        let work = try #require(TranscriptFold.folds(in: facts).all.first)
         #expect(work.hasAnswer)
         #expect(work.span == 1..<6)
     }
@@ -156,14 +165,14 @@ struct TranscriptFoldTests {
 
     // MARK: The thresholds
 
-    @Test("a working shorter than three rows hides nothing")
+    @Test("two settled actions fold, while one leaves its placeholder invisible")
     func theThreshold() {
         /// A turn of `count` calls, answered, so the whole working is foldable.
         func turn(of count: Int) -> [TranscriptFold.Fact] {
             [user(0)] + (1...count).map { tool($0) } + [prose(count + 1), footer(count + 2)]
         }
-        #expect(TranscriptFold.folds(in: turn(of: 1)).all.isEmpty)
-        #expect(TranscriptFold.folds(in: turn(of: 2)).all.map { hides($0) } == [0])
+        #expect(TranscriptFold.folds(in: turn(of: 1)).all.map { hides($0) } == [0])
+        #expect(TranscriptFold.folds(in: turn(of: 2)).all.map { hides($0) } == [2])
         #expect(TranscriptFold.folds(in: turn(of: 3)).all.map { hides($0) } == [3])
         #expect(TranscriptFold.folds(in: turn(of: 9)).all.map { hides($0) } == [9])
     }
@@ -174,12 +183,11 @@ struct TranscriptFoldTests {
     @Test("a working gets its line long before it can fold")
     func theLineArrivesEarly() {
         #expect(TranscriptFold.leastWork < TranscriptFold.leastHidden)
+        let one = [user(0), tool(1)]
+        #expect(TranscriptFold.folds(in: one).all.count == 1)
+        #expect(TranscriptFold.folds(in: one).all.map { hides($0) } == [0])
         let two = [user(0), tool(1), tool(2)]
-        #expect(TranscriptFold.folds(in: two).all.count == 1)
-        #expect(TranscriptFold.folds(in: two).all.map { hides($0) } == [0])
-        // One row is not a working at all: it can never fold whatever the threshold, and a single
-        // call between two paragraphs is the commonest shape in a transcript.
-        #expect(TranscriptFold.folds(in: [user(0), tool(1), prose(2)]).all.isEmpty)
+        #expect(TranscriptFold.folds(in: two).all.map { hides($0) } == [2])
     }
 
     // MARK: What is never hidden
@@ -264,7 +272,8 @@ struct TranscriptFoldTests {
     @Test("an error row stops the fold")
     func anErrorStopsTheFold() throws {
         let facts = [user(0), tool(1), tool(2), tool(3), tool(4), failure(5), tool(6)]
-        #expect(hides(try only(facts)) == 4)
+        let work = try #require(TranscriptFold.folds(in: facts).all.first)
+        #expect(hides(work) == 4)
     }
 
     /// **Rule 3, and the fault this file could least afford.** A question the turn is stopped on,
@@ -479,14 +488,11 @@ struct TranscriptFoldTests {
         #expect(TranscriptFold.folds(in: facts).resumeIndex == 6)
     }
 
-    /// The owner's screenshots, made the rule: the line a turn opens with stands above the group
-    /// and the work under it folds. `foldFact` marks it `featured` through
-    /// `TranscriptRowInk.isSessionStart`.
-    @Test("Started with stands above the turn's group rather than inside it")
-    func sessionStartStandsApart() {
+    @Test("session init metadata does not interrupt a work group")
+    func sessionStartIsSilent() {
         var facts: [TranscriptFold.Fact] = [
             .init(seq: 0, kind: .user),
-            .init(seq: 1, kind: .system, featured: true),
+            .init(seq: 1, kind: .system, drawsNothing: true),
         ]
         for seq in 2..<12 { facts.append(.init(seq: seq, kind: .toolUse, toolUseID: "t\(seq)")) }
         facts.append(.init(seq: 12, kind: .assistantText))

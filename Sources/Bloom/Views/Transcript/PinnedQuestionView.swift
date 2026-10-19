@@ -8,13 +8,12 @@ struct PinnedQuestion: Equatable {
     var summary: String
 }
 
-/// The two navigation values written while a transcript scrolls. Only their overlays observe
-/// them, so crossing a turn does not ask the parent transcript to rebuild its table entries.
+/// The compact question above a scrolled transcript observes this value without asking the
+/// transcript table to rebuild its entries.
 @MainActor
 @Observable
 final class TranscriptScrollNavigation {
     var pinnedQuestion: PinnedQuestion?
-    var currentTurnSeq: Int?
 }
 
 struct TranscriptPinnedQuestionOverlay: View {
@@ -58,9 +57,6 @@ struct PinnedQuestionIndex {
         }
         scannedRows = rows.count
     }
-
-    /// Every user turn seen so far, oldest first.
-    var all: [PinnedQuestion] { questions }
 
     func latest(atOrBefore seq: Int) -> PinnedQuestion? {
         var low = 0

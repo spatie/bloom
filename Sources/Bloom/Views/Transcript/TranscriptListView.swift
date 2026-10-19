@@ -90,7 +90,7 @@ struct TranscriptListView: View {
     /// each. Kept in the pane's memory beside `expanded` and for the same reason: a turn somebody
     /// opened to read must not fold itself away again behind a tab switch.
     @State private var unfolded: Set<Int> = []
-    /// Completed turns whose activity groups the reader opened together.
+    /// Completed turns whose interim work the reader opened beneath the prompt.
     @State private var unfoldedTurns: Set<Int> = []
     /// Whether the reader has unfolded the setup log at the head of this conversation, and nil
     /// while nobody has. Here rather than in the setup views, because the table measures a copy of
@@ -165,11 +165,9 @@ struct TranscriptListView: View {
     /// `TranscriptPaneState.anchorDelta`. Nil until the table has a stored row to name, and never
     /// cleared by a pane that cannot see one, so what is written down is the last real place.
     @State private var topPlace = GeometryBox<(seq: Int, delta: CGFloat)?>(nil)
-    /// Scroll navigation belongs to its two overlays. Moving between turns must not rebuild the
-    /// table's entries, which are independent of the pinned question and minimap highlight.
+    /// Scroll navigation belongs to the pinned question overlay. Moving between turns must not
+    /// rebuild the table's entries just to update that compact header.
     @State private var scrollNavigation = TranscriptScrollNavigation()
-    /// Whether the pane is wide enough for the minimap beside the column. See `TurnMinimap.fits`.
-    @State private var minimapFits = false
     /// Whether the pane is at the live end EXACTLY, which is not `geometry.isNearBottom`.
     ///
     /// **Two different questions, and one number was answering both.** `ScrollEnd.threshold` is 96
@@ -487,10 +485,9 @@ struct TranscriptListView: View {
         // and the `onChange` at the foot of `body`, which is the pass.
         let folds = foldsForThisPass(drawn: drawnRange)
         let turnFolds = turnFoldsForThisPass()
-        // The same action groups drive their own rows and the completed turn control. The core
-        // computes their hidden indices once for both readers.
-        let disclosures = TranscriptTurnFold.disclosures(
-            work: folds, turns: turnFolds, revealed: revealed, drawn: drawnRange
+        // Action groups retain their own disclosure when the outer turn is opened.
+        let hiddenActivity = TranscriptTurnFold.hiddenActivity(
+            work: folds, revealed: revealed, drawn: drawnRange
         )
         let lastVisibleRow = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })
         let lastVisibleSeq = lastVisibleRow?.seq
@@ -514,7 +511,13 @@ struct TranscriptListView: View {
             )
         }
         var responseCopies: [Int: String] = [:]
-        for resultRow in drawnRows where resultRow.kind == .result && resultRow.parentToolUseID == nil {
+        var answerIndexByTurn: [Int: Int] = [:]
+        let drawnIndexBySeq = Dictionary(uniqueKeysWithValues: drawnRows.indices.map {
+            (rows[$0].seq, $0)
+        })
+        for index in drawnRows.indices {
+            let resultRow = rows[index]
+            guard resultRow.kind == .result, resultRow.parentToolUseID == nil else { continue }
             guard let placement = TurnAnswerPlacementCache.placement(rowID: resultRow.id, build: {
                 guard case .result(let result)? = TranscriptEventCache.event(
                     rowID: resultRow.id, payload: resultRow.payload
@@ -524,6 +527,37 @@ struct TranscriptListView: View {
                 )
             }) else { continue }
             responseCopies[placement.rowSeq] = placement.text
+            if let turn = turnFolds.turn(containing: index),
+               let answerIndex = drawnIndexBySeq[placement.rowSeq] {
+                answerIndexByTurn[turn.firstSeq] = answerIndex
+            }
+        }
+
+        let visibility = rows.lazy.map { row in
+            return TranscriptTurnFold.Visibility(
+                seq: row.seq,
+                keepsVisible: TranscriptTurnVisibilityCache.keepsVisible(row)
+            )
+        }
+        var hiddenTurnIndices: Set<Int> = []
+        var turnDisclosures: [Int: (durationMS: Int, isExpanded: Bool, shows: Bool)] = [:]
+        var turnsWithDisclosure: Set<Int> = []
+        for turn in turnFolds.all where drawnRange.contains(turn.span.lowerBound) {
+            let base = TranscriptTurnFold.hiddenIndices(
+                turn: turn, answerIndex: answerIndexByTurn[turn.firstSeq],
+                in: visibility, revealed: [], drawn: drawnRange
+            )
+            let shown = !base.isEmpty
+            let protected = revealed.isEmpty ? base : TranscriptTurnFold.hiddenIndices(
+                turn: turn, answerIndex: answerIndexByTurn[turn.firstSeq],
+                in: visibility, revealed: revealed, drawn: drawnRange
+            )
+            let isExpanded = unfoldedTurns.contains(turn.firstSeq) || (shown && protected.isEmpty)
+            turnDisclosures[turn.span.lowerBound] = (
+                durationMS: turn.durationMS ?? 0, isExpanded: isExpanded, shows: shown
+            )
+            if shown { turnsWithDisclosure.insert(turn.firstSeq) }
+            if !isExpanded { hiddenTurnIndices.formUnion(protected) }
         }
 
         // What an Agent call row opens. Built once for the pass, and nil where there is no
@@ -610,8 +644,18 @@ struct TranscriptListView: View {
 
         for index in drawnRows.indices {
             let row = drawnRows[index]
-            // The existing result or next user row owns the completed work control. Inserting a
-            // separate entry here would turn a normal completion into a table reload.
+            if let disclosure = turnDisclosures[index] {
+                out.append(turnFoldEntry(
+                    firstSeq: row.seq,
+                    durationMS: disclosure.durationMS,
+                    isExpanded: disclosure.isExpanded,
+                    shows: disclosure.shows,
+                    session: sessionID
+                ))
+            }
+            if hiddenTurnIndices.contains(index) { continue }
+            // The result or next user row still supplies the duration to the footer when a turn
+            // has no work disclosure after its prompt.
             let closingTurn: TranscriptTurnFold.Turn?
             if row.kind == .result {
                 closingTurn = turnFolds.turn(containing: index)
@@ -621,22 +665,16 @@ struct TranscriptListView: View {
             } else {
                 closingTurn = nil
             }
-            let workDisclosure: CompletedWorkDisclosure?
-            if let closingTurn, closingTurn.isComplete,
-               disclosures.expandableTurns.contains(closingTurn.firstSeq) {
-                workDisclosure = CompletedWorkDisclosure(
-                    firstSeq: closingTurn.firstSeq,
-                    durationMS: closingTurn.durationMS ?? 0,
-                    isExpanded: unfoldedTurns.contains(closingTurn.firstSeq),
-                    onToggle: { toggleTurnFold(closingTurn.firstSeq, anchor: .row(row.seq)) }
-                )
-            } else {
-                workDisclosure = nil
-            }
+            let showsTurnDuration = !turnsWithDisclosure.contains(closingTurn?.firstSeq ?? -1)
             // A turn's working, drawn as one line and whatever of it still has to be on screen.
             // See `TranscriptFold`, which holds every decision about where a turn's working starts
             // and ends and what may be hidden; what happens here is only the emitting.
+            var revealsRawTool = false
             if let at = folds.index(containing: index) {
+                // A silent result or notice between hidden calls can still land inside this
+                // activity span. It must not recreate the group's disclosure below a closed
+                // turn after the first visible call has already been hidden above.
+                if hiddenTurnIndices.contains(folds.all[at].span.lowerBound) { continue }
                 // By index above and by value here, so the turn's own array of rows is taken up
                 // once per turn rather than once per row. See `TranscriptFold.Folds.index`.
                 if folds.all[at].firstSeq != foldSeq {
@@ -644,14 +682,15 @@ struct TranscriptListView: View {
                     foldSeq = work.firstSeq
                     // What the fold would hide if the reader had not opened it, which is what the
                     // line has to say either way, and whether it has anything to say at all.
-                    let would = disclosures.hiddenByWork[work.firstSeq] ?? []
-                    let turnIsOpen = disclosures.turnByWork[work.firstSeq]
-                        .map(unfoldedTurns.contains) ?? false
-                    hiddenIndices = unfolded.contains(work.firstSeq) || turnIsOpen ? [] : would
+                    let would = hiddenActivity[work.firstSeq] ?? []
+                    hiddenIndices = unfolded.contains(work.firstSeq) ? [] : would
                     let isFolded = !hiddenIndices.isEmpty
+                    let activityLabel = would.isEmpty
+                        ? nil : TranscriptActivityCache.label(for: work, in: rows)
                     out.append(foldEntry(
                         firstSeq: work.firstSeq,
                         hiding: isFolded ? would.count : work.rows.count,
+                        activityLabel: activityLabel,
                         showsMore: isFolded && would.count < work.rows.count,
                         isFolded: isFolded,
                         // A subagent's line is drawn where its rows are, under the call that
@@ -665,6 +704,7 @@ struct TranscriptListView: View {
                         session: sessionID
                     ))
                 }
+                revealsRawTool = unfolded.contains(folds.all[at].firstSeq)
                 // Skip completed actions individually so a pending command stays visible even
                 // when later commands have finished. Empty stream rows need no table entry either.
                 if !hiddenIndices.isEmpty,
@@ -684,6 +724,7 @@ struct TranscriptListView: View {
             // count's reason: the row becomes openable where it stands.
             let subagentHasRun = row.kind == .toolUse && folds.hasRun(underCall: row.refID)
             let isExpanded = expanded.contains(row.seq)
+            let summariseTool = row.kind == .toolUse && !revealsRawTool
             let responseCopyText = responseCopies[row.seq]
             let wasStopped = row.seq == stoppedTurnSeq
             // The echo already follows this footer. Waiting for its stored row to land added
@@ -707,6 +748,7 @@ struct TranscriptListView: View {
                 $0.combine(row.permissionDecision)
                 $0.combine(row.permissionNote)
                 $0.combine(isExpanded)
+                $0.combine(summariseTool)
                 $0.combine(row.parentToolUseID)
                 $0.combine(subagentActions)
                 $0.combine(subagentHasRun)
@@ -714,9 +756,8 @@ struct TranscriptListView: View {
                 $0.combine(wasStopped)
                 $0.combine(closesTranscript)
                 $0.combine(stillRunning)
-                $0.combine(workDisclosure?.firstSeq)
-                $0.combine(workDisclosure?.durationMS)
-                $0.combine(workDisclosure?.isExpanded)
+                $0.combine(closingTurn?.durationMS)
+                $0.combine(showsTurnDuration)
             }
             // Free, and no for the two kinds that make up most of a long session, so it is asked
             // here rather than inside the closure that runs per cell.
@@ -747,9 +788,8 @@ struct TranscriptListView: View {
                                 stillRunning: stillRunning,
                                 closesTranscript: closesTranscript,
                                 transcript: transcript,
-                                showsDuration: workDisclosure == nil,
-                                durationMS: closingTurn?.durationMS,
-                                workDisclosure: workDisclosure
+                                showsDuration: showsTurnDuration,
+                                durationMS: closingTurn?.durationMS
                             )
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)
@@ -771,6 +811,7 @@ struct TranscriptListView: View {
                             row: row,
                             home: home,
                             isExpanded: isExpanded,
+                            summariseTool: summariseTool,
                             isNested: row.parentToolUseID != nil,
                             subagentActions: subagentActions,
                             subagentHasRun: subagentHasRun,
@@ -785,20 +826,6 @@ struct TranscriptListView: View {
                         // The arriving animation belongs to the bubble, not the earlier work.
                         .arrivingRow(settles && arrivals.isArriving(row.seq))
                         .messageArrival(transcript.messageArrivals.row(row.seq))
-                        if let workDisclosure {
-                            return AnyView(VStack(alignment: .leading, spacing: 0) {
-                                TranscriptFoldRowView(
-                                    label: workDisclosure.label,
-                                    isExpanded: workDisclosure.isExpanded,
-                                    showsSeparator: true,
-                                    onToggle: workDisclosure.onToggle
-                                )
-                                .padding(.bottom, Metrics.gutter)
-                                content
-                            }
-                            .padding(.horizontal, TranscriptLayout.inset)
-                            .frame(maxWidth: .infinity, alignment: .leading))
-                        }
                         return AnyView(content
                             .padding(.horizontal, TranscriptLayout.inset)
                             .frame(maxWidth: .infinity, alignment: .leading))
@@ -992,6 +1019,7 @@ struct TranscriptListView: View {
     private func foldEntry(
         firstSeq: Int,
         hiding: Int,
+        activityLabel: String?,
         showsMore: Bool,
         isFolded: Bool,
         isNested: Bool,
@@ -1005,6 +1033,7 @@ struct TranscriptListView: View {
                 $0.combine(session)
                 $0.combine(firstSeq)
                 $0.combine(hiding)
+                $0.combine(activityLabel)
                 $0.combine(showsMore)
                 $0.combine(isFolded)
                 $0.combine(isNested)
@@ -1023,7 +1052,7 @@ struct TranscriptListView: View {
                 guard shows else { return AnyView(EmptyView()) }
                 return AnyView(
                     TranscriptFoldRowView(
-                        label: TranscriptFold.label(hiding: hiding),
+                        label: activityLabel ?? TranscriptFold.label(hiding: hiding),
                         isExpanded: !isFolded,
                         isNested: isNested,
                         onToggle: { toggleFold(firstSeq) }
@@ -1031,6 +1060,43 @@ struct TranscriptListView: View {
                     // The same two insets every row in this list carries: one here, and one inside
                     // `transcriptRowFrame`. A fold's line drawn with only the inner one would sit
                     // a gutter to the left of the run it stands for.
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                )
+            }
+        )
+    }
+
+    /// A completed turn's interim work, placed directly after its prompt. The final answer is
+    /// outside this disclosure, so closing it leaves the answer and any media below it visible.
+    private func turnFoldEntry(
+        firstSeq: Int,
+        durationMS: Int,
+        isExpanded: Bool,
+        shows: Bool,
+        session: SessionID
+    ) -> TranscriptTableEntry {
+        TranscriptTableEntry(
+            id: .turnFold(firstSeq),
+            contentKey: TranscriptContentKey {
+                $0.combine("turnFold")
+                $0.combine(session)
+                $0.combine(firstSeq)
+                $0.combine(durationMS)
+                $0.combine(isExpanded)
+                $0.combine(shows)
+            },
+            drawsNothing: !shows,
+            shape: .fold,
+            content: {
+                guard shows else { return AnyView(EmptyView()) }
+                return AnyView(
+                    TranscriptFoldRowView(
+                        label: TranscriptTurnFold.label(milliseconds: durationMS),
+                        isExpanded: isExpanded,
+                        showsSeparator: true,
+                        onToggle: { toggleTurnFold(firstSeq) }
+                    )
                     .padding(.horizontal, TranscriptLayout.inset)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 )
@@ -1104,10 +1170,6 @@ struct TranscriptListView: View {
                 onOpen: showPinnedQuestion
             )
         }
-        .overlay { minimap }
-        .onGeometryChange(for: Bool.self) {
-            TurnMinimap.fits(paneWidth: $0.size.width, measure: TranscriptLayout.conversationMeasure)
-        } action: { minimapFits = $0 }
         .overlay { TranscriptHoverOverlay(host: hoverHost) }
         .overlay {
             if showsPlaceholder {
@@ -1204,7 +1266,6 @@ struct TranscriptListView: View {
             isGrowing.value = false
             opening = nil
             scrollNavigation.pinnedQuestion = nil
-            scrollNavigation.currentTurnSeq = nil
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
             liveEndRequest = TranscriptLiveEndRequest(handled: remembered?.liveEndRequest ?? 0)
@@ -1550,22 +1611,6 @@ struct TranscriptListView: View {
         follower.seekLiveEnd(false)
     }
 
-    /// The strip of turns in the margin, clear of the pinned question above and the composer below.
-    @ViewBuilder
-    private var minimap: some View {
-        if minimapFits {
-            let turns = transcript.turns()
-            if turns.count >= TurnMinimap.minimumTurns {
-                TranscriptTurnMinimapOverlay(
-                    turns: turns,
-                    navigation: scrollNavigation,
-                    clearance: composerRoom?.clearance ?? 0,
-                    onOpen: showPinnedQuestion
-                )
-            }
-        }
-    }
-
     /// Where a passage selected in this conversation is quoted. Only where there is a composer to
     /// reply in: the room is what a pane with one puts in the environment, and an archived
     /// workspace's transcript has none.
@@ -1619,11 +1664,7 @@ struct TranscriptListView: View {
               let question = transcript.pinnedQuestion(atOrBefore: place.seq)
         else {
             if scrollNavigation.pinnedQuestion != nil { scrollNavigation.pinnedQuestion = nil }
-            if scrollNavigation.currentTurnSeq != nil { scrollNavigation.currentTurnSeq = nil }
             return
-        }
-        if scrollNavigation.currentTurnSeq != question.seq {
-            scrollNavigation.currentTurnSeq = question.seq
         }
 
         // A long user turn can fill most of the pane after its top has scrolled away. Pinning a
@@ -1918,17 +1959,11 @@ struct TranscriptListView: View {
         remember()
     }
 
-    /// Open or close every action group in this completed turn, leaving its prose in place.
-    private func toggleTurnFold(_ firstSeq: Int, anchor: TranscriptEntryID) {
+    /// Open or close the interim work of a completed turn beneath its prompt.
+    private func toggleTurnFold(_ firstSeq: Int) {
         follower.stop()
-        controller.willChangeFoldRows(anchor)
-        if unfoldedTurns.remove(firstSeq) != nil {
-            if let turn = turnFolds.all.first(where: { $0.firstSeq == firstSeq }) {
-                for work in folds.all where turn.span.contains(work.span.lowerBound) {
-                    unfolded.remove(work.firstSeq)
-                }
-            }
-        } else {
+        controller.willChangeFoldRows(.turnFold(firstSeq))
+        if unfoldedTurns.remove(firstSeq) == nil {
             unfoldedTurns.insert(firstSeq)
         }
         remember()
@@ -1941,6 +1976,7 @@ struct TranscriptListView: View {
         // row is remeasured and the table is told a number. So the table is warned that the next
         // height change on this row is one the reader asked for, and it animates that one and
         // nothing else. See `TranscriptTable.Coordinator.willUnfold`.
+        follower.stop()
         controller.willUnfold(.row(seq))
         if expanded.contains(seq) {
             expanded.remove(seq)

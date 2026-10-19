@@ -151,11 +151,6 @@ struct ToolRowSnapshotGallery: View {
             // running either. The last row is the pairing that is easiest to get wrong, a text
             // detail and a chip on the same line behind a short label.
             group("The other rows on the same ceiling") {
-                SessionStartRowView(info: AgentInit(
-                    sessionID: "s1",
-                    model: "opus-5-1m",
-                    permissionMode: "acceptEdits"
-                ))
                 ThinkingRowView(
                     text: "The gap is the whole complaint: four letters of label, then a "
                         + "hundred and forty seven points of nothing before its own detail."
