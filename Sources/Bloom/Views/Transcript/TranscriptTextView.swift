@@ -555,6 +555,9 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // A newly hosted merge turn has measured text but can still show only its blue bubble.
+        // Ask AppKit to paint the text layer when the row enters the window.
+        needsDisplay = true
         HoverQuickLookController.shared.update(self)
     }
 
