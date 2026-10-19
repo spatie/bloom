@@ -49,7 +49,12 @@ enum AppChromeProbe {
         if !narrowAligned { failures.append("narrow notes text does not align") }
         let formatting = await checkFormatting()
         failures += formatting.failures
-        let result: [String: Any] = ["notifications": 1000, "checks": 29 + formatting.checks, "passed": failures.isEmpty, "failures": failures]
+        let result: [String: Any] = [
+            "notifications": 1000,
+            "checks": 29 + ColourTheme.allCases.count + formatting.checks,
+            "passed": failures.isEmpty,
+            "failures": failures,
+        ]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             FileHandle.standardOutput.write(data)
         }
@@ -190,6 +195,18 @@ enum AppChromeProbe {
                 await render(UserTurnRowView(text: "Please review Sources/Bloom/Design/Theme.swift", home: TranscriptHome())
                     .environment(AppModel()), size: CGSize(width: 650, height: 160),
                              name: "bubble-\(name)", scheme: scheme)
+                let mergeBubbleHasInk = await render(UserTurnRowView(
+                    text: ProjectInstructions.turn(
+                        "Merge pull request #166 into main as a squash merge, which is `--squash`. It is on the branch feat/camping-info.",
+                        for: .merge,
+                        adding: .nothing
+                    ),
+                    home: TranscriptHome()
+                ).environment(AppModel()), size: CGSize(width: 650, height: 330),
+                name: "merge-bubble-\(name)", scheme: scheme)
+                if scheme == .dark && !mergeBubbleHasInk {
+                    failures.append("Merge instructions bubble has no visible text: \(name)")
+                }
                 await render(MergeSplitButton(method: .merge, fill: Palette.positive, canMerge: true, choose: { _ in }, merge: {}),
                              size: CGSize(width: 300, height: 80), name: "merge-\(name)", scheme: scheme)
             }
@@ -305,7 +322,26 @@ enum AppChromeProbe {
         host.view.layer?.render(in: context.cgContext)
         context.flushGraphics()
         try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(filePath: "/tmp/bloom-chrome-\(name).png"))
+        if name.hasPrefix("merge-bubble") && scheme == .dark {
+            // A newly hosted AppKit text view can have a measured string but no painted layer.
+            // The merge chip exposed it because the bubble still had its full blue background.
+            return hasLightInk(in: bitmap)
+        }
         return aligned
+    }
+
+    private static func hasLightInk(in bitmap: NSBitmapImageRep) -> Bool {
+        var found = 0
+        for y in stride(from: bitmap.pixelsHigh / 3, to: bitmap.pixelsHigh * 2 / 3, by: 3) {
+            for x in stride(from: bitmap.pixelsWide / 6, to: bitmap.pixelsWide * 5 / 6, by: 3) {
+                guard let colour = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if colour.redComponent > 0.9 && colour.greenComponent > 0.9 && colour.blueComponent > 0.9 {
+                    found += 1
+                    if found >= 20 { return true }
+                }
+            }
+        }
+        return false
     }
 }
 

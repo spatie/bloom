@@ -139,6 +139,11 @@ private struct ConversationPaneView: View {
     let pane: ConversationLayout.Pane
     let isSplit: Bool
 
+    private var closeColumn: (@MainActor () -> Void)? {
+        guard isSplit else { return nil }
+        return { state.closePane(tabID: tabID, paneID: pane.id) }
+    }
+
     var body: some View {
         Group {
             switch pane.kind {
@@ -149,6 +154,7 @@ private struct ConversationPaneView: View {
                     ownerID: pane.id.rawValue,
                     owner: .conversation(sessionID, directory: state.directory),
                     onCloseTab: { state.closePane(tabID: tabID, paneID: pane.id) },
+                    closeColumn: closeColumn,
                     splitColumn: { axis, kind in
                         state.split(tabID: tabID, paneID: pane.id, axis: axis, kind: kind.conversationKind)
                     },

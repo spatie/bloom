@@ -20,6 +20,7 @@ extension WorkspaceModel {
         for tab: CenterTab,
         siblings: [PaneContent],
         splitColumn: @escaping @MainActor (SplitAxis, PaneKind) -> Void,
+        closeColumn: (@MainActor () -> Void)?,
         paneMenu: (@MainActor () -> NSMenu)?
     ) -> some View {
         if let sessionID = tab.agentSessionID, pendingCLILaunches.contains(sessionID) {
@@ -31,7 +32,10 @@ extension WorkspaceModel {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ToolPaneView(model: self, tab: tab, siblings: siblings, splitColumn: splitColumn, paneMenu: paneMenu)
+            ToolPaneView(
+                model: self, tab: tab, siblings: siblings,
+                splitColumn: splitColumn, closeColumn: closeColumn, paneMenu: paneMenu
+            )
         }
     }
 

@@ -7,9 +7,8 @@ import BloomCore
 /// `NSView` and it consumes the right mouse event before SwiftUI ever sees it. `NSView.menu(for:)`
 /// is the hook AppKit itself asks, so this is the one place a menu can be returned from.
 ///
-/// Every item routes through the same `TerminalPaneCommand` the keyboard uses, so the menu cannot
-/// drift away from the shortcuts: there is one implementation of splitting and one of closing, and
-/// the menu is a second way to reach them rather than a second copy of them.
+/// Shell commands route through `TerminalPaneCommand`, as the keyboard does. When a terminal is
+/// the only shell in a split centre pane, closing routes through that pane's own action instead.
 ///
 /// The two directions are submenus, the same three kinds the centre pane's own menu offers and
 /// from the same `PaneKind`, so the direction and what goes in the half are one gesture. See
@@ -20,9 +19,10 @@ enum TerminalPaneMenu {
         canClose: Bool,
         isZoomed: Bool,
         onAddToChat: (@MainActor () -> Void)? = nil,
+        closeColumn: (@MainActor () -> Void)? = nil,
         perform: @escaping @MainActor (TerminalPaneCommand) -> Void
     ) -> NSMenu {
-        let target = ActionTarget(perform: perform, onAddToChat: onAddToChat)
+        let target = ActionTarget(perform: perform, onAddToChat: onAddToChat, closeColumn: closeColumn)
         // A menu that owns its target, because `NSMenuItem.target` is weak and nothing else here
         // would hold it: without this the closures are gone before the user picks anything.
         let menu = OwningMenu(target: target)
@@ -58,13 +58,17 @@ enum TerminalPaneMenu {
 
         menu.addItem(.separator())
 
-        // Closing the only pane closes the tab, which is a different and larger action than the
-        // one this item names, so it is offered only when it really does close a pane.
+        // A split shell closes with Cmd+W. When the shell is alone inside a split column, close
+        // that column pane instead, using the View menu's Ctrl+Cmd+W shortcut.
         let close = item(
-            "Close Pane", symbol: PaneSymbol.closePane, key: "w", modifiers: .command,
+            "Close Pane", symbol: PaneSymbol.closePane, key: "w",
+            modifiers: !canClose && closeColumn != nil ? [.control, .command] : .command,
             command: .close, target: target
         )
-        close.isEnabled = canClose
+        if !canClose, closeColumn != nil {
+            close.action = #selector(ActionTarget.closeColumnPane)
+        }
+        close.isEnabled = canClose || closeColumn != nil
         menu.addItem(close)
 
         return menu
@@ -135,13 +139,20 @@ enum TerminalPaneMenu {
     final class ActionTarget: NSObject {
         private let perform: @MainActor (TerminalPaneCommand) -> Void
         private let onAddToChat: (@MainActor () -> Void)?
+        private let closeColumn: (@MainActor () -> Void)?
 
-        init(perform: @escaping @MainActor (TerminalPaneCommand) -> Void, onAddToChat: (@MainActor () -> Void)?) {
+        init(
+            perform: @escaping @MainActor (TerminalPaneCommand) -> Void,
+            onAddToChat: (@MainActor () -> Void)?,
+            closeColumn: (@MainActor () -> Void)?
+        ) {
             self.perform = perform
             self.onAddToChat = onAddToChat
+            self.closeColumn = closeColumn
         }
 
         @objc func addToChat() { onAddToChat?() }
+        @objc func closeColumnPane() { closeColumn?() }
 
         @objc func fire(_ sender: NSMenuItem) {
             guard let command = sender.represented(TerminalPaneCommand.self) else { return }

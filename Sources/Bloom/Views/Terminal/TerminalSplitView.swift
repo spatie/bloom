@@ -25,6 +25,8 @@ struct TerminalSplitView: View {
     var runScript: RunScript?
     /// Called when the user closes the last pane, which is the tab asking to go away.
     var onCloseTab: @MainActor () -> Void
+    /// Closes the enclosing conversation or centre pane when this is its only shell.
+    var closeColumn: (@MainActor () -> Void)?
     /// Called when a split asks for something a shell tree cannot hold. See `handle`.
     var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
     var terminalLabel: String = "Terminal"
@@ -162,7 +164,8 @@ struct TerminalSplitView: View {
                     return TerminalPaneMenu.make(
                         canClose: layout.paneCount > 1,
                         isZoomed: layout.zoomed == id,
-                        onAddToChat: add
+                        onAddToChat: add,
+                        closeColumn: closeColumn
                     ) { _ = handle($0, from: id) }
                 }
             )

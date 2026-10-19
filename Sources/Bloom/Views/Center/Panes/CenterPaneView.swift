@@ -135,7 +135,8 @@ struct CenterPaneView: View {
             if let terminal = CenterTabStore.shared.terminal(for: sessionID, in: model.workspace.id) {
                 model.toolPane(
                     for: terminal, siblings: paneContents,
-                    splitColumn: { split($0, opening: $1) }, paneMenu: hostedMenu
+                    splitColumn: { split($0, opening: $1) }, closeColumn: closeColumn,
+                    paneMenu: hostedMenu
                 )
             } else if let transcript = model.existingTranscript(for: sessionID) {
                 ChatPaneView(transcript: transcript, model: model, pane: pane)
@@ -154,7 +155,8 @@ struct CenterPaneView: View {
                 .first(where: { $0.id == tabID }) {
                 model.toolPane(
                     for: tab, siblings: paneContents,
-                    splitColumn: { split($0, opening: $1) }, paneMenu: hostedMenu
+                    splitColumn: { split($0, opening: $1) }, closeColumn: closeColumn,
+                    paneMenu: hostedMenu
                 )
             } else {
                 emptyState
@@ -183,11 +185,13 @@ struct CenterPaneView: View {
         CenterPaneMenu(
             isSplit: isSplit,
             split: { axis, kind in split(axis, opening: kind) },
-            close: {
-                guard let tab else { return }
-                tabs.close(pane: pane, in: tab, of: model.workspace.id)
-            }
+            close: { closeColumn?() }
         )
+    }
+
+    private var closeColumn: (@MainActor () -> Void)? {
+        guard isSplit, let tab else { return nil }
+        return { tabs.close(pane: pane, in: tab, of: model.workspace.id) }
     }
 
     /// The same menu, as an `NSMenu`, for a pane whose content answers the right click itself.
