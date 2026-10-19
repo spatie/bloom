@@ -46,6 +46,7 @@ public struct MessageArrivals: Sendable {
     private var deliveries: [DeliveryID: MessageArrival] = [:]
     private var streams: [MessageKind: MessageArrival] = [:]
     private var rows: [Int: MessageArrival] = [:]
+    private var lastStreamedAssistantSeq: Int?
 
     public init() {}
 
@@ -57,6 +58,7 @@ public struct MessageArrivals: Sendable {
     public func delivery(_ id: DeliveryID) -> MessageArrival? { deliveries[id] }
     public func row(_ seq: Int) -> MessageArrival? { rows[seq] }
     public func stream(_ kind: MessageKind) -> MessageArrival? { streams[kind] }
+    public func wasStreamedAssistant(_ seq: Int) -> Bool { lastStreamedAssistantSeq == seq }
 
     public mutating func beganStream(_ kind: MessageKind, at date: Date = Date()) {
         guard kind == .assistantText || kind == .thinking else { return }
@@ -75,7 +77,11 @@ public struct MessageArrivals: Sendable {
             } else {
                 rows[seq] = MessageArrival(style: .sent, startedAt: date)
             }
-        case .assistantText, .thinking:
+        case .assistantText:
+            let streamed = streams.removeValue(forKey: kind)
+            if streamed != nil { lastStreamedAssistantSeq = seq }
+            rows[seq] = streamed ?? MessageArrival(style: .reply, startedAt: date)
+        case .thinking:
             rows[seq] = streams.removeValue(forKey: kind)
                 ?? MessageArrival(style: .reply, startedAt: date)
         default: break

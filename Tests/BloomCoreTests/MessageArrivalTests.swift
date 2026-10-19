@@ -66,6 +66,7 @@ struct MessageArrivalTests {
         arrivals.persisted(seq: 1, kind: .assistantText, at: start.addingTimeInterval(0.08))
         #expect(arrivals.row(1) == live)
         #expect(arrivals.stream(.assistantText) == nil)
+        #expect(arrivals.wasStreamedAssistant(1))
         arrivals.beganStream(.assistantText, at: start.addingTimeInterval(1))
         #expect(arrivals.stream(.assistantText) != live)
     }
@@ -83,6 +84,7 @@ struct MessageArrivalTests {
         arrivals.persisted(seq: 1, kind: .assistantText, at: start)
         arrivals.persisted(seq: 2, kind: .toolUse, at: start)
         #expect(arrivals.row(1)?.startedAt == start)
+        #expect(!arrivals.wasStreamedAssistant(1))
         #expect(arrivals.row(2) == nil)
     }
 

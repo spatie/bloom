@@ -1910,6 +1910,10 @@ struct TranscriptTable: NSViewRepresentable {
         /// A reflow, because the pane may have changed width while it drew nothing.
         func holdEnded() {
             rewidth(keeping: nil, withMargin: true)
+            // The first upward scroll otherwise does all of the older rows' height work itself.
+            // Start the same cancellable preparation used after a scroll once the new pane is
+            // visible and its landing has been measured.
+            scheduleSettle()
         }
 
         var reducesMotion: Bool { rowEnvironment?.reduceMotion ?? false }

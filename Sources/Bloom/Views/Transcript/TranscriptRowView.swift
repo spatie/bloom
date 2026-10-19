@@ -43,6 +43,7 @@ struct TranscriptRowView: View, Equatable {
             && lhs.isExpanded == rhs.isExpanded
             && lhs.summariseTool == rhs.summariseTool
             && lhs.isNested == rhs.isNested
+            && lhs.smoothMarkdownHandoff == rhs.smoothMarkdownHandoff
             && lhs.subagentActions == rhs.subagentActions
             && lhs.subagentHasRun == rhs.subagentHasRun
             && (lhs.responseCopyText != nil) == (rhs.responseCopyText != nil)
@@ -66,6 +67,8 @@ struct TranscriptRowView: View, Equatable {
     /// one-line summary. An explicitly opened group shows each call's original header.
     var summariseTool = false
     var isNested = false
+    /// The newly saved reply replaces the live text currently on screen.
+    var smoothMarkdownHandoff = false
     /// For a call that started a subagent, how many actions that subagent has taken, which the
     /// chat draws on this row instead of drawing the actions. See `TranscriptFold`.
     var subagentActions: Int?
@@ -151,7 +154,7 @@ struct TranscriptRowView: View, Equatable {
 
         case .assistantText:
             if let text = assistantText, !text.isEmpty {
-                ProseRowView(text: text, copyText: responseCopyText)
+                ProseRowView(text: text, copyText: responseCopyText, smoothMarkdownHandoff: smoothMarkdownHandoff)
             }
 
         case .thinking:

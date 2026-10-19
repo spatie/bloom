@@ -813,6 +813,9 @@ struct TranscriptListView: View {
                             isExpanded: isExpanded,
                             summariseTool: summariseTool,
                             isNested: row.parentToolUseID != nil,
+                            smoothMarkdownHandoff: row.kind == .assistantText
+                                && arrivals.isArriving(row.seq)
+                                && transcript.messageArrivals.wasStreamedAssistant(row.seq),
                             subagentActions: subagentActions,
                             subagentHasRun: subagentHasRun,
                             runActions: runActions,

@@ -69,7 +69,7 @@ public struct CodexSubagents: Sendable {
     private func start(_ child: CodexSubAgentActivity, resumesExisting: Bool = false) -> SubagentStart {
         SubagentStart(
             id: Self.id(for: child.agentThreadID), toolUseID: child.id,
-            description: child.agentPath.split(separator: "/").last.map(String.init) ?? "Codex subagent",
+            description: CodexSubagentName.display(child.agentPath, fallback: "Codex subagent"),
             type: "Codex", isBackgrounded: true,
             resumesExisting: resumesExisting
         )

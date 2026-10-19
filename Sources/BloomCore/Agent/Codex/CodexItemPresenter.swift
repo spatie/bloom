@@ -184,7 +184,7 @@ enum CodexItemPresenter {
         ToolPresentation(
             glyph: "person.2",
             label: "Sub-agent",
-            detail: ToolPresenter.basename(activity.agentPath),
+            detail: CodexSubagentName.display(activity.agentPath),
             tint: .neutral,
             chips: activity.kind.isEmpty ? [] : [.code(activity.kind)]
         )
