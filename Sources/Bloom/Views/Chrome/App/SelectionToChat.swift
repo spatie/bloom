@@ -109,7 +109,7 @@ enum SelectionToChat {
 
     /// The field editor is a subview of the text field it is editing while it has the keyboard, so
     /// walking superviews reaches the table from either kind of prose.
-    private static func transcript(containing view: NSView) -> TranscriptTableView? {
+    static func transcript(containing view: NSView) -> TranscriptTableView? {
         var current: NSView? = view
         while let each = current {
             if let table = each as? TranscriptTableView { return table }

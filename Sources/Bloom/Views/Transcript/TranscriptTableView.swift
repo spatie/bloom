@@ -1,4 +1,5 @@
 import AppKit
+import BloomCore
 
 /// AppKit can retain realised row origins after a resize even though rect(ofRow:) and the
 /// document height have already changed. In a live transcript the final cells were 92 points
@@ -10,6 +11,10 @@ final class TranscriptTableView: NSTableView {
     /// Puts a passage of this conversation into its own reply. Nil where the conversation has no
     /// composer to reply in, which is an archived workspace. See `SelectionToChat`.
     var quoteSelection: (@MainActor (String) -> Void)?
+
+    /// The conversation drawn here, so a paste over its selection reaches its own composer rather
+    /// than the focused chat's. See `TypeToComposer`.
+    var session: SessionID?
 
     /// What Select All and a drag across rows select. While it holds anything the table has the
     /// keyboard, because the text view the selection began in is usually recycled before Copy is
