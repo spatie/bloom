@@ -195,9 +195,9 @@ extension AppModel {
             return .refused("This workspace is no longer active. Refresh workspace_list.")
         }
         guard let sessionID = order.afterTurnOf else {
-            return await archive(current, deleteBranch: false, allowsConfirmation: false)
+            return await archiveForBridge(current, review: order.review)
         }
-        return bookArchiveForBridge(of: current, after: sessionID)
+        return bookArchiveForBridge(of: current, after: sessionID, review: order.review)
     }
 
     /// Confirms that the path the model named is a real image or movie inside its own worktree.

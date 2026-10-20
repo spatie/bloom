@@ -141,7 +141,8 @@ extension AppModel {
         deleteBranch: Bool? = nil,
         alwaysConfirm: Bool = false,
         allowsConfirmation: Bool = true,
-        presentConfirmation: ((ArchiveRequest) -> Void)? = nil
+        presentConfirmation: ((ArchiveRequest) -> Void)? = nil,
+        confirmationSurvivesDeparture: Bool = false
     ) async -> WorkspaceArchiveOutcome {
         guard let manager, let repo = repo(for: workspace) else {
             Log.archive.error(
@@ -169,7 +170,7 @@ extension AppModel {
             )
             request.isChecking = true
             offerArchiveConfirmation(request, present: presentConfirmation)
-            return .refused("Confirm this archive in Bloom.")
+            return .confirmationRequired("Confirm this archive in Bloom.")
         }
 
         let report: WorkspaceSafetyReport
@@ -196,7 +197,10 @@ extension AppModel {
                 problem: "Bloom could not check this workspace for unsaved work. \(trouble.sentence)",
                 hazards: hazards
             )
-            if allowsConfirmation { offerArchiveConfirmation(request, present: presentConfirmation) }
+            if allowsConfirmation {
+                offerArchiveConfirmation(request, present: presentConfirmation)
+                return .confirmationRequired(archiveRefusal(request))
+            }
             return .refused(archiveRefusal(request))
         }
 
@@ -211,7 +215,10 @@ extension AppModel {
             let request = ArchiveRequest(
                 workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards
             )
-            if allowsConfirmation { offerArchiveConfirmation(request, present: presentConfirmation) }
+            if allowsConfirmation {
+                offerArchiveConfirmation(request, present: presentConfirmation)
+                return .confirmationRequired(archiveRefusal(request))
+            }
             return .refused(archiveRefusal(request))
         }
 
@@ -223,8 +230,29 @@ extension AppModel {
             report: report,
             hazards: hazards,
             allowsConfirmation: allowsConfirmation,
-            presentConfirmation: presentConfirmation
+            presentConfirmation: presentConfirmation,
+            confirmationSurvivesDeparture: confirmationSurvivesDeparture
         )
+    }
+
+    /// A bridge review must not replace a question the owner has not answered. Check again in
+    /// the callback because another archive can offer a confirmation while Git is inspecting this one.
+    func archiveForBridge(_ workspace: Workspace, review: Bool) async -> WorkspaceArchiveOutcome {
+        var offeredConfirmation = false
+        let outcome = await archive(
+            workspace, deleteBranch: false, allowsConfirmation: review,
+            presentConfirmation: { [self] request in
+                if pendingArchive == nil {
+                    pendingArchive = request
+                    offeredConfirmation = true
+                }
+            },
+            confirmationSurvivesDeparture: true
+        )
+        if case .confirmationRequired = outcome, !offeredConfirmation {
+            return .refused("Another archive confirmation is open in Bloom. Answer it, then retry this archive.")
+        }
+        return outcome
     }
 
     /// Books an archive a workspace's own agent has asked for, to be run when its turn ends.
@@ -233,8 +261,10 @@ extension AppModel {
     /// is inside the worktree, and `performArchive` stops a workspace's agents before git touches
     /// a file, so archiving now would kill the turn that is waiting for this answer and leave the
     /// tool result going nowhere. See `WorkspaceArchiveTool` for the rest of that argument.
-    func bookArchiveForBridge(of workspace: Workspace, after sessionID: SessionID) -> WorkspaceArchiveOutcome {
-        bookArchive(of: workspace.id, after: sessionID)
+    func bookArchiveForBridge(
+        of workspace: Workspace, after sessionID: SessionID, review: Bool = false
+    ) -> WorkspaceArchiveOutcome {
+        bookArchive(of: workspace.id, after: sessionID, review: review)
         Log.archive.info(
             "\(workspace.name, privacy: .public) is booked to be archived when its agent's turn ends"
         )
@@ -264,7 +294,7 @@ extension AppModel {
     func archiveIfRequested(
         _ workspace: Workspace, endedIn sessionID: SessionID, wasStopped: Bool = false
     ) async {
-        guard takeArchiveBooking(of: workspace.id, endedIn: sessionID) else { return }
+        guard let review = takeArchiveBooking(of: workspace.id, endedIn: sessionID) else { return }
         guard let store else { return }
 
         if wasStopped {
@@ -291,13 +321,8 @@ extension AppModel {
             return
         }
 
-        // `deleteBranch: false` and `allowsConfirmation: false` are the same two arguments the
-        // owner's own client is archived under, and they are what keeps this from ever being more
-        // destructive than the tool's description promised: the branch is kept whatever the
-        // project's settings say, and a workspace with something at stake is refused rather than
-        // put behind a dialog nobody is sitting in front of.
-        switch await archive(workspace, deleteBranch: false, allowsConfirmation: false) {
-        case .archived, .requested:
+        switch await archiveForBridge(workspace, review: review) {
+        case .archived, .requested, .confirmationRequired:
             break
         case .refused(let reason):
             notice = BloomNotice(
@@ -453,7 +478,8 @@ extension AppModel {
         hazards: ArchiveHazards,
         skipArchiveScript: Bool = false,
         allowsConfirmation: Bool = true,
-        presentConfirmation: ((ArchiveRequest) -> Void)?
+        presentConfirmation: ((ArchiveRequest) -> Void)?,
+        confirmationSurvivesDeparture: Bool = false
     ) async -> WorkspaceArchiveOutcome {
         guard let manager else {
             Log.archive.error(
@@ -576,12 +602,18 @@ extension AppModel {
                 // raises this one is drawn in that workspace's own inspector, and a confirmation
                 // handed to a view that went away with the selection is a question nobody is ever
                 // shown. The window's dialog is exactly where a refusal with no control to
-                // animate out of belongs, which is what `RootView` says it is for.
+                // animate out of belongs, which is what `RootView` says it is for. Bridge review
+                // presenters belong to the app model, so they survive the departure and must still
+                // get the callback to avoid replacing another unanswered confirmation.
                 let request = ArchiveRequest(
                     workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards
                 )
                 if allowsConfirmation {
-                    offerArchiveConfirmation(request, present: departure == nil ? presentConfirmation : nil)
+                    offerArchiveConfirmation(
+                        request,
+                        present: departure == nil || confirmationSurvivesDeparture ? presentConfirmation : nil
+                    )
+                    return .confirmationRequired(archiveRefusal(request))
                 }
                 return .refused(archiveRefusal(request))
             default:
@@ -603,7 +635,7 @@ extension AppModel {
         if let problem = request.problem { return problem }
         let reasons = request.losses + request.notes
         guard !reasons.isEmpty else { return "Confirm this archive in Bloom." }
-        return "Archiving would discard \(reasons.joined(separator: "; ")). Resolve this or review it in Bloom."
+        return "Archiving would discard \(reasons.joined(separator: "; "))."
     }
 
     /// Diagnosed rather than reported, for both of the archive's catches.

@@ -412,19 +412,19 @@ final class AppModel {
     /// One booking per workspace. A second call from the same agent overwrites the first rather
     /// than queueing behind it, because both name the same worktree and the later one is the one
     /// with the fresher chat behind it.
-    private var archiveBookings: [WorkspaceID: SessionID] = [:]
+    private var archiveBookings: [WorkspaceID: (sessionID: SessionID, review: Bool)] = [:]
 
     /// Books a workspace to be archived once the asking chat's turn has ended.
-    func bookArchive(of id: WorkspaceID, after sessionID: SessionID) {
-        archiveBookings[id] = sessionID
+    func bookArchive(of id: WorkspaceID, after sessionID: SessionID, review: Bool = false) {
+        archiveBookings[id] = (sessionID, review)
     }
 
     /// Takes the booking back, if there is one and this is the chat it was waiting on. Answers
-    /// whether the caller now owns it, so a booking cannot be acted on twice.
-    func takeArchiveBooking(of id: WorkspaceID, endedIn sessionID: SessionID) -> Bool {
-        guard archiveBookings[id] == sessionID else { return false }
+    /// the review preference, or nil if this turn has no booking, so it cannot be acted on twice.
+    func takeArchiveBooking(of id: WorkspaceID, endedIn sessionID: SessionID) -> Bool? {
+        guard let booking = archiveBookings[id], booking.sessionID == sessionID else { return nil }
         archiveBookings[id] = nil
-        return true
+        return booking.review
     }
 
     /// Workspaces the owner has asked for whose worktree is still being cut.

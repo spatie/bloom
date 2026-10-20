@@ -29,6 +29,7 @@ struct WorkspaceArchiveToolTests {
             [:], ["id": .integer(1)], ["id": .string(" ")],
             ["id": .string(workspace.name)],
             ["id": .string(workspace.id.rawValue), "force": .bool(true)],
+            ["id": .string(workspace.id.rawValue), "review": .bool(true), "force": .bool(true)],
             ["id": .string(workspace.id.rawValue), "delete_branch": .bool(true)],
         ] {
             let result = await tool.call(request(arguments), as: .owner, store: store)
@@ -60,8 +61,8 @@ struct WorkspaceArchiveToolTests {
 
     /// The case that widened the tool: the workspace that handed a job out is the one that knows
     /// it is done. Not booked for a turn, because the caller is standing in another worktree.
-    @Test("a workspace agent archives a workspace it started, by id, at once")
-    func archivesOneItStarted() async throws {
+    @Test("a workspace agent archives a workspace it started, by id, at once", arguments: [true, false])
+    func archivesOneItStarted(_ review: Bool) async throws {
         let (store, mine) = try await fixture()
         let started = try await startedWorkspace(by: mine, in: store)
         let calls = ArchiveCalls()
@@ -74,7 +75,7 @@ struct WorkspaceArchiveToolTests {
         )
 
         let result = await tool.call(
-            request(["id": .string(started.id.rawValue)]), as: identity, store: store
+            request(["id": .string(started.id.rawValue), "review": .bool(review)]), as: identity, store: store
         )
 
         #expect(!result.isError, "\(result.text)")
@@ -82,6 +83,7 @@ struct WorkspaceArchiveToolTests {
         let orders = await calls.orders
         #expect(orders.map(\.workspace.id) == [started.id])
         #expect(orders.map(\.afterTurnOf) == [nil])
+        #expect(orders.map(\.review) == [review])
     }
 
     /// Nothing is excused on the started workspace's side: its agent still running means it is
@@ -165,6 +167,7 @@ struct WorkspaceArchiveToolTests {
         for arguments: [String: JSONValue] in [
             ["id": .integer(1)], ["id": .string(" ")], ["force": .bool(true)],
             ["id": .string(started.id.rawValue), "force": .bool(true)],
+            ["id": .string(started.id.rawValue), "review": .bool(true), "force": .bool(true)],
             ["id": .string(started.id.rawValue), "delete_branch": .bool(true)],
         ] {
             let result = await tool.call(request(arguments), as: identity, store: store)
@@ -332,6 +335,104 @@ struct WorkspaceArchiveToolTests {
         #expect(result.isError)
         #expect(result.text.contains("uncommitted changes"))
         #expect(try await store.workspace(id: workspace.id)?.state == .active)
+    }
+
+    @Test("review offers confirmation without claiming the workspace is archived")
+    func reviewRequiresConfirmation() async throws {
+        let (store, workspace) = try await fixture()
+        let calls = ArchiveCalls()
+        let tool = WorkspaceArchiveTool { order in
+            await calls.record(order)
+            return .confirmationRequired("Ignored files: .env, storage/logs/.")
+        }
+        let result = await tool.call(
+            request(["id": .string(workspace.id.rawValue), "review": .bool(true)]),
+            as: .owner, store: store
+        )
+
+        #expect(!result.isError)
+        #expect(await calls.orders.map(\.review) == [true])
+        #expect(result.text.contains("awaiting confirmation in Bloom"))
+        #expect(result.text.contains("Nothing has been removed"))
+        #expect(result.text.contains(".env"))
+        #expect(!result.text.contains("Archived '"))
+        #expect(try await store.workspace(id: workspace.id)?.state == .active)
+    }
+
+    @Test("review is optional and off by default", arguments: [true, false])
+    func reviewDefaultsOff(_ explicit: Bool) async throws {
+        let (store, workspace) = try await fixture()
+        let calls = ArchiveCalls()
+        let tool = WorkspaceArchiveTool { order in
+            await calls.record(order)
+            return .refused("Ignored files: .env.")
+        }
+        var arguments: [String: JSONValue] = ["id": .string(workspace.id.rawValue)]
+        if explicit { arguments["review"] = .bool(false) }
+        let result = await tool.call(request(arguments), as: .owner, store: store)
+
+        #expect(result.isError)
+        #expect(await calls.orders.map(\.review) == [false])
+        #expect(result.text.contains("retry with 'review': true"))
+    }
+
+    @Test("review must be a boolean", arguments: [JSONValue.string("true"), .integer(1), .null])
+    func reviewType(_ value: JSONValue) async throws {
+        let (store, workspace) = try await fixture()
+        let tool = WorkspaceArchiveTool { _ in
+            Issue.record("an invalid review preference reached the app")
+            return .archived
+        }
+        let result = await tool.call(
+            request(["id": .string(workspace.id.rawValue), "review": value]), as: .owner, store: store
+        )
+        #expect(result.isError)
+        #expect(result.text.contains("must be a boolean"))
+    }
+
+    @Test("a workspace's own review waits for its asking turn to end")
+    func deferredReview() async throws {
+        let (store, workspace) = try await fixture()
+        var session = Session(workspaceID: workspace.id, title: "Asking")
+        session.state = .running
+        session = try await store.upsert(session)
+        let calls = ArchiveCalls()
+        let tool = WorkspaceArchiveTool { order in
+            await calls.record(order)
+            return .requested
+        }
+        let identity = BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .workspace)
+        let result = await tool.call(request(["review": .bool(true)]), as: identity, store: store)
+
+        #expect(!result.isError)
+        #expect(await calls.orders.map(\.afterTurnOf) == [session.id])
+        #expect(await calls.orders.map(\.review) == [true])
+        #expect(result.text.contains("requested, not done"))
+        #expect(result.text.contains("offer an archive confirmation"))
+    }
+
+    @Test("review cannot name another workspace or bypass activity checks", arguments: [true, false])
+    func reviewKeepsSafetyChecks(_ queued: Bool) async throws {
+        let (store, mine) = try await fixture()
+        let started = try await startedWorkspace(by: mine, in: store)
+        var session = Session(workspaceID: started.id, title: "Unfinished")
+        if !queued { session.state = .running }
+        session = try await store.upsert(session)
+        if queued {
+            try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "Still to do"))
+        }
+        let tool = WorkspaceArchiveTool { _ in
+            Issue.record("review bypassed a scope or activity check")
+            return .confirmationRequired("Should never be offered")
+        }
+        let identity = BridgeIdentity(sessionID: SessionID("asking"), workspaceID: mine.id, role: .workspace)
+        let theirs = try await second(in: store)
+        for (id, caller) in [(started.id, identity), (started.id, BridgeIdentity.owner), (theirs.id, identity)] {
+            let result = await tool.call(
+                request(["id": .string(id.rawValue), "review": .bool(true)]), as: caller, store: store
+            )
+            #expect(result.isError)
+        }
     }
 
     private func request(_ arguments: [String: JSONValue]) -> MCPRequest {

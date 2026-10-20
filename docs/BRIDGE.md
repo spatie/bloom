@@ -356,7 +356,13 @@ terminal" from forking a second terminal.
 `workspace_archive` runs the app's normal archive lifecycle, including the project archive script.
 The worktree is removed; the branch, notes and chat history are kept. Running agents, queued
 messages, uncommitted work, local files at risk and failed safety checks refuse the call. There is
-no force or branch-deletion argument. Already archived workspaces are a no-op. This tool is not
+no force or branch-deletion argument. Pass `review: true` to offer Bloom's normal archive
+confirmation when files or a failed safety check block the archive. The result says it is awaiting
+confirmation, with the files or check failure explained; nothing is removed until the owner
+confirms in Bloom. An unanswered confirmation is never replaced by a later bridge review. Answer
+it before requesting another review. Running agents and queued messages still refuse the call.
+For an agent's own workspace, the review preference is kept with the booking and the confirmation
+can only appear after the asking turn ends. Already archived workspaces are a no-op. This tool is not
 self-approved for either role: removing a worktree is a question a person answers, and `reveal` can
 show candidates before the owner chooses which to archive.
 
