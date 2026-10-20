@@ -1,7 +1,7 @@
 import BloomCore
 
 /// The small changes a person makes to a workspace that is already there: its name, its pin, its
-/// colour, and whether it is showing as unread.
+/// colour, whether it is showing as unread, and the branch it targets.
 ///
 /// One subject, and the thing they share is the rule that makes them safe. Every one of these
 /// goes through `Store.update(workspaceID:)` rather than `upsert`, because a workspace row has a
@@ -87,5 +87,40 @@ extension AppModel {
     func setColour(_ workspace: Workspace, to hex: String?) async {
         guard let store else { return }
         _ = try? await store.update(workspaceID: workspace.id) { $0.colour = hex }
+    }
+
+    /// The branch the Changes tab, the diff stat and Create PR measure from.
+    func changeBaseBranch(of workspace: Workspace, to base: String) async {
+        guard base != workspace.baseBranch else { return }
+        let available = await BaseBranchChange.load(repoPath: workspace.path, excluding: workspace.branch)
+        if let refusal = BaseBranchChange.refusal(of: base, branch: workspace.branch, available: available) {
+            alert = BloomAlert(title: "Could not change the target branch", message: refusal)
+            return
+        }
+        do {
+            try await writeBaseBranch(base, of: workspace)
+        } catch {
+            alert = BloomAlert(title: "Could not change the target branch", message: error.readableMessage)
+        }
+    }
+
+    /// An open pull request's target, taken without a word: it arrives from a poll, not a press.
+    func adoptPullRequestBase(_ pullRequest: PullRequest?, for workspace: Workspace) async {
+        guard let base = await BaseBranchChange.adoptable(from: pullRequest, by: workspace) else { return }
+        try? await writeBaseBranch(base, of: workspace)
+    }
+
+    private func writeBaseBranch(_ base: String, of workspace: Workspace) async throws {
+        guard let store else { return }
+        try await BaseBranchChange.record(base, for: workspace)
+        guard let updated = try await store.update(workspaceID: workspace.id, { $0.baseBranch = base }) else {
+            return
+        }
+        // Handed over now rather than by the store feed, which may land after this refresh reads
+        // the base. The other readers take the row as they use it.
+        guard let model = workspaceModels[workspace.id] else { return }
+        model.workspace = updated
+        await model.refreshChanges()
+        await manager?.refreshDiffStat(workspace: updated)
     }
 }

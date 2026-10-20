@@ -8,8 +8,16 @@ import BloomCore
 /// floating list somebody arrows through), and a second shape for the second one is how a window
 /// grows two idioms for one job.
 struct WorkspaceSourceRow: View {
+    /// What a row is when it is not what its kind says. The inspector offers bases as new branch
+    /// rows to share their ranking, and "New branch from" with a plus would misname a target.
+    struct Role {
+        var glyph: String
+        var verb: String
+    }
+
     var source: WorkspaceSource
     var isSelected: Bool
+    var role: Role?
     var onPick: @MainActor () -> Void
     var onHover: @MainActor () -> Void
 
@@ -71,7 +79,7 @@ struct WorkspaceSourceRow: View {
         .buttonStyle(.plain)
         // The verb is spoken even though the tab carries it on screen, because a reader arrowing
         // down the list hears one row at a time and the tab strip is above all of them.
-        .accessibilityLabel("\(source.verb) \(source.name)")
+        .accessibilityLabel("\(role?.verb ?? source.verb) \(source.name)")
         .accessibilityValue([source.detail, source.note].compactMap { $0 }.joined(separator: ", "))
         // Focused, for the reason spelled out on `SlashCommandRow`.
         .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
@@ -96,7 +104,8 @@ struct WorkspaceSourceRow: View {
     }
 
     private var glyph: String {
-        switch source {
+        if let role { return role.glyph }
+        return switch source {
         case .pullRequest: "arrow.triangle.pull"
         case .existingBranch: "arrow.triangle.branch"
         case .newBranch: "plus.circle"

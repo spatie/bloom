@@ -2497,6 +2497,8 @@ final class WorkspaceModel {
         await PullRequestNumber.record(fresh, for: asked, in: store)
         isLoadingPullRequest = false
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
+        // After the band has its answer: following a moved target can mean a fetch.
+        await app.adoptPullRequestBase(fresh, for: workspace)
     }
 
     /// Asks the workspace's agent to open the pull request, instead of running `gh` from here.
