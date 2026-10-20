@@ -204,4 +204,25 @@ struct TranscriptTextMeasureTests {
         #expect(zero.width == 48)
         #expect(hair.width == 1)
     }
+
+    // MARK: What it draws at
+
+    /// A sent turn drew one sliver of glyph per line: a minimum size probe came after the
+    /// placing question and left the container at a hair's width inside a full bubble.
+    @Test("a run left at a probe's width is laid out again at its frame before drawing")
+    func relaysOutAtTheFrame() {
+        let floor = TranscriptTextMeasure.floorWidth
+        let ideal = TranscriptTextMeasure.idealWidth
+        #expect(TranscriptTextMeasure.needsRelayoutAtFrame(containerWidth: floor, frameWidth: 456, reportedWidth: 48))
+        #expect(TranscriptTextMeasure.needsRelayoutAtFrame(containerWidth: ideal, frameWidth: 456, reportedWidth: 1_200))
+    }
+
+    @Test("a run placed at the width it was laid out at, or narrower than it reported, is left alone")
+    func leavesAPlacedRunAlone() {
+        let ideal = TranscriptTextMeasure.idealWidth
+        #expect(!TranscriptTextMeasure.needsRelayoutAtFrame(containerWidth: 92, frameWidth: 92, reportedWidth: 92))
+        #expect(!TranscriptTextMeasure.needsRelayoutAtFrame(containerWidth: 536, frameWidth: 92, reportedWidth: 92))
+        #expect(!TranscriptTextMeasure.needsRelayoutAtFrame(containerWidth: ideal, frameWidth: 92, reportedWidth: 92))
+        #expect(!TranscriptTextMeasure.needsRelayoutAtFrame(containerWidth: 91.5, frameWidth: 92, reportedWidth: 92.5))
+    }
 }

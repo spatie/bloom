@@ -455,11 +455,15 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     var copyPrefix = ""
     var copySeparatorBefore = "\n\n"
 
-    /// `sizeThatFits` can leave the container wider than the placed frame, which drew a long
-    /// pasted turn past its bubble. Only an overflowing run is laid out again.
+    /// `sizeThatFits` leaves the container at its last question's width, which can be a probe
+    /// rather than the placed frame. See `TranscriptTextMeasure.needsRelayoutAtFrame`.
     override func viewWillDraw() {
         if let container = textContainer, let measured = lastReportedMeasurement,
-           measured.size.width > bounds.width + Self.overflowTolerance {
+           TranscriptTextMeasure.needsRelayoutAtFrame(
+               containerWidth: Double(container.containerSize.width),
+               frameWidth: Double(bounds.width),
+               reportedWidth: Double(measured.size.width)
+           ) {
             container.containerSize = CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
             lastReportedMeasurement = nil
             if measured.alignsBubbleInk, let layout = layoutManager {
@@ -470,10 +474,6 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         }
         super.viewWillDraw()
     }
-
-    /// Frames land on half points on a Retina display, and a reported width rounded up can sit
-    /// that far over one without a glyph crossing the edge.
-    private static let overflowTolerance: CGFloat = 0.5
 
     /// Whether whoever has the keyboard is selecting this view's text along with its own.
     private var isSelectedWithTheKeyboardOwner: Bool {
