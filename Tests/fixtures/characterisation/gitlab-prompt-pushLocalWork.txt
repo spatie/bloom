@@ -1,0 +1,1 @@
+Commit everything outstanding in this worktree, with a message that describes the change the way this project words one, then push {{branch}} so its merge request reflects what is here. If there is nothing to commit, just push.

@@ -39,8 +39,6 @@ struct GitHubSignInSheet: View {
 
     /// Long enough to see that it worked, short enough not to be a step of its own.
     private static let successPause = Duration.milliseconds(700)
-    private static let manualURL = "https://cli.github.com/manual/gh_auth_login"
-    private static let downloadURL = "https://cli.github.com"
 
     init(request: GitHubSignIn.Request, onFinish: @escaping (Bool) -> Void) {
         self.request = request
@@ -127,12 +125,12 @@ struct GitHubSignInSheet: View {
         case .checking:
             HStack(spacing: InspectorLayout.gap) {
                 ProgressView().controlSize(.small)
-                Text("Checking with the GitHub CLI")
+                Text("Checking with the \(words.cliName)")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
             }
         case .connected:
-            Label("Connected to GitHub", systemImage: "checkmark.circle.fill")
+            Label("Connected to \(words.service)", systemImage: "checkmark.circle.fill")
                 .font(Typo.label)
                 .foregroundStyle(Palette.positive)
         case .failed(let message):
@@ -170,7 +168,7 @@ struct GitHubSignInSheet: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             Text(
-                "You can sign in anywhere: run gh auth login in your own terminal, or use a "
+                "You can sign in anywhere: run \(words.login) in your own terminal, or use a "
                     + "token you already have. Bloom re-checks on its own, and Check again asks "
                     + "straight away."
             )
@@ -179,9 +177,9 @@ struct GitHubSignInSheet: View {
             .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: InspectorLayout.gap) {
-                Button("Copy gh auth login") { Clipboard.copy("gh auth login") }
+                Button("Copy \(words.login)") { Clipboard.copy(words.login) }
                 Button("Check again") { recheck() }
-                Button("GitHub CLI manual") { GitHubBridge.open(Self.manualURL) }
+                Button("\(words.cliName) manual") { GitHubBridge.open(words.manualURL) }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -197,7 +195,7 @@ struct GitHubSignInSheet: View {
         switch phase {
         case .idle:
             if access == .notInstalled, !canBrew {
-                Button("Open cli.github.com") { GitHubBridge.open(Self.downloadURL) }
+                Button("Open \(words.downloadName)") { GitHubBridge.open(words.downloadURL) }
                     .buttonStyle(.borderedProminent)
                     .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
@@ -228,24 +226,37 @@ struct GitHubSignInSheet: View {
     // MARK: - Copy
 
     private var title: String {
-        access == .notInstalled ? "Install the GitHub CLI" : "Connect GitHub"
+        if access == .notInstalled { return "Install the \(words.cliName)" }
+        return request.purpose == .switchAccount ? "Switch \(words.service) account" : "Connect \(words.service)"
     }
 
     private var sentence: String {
-        switch access {
-        case .notInstalled where canBrew:
-            "This action needs the gh command, and it is not installed on this Mac. "
+        let needs = request.purpose == .action ? "This action needs" : "Bloom works with \(words.service) through"
+        switch (access, request.purpose) {
+        case (.notInstalled, _) where canBrew:
+            return "\(needs) the \(words.command) command, and it is not installed on this Mac. "
                 + "Homebrew can install it here."
-        case .notInstalled:
-            "This action needs the gh command, and it is not installed on this Mac. "
-                + "Install it from cli.github.com, then come back."
-        default:
-            "This action needs GitHub access. Sign in with the GitHub CLI to continue."
+        case (.notInstalled, _):
+            return "\(needs) the \(words.command) command, and it is not installed on this Mac. "
+                + "Install it from \(words.downloadName), then come back."
+        case (_, .action):
+            return "This action needs \(words.service) access. Sign in with the \(words.cliName) to continue."
+        case (_, .connect):
+            return "Sign in with the \(words.cliName) so Bloom can read, open and merge \(request.forge.request)s."
+        case (_, .switchAccount):
+            return "Choose which of the accounts signed in to the \(words.cliName) Bloom uses. "
+                + "To add another, sign in again."
         }
     }
 
+    /// The command this state runs, as the button names it and as it starts.
+    private var invocation: (executable: String, arguments: [String]) {
+        if access == .notInstalled { return ("brew", ["install", words.command]) }
+        return (words.command, request.purpose == .switchAccount ? ["auth", "switch"] : words.loginArguments)
+    }
+
     private var primaryTitle: String {
-        access == .notInstalled ? "Run brew install gh" : "Run gh auth login"
+        "Run " + ([invocation.executable] + invocation.arguments).joined(separator: " ")
     }
 
     /// Resolved once when the sheet opens rather than on every render: `which` walks the PATH,
@@ -258,14 +269,13 @@ struct GitHubSignInSheet: View {
     private func start() {
         session?.stop()
 
-        let executable = access == .notInstalled ? "brew" : "gh"
-        let arguments = access == .notInstalled ? ["install", "gh"] : ["auth", "login"]
+        let (executable, arguments) = invocation
 
         guard let session = LoginTerminalSession(
             executable: executable,
             arguments: arguments,
             directory: request.directory,
-            onExit: { _ in finished() }
+            onExit: { exit in finished(exit) }
         ) else {
             phase = .failed("\(executable) is not on this Mac.")
             return
@@ -277,10 +287,15 @@ struct GitHubSignInSheet: View {
 
     /// The command has ended. Whether it worked is gh's answer to give, not the exit status's:
     /// a login the user backed out of exits zero just the same.
-    private func finished() {
+    private func finished(_ exit: TerminalExit) {
         phase = .checking
         Task {
-            let state = await GitHubAvailability.shared.check(force: true)
+            let state = await currentAccess()
+            // From Settings an account may already have been there, so a failed run is no proof.
+            if request.purpose != .action, state == .ready, exit != .exited(0) {
+                phase = .failed("\(words.command) did not finish. You can run it again.")
+                return
+            }
             switch state {
             case .ready:
                 phase = .connected
@@ -291,9 +306,9 @@ struct GitHubSignInSheet: View {
                 access = .signedOut
                 phase = .idle
             case .signedOut:
-                phase = .failed("The GitHub CLI is still signed out. You can run it again.")
+                phase = .failed("The \(words.cliName) is still signed out. You can run it again.")
             case .notInstalled:
-                phase = .failed("The gh command is still not on this Mac.")
+                phase = .failed("The \(words.command) command is still not on this Mac.")
             case .unknown:
                 phase = .failed("Bloom could not tell whether that worked.")
             }
@@ -303,8 +318,8 @@ struct GitHubSignInSheet: View {
     private func recheck() {
         phase = .checking
         Task {
-            guard await GitHubAvailability.shared.check(force: true) == .ready else {
-                phase = .failed("Still no GitHub access.")
+            guard await currentAccess() == .ready else {
+                phase = .failed("Still no \(words.service) access.")
                 return
             }
             phase = .connected
@@ -316,5 +331,47 @@ struct GitHubSignInSheet: View {
     private func stop() {
         session?.stop()
         onFinish(false)
+    }
+
+    private var words: SignInWords { SignInWords(request.forge, host: request.host) }
+
+    private func currentAccess() async -> GitHubAvailability.State {
+        guard request.forge == .gitLab else { return await GitHubAvailability.shared.check(force: true) }
+        return await GitHubSignIn.shared.gitLabAccess(in: request.directory, host: request.host)
+    }
+}
+
+/// The words and commands that differ between signing in to GitHub and to GitLab. GitHub's are
+/// the sheet's original literals.
+private struct SignInWords {
+    let command: String
+    let cliName: String
+    let service: String
+    let loginArguments: [String]
+    let manualURL: String
+    let downloadURL: String
+    let downloadName: String
+
+    var login: String { ([command] + loginArguments).joined(separator: " ") }
+
+    init(_ forge: Forge, host: String?) {
+        switch forge {
+        case .gitHub:
+            command = "gh"
+            cliName = "GitHub CLI"
+            service = "GitHub"
+            loginArguments = ["auth", "login"]
+            manualURL = "https://cli.github.com/manual/gh_auth_login"
+            downloadURL = "https://cli.github.com"
+            downloadName = "cli.github.com"
+        case .gitLab:
+            command = "glab"
+            cliName = "GitLab CLI"
+            service = host ?? "GitLab"
+            loginArguments = ["auth", "login"] + (host.map { ["--hostname", $0] } ?? [])
+            manualURL = "https://gitlab.com/gitlab-org/cli/-/blob/main/docs/source/auth/login.md"
+            downloadURL = "https://gitlab.com/gitlab-org/cli"
+            downloadName = "gitlab.com/gitlab-org/cli"
+        }
     }
 }

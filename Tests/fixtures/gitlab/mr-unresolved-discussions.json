@@ -1,0 +1,31 @@
+{
+  "iid": 4038,
+  "title": "fix(repo): send topics instead of deprecated tag_list",
+  "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4038",
+  "state": "opened",
+  "draft": false,
+  "has_conflicts": false,
+  "detailed_merge_status": "discussions_not_resolved",
+  "merge_status": "can_be_merged",
+  "source_branch": "anishisbusy/repo-create-topics",
+  "target_branch": "main",
+  "merged_at": null,
+  "closed_at": null,
+  "sha": "b4feaccdd217d199ed18d15d3acd4447bbf677b3",
+  "source_project_id": 45049979,
+  "target_project_id": 34675721,
+  "head_pipeline": {
+    "id": 2924840836,
+    "iid": 1584,
+    "project_id": 45049979,
+    "status": "success",
+    "sha": "b4feaccdd217d199ed18d15d3acd4447bbf677b3",
+    "ref": "anishisbusy/repo-create-topics",
+    "web_url": "https://gitlab.com/gitlab-community/gitlab-org/cli/-/pipelines/2924840836"
+  },
+  "references": {
+    "short": "!4038",
+    "relative": "!4038",
+    "full": "gitlab-org/cli!4038"
+  }
+}

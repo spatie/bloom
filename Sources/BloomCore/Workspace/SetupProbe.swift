@@ -59,6 +59,7 @@ public struct SetupProbe: Sendable {
         case .git: await SetupCheck(tool: tool, outcome: gitOutcome())
         case .claudeCode, .codex, .grok: await SetupCheck(tool: tool, outcome: agentOutcome(tool))
         case .gitHub: await SetupCheck(tool: tool, outcome: gitHubOutcome())
+        case .gitLab: await SetupCheck(tool: tool, outcome: gitLabOutcome())
         }
     }
 
@@ -132,5 +133,18 @@ public struct SetupProbe: Sendable {
         case .signedOut: return .needsSignIn(detail: nil)
         case .ready: return .ready(detail: "Signed in")
         }
+    }
+
+    // MARK: - GitLab
+
+    /// Signed in to any host is ready. See `GitLabIdentity.signedIn` for why host by host.
+    private func gitLabOutcome() async -> SetupOutcome {
+        guard Shell.which("glab") != nil else { return .missing }
+        return Self.gitLabOutcome(signedIn: await GitLabIdentity.signedIn().usernames)
+    }
+
+    static func gitLabOutcome(signedIn: [String: String]) -> SetupOutcome {
+        let hosts = signedIn.keys.sorted()
+        return hosts.isEmpty ? .needsSignIn(detail: nil) : .ready(detail: "Signed in to \(hosts.joined(separator: ", "))")
     }
 }

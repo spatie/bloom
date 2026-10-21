@@ -9,7 +9,8 @@ private func report(
     claude: SetupOutcome = .ready(detail: "freek@example.com"),
     codex: SetupOutcome = .ready(detail: "freek@example.com"),
     grok: SetupOutcome = .ready(detail: "ada@example.com"),
-    gitHub: SetupOutcome = .ready(detail: "Signed in")
+    gitHub: SetupOutcome = .ready(detail: "Signed in"),
+    gitLab: SetupOutcome = .ready(detail: "Signed in to gitlab.com")
 ) -> SetupReport {
     SetupReport(checks: [
         SetupCheck(tool: .git, outcome: git),
@@ -17,6 +18,7 @@ private func report(
         SetupCheck(tool: .codex, outcome: codex),
         SetupCheck(tool: .grok, outcome: grok),
         SetupCheck(tool: .gitHub, outcome: gitHub),
+        SetupCheck(tool: .gitLab, outcome: gitLab),
     ])
 }
 

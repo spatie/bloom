@@ -102,19 +102,22 @@ public struct WorkspaceCheckoutOptions: Sendable {
     /// half of the picker knew the branch was taken and the pull request half did not, so the one
     /// that reached `git worktree add` was the one that could not have worked.
     public let holders: [String: BranchHolder]
+    public let forge: Forge
 
     public init(
         pullRequests: [PullRequestListing] = [],
         branches: [ExistingBranch] = [],
         access: GitHubAccess = .ready,
         failure: String? = nil,
-        holders: [String: BranchHolder] = [:]
+        holders: [String: BranchHolder] = [:],
+        forge: Forge = .gitHub
     ) {
         self.pullRequests = pullRequests
         self.branches = branches
         self.access = access
         self.failure = failure
         self.holders = holders
+        self.forge = forge
     }
 
     /// Both branch listings are read here rather than handed in.
@@ -158,6 +161,7 @@ public struct WorkspaceCheckoutOptions: Sendable {
             workspaceNames: BranchHolder.names(of: workspaces, in: repoID)
         )
 
+        let forgeKind = await ForgeResolver.forge(for: repoPath)
         func options(
             pullRequests: [PullRequestListing] = [],
             access: GitHubAccess = .ready,
@@ -175,15 +179,17 @@ public struct WorkspaceCheckoutOptions: Sendable {
                 ),
                 access: access,
                 failure: failure,
-                holders: branchesInUse
+                holders: branchesInUse,
+                forge: forgeKind
             )
         }
 
-        let access = await GitHub.access()
+        let forge = await ForgeResolver.client(for: repoPath)
+        let access = await forge.access(in: repoPath)
         guard access == .ready else { return options(access: access) }
 
         do {
-            return options(pullRequests: try await GitHub.openPullRequests(repoPath: repoPath))
+            return options(pullRequests: try await forge.openPullRequests(repoPath: repoPath))
         } catch {
             return options(failure: error.readableMessage)
         }

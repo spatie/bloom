@@ -1,0 +1,200 @@
+[
+  {
+    "id": 17015172335,
+    "name": "lint_commit",
+    "stage": "checks",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015172335",
+    "created_at": "2026-10-07T22:35:58.281Z",
+    "started_at": "2026-10-07T22:35:58.546Z",
+    "finished_at": "2026-10-07T22:36:24.924Z"
+  },
+  {
+    "id": 17015105576,
+    "name": "review-docs-cleanup",
+    "stage": "review",
+    "status": "manual",
+    "allow_failure": true,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105576",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": null,
+    "finished_at": null
+  },
+  {
+    "id": 17015105575,
+    "name": "review-docs-deploy",
+    "stage": "review",
+    "status": "manual",
+    "allow_failure": true,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105575",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": null,
+    "finished_at": null
+  },
+  {
+    "id": 17015105574,
+    "name": "tests:coverage",
+    "stage": "test",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105574",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:35:49.786Z",
+    "finished_at": "2026-10-07T22:36:28.692Z"
+  },
+  {
+    "id": 17015105573,
+    "name": "tests:integration",
+    "stage": "test",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105573",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:37.278Z",
+    "finished_at": "2026-10-07T22:33:47.991Z"
+  },
+  {
+    "id": 17015105572,
+    "name": "tests:unit",
+    "stage": "test",
+    "status": "failed",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105572",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:37.178Z",
+    "finished_at": "2026-10-07T22:35:47.931Z"
+  },
+  {
+    "id": 17015105571,
+    "name": "lint",
+    "stage": "test",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105571",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:37.151Z",
+    "finished_at": "2026-10-07T22:38:57.151Z"
+  },
+  {
+    "id": 17015105570,
+    "name": "lint:comments",
+    "stage": "test",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105570",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:37.081Z",
+    "finished_at": "2026-10-07T22:32:05.621Z"
+  },
+  {
+    "id": 17015105569,
+    "name": "docs hugo_build",
+    "stage": "documentation",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105569",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.971Z",
+    "finished_at": "2026-10-07T22:32:04.282Z"
+  },
+  {
+    "id": 17015105568,
+    "name": "check_docs_markdown",
+    "stage": "documentation",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105568",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.952Z",
+    "finished_at": "2026-10-07T22:31:55.658Z"
+  },
+  {
+    "id": 17015105567,
+    "name": "check_docs_update",
+    "stage": "documentation",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105567",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.905Z",
+    "finished_at": "2026-10-07T22:33:35.901Z"
+  },
+  {
+    "id": 17015105566,
+    "name": "check_args",
+    "stage": "checks",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105566",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.837Z",
+    "finished_at": "2026-10-07T22:31:48.038Z"
+  },
+  {
+    "id": 17015105565,
+    "name": "check_embed",
+    "stage": "checks",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105565",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.752Z",
+    "finished_at": "2026-10-07T22:31:48.027Z"
+  },
+  {
+    "id": 17015105563,
+    "name": "check_go_generated_code",
+    "stage": "checks",
+    "status": "success",
+    "allow_failure": false,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105563",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.719Z",
+    "finished_at": "2026-10-07T22:32:31.164Z"
+  },
+  {
+    "id": 17015105562,
+    "name": "dependency-scanning-profile-0",
+    "stage": "application-security-testing",
+    "status": "success",
+    "allow_failure": true,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105562",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.650Z",
+    "finished_at": "2026-10-07T22:31:55.534Z"
+  },
+  {
+    "id": 17015105561,
+    "name": "govulncheck",
+    "stage": "application-security-testing",
+    "status": "manual",
+    "allow_failure": true,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105561",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": null,
+    "finished_at": null
+  },
+  {
+    "id": 17015105560,
+    "name": "secret_detection",
+    "stage": "application-security-testing",
+    "status": "success",
+    "allow_failure": true,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105560",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.466Z",
+    "finished_at": "2026-10-07T22:31:51.248Z"
+  },
+  {
+    "id": 17015105559,
+    "name": "gitlab-advanced-sast",
+    "stage": "application-security-testing",
+    "status": "success",
+    "allow_failure": true,
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/jobs/17015105559",
+    "created_at": "2026-10-07T22:31:35.849Z",
+    "started_at": "2026-10-07T22:31:36.476Z",
+    "finished_at": "2026-10-07T22:33:35.126Z"
+  }
+]

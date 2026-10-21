@@ -184,6 +184,20 @@ struct MergedPullRequestTests {
         #expect(stored.pinned)
     }
 
+    @Test("a project that moved forge forgets its numbers, and no other project's")
+    func forgeChangeForgetsTheNumbers() async throws {
+        let store = try makeTestStore("pr-number-forge")
+        let moved = try await seed(store, name: "moved")
+        let other = try await seed(store, name: "other")
+        try await store.recordPullRequestNumber(222, workspaceID: moved.id)
+        try await store.recordPullRequestNumber(333, workspaceID: other.id)
+
+        try await store.clearPullRequestNumbers(repoID: moved.repoID)
+
+        #expect(try await store.workspace(id: moved.id)?.pullRequestNumber == nil)
+        #expect(try await store.workspace(id: other.id)?.pullRequestNumber == 333)
+    }
+
     @Test("the other writers of a workspace row leave the number alone")
     func writersKeepTheNumber() async throws {
         let store = try makeTestStore("pr-number-writers")

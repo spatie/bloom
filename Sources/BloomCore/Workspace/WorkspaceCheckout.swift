@@ -303,7 +303,7 @@ public enum WorkspaceCheckoutPlan {
     /// The URL carries the repository as well, which is not thrown away: pasting another
     /// repository's pull request into this project is a mistake worth naming rather than a number
     /// that quietly resolves to somebody else's work.
-    public static func parseReference(_ text: String) -> PullRequestReference? {
+    public static func parseReference(_ text: String, forge: Forge = .gitHub) -> PullRequestReference? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -319,9 +319,24 @@ public enum WorkspaceCheckoutPlan {
             )
         }
 
+        if forge == .gitLab, let mergeRequest = gitLabReference(trimmed) { return mergeRequest }
         let bare = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
         guard let number = positiveNumber(bare) else { return nil }
         return PullRequestReference(number: number, repository: nil)
+    }
+
+    /// `!12`, or a merge request URL: `https://<host>/<group path>/-/merge_requests/12`.
+    private static func gitLabReference(_ text: String) -> PullRequestReference? {
+        if text.hasPrefix("!") {
+            return positiveNumber(String(text.dropFirst())).map { PullRequestReference(number: $0, repository: nil) }
+        }
+        guard let url = URL(string: text), url.host != nil else { return nil }
+        let parts = url.path.split(separator: "/").map(String.init)
+        guard let separator = parts.firstIndex(of: "-"), separator >= 2,
+              parts.indices.contains(separator + 2), parts[separator + 1] == "merge_requests",
+              let number = positiveNumber(parts[separator + 2])
+        else { return nil }
+        return PullRequestReference(number: number, repository: parts[..<separator].joined(separator: "/"))
     }
 
     private static func positiveNumber(_ text: String) -> Int? {
@@ -445,17 +460,17 @@ public enum WorkspaceCheckoutResolver {
     /// to have as number 42. Being told the numbers belong to different repositories is a fixable
     /// mistake; silently reviewing the wrong pull request is not.
     public static func problem(
-        with text: String, in repository: String?
+        with text: String, in repository: String?, forge: Forge = .gitHub
     ) -> String? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "Type a pull request number or paste its URL."
         }
-        guard let reference = WorkspaceCheckoutPlan.parseReference(text) else {
-            return "'\(text.trimmingCharacters(in: .whitespacesAndNewlines))' is not a pull request number or URL."
+        guard let reference = WorkspaceCheckoutPlan.parseReference(text, forge: forge) else {
+            return "'\(text.trimmingCharacters(in: .whitespacesAndNewlines))' is not a \(forge.request) number or URL."
         }
         if let repository, let named = reference.repository,
            named.lowercased() != repository.lowercased() {
-            return "That pull request belongs to \(named), and this project is \(repository)."
+            return "That \(forge.request) belongs to \(named), and this project is \(repository)."
         }
         return nil
     }
@@ -463,13 +478,15 @@ public enum WorkspaceCheckoutResolver {
     /// The whole of it, including the gh call. Lives here rather than in the sheet so the sheet is
     /// left drawing a text field and reading an answer.
     public static func resolve(_ text: String, repoPath: String) async -> WorkspaceCheckoutResolution {
-        let slug = await GitHub.repositorySlug(repoPath: repoPath)
-        if let problem = problem(with: text, in: slug) { return .failure(problem) }
-        guard let reference = WorkspaceCheckoutPlan.parseReference(text) else {
+        let kind = await ForgeResolver.forge(for: repoPath)
+        let forge = await ForgeResolver.client(for: repoPath)
+        let slug = await forge.repositorySlug(repoPath: repoPath)
+        if let problem = problem(with: text, in: slug, forge: kind) { return .failure(problem) }
+        guard let reference = WorkspaceCheckoutPlan.parseReference(text, forge: kind) else {
             return .failure("That is not a pull request number or URL.")
         }
         do {
-            let summary = try await GitHub.pullRequestSummary(
+            let summary = try await forge.pullRequestSummary(
                 number: reference.number, repoPath: repoPath
             )
             return .checkout(.pullRequest(summary))

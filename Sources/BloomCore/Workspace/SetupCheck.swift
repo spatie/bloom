@@ -17,6 +17,8 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
     case codex
     case grok
     case gitHub
+    /// Shown so GitLab is visibly supported, and optional: never in the verdict or its sentence.
+    case gitLab
 
     public var id: String { rawValue }
 
@@ -29,7 +31,7 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
         case .claudeCode: .claudeCode
         case .codex: .codex
         case .grok: .grok
-        case .git, .gitHub: nil
+        case .git, .gitHub, .gitLab: nil
         }
     }
 
@@ -41,6 +43,7 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
         case .codex: "Codex"
         case .grok: "Grok"
         case .gitHub: "GitHub CLI"
+        case .gitLab: "GitLab CLI"
         }
     }
 
@@ -50,6 +53,7 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
     public var sentenceName: String {
         switch self {
         case .gitHub: "the GitHub CLI"
+        case .gitLab: "the GitLab CLI"
         case .git, .claudeCode, .codex, .grok: title
         }
     }
@@ -71,6 +75,8 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
             "xAI's agent. Bloom can drive a workspace with it instead of Claude Code or Codex."
         case .gitHub:
             "Pull requests, checks and merges. Everything else in Bloom works without it."
+        case .gitLab:
+            "Merge requests and pipelines, for projects on GitLab. Only those projects need it."
         }
     }
 
@@ -80,12 +86,16 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
         case .git: "git"
         case .claudeCode, .codex, .grok: agentKind?.executableName ?? rawValue
         case .gitHub: "gh"
+        case .gitLab: "glab"
         }
     }
 
     /// The order the window lists them in: the flat requirement, then the agents, then the one
     /// that is optional. Reading down the column is reading down the strength of the ask.
-    public static let displayOrder: [SetupTool] = [.git, .claudeCode, .codex, .grok, .gitHub]
+    public static let displayOrder: [SetupTool] = [.git, .claudeCode, .codex, .grok, .gitHub, .gitLab]
+
+    /// A row the verdict ignores whatever it says.
+    public var isOptional: Bool { self == .gitLab }
 }
 
 // MARK: - How a tool turned out
@@ -254,6 +264,21 @@ public extension SetupCheck {
                 url: nil,
                 isInteractive: true
             )
+
+        case (.gitLab, .missing):
+            return SetupFix(
+                summary: "Install the GitLab CLI",
+                command: "brew install glab",
+                url: URL(string: "https://gitlab.com/gitlab-org/cli")
+            )
+
+        case (.gitLab, .needsSignIn):
+            return SetupFix(
+                summary: "Sign in to GitLab",
+                command: "glab auth login",
+                url: nil,
+                isInteractive: true
+            )
         }
     }
 }
@@ -338,7 +363,7 @@ public struct SetupReport: Sendable, Hashable {
         guard isSettled else { return .checking }
         if !outcome(for: .git).isReady { return .blocked }
         if !hasRunnableAgent { return .blocked }
-        let everythingIsReady = checks.allSatisfy { $0.outcome.isReady }
+        let everythingIsReady = checks.allSatisfy { $0.outcome.isReady || $0.tool.isOptional }
         return everythingIsReady ? .ready : .readyWithNotes
     }
 
@@ -357,7 +382,7 @@ public struct SetupReport: Sendable, Hashable {
             // quiet again half a second later.
             if hasRunnableAgent || agentsAreStillChecking { return .note }
             return .problem
-        case .gitHub:
+        case .gitHub, .gitLab:
             return .note
         }
     }
@@ -403,7 +428,7 @@ public extension SetupReport {
     /// sentence that has not finished its job.
     private var readyWithNotesSentence: String {
         let quiet = checks
-            .filter { !$0.outcome.isReady && severity(for: $0.tool) == .note }
+            .filter { !$0.outcome.isReady && !$0.tool.isOptional && severity(for: $0.tool) == .note }
             .map(\.tool.sentenceName)
 
         guard !quiet.isEmpty else {

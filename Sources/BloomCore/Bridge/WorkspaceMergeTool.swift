@@ -306,14 +306,16 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
     }
 
     private func note(workspace: Workspace, pullRequest: PullRequest, chat: String) -> String {
-        """
+        let forge = pullRequest.forge
+        return """
         Nothing is merged. A turn has begun in '\(workspace.name)', in the chat '\(chat)': its \
-        agent has been asked to merge #\(pullRequest.number) and it runs `gh pr merge` itself, \
+        agent has been asked to merge \(forge.reference(pullRequest.number)) and it runs \
+        `\(forge.command("merge"))` itself, \
         where the owner can watch it and answer anything it asks. Bloom does not wait for that \
         turn and there is no way to wait for it from here, so do not sit idle. The merge may still \
-        not happen: GitHub is allowed to refuse, and the agent is told to stop and report a \
+        not happen: \(forge.name) is allowed to refuse, and the agent is told to stop and report a \
         refusal rather than force it. To find out what became of it, call workspace_list with \
-        include_github and read the pull request's state.
+        include_github and read the \(forge.request)'s state.
         """
     }
 
@@ -385,13 +387,14 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
     /// cached "Ready to merge" from before somebody pushed a broken commit is the wrong kind of
     /// cheap.
     public static let ask: Reading = { workspace in
+        let forge = await ForgeResolver.client(for: workspace.path)
         do {
-            guard let pullRequest = try await GitHub.pullRequest(
+            guard let pullRequest = try await forge.pullRequest(
                 forBranch: workspace.branch, worktree: workspace.path
             ) else {
                 // gh answered and there is nothing, but only if gh could answer at all. Asked
                 // second because it costs a subprocess and the common case never needs it.
-                let access = await GitHub.access()
+                let access = await forge.access(in: workspace.path)
                 return access == .ready ? .noPullRequest : .unavailable(access)
             }
             let local = try? await Git.localWork(worktree: workspace.path)
@@ -399,7 +402,7 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
         } catch {
             // gh threw. Which of the two it is decides the advice, so it is asked rather than
             // assumed: an unusable gh is permanent and a failed call usually is not.
-            let access = await GitHub.access()
+            let access = await forge.access(in: workspace.path)
             return access == .ready ? .failed(plainly(error)) : .unavailable(access)
         }
     }

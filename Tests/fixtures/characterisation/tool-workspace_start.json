@@ -1,0 +1,57 @@
+{
+  "description" : "Start a workspace and give it a task. It is a real git worktree on its own branch with its own agent, and it appears in Bloom's sidebar for the owner to watch and review.\n\nName the project to start it in with 'project', giving the name or the path that project_list reports. Bloom only starts workspaces in repositories it already has, so a project that is not on that list has to be registered with project_add first. If you are yourself running inside a Bloom workspace, leave 'project' out to start it in the project you are already in, or name another project to hand the work to that repository instead. The new workspace is still counted as one you started.\n\nUse it when a task splits into parts that do not need to see each other's edits, and you want them worked on at the same time rather than one after another.\n\nThere are two ways to start it, the two Bloom's own create window offers, and picking the wrong one is the mistake worth avoiding here.\n\n'New branch' is the default and needs nothing said. Commits land on a new branch, and merge into the branch you pick here. Name the branch to cut from with 'base_branch', or leave it out for the project's default branch.\n\n'Existing branch' is 'existing_branch'. Commits land on the branch you pick here, and merge when it does. Use it to carry on, review or fix work that is already on a branch: cutting a new branch off that branch instead gives you a workspace whose diff is empty, because it starts out identical to the branch you named. The branch has to exist already, and git allows one worktree per branch, so a branch another workspace is sitting on is refused rather than opened twice.\n\nTo review an existing GitHub pull request, use 'pull_request' with its number, '#123', or its GitHub URL. Bloom checks out the pull request itself, preserving its base and identity so the Changes, Checks and Merge controls refer to that pull request. Do not create a review branch with base_branch for this purpose.\n\nName only one of base_branch, existing_branch or pull_request.\n\n'model' and 'effort' are optional. Leave either out to inherit the calling chat's setting, or Bloom's default when the caller has no chat. An explicit effort must be one the selected model supports.\n\nIt returns as soon as the workspace exists, not when its work is done. The new agent starts on its own and keeps running while you carry on. There is no way to wait for it from here, so do not ask for one and then sit idle: say what you started and get on with your own work.\n\nPass notify_when_done: true to have Bloom tell this chat once, by itself, when the new agent's first turn comes to rest: finished (with its last message), failed (with the reason), or blocked waiting on the owner for a permission prompt or a question. With it, there is no need to tell the new agent to report back when it is done.\n\nThe task you give it is all it gets. It cannot see this conversation, so write the prompt as if to someone who has just opened the project for the first time.\n\nThis costs real money and real disk. Start one because the work genuinely divides, not to parallelise something you could do in a single pass. A workspace that was itself started this way cannot start others.",
+  "inputSchema" : {
+    "properties" : {
+      "agent" : {
+        "description" : "Which agent runs it. Leave it out for the one you are running on, or for Bloom's own default if you are not running in Bloom.",
+        "enum" : [
+          "claudeCode",
+          "codex",
+          "grok"
+        ],
+        "type" : "string"
+      },
+      "base_branch" : {
+        "description" : "Cut a new branch from this one. Your commits land on the new branch and merge back into this one. Leave it out for the project's default branch. Do not name it together with existing_branch.",
+        "type" : "string"
+      },
+      "effort" : {
+        "description" : "The exact reasoning effort id, such as low, medium or high. Leave it out to inherit the calling chat's effort, or Bloom's default when the caller has no chat.",
+        "type" : "string"
+      },
+      "existing_branch" : {
+        "description" : "Work on this branch itself, instead of cutting a new one. Your commits land on it. It has to exist already, locally or on the remote, and it must not be open in another workspace. Do not name it together with base_branch.",
+        "type" : "string"
+      },
+      "model" : {
+        "description" : "The exact model id. Claude Code models are opus, sonnet, fable and haiku. Codex model ids come from the signed-in Codex account, for example gpt-5.6-sol. Do not use a Claude Code model with codex or a Codex model with claudeCode. Leave this out to use the selected agent's default model.",
+        "type" : "string"
+      },
+      "name" : {
+        "description" : "What to call it in the sidebar. Leave it out and Bloom names it from the task.",
+        "type" : "string"
+      },
+      "notify_when_done" : {
+        "description" : "Have Bloom tell this chat once when the new agent's first turn comes to rest: finished, failed, or waiting on the owner. Defaults to false.",
+        "type" : "boolean"
+      },
+      "project" : {
+        "description" : "Which project to start it in, by the name or the path project_list reports. Inside a Bloom workspace, leave it out for the project you are in, or name another to start the work there.",
+        "type" : "string"
+      },
+      "prompt" : {
+        "description" : "The task, written for someone with no context beyond the project itself.",
+        "type" : "string"
+      },
+      "pull_request" : {
+        "description" : "Open this GitHub pull request itself for review, by number, #number or GitHub URL. This preserves the PR connection so Bloom can show checks and merge it. Do not combine it with base_branch or existing_branch.",
+        "type" : "string"
+      }
+    },
+    "required" : [
+      "prompt"
+    ],
+    "type" : "object"
+  },
+  "name" : "workspace_start"
+}

@@ -152,6 +152,20 @@ struct RootView: View {
                 // `ArchiveRequest` in the core, where it can be tested.
                 Text(request.message)
             }
+            // Asked when a project with remotes on both forges is added and no forge is declared.
+            // Not now writes nothing: detection stays in charge, which picks GitHub, and asks again.
+            .confirmationDialog(
+                "Which forge does this project use?",
+                isPresented: $app.forgeQuestion.isPresent(),
+                titleVisibility: .visible,
+                presenting: app.forgeQuestion
+            ) { repo in
+                Button(Forge.gitLab.name) { app.answerForgeQuestion(.gitLab, for: repo) }
+                Button(Forge.gitHub.name) { app.answerForgeQuestion(.gitHub, for: repo) }
+                Button("Not now", role: .cancel) { app.answerForgeQuestion(nil) }
+            } message: { repo in
+                Text("\(repo.name) has remotes on GitHub and GitLab. Every workspace of the project will use the one you choose, and you can change it in the project settings. Until you choose, Bloom uses GitHub.")
+            }
             // The question asked before a session that is still working is closed. On the window for
             // the reason the archive confirmation above is: it is raised from the tab strip's close
             // button and from Cmd+W in the menu bar, and there is no one control both of those could

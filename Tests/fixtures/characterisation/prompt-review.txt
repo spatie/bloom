@@ -1,0 +1,18 @@
+title: Send review comments
+
+summary:
+Sent when you send the inline comments you left on the diff.
+
+variables:
+- message: What you typed in the composer alongside the comments.
+- comments: Every attached comment, with its file, line and surrounding code.
+- count: How many comments are attached.
+
+template:
+{{message}}
+
+I reviewed the diff and left {{count}} inline comment(s). Each one below names the file it is about, the line it points at, and the code around that line, with the commented line marked `>`.
+
+Work through them in order. Read the surrounding code before you change anything, because a comment is about the line it points at and not about the whole file. Where a comment says the line has moved or is gone, find what it is actually about before acting on it, and tell me if you cannot. If you disagree with one, say so instead of changing the code.
+
+{{comments}}

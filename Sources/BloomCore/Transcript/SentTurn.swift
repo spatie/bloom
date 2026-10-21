@@ -72,6 +72,7 @@ public enum SentTurn {
     /// written to, because the reader pressed the button and never sees the file.
     public static let mergeTitle = "Merge instructions"
     public static let pullRequestTitle = "Pull request instructions"
+    public static let mergeRequestTitle = "Merge request instructions"
     public static let conflictTitle = "Conflict instructions"
     public static let projectTitle = "Project instructions"
 
@@ -91,6 +92,8 @@ public enum SentTurn {
         switch path {
         case PullRequestInstructions.projectPath, PullRequestInstructions.scratchPath:
             return pullRequestTitle
+        case GitLabInstructions.mergeRequestScratchPath:
+            return mergeRequestTitle
         case ConflictInstructions.scratchPath:
             return conflictTitle
         default:
@@ -153,6 +156,11 @@ public enum SentTurn {
         found += PullRequestInstructions.retiredDefaults.map {
             InjectedInstruction(title: pullRequestTitle, body: $0)
         }
+        found += [
+            InjectedInstruction(title: mergeTitle, body: GitLabInstructions.merge),
+            InjectedInstruction(title: mergeRequestTitle, body: GitLabInstructions.mergeRequestMarkdown),
+            InjectedInstruction(title: conflictTitle, body: GitLabInstructions.conflictMarkdown),
+        ]
         return found
     }()
 

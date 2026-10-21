@@ -109,6 +109,7 @@ struct PullRequestBar: View {
                 onMarkReadyForReview: { markReadyForReview(pullRequest) },
                 onPush: push,
                 onFixConflicts: { fixConflicts(on: pullRequest) },
+                onRebase: { rebase(pullRequest) },
                 onContinue: { carryOn(after: pullRequest) },
                 onArchive: archive,
                 archiveRequest: $pendingArchive,
@@ -123,6 +124,7 @@ struct PullRequestBar: View {
                 branchActions: branchActions,
                 worktree: model.workspace.path,
                 github: model.gitHubReadiness,
+                forge: model.forge,
                 hasChanges: hasChanges,
                 hasReadChanges: model.hasReadChanges,
                 continued: model.continued,
@@ -190,13 +192,14 @@ struct PullRequestBar: View {
             case .direct:
                 do {
                     let created = try await model.createPullRequestDirectly()
+                    let forge = created.forge
                     report = PaneNoticeContent(
-                        tone: .info, title: "Pull request created",
-                        message: "Opened #\(created.number) on GitHub."
+                        tone: .info, title: "\(forge.titledRequest) created",
+                        message: "Opened \(forge.reference(created.number)) on \(forge.name)."
                     )
                 } catch {
                     report = PaneNoticeContent(
-                        tone: .failure, title: "Could not create the pull request",
+                        tone: .failure, title: "Could not create the \(model.forge.request)",
                         message: String(describing: error)
                     )
                 }
@@ -266,6 +269,19 @@ struct PullRequestBar: View {
         }
     }
 
+    /// Hands GitLab's rebase to the agent, the way Fix merge conflicts hands over a conflict.
+    private func rebase(_ pullRequest: PullRequest) {
+        isWorking = true
+        report = nil
+
+        Task {
+            defer { isWorking = false }
+            if let refusal = await model.requestRebase(pullRequest) {
+                report = PaneNoticeContent(tone: .info, title: "Nothing was sent", message: refusal)
+            }
+        }
+    }
+
     /// Cuts a fresh branch in this worktree and hands the session on to it.
     ///
     /// Reported when it does not work, and silent when it does. A refusal names the condition that
@@ -324,7 +340,7 @@ struct PullRequestBar: View {
     }
 
     /// The confirmation chose how to execute the merge. The direct path stays in the model,
-    /// keeping subprocesses out of the view and reporting gh's answer beside the inspector.
+    /// keeping subprocesses out of the view and reporting gh's or glab's answer beside the inspector.
     private func merge(_ method: GitHub.MergeMethod, execution: MergeExecution, squashMessage: SquashCommitMessage?) {
         guard let pullRequest = model.pullRequest else { return }
         isWorking = true
@@ -344,23 +360,25 @@ struct PullRequestBar: View {
                     let outcome = try await model.mergePullRequestDirectly(
                         pullRequest, method: method, squashMessage: squashMessage
                     )
+                    let forge = pullRequest.forge
+                    let reference = forge.reference(pullRequest.number)
                     let message: String
                     switch outcome {
                     case .merged:
-                        message = "#\(pullRequest.number) merged. Bloom did not delete the branch or change this checkout."
+                        message = "\(reference) merged. Bloom did not delete the branch or change this checkout."
                     case .acceptedButOpen:
-                        message = "#\(pullRequest.number) is still open, possibly waiting in a merge queue."
+                        message = "\(reference) is still open, possibly waiting in a merge queue."
                     case .acceptedUnverified:
-                        message = "gh accepted the command, but Bloom could not verify #\(pullRequest.number)'s final status."
+                        message = "\(forge.cli) accepted the command, but Bloom could not verify \(reference)'s final status."
                     }
                     report = PaneNoticeContent(
                         tone: .info,
-                        title: outcome == .merged ? "Merged on GitHub" : "GitHub accepted the merge",
+                        title: outcome == .merged ? "Merged on \(forge.name)" : "\(forge.name) accepted the merge",
                         message: message
                     )
                 } catch {
                     report = PaneNoticeContent(
-                        tone: .failure, title: "Could not merge on GitHub",
+                        tone: .failure, title: "Could not merge on \(pullRequest.forge.name)",
                         message: String(describing: error)
                     )
                 }

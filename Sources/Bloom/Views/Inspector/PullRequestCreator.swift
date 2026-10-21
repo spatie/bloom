@@ -32,6 +32,7 @@ struct PullRequestCreator: View {
     /// workspace with no worktree on this Mac, which is also one that is never in the dark.
     var worktree: String
     var github: GitHubAvailability.State
+    var forge: Forge = .gitHub
     /// Whether this branch has anything on it at all. A worktree identical to its base has nothing
     /// to open a pull request for, and Bloom knows that for free, so it says so here rather than
     /// spending a whole agent turn on the agent finding out.
@@ -152,18 +153,18 @@ struct PullRequestCreator: View {
         if let note = branchActions.note { return note }
         if !hasChanges, !hasReadChanges { return "Comparing with \(baseBranch)…" }
         guard hasChanges else { return ContinuedBranch.line(on: branch, continued: continued) }
-        return "No pull request yet. Target \(baseBranch)."
+        return "No \(forge.request) yet. Target \(baseBranch)."
     }
 
     /// A single title-bar control. Its popover chooses how to create the PR now.
     private var branchActionsButton: some View {
-        Button("Create PR") { isShowingBranchActions = true }
+        Button("Create \(forge.shortRequest)") { isShowingBranchActions = true }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(Palette.controlAccent)
             .controlSize(.regular)
             .disabled(!branchActions.isAllowed)
-            .help("Create a pull request for \(branch)")
+            .help("Create a \(forge.request) for \(branch)")
             .popover(isPresented: $isShowingBranchActions, arrowEdge: .top) {
                 BranchActionsPopover(model: model, onCreatePullRequest: action)
             }

@@ -650,7 +650,7 @@ extension AppModel {
         pullRequest: PullRequest,
         in model: WorkspaceModel
     ) async {
-        let template = PromptOverrides().template(for: .continueAfterMerge)
+        let template = PromptOverrides().template(for: .continueAfterMerge, forge: pullRequest.forge)
         let render = continuation.render(template: template, pullRequest: pullRequest.number)
 
         guard let session = await continuationSession(in: model) else { return }

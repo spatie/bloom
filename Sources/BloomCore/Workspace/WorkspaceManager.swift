@@ -354,7 +354,7 @@ public struct WorkspaceManager: Sendable {
         case .pullRequest(let request):
             try await Git.addDetachedWorktree(repo: repo.path, path: worktreePath)
             do {
-                try await GitHub.checkoutPullRequest(
+                try await ForgeResolver.client(for: repo.path).checkoutPullRequest(
                     number: request.number, into: worktreePath, localBranch: branch
                 )
             } catch {

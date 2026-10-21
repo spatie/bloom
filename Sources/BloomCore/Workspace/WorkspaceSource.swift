@@ -193,17 +193,21 @@ public struct WorkspaceSourceOffering: Sendable, Hashable {
     public let baseBranches: [String]
     /// The project's default branch, which a new branch is ordinarily cut from. See `carryOn`.
     public let defaultBranch: String
+    /// Which references a typed row accepts: `!12` and merge request URLs only on GitLab.
+    public let forge: Forge
 
     public init(
         pullRequests: [PullRequestListing] = [],
         branches: [ExistingBranch] = [],
         baseBranches: [String] = [],
-        defaultBranch: String = ""
+        defaultBranch: String = "",
+        forge: Forge = .gitHub
     ) {
         self.pullRequests = pullRequests
         self.branches = branches
         self.baseBranches = baseBranches
         self.defaultBranch = defaultBranch
+        self.forge = forge
     }
 
     /// The "Open, and carry on" section: what somebody else has already written.
@@ -278,7 +282,7 @@ public struct WorkspaceSourceOffering: Sendable, Hashable {
     /// `WorkspaceCheckoutPlan.parseReference`, which already knows every shape a pull request
     /// arrives in.
     private func typedRows(for query: String) -> [WorkspaceSource] {
-        guard let reference = WorkspaceCheckoutPlan.parseReference(query) else { return [] }
+        guard let reference = WorkspaceCheckoutPlan.parseReference(query, forge: forge) else { return [] }
         guard !pullRequests.contains(where: { $0.number == reference.number }) else { return [] }
         return [.pullRequest(.typed(reference, text: query))]
     }

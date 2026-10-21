@@ -1,0 +1,16 @@
+title: Merge a pull request
+
+summary:
+Sent when you confirm Merge, with Bloom's own merge steps under it and the project's own instructions attached when it has any. The agent runs `gh pr merge` in front of you, not Bloom.
+
+variables:
+- workspace: The workspace's name.
+- number: The pull request's number.
+- title: The pull request's title.
+- branch: The branch it is on.
+- base_branch: The branch it is merged into.
+- method: The method you chose, in words: squash merge, merge commit, rebase merge.
+- method_flag: The same method as the gh flag that performs it, such as --squash.
+
+template:
+Merge pull request #{{number}} into {{base_branch}} as a {{method}}, which is `{{method_flag}}`. It is on the branch {{branch}}.
