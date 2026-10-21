@@ -111,6 +111,47 @@ A browser pane normally opens `http://localhost:$BLOOM_PORT`. Set `browser.url` 
 address to the file named by `BLOOM_URL_FILE` from your setup script. The file is ignored by Git and
 read when a browser pane opens.
 
+#### Laravel Herd
+
+Herd 2 serves a worktree as a site of its own with `herd workspace`: a `.test` domain, a
+certificate and, if asked, a database. The domain is named after the worktree's folder and the
+parent site, `<folder>.<site>.test`, so it cannot be stated once in `browser.url`. Hand Herd's answer
+to Bloom from the setup script instead, and let the archive script take the site down again:
+
+```bash
+# .bloom/setup.sh
+set -euo pipefail
+
+served_url() {
+    herd workspaces --json | php -r '
+        foreach (json_decode(stream_get_contents(STDIN)) as $workspace) {
+            if ($workspace->path === getcwd()) echo $workspace->url;
+        }'
+}
+
+[ -n "$(served_url)" ] || herd workspace --database=empty
+served_url > "$BLOOM_URL_FILE"
+```
+
+```bash
+# .bloom/archive.sh
+herd workspace:delete --force --keep-files
+```
+
+The address is read from `herd workspaces --json` rather than from `herd workspace --json`, which
+prints its progress on the same stream before the JSON. Asking first also lets Run setup again
+pass over a worktree Herd already serves, where `herd workspace` refuses.
+
+State `--database`, because Herd's default is `shared`, which points the workspace at the main
+checkout's database. `empty` creates a new one and migrates it unless `--no-migrate` is passed;
+`clone` copies the parent's. `--keep-files` leaves the worktree in place for Bloom to remove. Herd
+writes `APP_URL` and `DB_DATABASE` into the worktree's `.env`, which Bloom has already copied by the
+time setup runs.
+
+A Vite dev server started in the worktree looks for a certificate named after the folder alone, so
+the HTTPS site loads no assets. Point `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` at the files
+Herd made for the workspace, in `~/Library/Application Support/Herd/config/valet/Certificates/`.
+
 Workspace agents can call `project_setup_guide` for the supported settings format and this copy of
 Bloom's current local SMTP port. Incoming mails is configured in Bloom Settings, not in the
 repository's `.bloom/settings.toml`.
