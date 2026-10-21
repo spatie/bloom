@@ -12,7 +12,7 @@ struct AllFilesReviewControls: View {
         HStack(spacing: InspectorLayout.gap) {
             ViewThatFits(in: .horizontal) {
                 Text(model.diffScope.isNarrowed
-                     ? model.diffScope.badge
+                     ? model.diffScope.badge(for: model.workspace.kind)
                      : model.viewedSummary ?? Counted.of(model.changedFiles.count, "file"))
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
@@ -33,7 +33,7 @@ struct AllFilesReviewControls: View {
             }
 
             Menu {
-                Text(model.diffScope.badge)
+                Text(model.diffScope.badge(for: model.workspace.kind))
                 Divider()
                 Picker("Diff layout", selection: $isSideBySide) {
                     Text(FileBarControls.unified).tag(false)

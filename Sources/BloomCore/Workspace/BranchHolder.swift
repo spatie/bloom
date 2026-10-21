@@ -112,10 +112,17 @@ public enum BranchHolder: Sendable, Hashable, Codable {
         case .otherWorktree(let path):
             opening = "'\(branch)' is checked out at \(path), which is not one of Bloom's workspaces."
         }
+        // The project's own checkout can be worked in where it stands, from the owner's client.
+        let inPlace = if case .projectCheckout = self {
+            " From the owner's own client, project_checkout true works in that checkout itself."
+        } else {
+            ""
+        }
         return opening
             + " Git allows one worktree per branch, so Bloom cannot open it again."
             + " Ask again with base_branch '\(branch)' instead of existing_branch, which cuts a"
             + " new branch from it and starts you on the same code, or leave it and say so."
+            + inPlace
     }
 }
 

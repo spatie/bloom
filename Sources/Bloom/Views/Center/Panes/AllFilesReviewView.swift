@@ -31,7 +31,7 @@ struct AllFilesReviewView: View {
             EmptyStateView(
                 glyph: "doc.text",
                 title: "No changes",
-                message: model.diffScope.emptyMessage(base: model.workspace.baseBranch)
+                message: model.diffScope.emptyMessage(base: model.workspace.baseBranch, kind: model.workspace.kind)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

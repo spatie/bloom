@@ -45,7 +45,8 @@ extension Store {
                 spawnToolUseID: row.string("spawn_tool_use_id")
             ),
             port: Int(row.int("port") ?? 0),
-            pullRequestNumber: row.int("pull_request_number").map(Int.init)
+            pullRequestNumber: row.int("pull_request_number").map(Int.init),
+            kind: WorkspaceKind(rawValue: row.string("kind") ?? "") ?? .worktree
         )
     }
 

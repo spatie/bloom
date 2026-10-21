@@ -214,17 +214,23 @@ public struct WorkspaceStartTool: BridgeToolHandling {
     private let preferences: WorkspaceStartPreferences
     private let start: WorkspaceStarting
     private let resolvePullRequest: PullRequestCheckoutResolving
+    /// How a `project_checkout` call reaches a project checkout that already exists: as a new chat
+    /// in it, through the same door `chat_create` uses, so the window's runner and tabs know about
+    /// it. Nil refuses such a call, which only a test that does not care would leave it.
+    private let addChat: ChatCreating?
 
     public init(
         preferences: WorkspaceStartPreferences = .init(),
         start: @escaping WorkspaceStarting,
         resolvePullRequest: @escaping PullRequestCheckoutResolving = {
             await WorkspaceCheckoutResolver.resolve($0, repoPath: $1)
-        }
+        },
+        addChat: ChatCreating? = nil
     ) {
         self.preferences = preferences
         self.start = start
         self.resolvePullRequest = resolvePullRequest
+        self.addChat = addChat
     }
 
     public let roles: Set<BridgeRole> = [.workspace, .owner]
@@ -264,7 +270,14 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             identity so the Changes, Checks and Merge controls refer to that pull request. Do not \
             create a review branch with base_branch for this purpose.
 
-            Name only one of base_branch, existing_branch or pull_request.
+            From the owner's own client only, 'project_checkout: true' works in the project's own \
+            folder instead of a worktree, on whatever branch it has checked out, with no new branch \
+            and no setup. Each project has one such workspace: when it already exists, the prompt \
+            starts a new chat in it rather than a second workspace. Changes made there are the \
+            owner's real working copy, so use it only when the owner asked for work in the \
+            project itself.
+
+            Name only one of base_branch, existing_branch, pull_request or project_checkout.
 
             'model' and 'effort' are optional. Leave either out to inherit the calling chat's \
             setting, or Bloom's default when the caller has no chat. An explicit effort must be \
@@ -334,6 +347,15 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                             + "GitHub URL. This preserves the PR connection so Bloom can show "
                             + "checks and merge it. Do not combine it with base_branch or "
                             + "existing_branch."
+                    ),
+                ]),
+                "project_checkout": .object([
+                    "type": .string("boolean"),
+                    "description": .string(
+                        "Work in the project's own folder on the branch it is on, instead of a "
+                            + "worktree. Owner's client only. If the project already has its "
+                            + "project checkout workspace, the prompt starts a new chat there. Do "
+                            + "not combine it with base_branch, existing_branch or pull_request."
                     ),
                 ]),
                 "agent": .object([
@@ -418,10 +440,23 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         switch AgentStartRequest.read(
             baseBranch: filled(request.param("base_branch")),
             existingBranch: filled(request.param("existing_branch")),
-            pullRequest: filled(request.param("pull_request"))
+            pullRequest: filled(request.param("pull_request")),
+            projectCheckout: WorkspaceDoneWatch.isRequested(request.param("project_checkout"))
         ) {
         case .refused(let sentence):
             return .failure(sentence)
+        case .projectCheckout:
+            // The owner's own folder, its real branch and the database it develops against. A
+            // workspace agent is held to its own worktree everywhere else, and handing work to
+            // the owner's checkout is the one move out of it this tool will not make.
+            guard identity.role == .owner else {
+                return .failure(
+                    "project_checkout works in the owner's own project folder, so only the owner's "
+                        + "client may ask for it. From a workspace, use base_branch or "
+                        + "existing_branch to start a worktree instead."
+                )
+            }
+            source = .projectCheckout
         case .newBranch(let ref):
             source = .newBranch(from: ref)
         case .existingBranch(let named):
@@ -474,6 +509,17 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             }
         }
 
+        // A project checkout that already exists gets a chat, not a second workspace, and costs
+        // no allowance: no row and no disk are spent. After the dedup of a call that created the
+        // workspace, so a retry of that one still answers `already_started`.
+        if order.source == .projectCheckout {
+            if let answer = await chatInLiveProjectCheckout(
+                of: project, order: order, spawnID: origin.spawnToolUseID, store: store
+            ) {
+                return answer
+            }
+        }
+
         // After the dedup, and that order is the rule rather than a preference. A retry of a call
         // that already cut a worktree is not another start, and answering it with a limit is how a
         // duplicate comes back looking like a runaway. It used to hold for the owner's client only,
@@ -517,6 +563,13 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 "note": .string(note),
             ]))
         } catch {
+            // Two calls raced and the other one made the project checkout first. The answer is
+            // the one this call would have had a moment later: a chat in it.
+            if error is ProjectCheckoutTaken, let answer = await chatInLiveProjectCheckout(
+                of: project, order: order, spawnID: origin.spawnToolUseID, store: store
+            ) {
+                return answer
+            }
             let trouble = await WorkspaceStartTrouble.diagnose(
                 error,
                 project: project.name,
@@ -742,6 +795,63 @@ public struct WorkspaceStartTool: BridgeToolHandling {
 
     /// The workspace an earlier run of this same call produced, if there is one and it is still
     /// here. An archived one does not count: asking again after archiving is asking again.
+    /// The answer to a `project_checkout` call when the project already has its project checkout:
+    /// a new chat in it with the prompt as its first message. Nil when there is none yet, and the
+    /// call goes on to create it.
+    ///
+    /// A retry of the same call is answered from a setting keyed by its spawn id rather than with
+    /// a second chat. Sessions have no spawn column, and adding one for a single caller would be a
+    /// migration for a fact that is only ever read here.
+    private func chatInLiveProjectCheckout(
+        of project: Repo, order: AgentWorkspaceOrder, spawnID: String?, store: Store
+    ) async -> BridgeToolResult? {
+        guard let existing = WorkspaceKind.liveProjectCheckout(
+            in: project.id, among: (try? await store.workspaces(repoID: project.id)) ?? []
+        ) else { return nil }
+
+        let repeatKey = spawnID.map { "workspaceStart.projectCheckoutChat.\($0)" }
+        if let repeatKey, (try? await store.setting(repeatKey)) != nil {
+            return answer(for: existing, state: "already_started", note:
+                "You already asked for this one and it started a chat in the project checkout. "
+                    + "Nothing new was created.")
+        }
+
+        guard let addChat else {
+            return .failure(
+                "The project '\(project.name)' already has its project checkout workspace, "
+                    + "'\(existing.name)', and Bloom cannot add a chat to it from here."
+            )
+        }
+        let outcome = await addChat(existing.id, ChatCreateOrder(
+            agent: order.agent, model: order.model, effort: order.effort, message: order.prompt
+        ))
+        switch outcome {
+        case .refused(let sentence):
+            return .failure(sentence)
+        case .created(let chat):
+            if let repeatKey { try? await store.setSetting(repeatKey, chat.chatID.rawValue) }
+            return answer(for: existing, state: "chat_added", note:
+                "The project already had its project checkout workspace, so the task went into a "
+                    + "new chat there. It runs on its own; call workspace_list or chat_read when "
+                    + "you want to know what became of it.", chat: chat.json)
+        }
+    }
+
+    private func answer(
+        for workspace: Workspace, state: String, note: String, chat: JSONValue? = nil
+    ) -> BridgeToolResult {
+        var fields: [String: JSONValue] = [
+            "workspace_id": .string(workspace.id.rawValue),
+            "name": .string(workspace.name),
+            "branch": .string(workspace.branch),
+            "path": .string(workspace.path),
+            "state": .string(state),
+            "note": .string(note),
+        ]
+        if let chat { fields["chat"] = chat }
+        return .json(.object(fields))
+    }
+
     private func alreadyStarted(spawnID: String, store: Store) async throws -> Workspace? {
         try await store.workspaces(spawnToolUseID: spawnID).first { $0.state != .archived }
     }

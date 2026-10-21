@@ -144,7 +144,7 @@ struct ReviewPaneView: View {
         } else if model.diffScope.isHistorical {
             EmptyStateView(glyph: "doc.text", title: "No file selected",
                            message: model.changedFiles.isEmpty
-                            ? model.diffScope.emptyMessage(base: model.workspace.baseBranch)
+                            ? model.diffScope.emptyMessage(base: model.workspace.baseBranch, kind: model.workspace.kind)
                             : "Pick a changed file in the inspector to read it here.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if tab.path.isEmpty {
@@ -201,7 +201,7 @@ struct ReviewPaneView: View {
             if tab.showsAllFiles {
                 AllFilesReviewControls(model: model)
             } else {
-                Text(model.diffScope.badge)
+                Text(model.diffScope.badge(for: model.workspace.kind))
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)

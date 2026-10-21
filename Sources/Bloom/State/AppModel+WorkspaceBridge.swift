@@ -59,12 +59,20 @@ extension AppModel {
             },
             MailListTool(client: mailClient),
             MailReadTool(client: mailClient),
-            WorkspaceStartTool { [weak self] order, project, identity, origin in
-                guard let self else { throw AppNotReady.stillStartingUp }
-                return try await self.startWorkspaceForBridge(
-                    order, in: project, from: identity, origin: origin
-                )
-            },
+            WorkspaceStartTool(
+                start: { [weak self] order, project, identity, origin in
+                    guard let self else { throw AppNotReady.stillStartingUp }
+                    return try await self.startWorkspaceForBridge(
+                        order, in: project, from: identity, origin: origin
+                    )
+                },
+                // A `project_checkout` call whose project already has one: a chat in it, through
+                // the same door as `chat_create`.
+                addChat: { [weak self] workspaceID, order in
+                    guard let self else { return .refused("Bloom is still starting up.") }
+                    return await self.createChatForBridge(order, in: workspaceID)
+                }
+            ),
             ChatCreateTool { [weak self] workspaceID, order in
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.createChatForBridge(order, in: workspaceID)
@@ -317,7 +325,8 @@ extension AppModel {
             select: false,
             origin: origin,
             name: order.name,
-            checkout: order.source.checkout
+            checkout: order.source.checkout,
+            kind: order.source.kind
         )
 
         return StartedWorkspaceSummary(

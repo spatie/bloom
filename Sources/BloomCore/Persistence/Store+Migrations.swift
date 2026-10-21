@@ -62,6 +62,15 @@ extension Store {
     /// only what is genuinely missing. It is deliberately a short list: the columns whose absence
     /// stops the app dead rather than every column the schema has. A migration is still where a
     /// change is written; this is the belt under it.
+    /// The `workspaces.kind` column, shared by its migration and by `repairSchema`.
+    nonisolated static let workspaceKindColumn =
+        "ALTER TABLE workspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'worktree';"
+
+    /// At most one live project checkout per project. See `WorkspaceKind.liveProjectCheckout`.
+    nonisolated static let oneProjectCheckoutIndex =
+        "CREATE UNIQUE INDEX IF NOT EXISTS workspaces_one_project_checkout ON workspaces(repo_id) "
+            + "WHERE kind = 'project_checkout' AND state = 'active';"
+
     private nonisolated static func repairSchema(_ db: SQLiteDatabase) throws {
         let required: [(table: String, column: String, add: String, index: String?)] = [
             (
@@ -89,6 +98,7 @@ extension Store {
                 "ALTER TABLE review_comments ADD COLUMN span INTEGER NOT NULL DEFAULT 1;",
                 nil
             ),
+            ("workspaces", "kind", Self.workspaceKindColumn, Self.oneProjectCheckoutIndex),
         ]
 
         for wanted in required {
@@ -1026,6 +1036,26 @@ extension Store {
             // the same two columns as messages_session. Keeping both writes two B-trees for every
             // message, while every read can use messages_session_seq.
             sql("DROP INDEX IF EXISTS messages_session;"),
+
+            // Whether a workspace is a worktree or the project's own checkout. See
+            // `WorkspaceKind`, which says why this is stated rather than read off the path.
+            //
+            // Every existing row is a worktree, because nothing else could be made until now, so
+            // the default is the backfill. The index is the "at most one live project checkout
+            // per project" rule held where two racing creates cannot both get past it; archived
+            // rows are outside it, so a checkout can be archived and taken up again.
+            //
+            // Also in `repairSchema`, because `upsert` names the column and a database stamped
+            // past this step without it could create no workspace at all.
+            { db in
+                let names = Set(
+                    try db.query("PRAGMA table_info(workspaces);").compactMap { $0.string("name") }
+                )
+                if !names.contains("kind") {
+                    try db.execute(Self.workspaceKindColumn)
+                }
+                try db.execute(Self.oneProjectCheckoutIndex)
+            },
         ]
 
         let current = Int(try db.readUserVersion())

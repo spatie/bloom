@@ -185,7 +185,8 @@ public struct WorkspaceManager: Sendable {
         baseBranch: String? = nil,
         origin: WorkspaceOrigin = .user,
         checkout: WorkspaceCheckout? = nil,
-        setupPolicy: WorkspaceSetupPolicy = .deferred
+        setupPolicy: WorkspaceSetupPolicy = .deferred,
+        kind: WorkspaceKind = .worktree
     ) async throws -> Workspace {
         // Everything below reads the repository and then acts on what it read, so two creates
         // running at once in one project decide on the same branch and the same directory and the
@@ -194,6 +195,9 @@ public struct WorkspaceManager: Sendable {
         let repositoryKey = Git.repositoryPaths(in: repo.path)?.commonDirectory
             ?? URL(fileURLWithPath: repo.path).resolvingSymlinksInPath().standardized.path
         return try await WorktreeCutQueue.shared.cut(in: repositoryKey) {
+            if kind == .projectCheckout {
+                return try await adoptProjectCheckout(id: id, repo: repo, name: name, origin: origin)
+            }
             if let checkout {
                 return try await open(
                     checkout, id: id, repo: repo, name: name, origin: origin, setupPolicy: setupPolicy
@@ -656,6 +660,12 @@ public struct WorkspaceManager: Sendable {
     }
 
     private func preservesFolderWhenArchiving(_ workspace: Workspace) async -> Bool {
+        // First, and before the folder is looked at: the project's own checkout is a repository
+        // and is on disk, so both questions below would answer "remove it", and the archive would
+        // run the project's archive script in the real checkout before git refused to remove the
+        // main working tree. The early return in `archive` skips the script, the removal and the
+        // branch delete together, with or without `force`. See `WorkspaceKind`.
+        if workspace.kind.preservesFolderOnArchive { return true }
         guard FileManager.default.fileExists(atPath: workspace.path) else { return false }
         return !(await Git.isRepository(workspace.path))
     }
@@ -758,6 +768,15 @@ public struct WorkspaceManager: Sendable {
         // in `WorkspaceLifecycle`, but this is the one edge that table would have had, so it is
         // written where the destructive work starts rather than where the row is finally saved.
         guard workspace.state == .active else { return }
+
+        // The project's own checkout: mark the row and touch nothing else. Asked of the row here
+        // as well as through `safetyReport`, so that what keeps the owner's real checkout, its
+        // branch and the database its archive script would drop does not hang on a report a
+        // forced archive is allowed to fail to produce.
+        if workspace.kind.preservesFolderOnArchive {
+            try await store.update(workspaceID: workspace.id) { $0.archive() }
+            return
+        }
 
         // Read before anything is removed, because the removal below is what makes it false.
         // See the branch delete near the end of this method for what it guards.

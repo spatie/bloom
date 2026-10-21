@@ -570,9 +570,7 @@ extension AppModel {
             await offerUndo(of: workspace, repo: repo, report: report)
             if let path = report?.preservedFolderPath {
                 notice = BloomNotice(
-                    message: "\(workspace.name) was archived. Its folder at `\(path)` and its branch "
-                        + "were kept because Git no longer recognizes the folder as a worktree. "
-                        + "The archive script was skipped.",
+                    message: ArchiveRequest.preservedFolderNotice(for: workspace, path: path),
                     dismissal: .untilDismissed
                 )
             } else if let stopped = BackgroundWork.archived(workspace.name, stopping: stoppedCommands) {

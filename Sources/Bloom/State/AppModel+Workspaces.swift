@@ -46,13 +46,14 @@ extension AppModel {
         controls: ComposerControls? = nil,
         staged: StagedAttachments? = nil,
         checkout: WorkspaceCheckout? = nil,
-        runSetupScript: Bool = true
+        runSetupScript: Bool = true,
+        kind: WorkspaceKind = .worktree
     ) async -> Workspace? {
         do {
             return try await startWorkspace(
                 in: repo, prompt: prompt, baseBranch: baseBranch, opensWith: opensWith,
                 branch: branch, controls: controls, staged: staged, checkout: checkout,
-                runSetupScript: runSetupScript
+                runSetupScript: runSetupScript, kind: kind
             )
         } catch {
             // Diagnosed rather than reported. `error.readableMessage` on a `ShellError` is the git
@@ -99,9 +100,15 @@ extension AppModel {
         /// A thread on the chosen backend for the new chat to pick up. Only `carryOn` passes one.
         /// See `WorkspaceStartRequest.resuming`.
         resuming: String? = nil,
-        runSetupScript: Bool = true
+        runSetupScript: Bool = true,
+        /// A worktree, or the project's own checkout. The second arrives named and is never set
+        /// up or renamed: see `WorkspaceKind`.
+        kind: WorkspaceKind = .worktree
     ) async throws -> Workspace {
         guard let manager else { throw AppNotReady.stillStartingUp }
+        // Settled first, so every naming decision below sees a supplied name and stands aside:
+        // no sea, no placeholder, and with no placeholder no automatic rename of `main`.
+        let name = name ?? kind.suppliedName
         isCreatingWorkspace = true
         defer { isCreatingWorkspace = false }
 
@@ -144,7 +151,7 @@ extension AppModel {
         // Never for a checkout. A pull request arrives with a title and a number, and a review
         // workspace that renamed itself after the task typed into the sheet would hide which pull
         // request it is.
-        let wantsAName = checkout == nil
+        let wantsAName = checkout == nil && kind == .worktree
             && shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
 
         // The sea this workspace wears while the model thinks of a real name. Claimed here,
@@ -254,7 +261,8 @@ extension AppModel {
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
             // transcript, a failure raises the one sentence every route says about a failed setup,
             // and an archive can cancel it. See `adopt`.
-            setupPolicy: runSetupScript ? .deferred : .skip
+            setupPolicy: runSetupScript && kind.allowsSetup ? .deferred : .skip,
+            kind: kind
         )
 
         // Nil declines, and the workspace keeps the title git would have given it. The closure is

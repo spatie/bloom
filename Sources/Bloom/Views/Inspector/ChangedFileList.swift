@@ -211,7 +211,7 @@ struct ChangedFileList: View {
             EmptyStateView(
                 glyph: "checkmark.circle",
                 title: "No changes yet",
-                message: model.diffScope.emptyMessage(base: model.workspace.baseBranch)
+                message: model.diffScope.emptyMessage(base: model.workspace.baseBranch, kind: model.workspace.kind)
             )
         }
     }
