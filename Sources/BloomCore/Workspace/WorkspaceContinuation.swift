@@ -45,6 +45,9 @@ public struct ContinuationFacts: Sendable, Hashable {
     public var hasOperationInProgress: Bool
     /// Every branch name already used in the repository.
     public var takenBranches: Set<String>
+    /// The workspace is the project's own checkout, which has no pull requests and whose branch
+    /// is the owner's to move. See `WorkspaceKind.hasPullRequests`.
+    public var isProjectCheckout: Bool
 
     public init(
         mergedBranch: String,
@@ -53,7 +56,8 @@ public struct ContinuationFacts: Sendable, Hashable {
         isPullRequestMerged: Bool = false,
         isAgentRunning: Bool = false,
         hasOperationInProgress: Bool = false,
-        takenBranches: Set<String> = []
+        takenBranches: Set<String> = [],
+        isProjectCheckout: Bool = false
     ) {
         self.mergedBranch = mergedBranch
         self.checkedOutBranch = checkedOutBranch
@@ -62,6 +66,7 @@ public struct ContinuationFacts: Sendable, Hashable {
         self.isAgentRunning = isAgentRunning
         self.hasOperationInProgress = hasOperationInProgress
         self.takenBranches = takenBranches
+        self.isProjectCheckout = isProjectCheckout
     }
 }
 
@@ -77,6 +82,7 @@ public enum ContinuationRefusal: Sendable, Hashable {
     case operationInProgress
     case onBaseBranch(String)
     case noValidName
+    case projectCheckout
 
     /// A whole sentence, unlike `BranchRenameRefusal.reason`. That one finishes a sentence the
     /// notice already started; this one is the only thing the user is shown, because pressing
@@ -102,6 +108,9 @@ public enum ContinuationRefusal: Sendable, Hashable {
                 + "There is nothing to continue from here."
         case .noValidName:
             "Bloom could not work out a branch name to continue on."
+        case .projectCheckout:
+            "This is the project's own checkout. Bloom does not move it to a new branch; "
+                + "switch branches there yourself."
         }
     }
 }
@@ -150,6 +159,10 @@ public enum ContinuationGate {
     /// finished is told about the agent, because that is the one they can do something about
     /// right now.
     public static func decide(_ facts: ContinuationFacts) -> ContinuationDecision {
+        // Before the merge, because nothing about a pull request makes it right: `git checkout -b`
+        // here moves the owner's own checkout off the branch it is on.
+        guard !facts.isProjectCheckout else { return .refuse(.projectCheckout) }
+
         // The merge is the entire justification. Without it the branch is still live work and
         // moving off it would leave the pull request pointing at a branch nobody is on.
         guard facts.isPullRequestMerged else { return .refuse(.notMerged) }
@@ -388,7 +401,8 @@ public extension WorkspaceManager {
             isPullRequestMerged: pullRequest?.isMerged ?? false,
             isAgentRunning: isAgentRunning,
             hasOperationInProgress: await inProgress,
-            takenBranches: Set(await branches ?? [])
+            takenBranches: Set(await branches ?? []),
+            isProjectCheckout: workspace.kind == .projectCheckout
         )
     }
 

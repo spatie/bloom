@@ -204,7 +204,9 @@ final class RunScriptLauncher {
         ) else { return }
 
         let approval = await RunScriptAutostartApproval.load(repoID: repo.id, from: store)
-        let decision = RunScriptAutostart.decide(scripts: settings.runScripts, approval: approval)
+        let decision = RunScriptAutostart.decide(
+            scripts: settings.runScripts, approval: approval, kind: model.workspace.kind
+        )
         switch decision {
         case .nothing:
             settled[workspaceID] = signature

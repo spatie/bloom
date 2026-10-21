@@ -519,7 +519,8 @@ final class WorkspaceModel {
         session.model = openingControls.model
         session.effort = openingControls.effort
         session.agentKind = openingControls.agentKind
-        session.permissionMode = openingControls.permissionMode
+        // A project checkout does not start a chat on Bypass. See `WorkspaceKind.startingPermission`.
+        session.permissionMode = workspace.kind.startingPermission(openingControls.permissionMode)
         session.interactionMode = openingControls.interactionMode
         guard let stored = try? await store.upsert(session) else { return nil }
         await openingControls.store(sessionID: stored.id, in: store)
@@ -1646,7 +1647,8 @@ final class WorkspaceModel {
         SetupRunOffer.offer(
             hasSetupScript: repo != nil && (settings.setupScript != nil || Git.hasSubmodules(in: workspace.path)),
             hasRunSetup: hasRunSetup,
-            isRunning: isRunningSetup
+            isRunning: isRunningSetup,
+            allowsSetup: workspace.kind.allowsSetup
         )
     }
 
@@ -2742,7 +2744,10 @@ final class WorkspaceModel {
     /// When the file cannot be written, the instructions go into the message itself. A read-only
     /// checkout is a reason to say it differently, not a reason for the button to stop working.
     private func pullRequestTurn(text: String) async -> String {
-        if let path = await PullRequestInstructions.ensure(in: workspace.path) {
+        // Never in the project's own checkout, where `ensure` may move or delete a
+        // `.bloom/pr-instructions.md` the owner left there. Inline is the documented fallback.
+        if workspace.kind.hasPullRequests,
+           let path = await PullRequestInstructions.ensure(in: workspace.path) {
             return PullRequestInstructions.asking(text, toFollow: path)
         }
         return text + "\n\n" + PullRequestInstructions.defaultMarkdown

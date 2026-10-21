@@ -407,7 +407,17 @@ public final class BridgeServer: Sendable {
               let directory = ProcessWorkingDirectory.of(pid),
               let workspaces = try? await store.workspaces()
         else { return nil }
-        return BridgeOwnerPlacement.refusal(workingDirectory: directory, workspaces: workspaces)
+        var descends: Bool?
+        if BridgeOwnerPlacement.needsLineage(workingDirectory: directory, workspaces: workspaces) {
+            descends = await ProcessTable.current()?.descends(
+                pid,
+                fromApp: ProcessInfo.processInfo.processIdentifier,
+                tmuxSocket: TmuxSessions.socketName(databasePath: store.path)
+            )
+        }
+        return BridgeOwnerPlacement.refusal(
+            workingDirectory: directory, workspaces: workspaces, descendsFromBloom: descends
+        )
     }
 
     private func refuse(_ problem: String, on connection: UnixSocketConnection) {

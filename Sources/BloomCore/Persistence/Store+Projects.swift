@@ -151,8 +151,8 @@ extension Store {
                 id, repo_id, name, branch, path, base_branch, state, setup_state, setup_log,
                 sort_order, created_at, last_activity_at, archived_at,
                 additions, deletions, changed_files, unread, pinned, colour,
-                parent_workspace_id, spawn_tool_use_id, port, pull_request_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                parent_workspace_id, spawn_tool_use_id, port, pull_request_number, kind
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 branch = excluded.branch,
@@ -191,6 +191,9 @@ extension Store {
                 workspace.origin.spawnToolUseID.map { .text($0) } ?? .null,
                 .int(Int64(workspace.port)),
                 workspace.pullRequestNumber.map { .int(Int64($0)) } ?? .null,
+                // Insert only: the `ON CONFLICT` list leaves it out, so a row keeps the kind it
+                // was made with whatever value is handed back. See `Workspace.kind`.
+                .text(workspace.kind.rawValue),
             ]
         )
         return workspace
@@ -473,12 +476,23 @@ extension Store {
     /// A filesystem refresh owns only the branch. A rename, restore or archive that landed while
     /// git was running wins over this older observation. An unchanged answer writes nothing, so
     /// the background poll does not wake every workspace observer on an idle checkout.
+    ///
+    /// A project checkout writes its base with it, and the two refusals that protect a worktree's
+    /// base and default branch do not apply to it. See `WorkspaceKind.followsHead`.
     public func updateCheckedOutBranch(_ branch: String, observed: Workspace) throws {
         guard observed.state == .active, branch != observed.branch,
               branch != "HEAD", Git.isValidBranchName(branch),
               let current = try workspace(id: observed.id),
               current.state == .active, current.path == observed.path,
-              current.branch == observed.branch, branch != current.baseBranch,
+              current.branch == observed.branch else { return }
+        if current.kind.followsHead {
+            try db.run(
+                "UPDATE workspaces SET branch = ?, base_branch = ? WHERE id = ?",
+                [.text(branch), .text(branch), .text(observed.id)]
+            )
+            return
+        }
+        guard branch != current.baseBranch,
               let project = try repo(id: current.repoID), branch != project.defaultBranch else { return }
         try db.run(
             "UPDATE workspaces SET branch = ? WHERE id = ?",

@@ -65,6 +65,7 @@ public struct WhoamiTool: BridgeToolHandling {
                     "branch": .string(workspace.branch),
                     "base_branch": .string(workspace.baseBranch),
                     "path": .string(workspace.path),
+                    "kind": .string(workspace.kind.rawValue),
                     "state": .string(workspace.state.rawValue),
                 ]),
                 "session": .object([

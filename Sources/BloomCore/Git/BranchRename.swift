@@ -26,6 +26,10 @@ public struct BranchRenameFacts: Sendable, Hashable {
     public var hasOperationInProgress: Bool
     /// Every branch name already used in the repository.
     public var takenBranches: Set<String>
+    /// The workspace is the project's own checkout, whose branch is never Bloom's to rename. A
+    /// project checkout is always made with a name, so no placeholder should ever bring it here;
+    /// this is what holds if one does. See `WorkspaceKind`.
+    public var isProjectCheckout: Bool
 
     public init(
         recordedBranch: String,
@@ -36,7 +40,8 @@ public struct BranchRenameFacts: Sendable, Hashable {
         hasRemoteCounterpart: Bool = false,
         hasPullRequest: Bool = false,
         hasOperationInProgress: Bool = false,
-        takenBranches: Set<String> = []
+        takenBranches: Set<String> = [],
+        isProjectCheckout: Bool = false
     ) {
         self.recordedBranch = recordedBranch
         self.checkedOutBranch = checkedOutBranch
@@ -47,6 +52,7 @@ public struct BranchRenameFacts: Sendable, Hashable {
         self.hasPullRequest = hasPullRequest
         self.hasOperationInProgress = hasOperationInProgress
         self.takenBranches = takenBranches
+        self.isProjectCheckout = isProjectCheckout
     }
 }
 
@@ -64,6 +70,7 @@ public enum BranchRenameRefusal: Sendable, Hashable {
     case detachedHead
     case operationInProgress
     case nameTaken(String)
+    case projectCheckout
     /// Every check passed and `git branch -m` still refused. Rare, and carried verbatim rather
     /// than guessed at, because inventing a reason here would be worse than quoting git.
     case gitRefused(String)
@@ -93,6 +100,8 @@ public enum BranchRenameRefusal: Sendable, Hashable {
             "a rebase or merge is half finished in this worktree"
         case .nameTaken(let branch):
             "`\(branch)` is already taken by another branch"
+        case .projectCheckout:
+            "it is the branch the project's own checkout is on"
         case .gitRefused(let message):
             "git refused to rename it: `\(message)`"
         }
@@ -107,7 +116,9 @@ public enum BranchRenameRefusal: Sendable, Hashable {
     /// happen quietly.
     public var isWorthReporting: Bool {
         switch self {
-        case .alreadyNamed, .noValidName: false
+        // Not worth a notice: nobody asked for this rename, and the workspace's name was
+        // given at creation rather than offered by a model.
+        case .alreadyNamed, .noValidName, .projectCheckout: false
         default: true
         }
     }
@@ -143,6 +154,7 @@ public enum BranchRenameGate {
         guard desired != facts.recordedBranch else {
             return .refuse(.alreadyNamed)
         }
+        guard !facts.isProjectCheckout else { return .refuse(.projectCheckout) }
 
         // The user's own hands come first. Anything they did to this branch outranks anything a
         // model suggested, and it is also the loudest signal that they are already using the name.

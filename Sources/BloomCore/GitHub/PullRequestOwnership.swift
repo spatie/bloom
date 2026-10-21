@@ -185,6 +185,13 @@ public extension GitHub {
     internal static func snapshot(
         for workspace: Workspace, onBranch head: String, maxAge: Duration
     ) async throws -> PullRequestSnapshot? {
+        // The project's own checkout has none either, by the same answer and without asking: its
+        // branch is usually the default branch, the base of every pull request rather than the
+        // head of one, and an old one found under it would offer to merge and carry on from the
+        // owner's own checkout. Every lookup of a workspace's pull request or checks comes through
+        // here. See `WorkspaceKind.hasPullRequests`.
+        guard workspace.kind.hasPullRequests else { return nil }
+
         // A local-only repository has no GitHub pull request to refresh. Let a failed git
         // probe continue through the normal lookup so an actual repository error stays visible.
         if ProcessInfo.processInfo.environment["GH_REPO"] == nil,

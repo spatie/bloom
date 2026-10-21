@@ -71,6 +71,29 @@ public struct ProcessTable: Sendable, Equatable {
         return value
     }
 
+    /// Whether `pid` was started by the app running as `appPID`, directly or through its private
+    /// tmux server, which is where a chat in a terminal and every terminal pane run.
+    ///
+    /// The tmux server is daemonised and is not the app's child, so it is recognised by its
+    /// socket: `TmuxSessions.socketName` is on its command line, and nothing the owner starts in
+    /// their own terminal carries it. The walk is capped because a table read mid-fork can hold a
+    /// cycle, and an answer about a pid it never reached is "no".
+    public func descends(_ pid: Int32, fromApp appPID: Int32, tmuxSocket: String?) -> Bool {
+        let byPID = Dictionary(rows.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        var current = pid
+        for _ in 0..<64 {
+            if current == appPID { return true }
+            guard let row = byPID[current] else { return false }
+            if let tmuxSocket, row.command.contains("tmux"),
+               row.command.split(separator: " ").contains(Substring(tmuxSocket)) {
+                return true
+            }
+            guard row.parent > 1, row.parent != current else { return false }
+            current = row.parent
+        }
+        return false
+    }
+
     public static func current() async -> ProcessTable? {
         guard let result = try? await Shell.run("ps", arguments, timeout: .seconds(5)) else {
             return nil
