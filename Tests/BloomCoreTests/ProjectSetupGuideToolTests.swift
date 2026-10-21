@@ -30,6 +30,16 @@ struct ProjectSetupGuideToolTests {
         #expect(result.text.contains("mail_list and mail_read"))
     }
 
+    @Test("a site served per worktree is told where its address goes and how it is taken down")
+    func addressWrittenBySetup() {
+        let guide = ProjectSetupGuideTool.guide(mail: .init(isEnabled: true, smtpPort: 1025))
+        #expect(guide.contains("$BLOOM_URL_FILE, which wins over browser.url"))
+        #expect(guide.contains("archive_file"))
+        #expect(guide.contains("herd workspace --database=empty"))
+        #expect(guide.contains("herd workspaces --json"))
+        #expect(guide.contains("herd workspace:delete --force --keep-files"))
+    }
+
     @Test("an off inbox is called out before an agent configures the project")
     func disabledMail() {
         let guide = ProjectSetupGuideTool.guide(mail: .init(isEnabled: false, smtpPort: 2256))
