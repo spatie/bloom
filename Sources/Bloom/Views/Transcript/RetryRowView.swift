@@ -58,6 +58,7 @@ struct RetryRowView: View {
             Text(sentence)
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
+                .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
                 // Under the headline rather than under the glyph, so the two lines read as one

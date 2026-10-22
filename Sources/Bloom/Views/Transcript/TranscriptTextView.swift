@@ -140,6 +140,9 @@ struct TranscriptTextView: NSViewRepresentable {
     var copyPrefix = ""
     var copySeparatorBefore = "\n\n"
     var actions = TranscriptLinkActions()
+    /// A click that selected nothing and landed on no link, for text drawn inside a control.
+    /// Reported only for text joined to a selection, which is what tracks the press.
+    var onPlainClick: (@MainActor () -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(actions: actions) }
 
@@ -214,6 +217,7 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     private func apply(to view: LinkTextView) {
+        view.onPlainClick = onPlainClick
         view.copyPrefix = copyPrefix
         view.copySeparatorBefore = copySeparatorBefore
         if view.answerSelection !== selection {
@@ -454,6 +458,7 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     var rowSeq: Int? { entryID?.selectionOrder }
     var copyPrefix = ""
     var copySeparatorBefore = "\n\n"
+    var onPlainClick: (@MainActor () -> Void)?
 
     /// `sizeThatFits` can leave the container wider than the placed frame, which drew a long
     /// pasted turn past its bubble. Only an overflowing run is laid out again.
@@ -695,8 +700,8 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
                 let point = convert(event.locationInWindow, from: nil)
                 let url = link(at: point)
                 let dragged = trackAnswerSelection(with: event, selection: answerSelection)
-                if !dragged, event.clickCount == 1, !event.modifierFlags.contains(.shift), let url {
-                    actions.open(url, .externalBrowser)
+                if !dragged, event.clickCount == 1, !event.modifierFlags.contains(.shift) {
+                    if let url { actions.open(url, .externalBrowser) } else { onPlainClick?() }
                 }
                 return
             }

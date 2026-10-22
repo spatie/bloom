@@ -39,6 +39,10 @@ struct AgentQuestionCard: View {
     /// empty set and so takes no focus.
     @State private var openedOther: Set<String> = []
     @FocusState private var otherFocus: String?
+    @Environment(\.fontScale) private var fontScale
+    /// Every run of words in the card, so one drag selects across the question and its options
+    /// and Copy takes all of it. Losing it to a rebuilt cell loses a highlight, nothing more.
+    @State private var selection = TranscriptTextSelection()
 
     /// The questions this card is about. See `AgentQuestionCache`, which is why asking for them
     /// six or eight times in one pass is not six or eight parses.
@@ -60,6 +64,7 @@ struct AgentQuestionCard: View {
                 settledLine
             }
         }
+        .environment(\.transcriptTextSelection, selection)
         .padding(TranscriptLayout.cardInset)
         .background(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
@@ -88,11 +93,7 @@ struct AgentQuestionCard: View {
                 .foregroundStyle(isOpen ? Palette.accent : Palette.textTertiary)
                 .accessibilityHidden(true)
 
-            Text(headerTitle)
-                .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textPrimary)
-
-            Spacer(minLength: 0)
+            cardText(headerTitle, font: Typo.labelEmphasis, color: Palette.textPrimary)
         }
     }
 
@@ -111,23 +112,29 @@ struct AgentQuestionCard: View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 if !question.header.isEmpty {
-                    Text(question.header.uppercased())
-                        .font(Typo.micro)
-                        .tracking(Typo.microTracking)
-                        .foregroundStyle(isOpen ? Palette.accent : Palette.textTertiary)
+                    cardText(
+                        question.header.uppercased(),
+                        font: Typo.micro,
+                        color: isOpen ? Palette.accent : Palette.textTertiary,
+                        tracking: Typo.microTracking
+                    )
                 }
 
-                Text(question.question)
-                    .font(Typo.bodyEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                cardText(
+                    question.question,
+                    font: Typo.bodyEmphasis,
+                    color: Palette.textPrimary,
+                    separator: question.header.isEmpty ? "\n\n" : "\n"
+                )
 
                 // An instruction, so it goes when the controls it instructs go.
                 if question.multiSelect, isOpen {
-                    Text("Choose as many as apply.")
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
+                    cardText(
+                        "Choose as many as apply.",
+                        font: Typo.caption,
+                        color: Palette.textTertiary,
+                        separator: "\n"
+                    )
                 }
             }
 
@@ -144,25 +151,38 @@ struct AgentQuestionCard: View {
     private func optionRow(_ question: AgentQuestion, _ option: AgentQuestion.Option) -> some View {
         let isChosen = box.draft.chosen[question.id]?.contains(option.label) ?? false
 
+        let label = rowLabel(
+            mark: markName(isChosen: isChosen, multiSelect: question.multiSelect),
+            isChosen: isChosen,
+            title: option.label,
+            detail: option.description,
+            onClick: isOpen ? { @MainActor in toggle(question, option.label) } : nil
+        )
+
         return VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-            Button {
-                toggle(question, option.label)
-            } label: {
-                rowLabel(
-                    mark: markName(isChosen: isChosen, multiSelect: question.multiSelect),
-                    isChosen: isChosen,
-                    title: option.label,
-                    detail: option.description
-                )
+            // Settled, there is nothing left to press, and a disabled button would also take the
+            // selection away from the text inside it.
+            Group {
+                if isOpen {
+                    Button {
+                        toggle(question, option.label)
+                    } label: {
+                        label
+                    }
+                    .buttonStyle(
+                        QuestionOptionStyle(
+                            isChosen: isChosen,
+                            isOpen: isOpen,
+                            forcesHover: forcesHover(question, option)
+                        )
+                    )
+                } else {
+                    label.questionOptionPlate(isChosen ? Palette.selected : .clear)
+                }
             }
-            .buttonStyle(
-                QuestionOptionStyle(
-                    isChosen: isChosen,
-                    isOpen: isOpen,
-                    forcesHover: forcesHover(question, option)
-                )
-            )
-            .disabled(!isOpen)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(option.label)
+            .accessibilityHint(option.description)
             .accessibilityAddTraits(isChosen ? [.isSelected] : [])
 
             // Shown only for the option it belongs to, and only once that option is the one being
@@ -180,24 +200,63 @@ struct AgentQuestionCard: View {
 
     /// One option as one object: the mark in its own column, the label carrying the weight, and
     /// the description a clear step under it rather than a second line of the same voice.
-    private func rowLabel(mark: String, isChosen: Bool, title: String, detail: String) -> some View {
+    ///
+    /// The words are AppKit text, so a drag selects part of them as it would anywhere in the
+    /// transcript, and a click that selects nothing still ticks the option through `onClick`.
+    private func rowLabel(
+        mark: String, isChosen: Bool, title: String, detail: String, onClick: (@MainActor () -> Void)?
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
             markView(mark, isChosen: isChosen)
 
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text(title)
-                    .font(Typo.labelEmphasis)
-                    .foregroundStyle(isOpen ? Palette.textPrimary : Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                cardText(
+                    title,
+                    font: Typo.labelEmphasis,
+                    color: isOpen ? Palette.textPrimary : Palette.textSecondary,
+                    copyPrefix: Self.copyMark(isChosen: isChosen),
+                    onClick: onClick
+                )
 
                 if !detail.isEmpty {
-                    Text(detail)
-                        .font(Typo.caption)
-                        .foregroundStyle(isOpen ? Palette.textSecondary : Palette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    cardText(
+                        detail,
+                        font: Typo.caption,
+                        color: isOpen ? Palette.textSecondary : Palette.textTertiary,
+                        separator: "\n",
+                        onClick: onClick
+                    )
                 }
             }
         }
+    }
+
+    /// A run of the card's words as AppKit text joined to the card's selection. `separator` is
+    /// what Copy puts before it when the selection starts in an earlier run.
+    private func cardText(
+        _ string: String,
+        font: ScaledFont,
+        color: Color,
+        tracking: CGFloat = 0,
+        separator: String = "\n\n",
+        copyPrefix: String = "",
+        onClick: (@MainActor () -> Void)? = nil
+    ) -> some View {
+        let text = NSAttributedString(string: string, attributes: [
+            .font: font.resolvedNSFont(scale: fontScale),
+            .foregroundColor: NSColor(color),
+            .kern: tracking,
+        ])
+        let baseline = TranscriptTextView.firstBaseline(of: text)
+        return TranscriptTextView(
+            text: text,
+            linkColor: Palette.linkNSColor,
+            copyPrefix: copyPrefix,
+            copySeparatorBefore: separator,
+            onPlainClick: onClick
+        )
+            // A native text view supplies no SwiftUI baseline for the mark beside it.
+            .alignmentGuide(.firstTextBaseline) { _ in baseline }
     }
 
     /// The mark in a fixed column, so the labels line up down the card whatever shape each mark
@@ -234,11 +293,12 @@ struct AgentQuestionCard: View {
                 // because a disabled field greys its contents down to placeholder grey and the
                 // one thing the person wrote read as the one thing they had not.
                 if !isOpen, !question.isSecret {
-                    Text(answer.wrappedValue)
-                        .font(Typo.label)
-                        .foregroundStyle(Palette.textPrimary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    cardText(
+                        answer.wrappedValue,
+                        font: Typo.label,
+                        color: Palette.textPrimary,
+                        copyPrefix: Self.copyMark(isChosen: true)
+                    )
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Group {
@@ -279,19 +339,20 @@ struct AgentQuestionCard: View {
             .focusedValue(\.isTypingProse, otherFocus != nil)
         } else if isOpen {
             Button {
-                // Recorded before the draft, because it is what tells the row that appears next
-                // that this card is the one to take focus.
-                openedOther.insert(question.id)
-                box.draft.writeOther(on: question)
+                openOther(question)
             } label: {
                 rowLabel(
                     mark: markName(isChosen: false, multiSelect: question.multiSelect),
                     isChosen: false,
                     title: AgentQuestionnaire.otherLabel,
-                    detail: "Answer in your own words."
+                    detail: "Answer in your own words.",
+                    onClick: { openOther(question) }
                 )
             }
             .buttonStyle(QuestionOptionStyle(isChosen: false, isOpen: true))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AgentQuestionnaire.otherLabel)
+            .accessibilityHint("Answer in your own words.")
         }
     }
 
@@ -327,10 +388,7 @@ struct AgentQuestionCard: View {
                     .accessibilityHidden(true)
             }
 
-            Text(settledText)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            cardText(settledText, font: Typo.caption, color: Palette.textSecondary)
         }
     }
 
@@ -367,8 +425,20 @@ struct AgentQuestionCard: View {
         onAnswer(.answer(input: AgentQuestionnaire.answered(ask.input, answers: answers)))
     }
 
+    private func openOther(_ question: AgentQuestion) {
+        // Recorded before the draft, because it is what tells the row that appears next that this
+        // card is the one to take focus.
+        openedOther.insert(question.id)
+        box.draft.writeOther(on: question)
+    }
+
     private func toggle(_ question: AgentQuestion, _ label: String) {
         box.draft.toggle(label, on: question)
+    }
+
+    /// What a copied option starts with, so pasted text still says which were ticked.
+    private static func copyMark(isChosen: Bool) -> String {
+        isChosen ? "[x] " : "[ ] "
     }
 
     /// A circle for one of many, a square for any of many. The shapes AppKit uses for a radio
@@ -452,13 +522,7 @@ private struct QuestionOptionStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .padding(.vertical, Metrics.spacing)
-                .padding(.horizontal, Metrics.spacingWide)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                        .fill(fill)
-                )
+                .questionOptionPlate(fill)
                 .contentShape(RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
                 .animation(reduceMotion ? nil : Motion.hover, value: isHovered)
                 .onHover { isHovered = $0 }
@@ -469,6 +533,19 @@ private struct QuestionOptionStyle: ButtonStyle {
             if isOpen, isHovered { return Palette.hover }
             return .clear
         }
+    }
+}
+
+private extension View {
+    /// The option row's padding and plate, shared by the button and by the settled, selectable row.
+    func questionOptionPlate(_ fill: Color) -> some View {
+        padding(.vertical, Metrics.spacing)
+            .padding(.horizontal, Metrics.spacingWide)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+                    .fill(fill)
+            )
     }
 }
 

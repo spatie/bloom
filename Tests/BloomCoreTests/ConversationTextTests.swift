@@ -48,6 +48,21 @@ struct ConversationTextTests {
         #expect(ConversationText.text(of: rows, in: slice).isEmpty)
     }
 
+    @Test func aQuestionCardIsCopiedWithItsOptions() {
+        let ask = #"{"type":"control_request","request_id":"ask-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"header":"Db","question":"Which database?","options":[{"label":"SQLite","description":"One file"},{"label":"Postgres"}]}]}}}"#
+        let rows = [user(1, "Go"), TurnAnswer.Row(seq: 2, kind: .permissionAsk, payload: Data(ask.utf8))]
+        #expect(
+            ConversationText.text(of: rows)
+                == "You:\nGo\n\nAgent:\nDB\nWhich database?\n- SQLite\n  One file\n- Postgres"
+        )
+    }
+
+    @Test func aPermissionRequestIsNotCopied() {
+        let ask = #"{"type":"control_request","request_id":"bash-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}"#
+        let rows = [TurnAnswer.Row(seq: 1, kind: .permissionAsk, payload: Data(ask.utf8))]
+        #expect(ConversationText.text(of: rows).isEmpty)
+    }
+
     private func row(_ seq: Int, _ kind: MessageKind) -> TurnAnswer.Row {
         TurnAnswer.Row(seq: seq, kind: kind, payload: Data())
     }
