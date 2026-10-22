@@ -232,6 +232,8 @@ struct TranscriptRowView: View, Equatable {
         case .notice:
             if let note = ConversationNotResumed.sentence(fromNote: row.payload) {
                 ConversationNotResumedRowView(sentence: note)
+            } else if let lifecycle = WorkspaceLifecycleNote(payload: row.payload) {
+                WorkspaceLifecycleRowView(note: lifecycle)
             } else {
                 RateLimitRowView(payload: row.payload)
             }

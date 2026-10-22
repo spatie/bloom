@@ -2086,7 +2086,7 @@ final class TranscriptModel {
 
     /// Pulls anything the runner has persisted since the last row we hold. The runner is the
     /// single writer, so reading back from the store keeps one ordering and one source of truth.
-    private func appendLatestMessages() async {
+    func appendLatestMessages() async {
         guard let store else { return }
         // Nothing is appended to a list the first read is still building. A workspace can be handed
         // a prompt the same moment its model is made, which starts the agent while the history is

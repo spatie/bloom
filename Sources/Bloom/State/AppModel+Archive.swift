@@ -534,6 +534,7 @@ extension AppModel {
         let departure = ArchiveNavigation.destination(leaving: selection, archiving: workspace.id)
         if let departure { selection = departure }
 
+        var facts = archiveFacts(of: workspace, in: repo)
         do {
             try await manager.archive(
                 workspace: workspace,
@@ -567,6 +568,9 @@ extension AppModel {
             // A chat in another workspace that asked to hear when this one finished will not hear
             // it any other way now. See `WorkspaceDoneWatch`.
             await noteWorkspaceArchivedForWatchers(workspace.id)
+            facts.branchKept = await Git.branchExists(workspace.branch, in: repo.path)
+            facts.keptFolder = report?.preservedFolderPath
+            await record(.archived(facts), in: workspace.id)
             await offerUndo(of: workspace, repo: repo, report: report)
             if let path = report?.preservedFolderPath {
                 notice = BloomNotice(
@@ -756,6 +760,16 @@ extension AppModel {
         return await manager.restoreSource(workspace: workspace, repo: repo)
     }
 
+    /// A restored worktree is a fresh checkout, so whatever the setup script installed is gone.
+    /// Pressing Restore is the same consent creating a workspace gives to the script.
+    ///
+    /// The settings are read first because `runSetupAgain` offers nothing until a model has them.
+    private func runSetupAfterRestore(_ workspace: Workspace) async {
+        let restored = model(for: workspace)
+        await restored.reloadSettings()
+        restored.runSetupAgain()
+    }
+
     /// Rebuilds the worktree and puts the workspace back in the sidebar.
     ///
     /// This is the second of the two things Restore could mean, and the one that can fail: a
@@ -807,8 +821,18 @@ extension AppModel {
             let outcome = try await manager.restore(workspace: current, repo: repo)
             // The other half of the pair: this workspace has left the archived list.
             invalidateArchived()
+            // `.pending` is what a rebuilt worktree with a setup script to run is filed as.
+            let setupRuns = outcome.workspace.setupState == .pending
+            await record(
+                .restored(
+                    setupRuns: setupRuns,
+                    relocatedTo: outcome.relocatedFrom == nil ? nil : outcome.workspace.path
+                ),
+                in: workspace.id
+            )
             await reload()
             Log.archive.info("restored \(workspace.name, privacy: .public)")
+            if setupRuns { await runSetupAfterRestore(outcome.workspace) }
 
             if let from = outcome.relocatedFrom {
                 // The one notice that waits. Everything else here is news about something
