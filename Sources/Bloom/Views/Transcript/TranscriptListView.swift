@@ -1857,7 +1857,16 @@ struct TranscriptListView: View {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
             if historyGeneration.value == generation { isGrowing.value = false }
+            // Rows that draw nothing move nothing, so no scroll arrives to ask for the next chunk.
+            if isVisible.value, contentOffset.value < Double(geometry.paneHeight) { growWindow() }
         }
+    }
+
+    /// How tall the table's rows came out and the pane they are drawn in, read when a history
+    /// budget is decided. Nought for both before the table has a scroll view.
+    private var drawnHeights: (drawn: Double, pane: Double) {
+        guard let scroll = controller.scrollView else { return (0, 0) }
+        return (Double(scroll.documentView?.frame.height ?? 0), Double(scroll.contentView.bounds.height))
     }
 
     /// Hands the table another chunk before the reader reaches it.
@@ -1893,7 +1902,11 @@ struct TranscriptListView: View {
                   drawn.session == transcript.session.id,
                   let prepared = drawn.window.preparedHistory(
                       afterArrival: true,
-                      maximumRows: atLiveEnd.value ? TranscriptWindow.livePreparedLimit : .max
+                      maximumRows: TranscriptWindow.preparationLimit(
+                          atLiveEnd: atLiveEnd.value,
+                          drawnHeight: drawnHeights.drawn,
+                          paneHeight: drawnHeights.pane
+                      )
                   ) {
                 drawn.window = prepared
                 TranscriptDrawn.note(prepared.count, session: transcript.session.id)
@@ -1915,13 +1928,14 @@ struct TranscriptListView: View {
     /// The table's height cache survives this trim. Only the row entries are released, so a new
     /// arrival pays for the live neighbourhood while an upward scroll can still recover history.
     private func trimHistoryAtLiveEnd() {
+        let heights = drawnHeights
         guard !isLiveScrolling.value,
               atLiveEnd.value,
               drawn.session == transcript.session.id,
               drawn.window.end >= transcript.rows.count,
-              drawn.window.count > TranscriptWindow.livePreparedLimit + TranscriptWindow.chunk
+              let trimmed = drawn.window.trimmedAtLiveEnd(drawnHeight: heights.drawn, paneHeight: heights.pane)
         else { return }
-        drawn.window = drawn.window.keepingLatest(TranscriptWindow.livePreparedLimit)
+        drawn.window = trimmed
         drawn.rowCount = transcript.rows.count
         TranscriptDrawn.note(drawn.window.count, session: transcript.session.id)
     }

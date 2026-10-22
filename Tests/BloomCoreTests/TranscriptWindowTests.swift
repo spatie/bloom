@@ -143,6 +143,54 @@ struct TranscriptWindowTests {
         ) == nil)
     }
 
+    /// The shape of a long session run through subagents: their rows are absorbed into the call
+    /// that started them and most system rows draw nothing, so its last 1,200 rows drew 1,057
+    /// points under a 1,100 point pane, and the conversation above them could not be reached.
+    private static let subagentSessionRows = 3_615
+    private static let subagentPointsPerRow = 1_057.0 / Double(TranscriptWindow.livePreparedLimit)
+    private static let pane = 1_100.0
+
+    private static func preparedAtLiveEnd(rowCount: Int, pointsPerRow: Double) -> TranscriptWindow {
+        var window = TranscriptWindow.liveEnd(rowCount: rowCount)
+        while let next = window.preparedHistory(
+            afterArrival: true,
+            maximumRows: TranscriptWindow.preparationLimit(
+                atLiveEnd: true, drawnHeight: Double(window.count) * pointsPerRow, paneHeight: pane
+            )
+        ) {
+            window = next
+        }
+        return window
+    }
+
+    @Test("live-end preparation goes past its row budget while the rows draw less than a few panes")
+    func livePreparationFillsThePane() {
+        let window = Self.preparedAtLiveEnd(
+            rowCount: Self.subagentSessionRows, pointsPerRow: Self.subagentPointsPerRow
+        )
+        #expect(window.start == 0)
+    }
+
+    @Test("live-end preparation keeps its row budget once the rows fill a few panes")
+    func livePreparationKeepsItsBudgetForTallRows() {
+        let window = Self.preparedAtLiveEnd(rowCount: 5_000, pointsPerRow: 40)
+        #expect(window == TranscriptWindow(start: 3_800, end: 5_000))
+    }
+
+    @Test("the live end keeps history that draws less than a few panes")
+    func liveTrimKeepsShortHistory() {
+        let whole = TranscriptWindow(start: 0, end: Self.subagentSessionRows)
+        let drawn = Double(Self.subagentSessionRows) * Self.subagentPointsPerRow
+        #expect(whole.trimmedAtLiveEnd(drawnHeight: drawn, paneHeight: Self.pane) == nil)
+    }
+
+    @Test("the live end drops old rows that still leave a few panes drawn")
+    func liveTrimDropsTallHistory() {
+        let trimmed = TranscriptWindow(start: 200, end: 5_000)
+            .trimmedAtLiveEnd(drawnHeight: 4_800 * 40, paneHeight: Self.pane)
+        #expect(trimmed == TranscriptWindow(start: 3_800, end: 5_000))
+    }
+
     @Test("returning to the live end discards only old drawn entries")
     func liveWindowCanDropOldEntries() {
         let window = TranscriptWindow(start: 200, end: 5_000)

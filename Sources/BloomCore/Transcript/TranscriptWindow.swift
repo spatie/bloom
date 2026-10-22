@@ -115,6 +115,27 @@ public struct TranscriptWindow: Equatable, Sendable {
         return grownUp(by: min(chunk, maximumRows - count))
     }
 
+    /// The panes of history `livePreparedLimit` stands for. Subagent rows are absorbed into their
+    /// call and most system rows draw nothing, so 1,200 rows of such a session measured shorter
+    /// than one pane, and with nothing to scroll the reader could never ask for more.
+    public static let livePreparedPanes = 3.0
+
+    /// The most rows idle preparation may hand the table.
+    public static func preparationLimit(atLiveEnd: Bool, drawnHeight: Double, paneHeight: Double) -> Int {
+        guard atLiveEnd, drawnHeight >= paneHeight * livePreparedPanes else { return .max }
+        return livePreparedLimit
+    }
+
+    /// The window kept once the reader is back at the live end, or nil to keep this one. The kept
+    /// rows are assumed to draw like the average row, so a trim never leaves less than
+    /// `livePreparedPanes` for preparation to grow straight back.
+    public func trimmedAtLiveEnd(drawnHeight: Double, paneHeight: Double) -> Self? {
+        guard count > Self.livePreparedLimit + Self.chunk else { return nil }
+        let keptHeight = drawnHeight * Double(Self.livePreparedLimit) / Double(count)
+        guard keptHeight >= paneHeight * Self.livePreparedPanes else { return nil }
+        return keepingLatest(Self.livePreparedLimit)
+    }
+
     /// Drop old table entries after a reader returns to the live end. The model still owns every
     /// row, and the table can grow upward again when the reader asks for that history.
     public func keepingLatest(_ rows: Int) -> Self {
