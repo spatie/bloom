@@ -60,7 +60,8 @@ enum TranscriptLayoutProbe {
             rowEnvironment: TranscriptRowEnvironment(
                 app: app, hoverHost: TranscriptHoverHost(), bubbleWidth: TranscriptBubbleWidth(),
                 conversation: TranscriptConversationSelection(),
-                linkActions: TranscriptLinkActions(), fontScale: ChatTextSize.defaultChoice.scale,
+                linkActions: TranscriptLinkActions(), table: controller,
+                fontScale: ChatTextSize.defaultChoice.scale,
                 chatFont: .standard, lineHeight: .defaultChoice, reduceMotion: true
             ),
             onGeometryChange: { _ in }, onSettled: {}, onLiveScrollChange: { _ in }

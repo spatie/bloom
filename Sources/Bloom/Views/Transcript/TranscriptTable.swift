@@ -128,6 +128,9 @@ final class TranscriptTableController {
     /// A fold is about to open or close. See `Coordinator.pendingUnfolds`.
     func willUnfold(_ entryID: TranscriptEntryID) { coordinator?.willUnfold(entryID) }
 
+    /// A row is about to change its own height because the reader clicked inside it.
+    func willResize(_ entryID: TranscriptEntryID) { coordinator?.willResize(entryID) }
+
     /// A transcript activity group is about to add or remove its disclosed rows.
     func willChangeFoldRows(_ entryID: TranscriptEntryID) {
         coordinator?.willChangeFoldRows(entryID)
@@ -411,6 +414,8 @@ struct TranscriptTable: NSViewRepresentable {
         /// The disclosure row where the reader clicked, held at the same point in the viewport
         /// while its children enter or leave below it.
         private var pendingFoldAnchor: (id: TranscriptEntryID, delta: CGFloat)?
+        /// The clicked row, held still while its own content changes height. See `willResize`.
+        private var pendingResizeAnchor: (id: TranscriptEntryID, delta: CGFloat)?
 
         /// Where the reader was just before the pane changed size, read before AppKit moves the
         /// clip view. See `viewportWillResize`, which carries why afterwards is too late.
@@ -956,12 +961,13 @@ struct TranscriptTable: NSViewRepresentable {
                 // what a rebuilt list comes to. See `owedHeights`.
                 let rows = IndexSet(owed.compactMap(rowOf))
                 guard !rows.isEmpty else { return }
-                let wasAtEnd = isFollowingAlong
+                let clicked = pendingResizeAnchor.flatMap { owed.contains($0.id) ? $0 : nil }
+                let wasAtEnd = clicked == nil && isFollowingAlong
                 // **The row being corrected is usually above the reader.** Scrolling up brings
                 // rows in at the top, each reports a height that differs from what it was measured
                 // at, and every correction moves everything below it. Without the anchor the text
                 // slides under the eye on the way up.
-                let anchor = anchorEntry()
+                let anchor = clicked ?? anchorEntry()
                 if wasAtEnd || isFollowerDriving { onContentWillChange?() }
                 noteHeights(rows)
                 // **The correction is also what leaves a reader short of the end**, and it is the
@@ -1164,6 +1170,15 @@ struct TranscriptTable: NSViewRepresentable {
             aimingElsewhere()
         }
 
+        /// Only a cell knows its height is about to change, so it reports through `drainOwedHeights`
+        /// and not through `update`, where the two fold anchors are consumed. Kept until the reader
+        /// scrolls: a preview settles over several passes, and one dip near the end clamps the clip.
+        func willResize(_ entryID: TranscriptEntryID) {
+            guard pendingResizeAnchor?.id != entryID else { return }
+            aimingElsewhere()
+            pendingResizeAnchor = anchorEntry(entryID)
+        }
+
         func willChangeFoldRows(_ entryID: TranscriptEntryID) {
             pendingFoldRows = true
             pendingFoldAnchor = anchorEntry(entryID)
@@ -1291,6 +1306,7 @@ struct TranscriptTable: NSViewRepresentable {
             // hold back the moment it is paused, which is the moment the reader grabbed the view,
             // and obeying that would be this file yanking somebody down as they scroll away.
             guard !isLiveScrolling else { return }
+            pendingResizeAnchor = nil
             putEnd()
             // **A movement rather than an instruction while the follower is running**, because
             // keeping the view at the end during a turn is precisely the follower's job and it is
@@ -1428,6 +1444,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// Somebody is taking the view somewhere that is not the end, so every standing claim on
         /// it comes down first.
         private func aimingElsewhere() {
+            pendingResizeAnchor = nil
             viewportWork?.cancel()
             viewportWork = nil
             viewportPlace = nil

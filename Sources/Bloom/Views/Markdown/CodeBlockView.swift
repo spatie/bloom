@@ -7,6 +7,9 @@ public struct CodeBlockView: View {
     /// Beyond this the fence is folded, because a fence nobody asked to see all of is not worth
     /// lexing and laying out all of on the way past it.
     private static let lineCap = 2_000
+    // ponytail: a quiet spell, not a signal. Markdown has no "laid out" event, and its text views
+    // settle over a few passes; raise it if a preview still swaps in short.
+    private static let previewSettle = Duration.milliseconds(120)
 
     private let code: String
     private let language: Language
@@ -21,9 +24,15 @@ public struct CodeBlockView: View {
     /// An attach in flight. The draft is frozen until it lands, so a second press cannot attach
     /// it twice and nothing typed meanwhile is wiped by the clear that follows.
     @State private var isAttaching = false
+    @State private var showsPreview = false
+    /// The preview is laid out hidden and swapped in once its height has settled, so the row
+    /// changes height once rather than dipping and growing back under the reader.
+    @State private var previewIsReady = false
+    @State private var previewHeight: CGFloat = 0
     @Environment(\.transcriptTextSelection) private var selection
     @Environment(\.markdownLinkActions) private var linkActions
     @Environment(\.transcriptEntryID) private var entryID
+    @Environment(\.transcriptTable) private var table
 
     /// Whether the answer this fence belongs to is still arriving, which decides which cache the
     /// preparation goes through. See `CodeBlockPreparationCache`.
@@ -43,6 +52,9 @@ public struct CodeBlockView: View {
             code: shown, language: language, isStreaming: isStreaming && shown == code
         )
         let visibleCount = showsAllLines ? prepared.lines.count : min(prepared.lines.count, Self.lineCap)
+        // Not while streaming: a page reloaded on every delta is a flicker, not a preview.
+        let previewKind = isStreaming || showsEditor ? nil : DocumentPreview.kind(language: language)
+        let showsRendered = showsPreview && previewKind != nil && previewIsReady
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Metrics.spacing) {
@@ -59,6 +71,18 @@ public struct CodeBlockView: View {
                     .compactSegmented()
                 }
                 Spacer(minLength: MarkdownMetrics.blockGap)
+                if previewKind != nil {
+                    iconButton(
+                        showsPreview ? "eye.fill" : "eye",
+                        ink: showsPreview ? Palette.accent : Palette.textTertiary,
+                        title: showsPreview ? "Show the code" : "Show the rendered preview"
+                    ) {
+                        if let entryID { table?.willResize(entryID) }
+                        showsPreview.toggle()
+                        previewIsReady = false
+                        previewHeight = 0
+                    }
+                }
                 editControls(versions)
                 CopyButton(
                     text: showsEditor ? versions.draft ?? shown : shown,
@@ -79,13 +103,28 @@ public struct CodeBlockView: View {
                 )
                     .padding(Metrics.spacing)
             } else {
-                reader(prepared, upTo: visibleCount)
+                ZStack(alignment: .topLeading) {
+                    if showsPreview, let previewKind {
+                        rendered(previewKind, code: shown)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewHeight = $0 }
+                            .frame(height: previewIsReady ? nil : 0, alignment: .top)
+                            .opacity(previewIsReady ? 1 : 0)
+                            .allowsHitTesting(previewIsReady)
+                    }
+                    if !showsRendered { reader(prepared, upTo: visibleCount) }
+                }
+                .task(id: previewHeight) {
+                    guard showsPreview, previewKind == .markdown, previewHeight > 0 else { return }
+                    try? await Task.sleep(for: Self.previewSettle)
+                    guard !Task.isCancelled else { return }
+                    previewIsReady = true
+                }
             }
 
             // No `!showsAllLines`: an opened fence keeps the control, now reading the other way.
             // A fence unfolded once could not be folded again, and two thousand lines is a lot of
             // pane to have put between the reader and whatever they were scrolling towards.
-            if !showsEditor, prepared.lines.count > Self.lineCap {
+            if !showsEditor, !showsRendered, prepared.lines.count > Self.lineCap {
                 Hairline()
                 Button(TextFold.title(isExpanded: showsAllLines, lines: prepared.lines.count)) {
                     showsAllLines.toggle()
@@ -121,6 +160,20 @@ public struct CodeBlockView: View {
                     .textSelection(.enabled)
                     .padding(MarkdownMetrics.blockGap)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func rendered(_ kind: DocumentPreview.Kind, code: String) -> some View {
+        switch kind {
+        case .markdown:
+            // Its natural height, or a quote's rule stretches into whatever height the row offers.
+            MarkdownView(code)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(MarkdownMetrics.blockGap)
+        case .html, .svg:
+            HTMLSnippetView(html: code) { previewIsReady = true }
         }
     }
 
