@@ -152,6 +152,7 @@ struct ComposerView: View {
                 controls: controls,
                 onChange: apply(controls:),
                 context: transcript.contextUsage,
+                loadContextBreakdown: transcript.contextBreakdown,
                 isRunning: transcript.isRunning,
                 queues: transcript.queuesNextMessage,
                 canSend: canSend,

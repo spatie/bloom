@@ -807,6 +807,55 @@ struct AgentRunnerProcessTests {
         #expect(try #require(recorder.last).launch.executable == "/tmp/tools/claude")
     }
 
+    @Test("asks the running process what fills its window, and keeps the answer out of the transcript")
+    func asksForTheContextBreakdown() async throws {
+        let store = try makeTestStore("agent-context")
+        let session = try await makeSession(store)
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+        #expect(await runner.contextBreakdown() == nil)
+
+        try await runner.send("hello")
+        let process = try #require(recorder.last)
+        async let asked = runner.contextBreakdown()
+        await waitUntil("the ask was written") { process.stdin.count == 2 }
+        let request = try #require(JSONValue.parse(process.stdin[1]))
+        #expect(request["request"]?["subtype"]?.stringValue == "get_context_usage")
+        let id = try #require(request["request_id"]?.stringValue)
+
+        process.emit("""
+        {"type":"control_response","response":{"subtype":"success","request_id":"\(id)","response":{"categories":[\
+        {"name":"System prompt","tokens":2304,"kind":"used"},\
+        {"name":"MCP tools (deferred)","tokens":19995,"kind":"deferred"},\
+        {"name":"Messages","tokens":10527,"kind":"used"},\
+        {"name":"Free space","tokens":942069,"kind":"free"}]}}}
+        """)
+
+        #expect(await asked == ContextBreakdown(categories: [
+            .init(name: "System prompt", tokens: 2304),
+            .init(name: "Messages", tokens: 10527),
+        ]))
+        #expect(try await store.messageCount(sessionID: session.id) == 1)
+    }
+
+    @Test("an ask the process dies under answers nil")
+    func contextBreakdownEndsWithTheProcess() async throws {
+        let store = try makeTestStore("agent-context-exit")
+        let session = try await makeSession(store)
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+        try await runner.send("hello")
+        let process = try #require(recorder.last)
+        async let asked = runner.contextBreakdown()
+        await waitUntil("the ask was written") { process.stdin.count == 2 }
+        process.endOutput()
+        #expect(await asked == nil)
+    }
+
     /// The other half, and the one that matters more: a session nobody has set a style on spawns
     /// with no settings object at all, so a style the repository chose in its own
     /// `.claude/settings.json` is left standing.

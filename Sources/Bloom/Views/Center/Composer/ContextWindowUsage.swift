@@ -15,9 +15,8 @@ import BloomCore
 /// It is the SUM over every API call the turn made, so a turn with ten tool calls reports roughly
 /// ten times the context it actually had, and the fuller the window the worse it reads.
 ///
-/// There is no breakdown. The protocol never says how much of the window is the system prompt, or
-/// skills, or memory files, or MCP tool definitions, so this deliberately carries a total and
-/// nothing that would have to be guessed at.
+/// The breakdown by system prompt, skills, memory files and so on is not on the stream. It is
+/// asked for separately: see `ContextBreakdown`.
 struct ContextWindowUsage: Equatable {
     /// Tokens the model had in front of it on the last call.
     var used: Int
