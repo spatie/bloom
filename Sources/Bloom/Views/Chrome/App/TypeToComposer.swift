@@ -24,7 +24,7 @@ enum TypeToComposer {
             let modifiers = modifiers(of: event)
             MainActor.assumeIsolated {
                 guard ComposerTypeAhead.belongsToComposer(characters: characters, modifiers: modifiers) else { return }
-                redirect()
+                redirect(isPaste: ComposerTypeAhead.isPaste(characters: characters, modifiers: modifiers))
             }
             return event
         }
@@ -36,15 +36,22 @@ enum TypeToComposer {
         editors.setObject(sessionKey as NSString, forKey: editor)
     }
 
-    private static func redirect() {
+    private static func redirect(isPaste: Bool) {
         guard let window = NSApp.keyWindow,
               window.canBecomeMain, !window.isSheet, window.attachedSheet == nil,
-              !takesKeys(window.firstResponder),
-              let sessionKey = focusedChat() else { return }
+              !takesKeys(window.firstResponder, isPaste: isPaste),
+              let sessionKey = (isPaste ? selectedConversation(in: window) : nil) ?? focusedChat()
+        else { return }
         for case let editor as ComposerEditorHandle in editors.keyEnumerator()
         where editors.object(forKey: editor) as String? == sessionKey {
             if editor.takeKeyboard(in: window) { return }
         }
+    }
+
+    /// A side conversation is not the focused pane, so its selection names its own composer.
+    private static func selectedConversation(in window: NSWindow) -> String? {
+        guard let view = window.firstResponder as? NSView else { return nil }
+        return SelectionToChat.transcript(containing: view)?.session?.rawValue
     }
 
     private static func focusedChat() -> String? {
@@ -56,11 +63,13 @@ enum TypeToComposer {
         return sessionID.rawValue
     }
 
-    /// A selected passage keeps its keys too, because R quotes it into the reply.
-    private static func takesKeys(_ responder: NSResponder?) -> Bool {
+    /// A selected passage keeps typed keys too, because R quotes it into the reply. See
+    /// `ComposerTypeAhead.isPaste` for why it does not keep Command+V.
+    private static func takesKeys(_ responder: NSResponder?, isPaste: Bool) -> Bool {
         var current = responder
         while let each = current {
-            if let text = each as? NSTextView, text.isEditable || text.selectedRange().length > 0 {
+            if let text = each as? NSTextView,
+               text.isEditable || (!isPaste && text.selectedRange().length > 0) {
                 return true
             }
             if each is BloomTerminalView || each is WKWebView

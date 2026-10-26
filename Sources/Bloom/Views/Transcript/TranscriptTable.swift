@@ -302,6 +302,7 @@ struct TranscriptTable: NSViewRepresentable {
         coordinator.onContentWillChange = onContentWillChange
         coordinator.includesLiveEnd = includesLiveEnd
         (coordinator.tableView as? TranscriptTableView)?.quoteSelection = quoteSelection
+        (coordinator.tableView as? TranscriptTableView)?.session = session
         (coordinator.tableView as? TranscriptTableView)?.conversation = rowEnvironment.conversation
         // Before the entries, so that a pass carrying another conversation's rows is applied to a
         // pane that has already stopped drawing.
