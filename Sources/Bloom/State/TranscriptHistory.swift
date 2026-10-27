@@ -14,8 +14,11 @@ final class TranscriptHistory {
     /// under "Running Bash" while the turn carried on, and read as part of the work in progress
     /// rather than as a note that this turn's file list would be missing.
     @ObservationIgnored var report: (String) -> Void = { _ in }
+    /// Where a summary read from git is kept. See `files(_:cwd:)`.
+    @ObservationIgnored private var store: Store?
 
     func load(store: Store, sessionID: SessionID) async {
+        self.store = store
         do {
             checkpoints = try await store.turnCheckpoints(sessionID: sessionID)
         } catch { report("Could not load this conversation's turn history. \(error.readableMessage)") }
@@ -67,8 +70,15 @@ final class TranscriptHistory {
         }
     }
 
-    func files(_ checkpoint: TurnCheckpoint, cwd: String) async throws -> [ChangedFile] {
+    /// Read from git once, then kept on the checkpoint. See `TurnCheckpoint.files`.
+    func files(_ checkpoint: TurnCheckpoint, cwd: String) async throws -> [TurnFile] {
         guard let after = checkpoint.after else { throw SnapshotFailure("This turn has no completed snapshot.") }
-        return try await Git.snapshotFiles(from: checkpoint.before, to: after, in: cwd)
+        let files = try await Git.snapshotFiles(from: checkpoint.before, to: after, in: cwd).map(TurnFile.init)
+        guard let index = checkpoints.firstIndex(where: { $0.id == checkpoint.id }) else { return files }
+        checkpoints[index].files = files
+        let summarised = checkpoints[index]
+        // A lost write costs one more git read on the next open, nothing the reader can see.
+        try? await store?.saveTurnCheckpoint(summarised)
+        return files
     }
 }

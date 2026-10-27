@@ -1,9 +1,21 @@
 import SwiftUI
 
+/// One part of a long answer cut into rows. See `TranscriptAnswerParts`.
+struct AnswerPart: Equatable {
+    var text: String
+    var index: Int
+    var count: Int
+
+    var isFirst: Bool { index == 0 }
+    var isLast: Bool { index == count - 1 }
+}
+
 /// Shared by live and saved messages so their boundaries do not move when streaming finishes.
 struct ProseRowView: View {
     var text: String
     var isStreaming = false
+    /// The part of a long answer this row draws, which sits as close to its neighbours as blocks do.
+    var part: AnswerPart?
     /// Present only on the response that closes a completed turn.
     var copyText: String?
     var smoothMarkdownHandoff = false
@@ -44,8 +56,8 @@ struct ProseRowView: View {
         }
         .padding(.horizontal, TranscriptLayout.inset)
         // Equal air above and below keeps an activity disclosure centred between paragraphs.
-        .padding(.top, TranscriptLayout.block)
-        .padding(.bottom, TranscriptLayout.block)
+        .padding(.top, part?.isFirst == false ? 0 : TranscriptLayout.block)
+        .padding(.bottom, part?.isLast == false ? MarkdownMetrics.blockGap : TranscriptLayout.block)
         .onHover { isHovered = $0 }
     }
 
@@ -58,7 +70,7 @@ struct ProseRowView: View {
             StreamingMarkdownView(text)
         } else if smoothMarkdownHandoff {
             ZStack(alignment: .topLeading) {
-                MarkdownView(text)
+                MarkdownView(text, continuesAnswer: part?.isFirst == false)
                     .onGeometryChange(for: Bool.self) { proxy in
                         proxy.size.width > 0 && proxy.size.height > 0
                     } action: { markdownReady = $0 }
@@ -83,7 +95,7 @@ struct ProseRowView: View {
                 }
             }
         } else {
-            MarkdownView(text)
+            MarkdownView(text, continuesAnswer: part?.isFirst == false)
         }
     }
 }

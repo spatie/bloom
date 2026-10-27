@@ -82,7 +82,8 @@ enum TranscriptPrime {
             }
             switch event {
             case .assistantText(let block):
-                prose(block.text)
+                // Parsed as it is drawn: a long answer's parts each parse on their own.
+                for part in TranscriptAnswerPartsCache.parts(rowID: row.id, text: block.text) { prose(part) }
             case .toolUse(let use):
                 _ = TranscriptPresentationCache.presentation(
                     rowID: row.id, use: use, worktree: worktree

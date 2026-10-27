@@ -49,6 +49,9 @@ struct TranscriptTableEntry: Identifiable {
     var minimumHeight: CGFloat = 0
     /// A retired live slot is zero immediately, even if its child reports the previous layout.
     var fixedHeight: CGFloat?
+    /// What the table is told until the row's own cell has measured it, for a row never measured
+    /// off screen. See `TranscriptLongAnswer`.
+    var estimatedHeight: CGFloat?
     var sentArrival: MessageArrival?
 
     func resolvedHeight(_ measured: CGFloat) -> CGFloat {
@@ -574,17 +577,15 @@ struct TranscriptTable: NSViewRepresentable {
                 changed.insert(new)
                 if pendingUnfolds.contains(newEntries[new].id) { unfolding.insert(new) }
             }
-            switch change {
-            case .same:
-                for offset in newEntries.indices { noteChange(old: offset, new: offset) }
-            case .grew, .shrank:
-                for offset in newEntries.indices {
+            // The unmoved head is matched by position: looking every entry up by id was an O(n)
+            // dictionary walk on each row an agent wrote into a long chat.
+            let unmoved = change.unmovedPrefix(count: newEntries.count)
+            if change != .rebuilt {
+                for offset in 0..<unmoved { noteChange(old: offset, new: offset) }
+                for offset in unmoved..<newEntries.count {
                     guard let old = index[newEntries[offset].id] else { continue }
                     noteChange(old: old, new: offset)
                 }
-            case .rebuilt:
-                // Every cell is going anyway.
-                break
             }
             // An in-place edit can change a row the idle pass has already walked past. Its next
             // settle starts a fresh pass at the visible row and sees the new content key.
@@ -603,17 +604,22 @@ struct TranscriptTable: NSViewRepresentable {
             // last screen. Keep that row where it was instead of treating the new children as
             // live transcript activity and following them to the end.
             let wasAtEnd = changesFoldRows || !unfolding.isEmpty ? false : isFollowingAlong
-            let anchor = foldAnchor ?? unfoldAnchor ?? (change.movesRows ? anchorEntry() : nil)
+            let anchor = foldAnchor ?? unfoldAnchor ?? (change.movesRows ? centreAnchor() : nil)
 
             if !changesFoldRows, !remeasured, !environmentMoved, holdView?.isHolding != true,
                wasAtEnd || isFollowerDriving {
                 onContentWillChange?()
             }
 
+            if case .shrank(let head, let tail) = change {
+                for offset in head { index[ids[offset]] = nil }
+                for offset in tail { index[ids[offset]] = nil }
+            } else if change == .rebuilt {
+                index = [:]
+            }
             entries = newEntries
             ids = newIDs
-            index = [:]
-            for (offset, id) in newIDs.enumerated() { index[id] = offset }
+            for offset in unmoved..<newIDs.count { index[newIDs[offset]] = offset }
             // The activity slot observes the sending state itself, so its content key stays
             // stable. Measure it alongside the echo instead of waiting for a later height report.
             if let sending = index[.sending], changed.contains(sending), let streaming = index[.streaming] {
@@ -815,6 +821,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// months on the strength of how plausible it sounds.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard heights.isReady else { return Self.hair }
+            if let estimate = unmeasuredEstimate(of: entry) { return estimate }
             return entry.resolvedHeight(CGFloat(heights.assumed(
                 for: entry.contentKey, shape: entry.shape, drawsNothing: entry.drawsNothing
             )))
@@ -961,7 +968,7 @@ struct TranscriptTable: NSViewRepresentable {
                 // rows in at the top, each reports a height that differs from what it was measured
                 // at, and every correction moves everything below it. Without the anchor the text
                 // slides under the eye on the way up.
-                let anchor = anchorEntry()
+                let anchor = centreAnchor()
                 if wasAtEnd || isFollowerDriving { onContentWillChange?() }
                 noteHeights(rows)
                 // **The correction is also what leaves a reader short of the end**, and it is the
@@ -1072,7 +1079,7 @@ struct TranscriptTable: NSViewRepresentable {
             let rows = IndexSet(visibleRows.filter { entries.indices.contains($0) })
             guard !rows.isEmpty else { return }
             let wasAtEnd = isFollowingAlong
-            let anchor = anchorEntry()
+            let anchor = centreAnchor()
             // **Measured before it is told, because re-telling a guess tells the table the guess
             // again.** This used to hand the table whatever `assumed` said, which for a row nobody
             // has measured is the running mean, so a screenful of guesses was reported by the
@@ -1099,12 +1106,19 @@ struct TranscriptTable: NSViewRepresentable {
         /// or the mean. The same number `height(of:)` gives the table, so the two cannot disagree
         /// about what counts as a row drawn wrong.
         private func owedHeight(of entry: TranscriptTableEntry) -> Double {
-            max(
+            if let estimate = unmeasuredEstimate(of: entry) { return Double(estimate) }
+            return max(
                 Double(Self.hair),
                 heights.assumed(
                     for: entry.contentKey, shape: entry.shape, drawsNothing: entry.drawsNothing
                 )
             )
+        }
+
+        /// A long answer's estimate, until its cell has reported what it really is.
+        private func unmeasuredEstimate(of entry: TranscriptTableEntry) -> CGFloat? {
+            guard let estimate = entry.estimatedHeight, heights.height(for: entry.contentKey) == nil else { return nil }
+            return estimate
         }
 
         /// Every height change in this file goes through here.
@@ -1194,15 +1208,12 @@ struct TranscriptTable: NSViewRepresentable {
         private func keepPlace(
             wasAtEnd: Bool, anchor: (id: TranscriptEntryID, delta: CGFloat)?
         ) {
-            // A new row or a late height report can arrive between two wheel events. The
-            // reader's gesture owns the clip view until it ends, including while AppKit is
-            // correcting the document height underneath it.
-            guard !isLiveScrolling else { return }
             switch TranscriptAnchor.place(
                 holdsEnd: holdsEnd,
                 wasAtEnd: wasAtEnd,
                 followerDriving: isFollowerDriving,
-                hasAnchor: anchor != nil
+                hasAnchor: anchor != nil,
+                underHand: isLiveScrolling
             ) {
             case .end:
                 putEnd()
@@ -1521,6 +1532,16 @@ struct TranscriptTable: NSViewRepresentable {
             )
         }
 
+        /// The row under the middle of the pane, which is where the reader is reading. Scrolling
+        /// up, the rows at the top are the ones just drawn and being corrected, and most rows
+        /// there draw nothing, so the topmost row holds nothing still.
+        private func centreAnchor() -> (id: TranscriptEntryID, delta: CGFloat)? {
+            guard let tableView, let scrollView else { return nil }
+            let row = tableView.row(at: NSPoint(x: 0, y: scrollView.contentView.documentVisibleRect.midY))
+            guard entries.indices.contains(row) else { return anchorEntry() }
+            return anchorEntry(entries[row].id)
+        }
+
         /// The clicked disclosure row at its current visual position. Unlike `anchorEntry()`,
         /// this keeps the control itself under the pointer while rows open or close beneath it.
         private func anchorEntry(
@@ -1748,7 +1769,7 @@ struct TranscriptTable: NSViewRepresentable {
                     let entry = entries[row]
                     // A silent stored row needs no view. The live slots can change without a
                     // content key change, so their first height cannot be warmed here.
-                    guard !entry.id.redrawsItself, entry.fixedHeight != 0 else { return false }
+                    guard !entry.id.redrawsItself, entry.fixedHeight != 0, entry.estimatedHeight == nil else { return false }
                     let key = entry.contentKey
                     return heights.height(for: key) == nil || heights.isStale(key)
                 }
@@ -1783,7 +1804,7 @@ struct TranscriptTable: NSViewRepresentable {
                     return
                 }
                 let wasAtEnd = isFollowingAlong
-                let anchor = anchorEntry()
+                let anchor = centreAnchor()
                 isApplyingWarmHeights = true
                 noteHeights(moved)
                 keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
@@ -1868,7 +1889,7 @@ struct TranscriptTable: NSViewRepresentable {
             guard heights.isReady, !isLiveScrolling else { return }
             let rows = TranscriptPaneHold.eager(visible: visibleRows, count: entries.count)
             let wasAtEnd = isFollowingAlong
-            let anchor = anchorEntry()
+            let anchor = centreAnchor()
             measureExactly(rows)
             let moved = heightUpdates(in: rows)
             guard !moved.isEmpty else { return }
@@ -1882,8 +1903,10 @@ struct TranscriptTable: NSViewRepresentable {
         /// notifications. Reading it afterwards mistakes a shorter viewport for scrolling up.
         private func viewportWillResize() {
             guard !isLiveScrolling, viewportPlace == nil, heights.isReady else { return }
+            // The middle row, as every correction after the resize holds: anchored on the top row
+            // instead, an inspector opened and closed again left the reader tens of points away.
             viewportPlace = PlaceBeforeResize(
-                wasAtEnd: holdsEnd || isFollowingAlong, anchor: anchorEntry()
+                wasAtEnd: holdsEnd || isFollowingAlong, anchor: centreAnchor()
             )
         }
 
@@ -1981,7 +2004,7 @@ struct TranscriptTable: NSViewRepresentable {
                 anchor = place.anchor
             } else {
                 wasAtEnd = isFollowingAlong
-                anchor = anchorEntry()
+                anchor = centreAnchor()
             }
             // **Before the measuring, and that is not tidiness.** A user bubble is capped at a
             // share of the pane's width, and the pane publishes that cap through this report. Rows
@@ -2042,6 +2065,7 @@ struct TranscriptTable: NSViewRepresentable {
             for row in rows where entries.indices.contains(row) {
                 let entry = entries[row]
                 if !entry.id.redrawsItself, entry.fixedHeight == 0 { continue }
+                if entry.estimatedHeight != nil { continue }
                 guard heights.needsMeasuring(
                     entry.contentKey, redrawsItself: entry.id.redrawsItself
                 ) else { continue }
@@ -2378,6 +2402,8 @@ final class TranscriptTableCell: NSView {
     /// Which generation of the table's cells this one is from. Nothing to start with, so a cell
     /// built here is always behind and is always applied. See `Coordinator.cellGeneration`.
     private var appliedGeneration: Int?
+    /// Content applied while the cell has no window. See `viewDidMoveToWindow`.
+    private var pendingRoot: TranscriptCellRoot?
     private var unclip: Task<Void, Never>?
     private var clipsForGrowth = false
     private var clipsForLiveScroll = false
@@ -2447,13 +2473,28 @@ final class TranscriptTableCell: NSView {
         // rather than only which row reported it. See `Coordinator.noted`.
         let key = entry.contentKey
         // One concrete root type, whatever the row is. See `TranscriptCellRoot`.
-        host.rootView = TranscriptCellRoot(
+        let root = TranscriptCellRoot(
             content: entry.content(),
             id: id,
             environment: environment,
             report: { [weak self] size in self?.onMeasured?(id, key, size) }
         )
+        if window == nil {
+            pendingRoot = root
+        } else {
+            pendingRoot = nil
+            host.rootView = root
+        }
         return true
+    }
+
+    /// A table reopened with its heights known lays out before it reaches a window, and a long
+    /// answer was laid out there at the wrong display scale and again on arrival: 2.8 s, then 5.9.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, let pendingRoot else { return }
+        self.pendingRoot = nil
+        host.rootView = pendingRoot
     }
 
     override func layout() {

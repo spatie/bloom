@@ -39,11 +39,19 @@ struct TurnFooterView: View {
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
 
-    @State private var files: [TurnFile] = []
+    /// What `scanFiles` found for a turn nothing knew about when the row was built.
+    @State private var loaded: [TurnFile]?
     @State private var snapshotFailure: String?
 
     private var checkpoint: TurnCheckpoint? {
         transcript?.history.checkpoints.first { $0.endSeq == row.seq && $0.after != nil }
+    }
+
+    /// Read in `body` rather than loaded in a task, because the table measures a row once, off
+    /// screen, before any task has run: chips that land after it grow the row under the reader.
+    private var knownFiles: [TurnFile]? {
+        if let checkpoint { return checkpoint.files }
+        return transcript?.turnScans[row.id]
     }
 
     var body: some View {
@@ -57,6 +65,9 @@ struct TurnFooterView: View {
         // decode is a dictionary lookup and an enum match per ask, and `outcome` and `appearance`
         // were rebuilt on top of each one.
         let result = result
+        // A snapshot git has not summarised yet shows the turn's own edits meanwhile: nearly always
+        // the same files, so the row keeps its height when the answer lands.
+        let files = knownFiles ?? loaded ?? transcript?.turnScans[row.id] ?? []
         let outcome = TurnEnding.of(
             wasStopped: wasStopped,
             succeeded: result?.succeeded != false,
@@ -95,10 +106,10 @@ struct TurnFooterView: View {
                     // More chips than fit step down to three, one, then a count rather than
                     // squeezing every path into an empty rounded rectangle.
                     ViewThatFits(in: .horizontal) {
-                        fileChips(limit: Self.visibleFileLimit)
-                        fileChips(limit: files.count > 3 ? 3 : 1)
-                        fileChips(limit: 1)
-                        countChip
+                        fileChips(files, limit: Self.visibleFileLimit)
+                        fileChips(files, limit: files.count > 3 ? 3 : 1)
+                        fileChips(files, limit: 1)
+                        countChip(files)
                         Color.clear.frame(width: 0, height: 0)
                     }
                 }
@@ -266,48 +277,39 @@ struct TurnFooterView: View {
 
     // MARK: Actions
 
-    /// Off the main actor: a long turn means decoding every tool call in it, and that must not land
-    /// on the frame that scrolled the footer into view.
+    /// Only for a turn the row was built without: a snapshot read before `TurnCheckpoint.files`
+    /// was kept, or a turn that finished after the conversation was read. Both answers are kept
+    /// where `knownFiles` finds them, so a row realised again does not ask twice.
     ///
-    /// And only once per turn. This hangs off a `.task`, which runs on every realisation of the
-    /// row, and a `LazyVStack` re-realises a footer every time it is scrolled past: each of those
-    /// was a walk back over up to four hundred rows, decoding every one of them. See
-    /// `TurnScanCache` for why the answer can be kept.
+    /// The scan runs off the main actor: a long turn means decoding every tool call in it, and that
+    /// must not land on the frame that scrolled the footer into view.
     private func scanFiles() async {
         snapshotFailure = nil
-        if let transcript, let checkpoint, let snapshotID = checkpoint.after?.id {
-            if let known = TurnScanCache.files(snapshotID: snapshotID) {
-                files = known
-                return
-            }
+        guard knownFiles == nil, let transcript else { return }
+        if let checkpoint {
             do {
-                let changed = try await transcript.history.files(checkpoint, cwd: worktree)
+                let changed = try await transcript.history.files(checkpoint, cwd: transcript.snapshotDirectory)
                 guard !Task.isCancelled else { return }
-                files = changed.map { TurnFile(path: $0.path, additions: $0.additions, deletions: $0.deletions) }
-                TurnScanCache.remember(files, snapshotID: snapshotID)
+                loaded = changed
             } catch {
+                // The turn's own edits stay drawn, so a failure adds its line without the chips leaving.
                 guard !Task.isCancelled else { return }
-                files = []
                 snapshotFailure = "Could not load the saved file summary: \(error)"
             }
             return
         }
-        if let known = TurnScanCache.files(rowID: row.id) {
-            files = known
-            return
-        }
-        guard let rows = transcript?.rows else { return }
+        let rows = transcript.rows
         let scanned = await Task.detached(priority: .utility) { [rows, seq = row.seq] in
             TurnScan.files(rows: rows, endingAt: seq)
         }.value
         guard !Task.isCancelled else { return }
-        TurnScanCache.remember(scanned, rowID: row.id)
-        files = scanned
+        transcript.turnScans[row.id] = scanned
+        loaded = scanned
     }
 
     /// The first `limit` files as chips, with what is left named rather than dropped.
     @ViewBuilder
-    private func fileChips(limit: Int) -> some View {
+    private func fileChips(_ files: [TurnFile], limit: Int) -> some View {
         HStack(spacing: TranscriptLayout.block) {
             ForEach(files.prefix(limit)) { file in
                 TurnFileChip(file: file, worktree: worktree)
@@ -321,7 +323,7 @@ struct TurnFooterView: View {
 
     /// The last thing before nothing: how many files the turn touched, without naming any of them.
     @ViewBuilder
-    private var countChip: some View {
+    private func countChip(_ files: [TurnFile]) -> some View {
         if !files.isEmpty {
             Chip(text: files.count == 1 ? "1 file" : "\(files.count) files")
                 .fixedSize()

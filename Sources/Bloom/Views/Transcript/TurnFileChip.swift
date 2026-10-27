@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// One file the turn touched, with what it did to it.
 struct TurnFileChip: View {

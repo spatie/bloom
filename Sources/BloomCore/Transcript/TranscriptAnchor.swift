@@ -119,10 +119,13 @@ public enum TranscriptAnchor {
     /// `wasAtEnd` is the reader who simply had not scrolled away, read BEFORE the move, and it is
     /// dropped while a follower is driving the view: two things pinning the same clip view is the
     /// instant pin winning with the travel invisible underneath it.
+    ///
+    /// Under a moving hand the row is kept and the end never is: a row remeasured above the reader
+    /// mid gesture otherwise slides the text under their fingers.
     public static func place(
-        holdsEnd: Bool, wasAtEnd: Bool, followerDriving: Bool, hasAnchor: Bool
+        holdsEnd: Bool, wasAtEnd: Bool, followerDriving: Bool, hasAnchor: Bool, underHand: Bool = false
     ) -> Place {
-        if holdsEnd || (wasAtEnd && !followerDriving) { return .end }
+        if !underHand, holdsEnd || (wasAtEnd && !followerDriving) { return .end }
         return hasAnchor ? .anchor : .stay
     }
 

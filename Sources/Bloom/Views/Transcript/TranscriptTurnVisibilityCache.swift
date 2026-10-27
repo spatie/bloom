@@ -6,7 +6,8 @@ import Foundation
 enum TranscriptTurnVisibilityCache {
     nonisolated(unsafe) private static let values: NSCache<NSNumber, VisibilityBox> = {
         let cache = NSCache<NSNumber, VisibilityBox>()
-        cache.countLimit = 8_192
+        // Above the longest chat: at 8,192 a 10,000 row one evicted rows on every pass.
+        cache.countLimit = 65_536
         return cache
     }()
 

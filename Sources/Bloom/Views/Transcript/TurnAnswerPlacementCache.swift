@@ -6,7 +6,7 @@ import Foundation
 /// Finding it walks backwards through the turn and decodes its final prose. A transcript body is
 /// rebuilt for every streamed delta, while a stored result and every row before it are immutable,
 /// so repeating that work would put old turns back on the live typing path. The result row ID is a
-/// complete key for the same reason `TurnScanCache` uses it.
+/// complete key for the reason `TranscriptEventCache` gives for the payloads it holds.
 @MainActor
 enum TurnAnswerPlacementCache {
     private static let values: NSCache<NSNumber, TurnAnswerPlacementBox> = {

@@ -134,6 +134,17 @@ private final class PaneContainerView: NSView {
         if host.frame != wanted { host.frame = wanted }
     }
 
+    /// A width that arrived at once rather than along a drag, taken as it is. Held and faded in
+    /// 150 ms later, an inspector appearing with a workspace drew the transcript twice.
+    func settleNow() {
+        settleWork?.cancel()
+        settleWork = nil
+        guard bounds.width > 0 else { return }
+        isSettled = true
+        settledWidth = bounds.width
+        fitHost()
+    }
+
     private func settleAfterResize() {
         settleWork?.cancel()
         settleWork = Task { @MainActor [weak self] in
@@ -167,6 +178,9 @@ private final class PaneContainerView: NSView {
 /// the split view gives it, and nothing SwiftUI measures ever travels back the other way.
 final class PaneViewController: NSViewController {
     private let host: MeasuredHostingView
+
+    /// See `PaneContainerView.settleNow`.
+    func settleNow() { (view as? PaneContainerView)?.settleNow() }
 
     var rootView: AnyView {
         get { host.rootView }
@@ -438,6 +452,8 @@ final class DetailSplitViewController: NSSplitViewController {
                 restoreInspectorWidth()
             }
             publishInspectorWidth(collapsed: shouldCollapse, sliding: false)
+            splitView.layoutSubtreeIfNeeded()
+            detailHost.settleNow()
             return
         }
 

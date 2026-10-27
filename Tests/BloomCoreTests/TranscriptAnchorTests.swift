@@ -6,8 +6,8 @@ import Foundation
 struct TranscriptAnchorTests {
     // MARK: - The row the reader was on
 
-    /// The bug this whole mechanism exists for: `TranscriptWindow.grownUp` puts four hundred rows
-    /// in above the viewport, and a reader put back to the same POINT is thrown backwards through
+    /// The bug this whole mechanism exists for: rows put in above the viewport, and a reader put
+    /// back to the same POINT is thrown backwards through
     /// the conversation by exactly what was added. Put back on the same ROW they do not move at
     /// all, however much went in above.
     @Test("rows put in above the reader do not move the reader")
@@ -206,6 +206,24 @@ struct TranscriptAnchorTests {
                 holdsEnd: false, wasAtEnd: true, followerDriving: true, hasAnchor: true
             ) == .anchor
         )
+    }
+
+    /// Measured in the lab on a long upward trackpad sweep: 351 of 453 misses were a row above
+    /// the reader remeasured mid gesture, with the text sliding by the correction.
+    @Test("a hand on the view keeps its row, even at the end or holding it")
+    func underHandKeepsTheRow() {
+        for holdsEnd in [false, true] {
+            for wasAtEnd in [false, true] {
+                #expect(TranscriptAnchor.place(
+                    holdsEnd: holdsEnd, wasAtEnd: wasAtEnd, followerDriving: false,
+                    hasAnchor: true, underHand: true
+                ) == .anchor)
+                #expect(TranscriptAnchor.place(
+                    holdsEnd: holdsEnd, wasAtEnd: wasAtEnd, followerDriving: false,
+                    hasAnchor: false, underHand: true
+                ) == .stay)
+            }
+        }
     }
 
     @Test("nothing to anchor to is nothing to do")

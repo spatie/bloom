@@ -34,7 +34,7 @@ struct ConversationTextTests {
             user(3, "Whole"), prose(4, "Whole too"), user(5, "A question cut short"), prose(6, "After"),
         ]
         let slice = ConversationText.Slice(
-            first: 2, last: 5, firstText: "dragged over", lastText: "A question"
+            first: .init(seq: 2), last: .init(seq: 5), firstText: "dragged over", lastText: "A question"
         )
         #expect(
             ConversationText.text(of: rows, in: slice)
@@ -44,8 +44,39 @@ struct ConversationTextTests {
 
     @Test func aDragThroughNothingThatIsTextCopiesNothing() {
         let rows = [row(1, .toolUse), row(2, .toolUse)]
-        let slice = ConversationText.Slice(first: 1, last: 2, firstText: "x", lastText: "y")
+        let slice = ConversationText.Slice(first: .init(seq: 1), last: .init(seq: 2), firstText: "x", lastText: "y")
         #expect(ConversationText.text(of: rows, in: slice).isEmpty)
+    }
+
+    @Test func aDragBetweenThePartsOfOneAnswerTakesTheWholePartsBetweenUnlabelled() throws {
+        let long = (1...40).map { "Paragraph \($0) " + Array(repeating: "word", count: 30).joined(separator: " ") }
+            .joined(separator: "\n\n")
+        let parts = TranscriptAnswerParts.split(long)
+        try #require(parts.count >= 3)
+        let slice = ConversationText.Slice(
+            first: .init(seq: 2, part: 0), last: .init(seq: 2, part: 2),
+            firstText: "end of the first", lastText: "start of the third"
+        )
+        #expect(
+            ConversationText.text(of: [user(1, "Before"), prose(2, long)], in: slice)
+                == "end of the first\n\n\(parts[1])\n\nstart of the third"
+        )
+    }
+
+    @Test func aDragFromAPartIntoTheNextRowTakesTheRestOfTheAnswer() throws {
+        let long = (1...40).map { "Paragraph \($0) " + Array(repeating: "word", count: 30).joined(separator: " ") }
+            .joined(separator: "\n\n")
+        let parts = TranscriptAnswerParts.split(long)
+        try #require(parts.count >= 3)
+        let last = parts.count - 1
+        let slice = ConversationText.Slice(
+            first: .init(seq: 2, part: last - 1), last: .init(seq: 3),
+            firstText: "dragged", lastText: "Next"
+        )
+        #expect(
+            ConversationText.text(of: [prose(2, long), user(3, "Next question")], in: slice)
+                == "Agent:\ndragged\n\n\(parts[last])\n\nYou:\nNext"
+        )
     }
 
     private func row(_ seq: Int, _ kind: MessageKind) -> TurnAnswer.Row {

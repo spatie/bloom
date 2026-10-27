@@ -31,37 +31,10 @@ struct TranscriptResumeTests {
 
     // MARK: What the arrival frame draws
 
-    @Test("a pane that has never held this session draws the tail")
-    func nothingRememberedDrawsTheTail() {
-        let window = TranscriptResume.window(nil, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
-    }
-
-    @Test("a pane coming back to a session goes back to the window it was reading in")
-    func aReturnGoesBackToItsWindow() {
-        let remembered = state(drawn: TranscriptWindow(start: 3_600, end: 4_000))
-        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_600, end: 4_000))
-    }
-
     @Test("a pane with nothing written down is arriving, and one with a memory is coming back")
     func resumingIsHavingBeenHereBefore() {
         #expect(TranscriptResume.isResuming(nil) == false)
         #expect(TranscriptResume.isResuming(state()))
-    }
-
-    @Test("a window with nothing in it is not restored, because it would draw a blank transcript")
-    func anEmptyWindowIsNotAWindow() {
-        let remembered = state(drawn: TranscriptWindow(start: 0, end: 0))
-        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
-    }
-
-    @Test("a window from a session that has since been read again is clamped to it")
-    func aStaleWindowIsClamped() {
-        let remembered = state(drawn: TranscriptWindow(start: 9_000, end: 9_400))
-        let window = TranscriptResume.window(remembered, tailStart: 20, rowCount: 100)
-        #expect(window == TranscriptWindow(start: 100, end: 100))
     }
 
     // MARK: Where it opens

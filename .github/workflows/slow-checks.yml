@@ -18,6 +18,15 @@ name: Slow checks
 
 on:
   workflow_dispatch:
+    inputs:
+      scroll_lab:
+        description: Run the scroll lab as well (about an hour of a macOS runner)
+        type: boolean
+        default: false
+      scroll_lab_compare:
+        description: Revisions to compare with HEAD, comma separated, for example origin/main
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -186,5 +195,42 @@ jobs:
         with:
           name: periphery
           path: periphery.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  # How the transcript scrolls, measured: Tools/scroll-lab.sh builds HEAD and any revision named in
+  # `scroll_lab_compare` with the lab compiled in, drives each one with real scroll events over a
+  # synthetic corpus, and fails on any broken invariant. Opt in, because it is the longest job here.
+  scroll-lab:
+    if: ${{ inputs.scroll_lab }}
+    runs-on: macos-26
+    timeout-minutes: 150
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Every revision named for comparison is exported from this clone.
+          fetch-depth: 0
+
+      - name: Run the scroll lab
+        env:
+          SCROLL_LAB_HOME: ${{ runner.temp }}/scroll-lab
+          COMPARE: ${{ inputs.scroll_lab_compare }}
+        run: |
+          set -euo pipefail
+          ./Tools/scroll-lab.sh run --builds "HEAD${COMPARE:+,$COMPARE}" --repeat 3 --out "$SCROLL_LAB_HOME/run"
+
+      - name: Summarise it
+        if: ${{ !cancelled() }}
+        run: cat "${{ runner.temp }}/scroll-lab/run/report.md" >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Keep the traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scroll-lab
+          path: |
+            ${{ runner.temp }}/scroll-lab/run/report.md
+            ${{ runner.temp }}/scroll-lab/run/*/run.*
           retention-days: 30
           if-no-files-found: warn

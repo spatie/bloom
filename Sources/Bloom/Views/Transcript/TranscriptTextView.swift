@@ -137,6 +137,8 @@ struct TranscriptTextView: NSViewRepresentable {
     /// says so.
     var selectionColor: NSColor = .selectedTextBackgroundColor
     var alignsBubbleInk = false
+    /// Set by a code block, whose horizontal scroll view is the one this text sits in.
+    var overlaysScroller = false
     var copyPrefix = ""
     var copySeparatorBefore = "\n\n"
     var actions = TranscriptLinkActions()
@@ -235,6 +237,7 @@ struct TranscriptTextView: NSViewRepresentable {
         }
         conversation?.adopt(view)
         view.linkColor = linkColor
+        view.overlaysScroller = overlaysScroller
         // No underline at rest. The pointing hand is asked for here and set for real in
         // `LinkTextView.pointer`: this dictionary only reaches the screen through the cursor
         // tracking `updateTrackingAreas` used to throw away, and one mechanism that has been
@@ -448,10 +451,11 @@ private final class TranscriptLayoutManager: NSLayoutManager {
 /// The text view itself: hover, and the menu over a link.
 final class LinkTextView: NSTextView, HoverQuickLookSource {
     weak var answerSelection: TranscriptTextSelection?
+    var overlaysScroller = false
     weak var conversationSelection: TranscriptConversationSelection?
     /// The table entry this text is drawn in, which orders it among the rows of the conversation.
     var entryID: TranscriptEntryID?
-    var rowSeq: Int? { entryID?.selectionOrder }
+    var selectionPlace: TranscriptSelection.Place? { entryID?.selectionPlace }
     var copyPrefix = ""
     var copySeparatorBefore = "\n\n"
 
@@ -559,6 +563,11 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         // Ask AppKit to paint the text layer when the row enters the window.
         needsDisplay = true
         HoverQuickLookController.shared.update(self)
+        // A legacy scroller appearing under wide code grew the block after layout, and the whole
+        // answer was laid out again for it. An overlay scroller takes no room.
+        if overlaysScroller, let scroll = enclosingScrollView, scroll.scrollerStyle != .overlay {
+            scroll.scrollerStyle = .overlay
+        }
     }
 
     func quickLookURL(at point: NSPoint) -> URL? {

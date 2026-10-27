@@ -18,6 +18,9 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     case setup
     /// A stored row, by its sequence number within the session.
     case row(Int)
+    /// A part after the first of a long answer cut into rows. The first part is the row itself,
+    /// so a place, a search result or an unread mark naming the row lands on its first line.
+    case answerPart(seq: Int, part: Int)
     /// The line over a turn's working, by the sequence number of the FIRST row of it. See
     /// `TranscriptFold`.
     ///
@@ -72,8 +75,20 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// promise that holds until the key moves.
     public var redrawsItself: Bool {
         switch self {
-        case .row, .fold, .turnFold, .bottomSpacing: false
+        case .row, .answerPart, .fold, .turnFold, .bottomSpacing: false
         case .setup, .sending, .streaming, .pending: true
+        }
+    }
+
+    /// Where an entry holding selectable text sits in reading order. The setup log is before
+    /// every row and a message on its way is after all of them.
+    public var selectionPlace: TranscriptSelection.Place? {
+        switch self {
+        case .row(let seq): .init(seq: seq)
+        case .answerPart(let seq, let part): .init(seq: seq, part: part)
+        case .setup: .init(seq: .min)
+        case .sending, .streaming, .pending: .init(seq: .max)
+        case .fold, .turnFold, .bottomSpacing: nil
         }
     }
 
@@ -81,6 +96,7 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
         switch self {
         case .setup: "setup"
         case .row(let seq): "row.\(seq)"
+        case .answerPart(let seq, let part): "row.\(seq).\(part)"
         case .fold(let seq): "fold.\(seq)"
         case .turnFold(let seq): "turnFold.\(seq)"
         case .sending: "sending"

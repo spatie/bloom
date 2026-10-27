@@ -1,44 +1,19 @@
 import Foundation
 
-/// How much of a session the list hands to its lazy stack, and when that moves.
+/// A range of a session's rows: what `TranscriptPrime` warms before an arrival, and what the list
+/// hands its table, which is the whole session (see `whole`).
 ///
-/// **A lazy stack is lazy about realising a row and is not lazy about knowing one.** Placing its
-/// subviews walks every child it has been handed, realised or not, so the cost of a layout pass
-/// follows the length of the conversation rather than the height of the pane. Measured on a
-/// release build at 1440 by 900, resizing a window over a 1,582 row chat: 11.1ms per pass of the
-/// centre column with the whole session in the stack, 4.6ms with eighty rows in it and the same
-/// session on screen, against 1.6ms for a pane holding an empty one. A resize is two to three
-/// passes a frame, so that difference is the difference between six frames a second and something
-/// a hand can follow.
-///
-/// `TranscriptTail` already answered half of this: the frame that ARRIVES at a session draws its
-/// last eighty rows, because resolving a position at the end of a stack realises everything above
-/// it. What it did next was hand the stack the whole session a hundred milliseconds later, so the
-/// saving lasted exactly one frame and every resize, scroll and streamed token for the rest of the
-/// visit paid for four thousand children. This is that second half.
-///
-/// # Why it has two ends
-///
-/// The first version had one, and a window that started somewhere and ran to the end of the
-/// session. It was measured drawing all 1,582 rows of the fixture anyway, and the reason is the
-/// case Bloom is FOR: an agent works while you are somewhere else, so the first unread row is
-/// often near the beginning of a long conversation. The list opens on that row, a scroll can only
-/// find a row the list is drawing, and a window that starts there and runs to the end is the whole
-/// session with extra steps.
-///
-/// So it is a range. A session opened on an old row draws that row's neighbourhood, and the rows
-/// below it arrive as the reader scrolls down towards them, which costs nothing to arrange:
-/// content added BELOW the viewport moves nothing, where content added above it needs the bottom
-/// anchor to hold the view still.
+/// A table builds only the rows on screen and is told every height from a cache, so the whole
+/// session costs no more on arrival than a tail, while a tail grown in chunks resized the scroller
+/// under the reader by thousands of points at a time.
 ///
 /// **Nothing here decides what a transcript IS.** `TranscriptModel.rows` is the whole session
 /// throughout, which is what the unread counts are computed over and what `TurnScan` walks
-/// backwards through. This is a drawing decision and only the list takes it.
+/// backwards through.
 public struct TranscriptWindow: Equatable, Sendable {
     /// The first row drawn, as an index into the session's rows.
     public var start: Int
-    /// One past the last row drawn. `rowCount` whenever the live end is in the window, which is
-    /// every state except a session opened on an old row and not yet scrolled down from.
+    /// One past the last row drawn.
     public var end: Int
 
     public init(start: Int, end: Int) {
@@ -53,15 +28,6 @@ public struct TranscriptWindow: Equatable, Sendable {
     /// the conversation scrolls through without ever waiting for a growth, and at 7µs a row a pass
     /// four hundred of them is under three milliseconds of layout.
     public static let settled = 400
-
-    /// How many rows a growth adds. The same figure as `settled`, because the reason for the size
-    /// is the same: enough that reaching the next growth takes a deliberate scroll rather than a
-    /// flick, and small enough that adding it is a layout of a few milliseconds.
-    public static let chunk = 400
-
-    /// Keep a few screens of history ready at the live end. Preparing the entire session made
-    /// every new row rebuild and compare thousands of entries, even while nobody scrolled.
-    public static let livePreparedLimit = 1_200
 
     /// How many rows above a row that has to be reachable the window starts.
     ///
@@ -97,44 +63,10 @@ public struct TranscriptWindow: Equatable, Sendable {
         )
     }
 
-    /// The window grown upward, which is what the reader approaching the top asks for.
-    public func grownUp(by chunk: Int = chunk) -> Self {
-        Self(start: max(0, start - max(0, chunk)), end: end)
-    }
-
-    /// One more piece of history to hand to a table while the reader is idle.
-    ///
-    /// The visible window still opens narrowly, so arriving at a long conversation keeps its
-    /// first frame. Once that arrival is complete, however, an `NSTableView` is cheaper when its
-    /// lightweight row entries arrive before the reader asks for them. Returning nil makes the
-    /// caller's settle chain stop naturally when there is no history left.
-    public func preparedHistory(
-        afterArrival arrived: Bool, by chunk: Int = chunk, maximumRows: Int = .max
-    ) -> Self? {
-        guard arrived, canGrowUp, count < maximumRows else { return nil }
-        return grownUp(by: min(chunk, maximumRows - count))
-    }
-
-    /// Drop old table entries after a reader returns to the live end. The model still owns every
-    /// row, and the table can grow upward again when the reader asks for that history.
-    public func keepingLatest(_ rows: Int) -> Self {
-        Self(start: max(start, end - max(0, rows)), end: end)
-    }
-
-    /// The window grown downward, which is what the reader approaching the bottom of an opened-on-
-    /// an-old-row window asks for.
-    public func grownDown(rowCount: Int, by chunk: Int = chunk) -> Self {
-        Self(start: start, end: min(max(0, rowCount), end + max(0, chunk)))
-    }
-
-    /// The window that holds the live end, which is where the jump pill takes the reader.
-    ///
-    /// The tail rather than everything between here and the end. The reader is being moved to the
-    /// newest row, so the rows they were looking at are not rows they are looking at any more, and
-    /// realising every one of them on the way is the exact cost `TranscriptTail` was written to
-    /// avoid.
-    public static func liveEnd(rowCount: Int) -> Self {
-        Self(start: clamp(rowCount - settled, rowCount: rowCount), end: max(0, rowCount))
+    /// Every row of the session, which is what the list hands its table. See `TranscriptListView`
+    /// for why that costs nothing on arrival with a table where it cost 269ms with a lazy stack.
+    public static func whole(rowCount: Int) -> Self {
+        Self(start: 0, end: max(0, rowCount))
     }
 
     /// The window's rows in the order a preparation pass should take them: nearest first to the
@@ -149,12 +81,6 @@ public struct TranscriptWindow: Equatable, Sendable {
         let pinned = min(max(anchor, start), end - 1)
         return (start..<end).sorted { abs($0 - pinned) < abs($1 - pinned) }
     }
-
-    /// Whether there is any history left above the window to grow into.
-    public var canGrowUp: Bool { start > 0 }
-
-    /// Whether the session runs on below the window.
-    public func canGrowDown(rowCount: Int) -> Bool { end < rowCount }
 
     /// How many rows are drawn.
     public var count: Int { max(0, end - start) }

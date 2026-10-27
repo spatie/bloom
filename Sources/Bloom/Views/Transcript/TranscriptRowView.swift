@@ -44,6 +44,8 @@ struct TranscriptRowView: View, Equatable {
             && lhs.summariseTool == rhs.summariseTool
             && lhs.isNested == rhs.isNested
             && lhs.smoothMarkdownHandoff == rhs.smoothMarkdownHandoff
+            && lhs.answerPart?.index == rhs.answerPart?.index
+            && lhs.answerPart?.count == rhs.answerPart?.count
             && lhs.subagentActions == rhs.subagentActions
             && lhs.subagentHasRun == rhs.subagentHasRun
             && (lhs.responseCopyText != nil) == (rhs.responseCopyText != nil)
@@ -81,6 +83,8 @@ struct TranscriptRowView: View, Equatable {
     /// The completed response copied by the control beside this row, or nil for intermediate
     /// prose and prose that is still streaming.
     var responseCopyText: String?
+    /// Set on the rows a long answer is cut into. The copy control stays where it is, on the first.
+    var answerPart: AnswerPart?
     /// What the project is called, so a permission row can name where a rule would apply, or nil
     /// when there is no project behind this conversation. Handed down for the same reason `home`
     /// is: it is constant for a whole transcript.
@@ -153,8 +157,12 @@ struct TranscriptRowView: View, Equatable {
             }
 
         case .assistantText:
-            if let text = assistantText, !text.isEmpty {
-                ProseRowView(text: text, copyText: responseCopyText, smoothMarkdownHandoff: smoothMarkdownHandoff)
+            if let text = answerPart?.text ?? assistantText, !text.isEmpty {
+                ProseRowView(
+                    text: text, part: answerPart,
+                    copyText: answerPart?.isFirst == false ? nil : responseCopyText,
+                    smoothMarkdownHandoff: smoothMarkdownHandoff
+                )
             }
 
         case .thinking:

@@ -150,23 +150,6 @@ public enum TranscriptPlacement: Equatable, Sendable {
 
 /// The rule for what a pane may do with what it remembers.
 public enum TranscriptResume {
-    /// The first row of the session a pane draws, given what it wrote down when it last left one.
-    ///
-    /// **Asked before anything has been laid out**, because it decides what the FIRST pass of the
-    /// list's body draws, so it can read nothing that a measurement has to arrive for.
-    ///
-    /// This used to answer a Bool, and the Bool was "draw the whole session". The argument for it
-    /// was sound and is kept: a pane that has drawn this session before is not arriving at it, so
-    /// the tail that keeps a 269ms layout off an arrival frame buys nothing on a return, and
-    /// paying a second layout to reveal the history behind it is the trade going the wrong way.
-    /// What was wrong was the other end of it. The whole session stays in the lazy stack for the
-    /// rest of the visit, and every resize, scroll and streamed token then pays for a stack with
-    /// four thousand children in it. See `TranscriptWindow`, which carries those measurements.
-    ///
-    /// So a return goes back to the window the reader was actually looking at, which is what makes
-    /// the remembered offset mean anything: the same rows above the viewport, in the same order,
-    /// so the same number of points down the content names the same place. A pane with nothing
-    /// written down is arriving, and arrives on the tail.
     /// Whether this pane is coming back to a session rather than arriving at one.
     ///
     /// The existence of a memory for this pane and this session is the whole of it. A reader
@@ -174,19 +157,6 @@ public enum TranscriptResume {
     /// window stays exactly as `window` restored it.
     public static func isResuming(_ remembered: TranscriptPaneState?) -> Bool {
         remembered != nil
-    }
-
-    public static func window(
-        _ remembered: TranscriptPaneState?, tailStart: Int, rowCount: Int
-    ) -> TranscriptWindow {
-        // A remembered window with no rows in it is not a window anybody was reading in: it is
-        // what a pane wrote down before its session had loaded, and restoring it draws a blank
-        // transcript. Measured, and caught only because the probe reports how many rows are in the
-        // stack: a run that looked like the fastest resize yet was a pane with nothing in it.
-        guard let remembered, remembered.drawn.count > 0 else {
-            return TranscriptWindow.opening(rowCount: rowCount, tailStart: tailStart)
-        }
-        return remembered.drawn.clamped(rowCount: rowCount)
     }
 
     /// Where a pane opens a session, given what it wrote down when it last left one.
@@ -248,9 +218,8 @@ public enum TranscriptResume {
     /// arriving session's key, a live end flag forced true by the switch, an anchor of nothing,
     /// and the offset of the conversation being left.
     ///
-    /// So the same guard the list's two other after-the-fact writers already had:
-    /// `TranscriptListView.growWindow` and `trackArrivals` both open by refusing to act until the
-    /// session has finished arriving. `arrived` is the session the pane has settled on and
+    /// So the same guard the list's other after-the-fact writer already had: `trackArrivals`
+    /// opens by refusing to act until the session has finished arriving. `arrived` is the session the pane has settled on and
     /// `writingTo` is the session the measurements belong to, which is deliberately not the one
     /// the model is pointed at now: on the way out of a conversation they are the one being left,
     /// and that write is the one this whole file exists for.

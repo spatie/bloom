@@ -18,6 +18,13 @@ final class TranscriptTableView: NSTableView {
         didSet { conversation?.responder = self }
     }
 
+    /// Since macOS 13 a table guesses the heights of far rows and swaps in the answers a hundred at
+    /// a time as they near, moving the text under a scrolling hand by up to 430 points. Read once
+    /// per process, so registered before any table exists.
+    static func asksEveryRowHeight() {
+        UserDefaults.standard.register(defaults: ["NSTableViewCanEstimateRowHeights": false])
+    }
+
     /// The table has been laid out at a new width, and the rows on screen are owed heights for it.
     /// See `TranscriptTable.Coordinator.widthChanged`.
     var didChangeWidth: (@MainActor () -> Void)?

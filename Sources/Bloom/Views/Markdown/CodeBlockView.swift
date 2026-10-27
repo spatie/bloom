@@ -109,7 +109,8 @@ public struct CodeBlockView: View {
             if selection != nil {
                 TranscriptTextView(
                     text: nativeHighlighted(prepared, upTo: visibleCount),
-                    linkColor: Palette.linkNSColor
+                    linkColor: Palette.linkNSColor,
+                    overlaysScroller: true
                 )
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(MarkdownMetrics.blockGap)
