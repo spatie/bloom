@@ -1388,7 +1388,7 @@ struct TranscriptTable: NSViewRepresentable {
         }
 
         private func put(at entryID: TranscriptEntryID, anchor: UnitPoint) {
-            guard let tableView, let scrollView, let row = index[entryID] else { return }
+            guard let tableView, let scrollView, let row = landing(for: entryID)?.row else { return }
             func target() -> CGFloat {
                 let rect = tableView.rect(ofRow: row)
                 return TranscriptAnchor.offset(
@@ -1419,14 +1419,24 @@ struct TranscriptTable: NSViewRepresentable {
         }
 
         private func put(at entryID: TranscriptEntryID, delta: CGFloat) {
-            guard let tableView, let scrollView, let row = index[entryID] else { return }
+            guard let tableView, let scrollView, let landing = landing(for: entryID) else { return }
+            // The delta was measured into the row asked for, not into what stands in for it.
+            let delta = landing.isExact ? delta : 0
             func target() -> CGFloat {
                 CGFloat(TranscriptAnchor.offset(
-                    rowTop: tableView.rect(ofRow: row).minY, delta: delta
+                    rowTop: tableView.rect(ofRow: landing.row).minY, delta: delta
                 ))
             }
             measureLanding(at: target())
             put(target(), in: scrollView)
+        }
+
+        /// The entry asked for, or what is drawn in its place. See `TranscriptLanding`.
+        private func landing(for entryID: TranscriptEntryID) -> (row: Int, isExact: Bool)? {
+            if let row = index[entryID] { return (row, true) }
+            guard let seq = entryID.seq,
+                  let row = TranscriptLanding.index(of: seq, in: entries.map(\.id)) else { return nil }
+            return (row, false)
         }
 
         func scroll(toY y: CGFloat) {
