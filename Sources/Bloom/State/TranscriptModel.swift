@@ -445,7 +445,9 @@ final class TranscriptModel {
     /// Where a turn's snapshots are read. Their refs are shared by every worktree of a repository,
     /// so an archived workspace, whose worktree was removed, still reads them from its project.
     var snapshotDirectory: String {
-        guard let workspace, !FileManager.default.fileExists(atPath: cwd) else { return cwd }
+        // `.git` rather than the folder: Bloom can recreate `.bloom` at a removed worktree's path.
+        let isWorktree = FileManager.default.fileExists(atPath: (cwd as NSString).appendingPathComponent(".git"))
+        guard let workspace, !isWorktree else { return cwd }
         return app.repo(for: workspace)?.path ?? cwd
     }
     private var draftStore: Store? { app.store }
