@@ -39,6 +39,9 @@ struct ComposerEditor: View {
     /// announce itself as "Message".
     var accessibilityLabel: String = "Message"
 
+    /// Dictation writes as marked text, which the binding leaves out until it is committed.
+    @State private var isComposing = false
+
     static let chatPlaceholder = "Ask to make changes, @mention files, run /commands"
 
     var body: some View {
@@ -57,7 +60,8 @@ struct ComposerEditor: View {
             onOpenAttachment: onOpenAttachment,
             onHoverAttachment: onHoverAttachment,
             attachmentRoot: attachmentRoot,
-            handle: handle
+            handle: handle,
+            onComposingChange: { isComposing = $0 }
         )
         // The unscaled minimum can be shorter than the empty text view's caret line,
         // leaving a scrollbar visible when a pane or a manual resize caps the editor.
@@ -67,7 +71,7 @@ struct ComposerEditor: View {
         // and as a sibling the hint made the empty box that point taller: the transcript
         // above jumped by it on the first character typed and again when the draft was cleared.
         .background(alignment: .topLeading) {
-            if text.isEmpty {
+            if text.isEmpty, !isComposing {
                 // `textPlaceholder`, not the tertiary label: they are different colours, and
                 // the tertiary label at 26% is faint enough that the prompt hint read as a
                 // rendering fault rather than as a hint.
