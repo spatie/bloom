@@ -228,17 +228,17 @@ public enum TranscriptResume {
     /// written down about a pane that has drawn no rows, or that has never been laid out. Nought
     /// is a real place to a reader at the top of a conversation, so the height is what says a
     /// layout has happened.
-    /// Whether what the pane measures now describes the conversation its place is written for.
-    /// Between a switch of conversation and its handler the table already shows the arriving one,
-    /// and its "at the end" overwrote the place of the one being left.
-    public static func measuresWriteTarget(writingTo: SessionID?, showing: SessionID) -> Bool {
-        writingTo.map { $0 == showing } ?? true
-    }
-
     public static func mayRemember(
         arrived: SessionID?, writingTo: SessionID?, drawnRows: Int, paneHeight: Double
     ) -> Bool {
         guard let writingTo, arrived == writingTo else { return false }
         return drawnRows > 0 && paneHeight > 0
+    }
+
+    /// Whether what the pane measures now describes the conversation its place is written for.
+    /// Between a switch of conversation and its handler the table already shows the arriving one,
+    /// and its "at the end" overwrote the place of the one being left.
+    public static func measuresWriteTarget(writingTo: SessionID?, showing: SessionID) -> Bool {
+        writingTo.map { $0 == showing } ?? true
     }
 }
