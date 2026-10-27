@@ -105,6 +105,16 @@ struct TranscriptResumeTests {
         ))
     }
 
+    /// Measured in the lab: leaving a chat for another tab wrote it as left at its end, because the
+    /// table already measured the short arriving chat when the place was written.
+    @Test("what the table measures for the arriving chat is not the place of the one being left")
+    func measurementsBelongToTheShownChat() {
+        let leaving = SessionID("being-left")
+        #expect(!TranscriptResume.measuresWriteTarget(writingTo: leaving, showing: SessionID("arriving")))
+        #expect(TranscriptResume.measuresWriteTarget(writingTo: leaving, showing: leaving))
+        #expect(TranscriptResume.measuresWriteTarget(writingTo: nil, showing: leaving))
+    }
+
     @Test("a pane that has drawn nothing, or has never been laid out, writes nothing")
     func nothingIsWrittenBeforeThereIsSomethingToWrite() {
         let session = SessionID("one")

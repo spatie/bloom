@@ -1371,12 +1371,14 @@ struct TranscriptListView: View {
             floor: Self.bubbleFloor
         )
         if bubbleWidth.cap != cap { bubbleWidth.cap = cap }
-        contentOffset.value = table.offset
         let place = controller.topmostPlace
-        if let place { topPlace.value = place }
         updatePinnedQuestion(at: place)
-        atLiveEnd.value = table.isAtEnd || controller.holdsEnd || follower.isFollowing
-            || follower.isSeekingLiveEnd
+        if TranscriptResume.measuresWriteTarget(writingTo: writingTo?.session, showing: transcript.session.id) {
+            contentOffset.value = table.offset
+            if let place { topPlace.value = place }
+            atLiveEnd.value = table.isAtEnd || controller.holdsEnd || follower.isFollowing
+                || follower.isSeekingLiveEnd
+        }
 
         let measured = TranscriptGeometry(
             paneHeight: TranscriptGeometry.height(table.viewportHeight),
