@@ -565,6 +565,24 @@ struct WorkspaceMergeToolTests {
         #expect(!json["state"]!.stringValue!.contains("merge"))
     }
 
+    @Test("on GitLab the answer names the merge request, glab and GitLab")
+    func theAnswerOnGitLab() async throws {
+        let store = try makeTestStore("merge-answer-gitlab")
+        let target = try await workspace(in: store)
+        var mergeRequest = Self.open()
+        mergeRequest.forge = .gitLab
+
+        let result = await tool(reading: .found(mergeRequest, local: nil)).call(
+            request(["workspace": .string(target.id.rawValue)]), as: .owner, store: store
+        )
+
+        let note = try #require(try answer(result)["note"]?.stringValue)
+        #expect(note.contains("asked to merge !42 and it runs `glab mr merge` itself"))
+        #expect(note.contains("GitLab is allowed to refuse"))
+        #expect(note.contains("read the merge request's state"))
+        #expect(!note.contains("gh "))
+    }
+
     @Test("squash is what it proposes, and the other two are carried through unaltered")
     func methods() async throws {
         let store = try makeTestStore("merge-methods")

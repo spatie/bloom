@@ -13,8 +13,12 @@ public struct SquashCommitMessage: Sendable, Hashable {
         self.body = body
     }
 
+    /// `Title (#12)` on GitHub. GitLab's own default for a squash is just the title.
     public static func proposed(for pullRequest: PullRequest) -> SquashCommitMessage {
-        SquashCommitMessage(subject: "\(pullRequest.title) (#\(pullRequest.number))")
+        switch pullRequest.forge {
+        case .gitHub: SquashCommitMessage(subject: "\(pullRequest.title) (#\(pullRequest.number))")
+        case .gitLab: SquashCommitMessage(subject: pullRequest.title)
+        }
     }
 
     /// This message trimmed, or nil when there is nothing to ask for: left as proposed, or a
@@ -34,13 +38,22 @@ public struct SquashCommitMessage: Sendable, Hashable {
         ["--subject=\(subject)"] + (body.isEmpty ? [] : ["--body=\(body)"])
     }
 
+    /// The whole message as `glab mr merge --squash-message` takes it: subject, blank line, body.
+    public var commitMessage: String {
+        body.isEmpty ? subject : "\(subject)\n\n\(body)"
+    }
+
     /// The paragraph that asks the agent for this message, or nil when there is nothing to ask.
-    public func instruction(proposed: SquashCommitMessage) -> String? {
+    public func instruction(proposed: SquashCommitMessage, forge: Forge = .gitHub) -> String? {
         guard let edited = edited(from: proposed) else { return nil }
         let subject = edited.subject
         let body = edited.body
 
         let fence = Self.fence(longerThanAnyIn: subject + "\n" + body)
+        if forge == .gitLab {
+            return "Squash with this commit message, word for word, as `--squash-message` to `glab mr merge`:\n\n"
+                + "\(fence)\n\(edited.commitMessage)\n\(fence)"
+        }
         guard !body.isEmpty else {
             return "Squash with this commit subject, word for word, as `--subject` to `gh pr merge`:\n\n"
                 + "\(fence)\n\(subject)\n\(fence)"

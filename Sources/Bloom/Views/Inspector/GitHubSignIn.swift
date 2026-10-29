@@ -18,13 +18,28 @@ final class GitHubSignIn {
 
     struct Request: Identifiable, Equatable {
         let id = UUID()
-        /// What the probe found: missing, or signed out. Never `.ready`.
+        /// What the probe found: missing, or signed out. `.ready` only from Settings, to sign in
+        /// again or switch account.
         var access: GitHubAvailability.State
         /// Where the login runs. Any directory would do; the worktree the user was looking at
         /// keeps the shell's idea of "here" the same as theirs.
         var directory: String
+        var forge: Forge = .gitHub
+        /// The GitLab host to sign in to. Nil on GitHub, and from Settings for any host.
+        var host: String?
+        var purpose: Purpose = .action
 
         static func == (lhs: Request, rhs: Request) -> Bool { lhs.id == rhs.id }
+    }
+
+    /// Why the sheet is up, which is what its sentence and its command depend on.
+    enum Purpose {
+        /// An action that needed access, which runs once it is there.
+        case action
+        /// Settings' install, sign in and reconnect.
+        case connect
+        /// Settings' `gh auth switch`.
+        case switchAccount
     }
 
     /// Non-nil while the sheet is up. Settable so a `.sheet(item:)` binding can close it.
@@ -49,6 +64,11 @@ final class GitHubSignIn {
     /// cannot be undone may be handed to this.
     func run(directory: String, action: @escaping @MainActor () -> Void) {
         Task {
+            // A GitLab project never needs gh, and says what glab needs through its own reads.
+            guard await ForgeResolver.forge(for: directory) == .gitHub else {
+                action()
+                return
+            }
             let state = await GitHubAvailability.shared.check()
             guard state != .ready else {
                 action()
@@ -64,6 +84,24 @@ final class GitHubSignIn {
     /// updated by the probe, so whatever offered this button goes away on its own.
     func present(directory: String) {
         run(directory: directory) {}
+    }
+
+    /// glab's state on the host asked about, else this directory's, else any host for a sign in
+    /// from Settings, with the accounts read again so it shows in Settings and in
+    /// `gitlab_username` without a relaunch.
+    func gitLabAccess(in directory: String, host: String?) async -> GitHubAvailability.State {
+        guard GitLab.isInstalled else { return .notInstalled }
+        var asked = host
+        if asked == nil { asked = await GitLab.host(in: directory) }
+        await GitLabIdentity.resolve(force: true)
+        guard let asked else { return GitLabIdentity.usernames.isEmpty ? .signedOut : .ready }
+        return GitHubAvailability.State(await GitLab.access(host: asked))
+    }
+
+    /// The GitLab sheet, for a read that failed because glab is missing or signed out.
+    func presentGitLab(directory: String, host: String?, access: GitHubAvailability.State) {
+        pending = nil
+        request = Request(access: access, directory: directory, forge: .gitLab, host: host)
     }
 
     /// Closes the sheet. On success the remembered action runs, on the same turn of the run loop

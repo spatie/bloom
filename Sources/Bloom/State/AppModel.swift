@@ -289,6 +289,14 @@ final class AppModel {
     /// Non-nil after an archive script failed, while the owner decides between keeping the
     /// workspace and archiving it without the script. RootView presents it.
     var pendingScriptFailure: ScriptFailureRequest?
+    /// A project just added with remotes on both GitHub and GitLab. RootView asks which one it
+    /// uses. See `ForgeResolver.offersBoth`.
+    var forgeQuestion: Repo? {
+        // A dialog dismissed without its buttons must still let `askForgeIfBoth` return.
+        didSet { if forgeQuestion == nil { Task { self.answerForgeQuestion(nil) } } }
+    }
+    /// Resumed once `forgeQuestion` is answered, so the create window can wait for it.
+    @ObservationIgnored var forgeQuestionAnswered: CheckedContinuation<Void, Never>?
     /// The transcript half of a search, one row per workspace. Held here rather than in `HomeView`
     /// for the same reason `homeFilter` is: the pane is destroyed and rebuilt every time the
     /// selection leaves Home, and a result list that had to be fetched again on the way back would
@@ -517,6 +525,15 @@ final class AppModel {
     private(set) var lastQuotaAskAt: Date?
     private(set) var isAskingForQuotas = false
     private var identityTask: Task<Void, Never>?
+
+    /// GitLab accounts once the launch's identity lookup has finished, which can be after a
+    /// settings pane has already opened.
+    func gitLabAccounts() async -> [String: String] {
+        await identityTask?.value
+        // Read again on every visit: a sign in may have happened in a terminal since launch.
+        if GitLab.isInstalled { await GitLabIdentity.resolve(force: true) }
+        return GitLabIdentity.usernames
+    }
     /// The launch sweep for project icons. Not private, because the work it does is in
     /// `AppModel+ProjectIcons.swift`, and outside observation because nothing draws from it.
     @ObservationIgnored var iconSearchTask: Task<Void, Never>?
@@ -631,7 +648,10 @@ final class AppModel {
 
         // Held so quitting takes it with us: it is a `gh` subprocess with a ten second timeout,
         // and `Shell.run` terminates the child when its task is cancelled.
-        identityTask = Task { await GitHubIdentity.resolve() }
+        identityTask = Task {
+            await GitHubIdentity.resolve()
+            await GitLabIdentity.resolve()
+        }
         startBackgroundRefresh()
         startObservingStore()
         startObservingSessions()

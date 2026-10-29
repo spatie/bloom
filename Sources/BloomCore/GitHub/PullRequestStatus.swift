@@ -60,6 +60,8 @@ public struct PullRequestStatus: Sendable, Hashable {
         /// cannot do. The strip used to draw Merge here, beside a red band saying the branch
         /// conflicts, and pressing it asked the agent to run a command GitHub had already refused.
         case fixConflicts
+        /// GitLab requires the branch rebased onto its target before it will merge.
+        case rebase
     }
 
     // A running agent is not one of the reasons in here: everything in this type is what GitHub
@@ -202,7 +204,7 @@ public extension PullRequest {
                 tone: .merged,
                 text: "Merged",
                 canMerge: false,
-                blockedReason: "This pull request is already merged."
+                blockedReason: "This \(forge.request) is already merged."
             )
         }
         if isClosed {
@@ -210,7 +212,7 @@ public extension PullRequest {
                 tone: .neutral,
                 text: "Closed",
                 canMerge: false,
-                blockedReason: "This pull request was closed without merging."
+                blockedReason: "This \(forge.request) was closed without merging."
             )
         }
         // Conflicts outrank the check rollup: green checks on a branch that cannot be applied to
@@ -236,8 +238,18 @@ public extension PullRequest {
                 text: "Draft",
                 detail: checksDetail,
                 canMerge: false,
-                blockedReason: "This pull request is still a draft.",
+                blockedReason: "This \(forge.request) is still a draft.",
                 remedy: .markReadyForReview
+            )
+        }
+        if let blocker = blockers.first {
+            return PullRequestStatus(
+                tone: blocker == .checking ? .neutral : .warning,
+                text: blocker.text,
+                detail: checksDetail,
+                canMerge: false,
+                blockedReason: blocker.reason,
+                remedy: blocker == .needsRebase ? .rebase : .merge
             )
         }
 
@@ -247,16 +259,16 @@ public extension PullRequest {
     }
 
     func mergeConfirmationTitle(base: String) -> String {
-        "Merge #\(number) into \(base)?"
+        "Merge \(forge.reference(number)) into \(base)?"
     }
 
     var mergeConfirmationMessage: String {
-        "Your agent will merge this pull request in the chat, where you can follow its progress."
+        "Your agent will merge this \(forge.request) in the chat, where you can follow its progress."
     }
 
     func mergeBranchDeletionMessage(deletesBranch: Bool) -> String? {
         guard deletesBranch, !branch.isEmpty else { return nil }
-        return "After merging, \(branch) will be deleted on GitHub. Your local branch stays."
+        return "After merging, \(branch) will be deleted on \(forge.name). Your local branch stays."
     }
 
     /// These warnings precede the explanation so a merge of older work or a failing check
@@ -265,7 +277,7 @@ public extension PullRequest {
         var warnings: [String] = []
         if let local, local.isAhead {
             warnings.append(
-                "GitHub does not have everything in this worktree: "
+                "\(forge.name) does not have everything in this worktree: "
                     + Self.localDetail(local)
                     + ". None of that is part of what is merged, and the agent is told to leave it"
                     + " alone rather than commit it first."
@@ -273,7 +285,7 @@ public extension PullRequest {
         }
         if checks == .failing { warnings.append(checksSummary) }
         if checks == .unavailable {
-            warnings.append("Bloom could not read this pull request's checks, so it cannot say whether they passed.")
+            warnings.append("Bloom could not read this \(forge.request)'s checks, so it cannot say whether they passed.")
         }
         if hasConflicts { warnings.append("This branch conflicts with \(base).") }
         return warnings
@@ -297,17 +309,17 @@ public extension PullRequest {
     /// to be fixed before the second one matters.
     private var openHeadline: String {
         switch checks {
-        case .failing: return "Checks failing"
+        case .failing: return "\(forge.checks) failing"
         // The headline has to agree with the line under it. `GitHub.rollup` tells a queued check
         // from a running one and says which in the summary, so a headline fixed at "Checks
         // running" would sit over the words "1 check queued". The summary is read back rather
         // than recomputed because `rollup` is its only writer and `PullRequest` carries no
         // rollup nodes to ask again. `WorkspaceStatusTests` pins the two lines together, in both
         // vocabularies, so a change to one of them fails rather than drifting.
-        case .pending: return checksSummary.hasSuffix("queued") ? "Checks queued" : "Checks running"
+        case .pending: return "\(forge.checks) \(checksSummary.hasSuffix("queued") ? "queued" : "running")"
         // Ahead of the review, because the review falls through to "Ready to merge", and that is
         // the claim nobody can make about checks nobody could read.
-        case .unavailable: return GitHub.checksUnavailableSummary
+        case .unavailable: return forge == .gitHub ? GitHub.checksUnavailableSummary : "Pipeline unavailable"
         case .passing, .none: break
         }
         switch reviewDecision?.uppercased() {
@@ -321,7 +333,10 @@ public extension PullRequest {
     /// "No checks" under "Ready to merge" reads as something missing rather than as a fact.
     private var checksDetail: String? {
         // The headline already says the summary, so the line under it says why.
-        if checks == .unavailable { return "GitHub did not let this token read check runs" }
+        if checks == .unavailable {
+            return forge == .gitHub
+                ? "GitHub did not let this token read check runs" : "GitLab did not let this token read the pipeline's jobs"
+        }
         guard checks != .none, !checksSummary.isEmpty else { return nil }
         return checksSummary
     }

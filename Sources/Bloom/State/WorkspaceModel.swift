@@ -203,6 +203,8 @@ final class WorkspaceModel {
     }
 
     var isLoadingPullRequest = false
+    /// Which forge this workspace's repository answered to on the last refresh.
+    var forge: Forge = .gitHub
     /// Whether any refresh has come back for this workspace this launch, whatever it said.
     ///
     /// Not the same question as `pullRequest != nil`, and that is the whole point: "this branch
@@ -2474,6 +2476,8 @@ final class WorkspaceModel {
         ) {
             isLoadingPullRequest = true
         }
+        // Before the read is awaited, so the supersession guard below still has nothing after it.
+        forge = await ForgeResolver.forge(for: asked.path)
 
         let read = await task.value
 
@@ -2519,7 +2523,8 @@ final class WorkspaceModel {
     ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestPullRequest(overrides: PromptOverrides = PromptOverrides()) async -> String? {
-        let template = overrides.template(for: .createPullRequest)
+        let forge = await ForgeResolver.forge(for: workspace.path)
+        let template = overrides.template(for: .createPullRequest, forge: forge)
         let wanted = Set(PromptTemplate.variableNames(in: template))
 
         // Only what this template actually asks for. The built-in one names the target branch and
@@ -2548,7 +2553,7 @@ final class WorkspaceModel {
         // pressed a button in the inspector should be looking at the answer to it.
         activeSessionID = session.id
         isExpectingPullRequest = true
-        await transcript(for: session).submit(await pullRequestTurn(text: render.text))
+        await transcript(for: session).submit(await pullRequestTurn(text: render.text, forge: forge))
         return nil
     }
 
@@ -2575,7 +2580,7 @@ final class WorkspaceModel {
     ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestPush(overrides: PromptOverrides = PromptOverrides()) async -> String? {
-        let template = overrides.template(for: .pushLocalWork)
+        let template = overrides.template(for: .pushLocalWork, forge: await ForgeResolver.forge(for: workspace.path))
         let wanted = Set(PromptTemplate.variableNames(in: template))
 
         if wanted.contains(PromptRegistry.PushLocalWork.changes) {
@@ -2639,12 +2644,15 @@ final class WorkspaceModel {
             title: pullRequest.title,
             branch: pullRequest.branch,
             baseBranch: workspace.baseBranch,
-            method: method
+            method: method,
+            forge: pullRequest.forge
         )
-        let render = context.render(template: overrides.template(for: .mergePullRequest))
+        let render = context.render(template: overrides.template(for: .mergePullRequest, forge: pullRequest.forge))
 
-        let asked = squashMessage?.instruction(proposed: .proposed(for: pullRequest))
-        let text = await turn([render.text, asked].compactMap { $0 }.joined(separator: "\n\n"), for: .merge)
+        let asked = squashMessage?.instruction(proposed: .proposed(for: pullRequest), forge: pullRequest.forge)
+        let text = await turn(
+            [render.text, asked].compactMap { $0 }.joined(separator: "\n\n"), for: .merge, forge: pullRequest.forge
+        )
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil
@@ -2672,7 +2680,9 @@ final class WorkspaceModel {
     /// refreshed when the workspace is selected, and the sequence that has to work is typing an
     /// instruction in the project settings window and pressing Merge in the window behind it
     /// without touching the sidebar in between.
-    private func turn(_ text: String, for subject: ProjectInstructions.Subject) async -> String {
+    private func turn(
+        _ text: String, for subject: ProjectInstructions.Subject, forge: Forge
+    ) async -> String {
         await reloadSettings()
         let stated = ProjectInstructions.stated(subject, in: settings)
         let path = workspace.path
@@ -2681,7 +2691,7 @@ final class WorkspaceModel {
         let extra = await Task.detached(priority: .userInitiated) {
             ProjectInstructions.resolve(subject, in: path, stated: stated)
         }.value
-        return ProjectInstructions.turn(text, for: subject, adding: extra)
+        return ProjectInstructions.turn(text, for: subject, adding: extra, forge: forge)
     }
 
     /// Asks the workspace's agent to bring the base branch in and resolve the conflicts.
@@ -2718,15 +2728,33 @@ final class WorkspaceModel {
             branch: workspace.branch,
             baseBranch: workspace.baseBranch
         )
-        let render = context.render(template: overrides.template(for: .fixConflicts))
+        let forge = pullRequest.forge
+        let render = context.render(template: overrides.template(for: .fixConflicts, forge: forge))
 
         let path = workspace.path
         let rendered = render.text
+        let contents = forge == .gitLab ? GitLabInstructions.conflictMarkdown : ConflictInstructions.defaultMarkdown
         // Off the main actor: it writes a file into the worktree, and this runs on a button press.
         let asked = await Task.detached(priority: .userInitiated) {
-            ConflictInstructions.asking(rendered, in: path)
+            ConflictInstructions.asking(rendered, in: path, contents: contents)
         }.value
-        let text = await turn(asked, for: .fixConflicts)
+        let text = await turn(asked, for: .fixConflicts, forge: forge)
+        activeSessionID = session.id
+        await transcript(for: session).submit(text)
+        return nil
+    }
+
+    /// Asks the agent to have GitLab rebase the merge request onto its target, and nothing more.
+    func requestRebase(_ pullRequest: PullRequest) async -> String? {
+        guard let session = await sessionForPullRequest(titledIfNew: "Rebase") else {
+            return "Could not open a session in \(workspace.name) to send the request to."
+        }
+        let reference = pullRequest.forge.reference(pullRequest.number)
+        let text = "GitLab will not merge \(reference) until it is rebased onto \(workspace.baseBranch). "
+            + "Run `glab mr rebase \(pullRequest.number)` from this worktree and wait for it to finish, "
+            + "then bring this worktree up to date with `git pull --rebase origin \(workspace.branch)`, so it does not hold the "
+            + "commits from before the rebase. If GitLab or git reports a conflict, stop and say so. "
+            + "Do not merge \(reference) and do not force push."
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil
@@ -2741,11 +2769,14 @@ final class WorkspaceModel {
     ///
     /// When the file cannot be written, the instructions go into the message itself. A read-only
     /// checkout is a reason to say it differently, not a reason for the button to stop working.
-    private func pullRequestTurn(text: String) async -> String {
-        if let path = await PullRequestInstructions.ensure(in: workspace.path) {
+    private func pullRequestTurn(text: String, forge: Forge) async -> String {
+        let (contents, scratch) = forge == .gitLab
+            ? (GitLabInstructions.mergeRequestMarkdown, GitLabInstructions.mergeRequestScratchPath)
+            : (PullRequestInstructions.defaultMarkdown, PullRequestInstructions.scratchPath)
+        if let path = await PullRequestInstructions.ensure(in: workspace.path, contents: contents, scratch: scratch) {
             return PullRequestInstructions.asking(text, toFollow: path)
         }
-        return text + "\n\n" + PullRequestInstructions.defaultMarkdown
+        return text + "\n\n" + contents
     }
 
     /// A workspace whose agent was never started still has a button to press. Rather than doing

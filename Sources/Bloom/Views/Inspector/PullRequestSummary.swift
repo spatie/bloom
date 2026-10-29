@@ -43,6 +43,7 @@ struct PullRequestSummary: View {
     var onPush: () -> Void
     /// Asks the workspace's agent to bring the base branch in and resolve the conflicts with it.
     var onFixConflicts: () -> Void
+    var onRebase: () -> Void = {}
     /// Carries a merged workspace on to a fresh branch, in place. See `continueButton`.
     var onContinue: () -> Void
     /// Archives, through the app's ordinary archive with all its checks intact.
@@ -80,7 +81,7 @@ struct PullRequestSummary: View {
         // the part the reader is trying to read. A right click costs no width at all, and it is
         // where a link is asked for everywhere else on this system.
         .contextMenu {
-            Button("Open on GitHub") { GitHubBridge.open(pullRequest.url) }
+            Button("Open on \(pullRequest.forge.name)") { GitHubBridge.open(pullRequest.url) }
             Button("Copy link", action: copyLink)
             if let url = URL(string: pullRequest.url) {
                 // A submenu of this menu rather than a picker that replaces it, which is where
@@ -111,7 +112,8 @@ struct PullRequestSummary: View {
                 number: pullRequest.number,
                 title: pullRequest.title,
                 url: pullRequest.url,
-                tint: tint
+                tint: tint,
+                forge: pullRequest.forge
             )
             if pullRequest.isDraft { draftChip }
         }
@@ -128,7 +130,7 @@ struct PullRequestSummary: View {
     /// is the other thing about this pull request that is simply true.
     private var draftChip: some View {
         Chip(text: "Draft", tint: Palette.textSecondary, background: Palette.hover)
-            .help("This pull request is still a draft, so it cannot be merged.")
+            .help("This \(pullRequest.forge.request) is still a draft, so it cannot be merged.")
             .accessibilityLabel("Draft")
     }
 
@@ -280,6 +282,7 @@ struct PullRequestSummary: View {
         case .merge: mergeControl
         case .markReadyForReview: markReadyForReviewButton
         case .fixConflicts: fixConflictsButton
+        case .rebase: rebaseButton
         case .commitAndPush, .push: pushButton
         }
     }
@@ -398,7 +401,7 @@ struct PullRequestSummary: View {
     }
 
     private var archiveHelp: String {
-        return "Remove this workspace's worktree. #\(pullRequest.number) is merged, so "
+        return "Remove this workspace's worktree. \(pullRequest.forge.reference(pullRequest.number)) is merged, so "
             + "this asks first only when something here exists nowhere else."
     }
 
@@ -431,7 +434,7 @@ struct PullRequestSummary: View {
                 branchActions.reason
                     ?? "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
                         + "\(pullRequest.branch.isEmpty ? "this branch" : pullRequest.branch), so "
-                        + "#\(pullRequest.number) is what is on this disk."
+                        + "\(pullRequest.forge.reference(pullRequest.number)) is what is on this disk."
             )
     }
 
@@ -448,7 +451,7 @@ struct PullRequestSummary: View {
             .fixedSize()
             .help(
                 branchActions.reason
-                    ?? "Mark #\(pullRequest.number) ready for review on GitHub."
+                    ?? "Mark \(pullRequest.forge.reference(pullRequest.number)) ready for review on \(pullRequest.forge.name)."
             )
     }
 
@@ -499,8 +502,23 @@ struct PullRequestSummary: View {
             .help(
                 branchActions.reason
                     ?? "Ask this workspace's agent to bring \(baseBranch) into this worktree and "
-                        + "resolve the conflicts here. Nothing is pushed and #\(pullRequest.number)"
+                        + "resolve the conflicts here. Nothing is pushed and \(pullRequest.forge.reference(pullRequest.number))"
                         + " is not merged."
+            )
+    }
+
+    private var rebaseButton: some View {
+        Button("Rebase", systemImage: "arrow.triangle.branch", action: onRebase)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
+            .tint(status.tone.fill)
+            .controlSize(.regular)
+            .labelStyle(.titleAndIcon)
+            .fixedSize()
+            .help(
+                branchActions.reason
+                    ?? "Ask this workspace's agent to have GitLab rebase \(pullRequest.forge.reference(pullRequest.number)) "
+                        + "onto \(baseBranch). Nothing is merged."
             )
     }
 
@@ -564,7 +582,7 @@ struct PullRequestSummary: View {
     /// request is this" without spending any of the strip's width on an answer the reader already
     /// has from the workspace name.
     private var helpText: String {
-        var text = "#\(pullRequest.number) \(pullRequest.title)"
+        var text = "\(pullRequest.forge.reference(pullRequest.number)) \(pullRequest.title)"
         if let detail = status.detail { text += "\n\(detail)" }
         if let reason = status.blockedReason { text += "\n\(reason)" }
         return text

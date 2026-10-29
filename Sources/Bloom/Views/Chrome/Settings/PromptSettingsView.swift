@@ -4,6 +4,8 @@ import BloomCore
 struct PromptSettingsView: View {
     @State private var selection: PromptID? = .createPullRequest
     @State private var customised: Set<PromptID> = []
+    @State private var forge: Forge = .gitHub
+    @State private var showsGitLab = false
 
     private var definition: PromptDefinition {
         PromptRegistry.definition(for: selection ?? .createPullRequest)
@@ -18,8 +20,22 @@ struct PromptSettingsView: View {
                     .padding(.horizontal, Metrics.inset)
                     .padding(.top, Metrics.inset)
 
+                if showsGitLab {
+                    Picker("Forge", selection: $forge) {
+                        Text("GitHub").tag(Forge.gitHub)
+                        Text("GitLab").tag(Forge.gitLab)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(.horizontal, Metrics.inset)
+                    .onChange(of: forge) {
+                        if let selection, !PromptOverrides.hasVariant(selection, for: forge) { self.selection = .createPullRequest }
+                        refreshStatuses()
+                    }
+                }
+
                 List(selection: $selection) {
-                    ForEach(PromptRegistry.all) { prompt in
+                    ForEach(PromptRegistry.all.filter { PromptOverrides.hasVariant($0.id, for: forge) }) { prompt in
                         HStack(spacing: Metrics.spacingSmall) {
                             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                                 Text(prompt.title)
@@ -56,11 +72,11 @@ struct PromptSettingsView: View {
                             .foregroundStyle(Palette.textSecondary)
                     }
 
-                    PromptEditor(definition: definition) {
+                    PromptEditor(definition: definition, forge: forge) {
                         refreshStatuses()
                     }
                     // A different prompt must never inherit the previous editor's draft or focus.
-                    .id(definition.id)
+                    .id("\(forge.rawValue).\(definition.id.rawValue)")
 
                     Text("Changes save automatically and apply the next time Bloom uses this prompt.")
                         .settingsFootnote()
@@ -71,11 +87,14 @@ struct PromptSettingsView: View {
             }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear(perform: refreshStatuses)
+        .onAppear {
+            showsGitLab = GitLab.isInstalled
+            refreshStatuses()
+        }
     }
 
     private func refreshStatuses() {
         let overrides = PromptOverrides()
-        customised = Set(PromptRegistry.all.filter { overrides.isCustomised(for: $0.id) }.map(\.id))
+        customised = Set(PromptRegistry.all.filter { overrides.stored(for: $0.id, forge: forge) != nil }.map(\.id))
     }
 }

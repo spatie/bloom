@@ -23,6 +23,7 @@ public struct MergePromptContext: Sendable, Hashable {
     public var branch: String
     public var baseBranch: String
     public var method: GitHub.MergeMethod
+    public var forge: Forge
 
     public init(
         workspaceName: String,
@@ -30,7 +31,8 @@ public struct MergePromptContext: Sendable, Hashable {
         title: String,
         branch: String,
         baseBranch: String,
-        method: GitHub.MergeMethod
+        method: GitHub.MergeMethod,
+        forge: Forge = .gitHub
     ) {
         self.workspaceName = workspaceName
         self.number = number
@@ -38,6 +40,7 @@ public struct MergePromptContext: Sendable, Hashable {
         self.branch = branch
         self.baseBranch = baseBranch
         self.method = method
+        self.forge = forge
     }
 
     public var values: [String: String] {
@@ -48,7 +51,7 @@ public struct MergePromptContext: Sendable, Hashable {
             PromptRegistry.MergePullRequest.branch: branch.isEmpty ? Self.noBranch : branch,
             PromptRegistry.MergePullRequest.baseBranch: baseBranch,
             PromptRegistry.MergePullRequest.method: method.phrase,
-            PromptRegistry.MergePullRequest.methodFlag: method.flag,
+            PromptRegistry.MergePullRequest.methodFlag: forge == .gitLab ? GitLabInstructions.flag(for: method) : method.flag,
         ]
     }
 

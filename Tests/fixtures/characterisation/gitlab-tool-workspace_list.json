@@ -1,0 +1,24 @@
+{
+  "description" : "The workspaces Bloom has: what each one is, what state it is in, and where its worktree is on disk. This is how you find out what became of a workspace you started, since workspace_start answers before any work happens and nothing waits for it.\n\nEach one carries its id, name, branch, base branch and worktree path, its project, whether it is active or archived, how far its setup script got, whether an agent is running in it, whether one has stopped on a permission question and what it asked, whether there is output nobody has read, the size of its diff, who asked for it, its chats with their cost and context size, and any messages queued for those chats with the reason the queue is not moving.\n\nDo not call it in a loop to wait for a workspace you started: pass notify_when_done to workspace_start instead, and Bloom tells your chat when that work comes to rest.\n\nThe worktree path is the most useful thing here. It is an ordinary git checkout, so read the diff, the log and the files in it with your own tools rather than asking Bloom for them.\n\nagent_running is about right now, and a workspace with nothing running is still a workspace: most of them sit idle most of the time, waiting to be read and merged. project_list counts these same rows, so its workspaces for a project is how many appear here for it and its agents_running is how many of those are marked agent_running. If the two ever look as though they disagree, one of them is being read as the other's number.\n\nBy default it reads Bloom's database and nothing else, and at that price GitLab is not consulted at all: there is no merge request, no checks, and the status can never say merged, closed, draft or anything about checks. A default call has not looked, so do not report that a workspace has no merge request on the strength of one. Pass include_github to ask, which costs one glab call and one git call per workspace and is slow on a long list.\n\nThe diff counts and the states come from Bloom's database, which a running Bloom refreshes every few seconds. With Bloom closed they are as old as the last time it was open. Read only. It changes nothing and starts nothing.\n",
+  "inputSchema" : {
+    "properties" : {
+      "include_archived" : {
+        "description" : "Include workspaces that have been archived. They have no worktree left on disk. Off by default.",
+        "type" : "boolean"
+      },
+      "include_github" : {
+        "description" : "Include merge request and check state. Costs one glab call and one git call per workspace, so it is slow on a long list. Off by default.",
+        "type" : "boolean"
+      },
+      "project" : {
+        "description" : "Narrow it to one project, by the name or the path project_list reports. Leave it out for every project.",
+        "type" : "string"
+      }
+    },
+    "required" : [
+
+    ],
+    "type" : "object"
+  },
+  "name" : "workspace_list"
+}

@@ -1,0 +1,14 @@
+title: Create pull request
+
+summary:
+Sent when you press Create pull request, with the project's `.bloom/pr-instructions.md` attached.
+
+variables:
+- workspace: The workspace's name.
+- branch: The branch the work is on.
+- base_branch: The branch the pull request targets.
+- task: The first thing you asked this workspace for.
+- changes: The changed files, with their added and removed line counts.
+
+template:
+Create a pull request for this workspace against {{base_branch}}.

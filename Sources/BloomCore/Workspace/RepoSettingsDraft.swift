@@ -56,6 +56,8 @@ public struct RepoSettingsDraft: Sendable, Hashable {
     /// What a browser pane opens on, as typed, with the variables left unexpanded. Empty for the
     /// port Bloom allocated, which is what most projects want.
     public var browserURL = ""
+    /// Nil is detection, which is what a project that never said is using.
+    public var forge: Forge?
     /// Table names under `scripts.run` that the file holds and the loader skipped as broken. A new
     /// row must not be given one of them, or its keys would land in the broken table the writer
     /// deliberately leaves alone. See `SettingsWriter.skippedRunScripts`.
@@ -82,6 +84,7 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         mergeInstructions = settings.mergeInstructions ?? ""
         conflictInstructions = settings.conflictInstructions ?? ""
         browserURL = settings.browserURL ?? ""
+        forge = settings.forge
     }
 
     // MARK: - One run script, by identity
@@ -196,6 +199,9 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         let url = browserURL.trimmed
         if url != (settings.browserURL ?? "") {
             edits.append(.browserURL(url))
+        }
+        if forge != settings.forge {
+            edits.append(.forge(forge))
         }
         return edits
     }

@@ -1,0 +1,19 @@
+title: Carry on from an archive
+
+summary:
+Sent when you press Carry On in an archived workspace, into a new worktree, resuming that workspace's conversation. It only says what moved.
+
+variables:
+- workspace: The archived workspace's name, which the new one keeps.
+- project: The project it belongs to.
+- previous_branch: The branch the archived workspace was on, which no longer exists.
+- previous_path: The worktree the archive removed.
+- branch: The branch the new worktree is on.
+- base_branch: The branch the new one was cut from.
+
+template:
+We are carrying on somewhere else. The workspace this conversation was in, {{workspace}}, has been archived: its worktree at {{previous_path}} was deleted, and {{previous_branch}} is gone from this Mac and from the remote, so there was nothing left to rebuild it from.
+
+You are in a new worktree now, on a fresh branch {{branch}} cut from an up to date {{base_branch}} in {{project}}. Everything we said to each other is still yours, and none of the files are: every path you remember is stale, so read anything here before you rely on it, and expect work that landed on {{base_branch}} to already be underneath you.
+
+Do not redo what the old branch held, and do not start anything new yet. Say in one or two lines where we had got to and what was left, which is the only record of it this chat has, then wait for what I ask next.

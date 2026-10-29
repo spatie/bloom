@@ -188,6 +188,7 @@ struct InspectorToolbar: View {
     /// one file inside it, and the field holding a word is what says the list below is showing
     /// fewer.
     private func title(for tab: InspectorTab) -> String {
+        if tab == .checks { return model.forge.checks }
         guard tab == .changes, model.inspectorTab != .history, !model.changedFiles.isEmpty else { return tab.rawValue }
         return "\(tab.rawValue) (\(Set(model.changedFiles.map(\.path)).count))"
     }

@@ -25,17 +25,22 @@ public enum CheckFailureHandoff {
         public var runID: String
         /// The job inside that run, when the URL named one.
         public var jobID: String?
+        /// The GitLab project the job ran in, which for a merge request from a fork is the fork.
+        /// Nil on GitHub, whose run ids are found through the repository gh is pointed at.
+        public var project: String?
 
-        public init(runID: String, jobID: String? = nil) {
+        public init(runID: String, jobID: String? = nil, project: String? = nil) {
             self.runID = runID
             self.jobID = jobID
+            self.project = project
         }
     }
 
     public static func logTarget(detailsURL: String?) -> LogTarget? {
-        guard let detailsURL, let url = URL(string: detailsURL),
-              let host = url.host?.lowercased(), host == "github.com" || host.hasSuffix(".github.com")
-        else { return nil }
+        guard let detailsURL, let url = URL(string: detailsURL), let host = url.host?.lowercased() else {
+            return nil
+        }
+        guard host == "github.com" || host.hasSuffix(".github.com") else { return gitLabJob(url) }
 
         let parts = url.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
         guard let runs = parts.firstIndex(of: "runs"), runs > 0, parts[runs - 1] == "actions",
@@ -53,6 +58,19 @@ public enum CheckFailureHandoff {
             if !candidate.isEmpty, candidate.allSatisfy(\.isNumber) { jobID = candidate }
         }
         return LogTarget(runID: runID, jobID: jobID)
+    }
+
+    /// A GitLab job page, `https://<host>/<project path>/-/jobs/<id>`. The job is its own run.
+    private static func gitLabJob(_ url: URL) -> LogTarget? {
+        let parts = url.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard let separator = parts.firstIndex(of: "-"), separator >= 2,
+              parts.indices.contains(separator + 2), parts[separator + 1] == "jobs"
+        else { return nil }
+        let jobID = parts[separator + 2]
+        guard !jobID.isEmpty, jobID.allSatisfy(\.isNumber) else { return nil }
+        return LogTarget(
+            runID: jobID, jobID: jobID, project: parts[..<separator].joined(separator: "/")
+        )
     }
 
     // MARK: - How much of a log to keep

@@ -9,7 +9,10 @@ import BloomCore
 /// it still falls back to the built-in on the way out.
 struct PromptEditor: View {
     let definition: PromptDefinition
+    var forge: Forge = .gitHub
     var onSave: () -> Void = {}
+
+    private var defaultTemplate: String { PromptOverrides.defaultTemplate(for: definition.id, forge: forge) }
 
     /// Tall enough that the built-in prompts are readable without scrolling on a default window,
     /// and short enough that the variable reference below stays visible.
@@ -148,7 +151,7 @@ struct PromptEditor: View {
     // MARK: - State
 
     private var isCustomised: Bool {
-        text != definition.defaultTemplate
+        text != defaultTemplate
     }
 
     private var isEmptyOverride: Bool {
@@ -165,7 +168,7 @@ struct PromptEditor: View {
     // MARK: - Storage
 
     private func load() {
-        text = overrides.stored(for: definition.id) ?? definition.defaultTemplate
+        text = overrides.stored(for: definition.id, forge: forge) ?? defaultTemplate
         isLoaded = true
     }
 
@@ -174,12 +177,12 @@ struct PromptEditor: View {
     /// have on screen once.
     private func save(_ value: String) {
         guard isLoaded else { return }
-        overrides.set(value == definition.defaultTemplate ? nil : value, for: definition.id)
+        overrides.set(value == defaultTemplate ? nil : value, for: definition.id, forge: forge)
         onSave()
     }
 
     private func restoreDefault() {
-        text = definition.defaultTemplate
+        text = defaultTemplate
         save(text)
     }
 }

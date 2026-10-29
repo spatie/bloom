@@ -1,0 +1,1 @@
+Merge merge request !{{number}} into {{base_branch}} as a {{method}} ({{method_flag}}). It is on the branch {{branch}}.

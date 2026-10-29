@@ -1,0 +1,15 @@
+title: Fix merge conflicts
+
+summary:
+Sent when you press Fix merge conflicts, with Bloom's own steps attached as a file. It resolves against the base branch here and pushes the result; it never merges the pull request.
+
+variables:
+- workspace: The workspace's name.
+- number: The pull request's number.
+- branch: The branch the conflicts are resolved on, which is this worktree's.
+- base_branch: The branch that conflicts with it, and that is brought in.
+
+template:
+Pull request #{{number}} conflicts with {{base_branch}}, so GitHub will not merge it as it stands. Resolve that here, in this worktree, on {{branch}}: bring {{base_branch}} into this branch, work through the conflicts, commit, and push {{branch}}, so the conflict is gone for everybody rather than only here.
+
+Do not merge the pull request.

@@ -39,6 +39,7 @@ public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
     case filesToCopy = "file_include_globs"
     case branchPrefix = "git.branch_prefix"
     case deleteBranchOnArchive = "git.delete_branch_on_archive"
+    case forge = "git.forge"
     case mergeInstructions = "instructions.merge"
     case conflictInstructions = "instructions.fix_conflicts"
     case browserURL = "browser.url"
@@ -100,6 +101,8 @@ public struct RepoSettings: Sendable, Hashable {
     /// `http://localhost:$BLOOM_PORT/admin`. A workspace whose setup script wrote an address of
     /// its own beats this. See `WorkspaceBrowserURL`, which holds both and the order between them.
     public var browserURL: String?
+    /// `git.forge`, overruling detection. See `ForgeRouting`.
+    public var forge: Forge?
     /// Set by a file inside the repository. Ranks ABOVE the app-level defaults, because pinning
     /// a model in a project's own settings is a deliberate statement about that project.
     public var defaultModel: String?
@@ -316,12 +319,19 @@ public enum SettingsLoader {
             case "github_username":
                 settings.branchPrefix = GitHubIdentity.cachedUsername
                 note(.branchPrefix)
+            case "gitlab_username":
+                settings.branchPrefix = GitLabIdentity.username(forRepo: repo)
+                note(.branchPrefix)
             case "none":
                 settings.branchPrefix = nil
                 note(.branchPrefix)
             default:
                 break
             }
+        }
+        if let forge = toml["git.forge"]?.stringValue.flatMap(Forge.init(rawValue:)) {
+            settings.forge = forge
+            note(.forge)
         }
         if let delete = toml["git.delete_branch_on_archive"]?.boolValue {
             settings.deleteBranchOnArchive = delete
@@ -367,8 +377,9 @@ public enum GitHubIdentity {
         state.withLock(\.username)
     }
 
-    public static func resolve() async {
-        guard !state.withLock(\.resolved) else { return }
+    /// - Parameter force: read again, after a sign in in Settings that may have changed the answer.
+    public static func resolve(force: Bool = false) async {
+        guard force || !state.withLock(\.resolved) else { return }
 
         var username: String?
         if let result = try? await Shell.run("gh", ["api", "user", "--jq", ".login"], timeout: .seconds(10)),
@@ -382,7 +393,8 @@ public enum GitHubIdentity {
         }
 
         state.withLock {
-            $0.username = username
+            // A read again that failed, offline or timed out, keeps the name it had.
+            $0.username = username ?? $0.username
             $0.resolved = true
         }
     }

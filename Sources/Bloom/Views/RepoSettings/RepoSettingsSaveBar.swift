@@ -50,6 +50,7 @@ struct RepoSettingsSaveBar: View {
         Task {
             guard await model.save() else { return }
             app.refreshSettings(for: model.repo.id, savedPaths: model.savedPaths)
+            if model.changedForge { await app.forgetPullRequestNumbers(of: model.repo.id) }
         }
     }
 

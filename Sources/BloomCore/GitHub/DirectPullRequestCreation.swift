@@ -1,9 +1,10 @@
 import Foundation
 
-/// Commits and publishes a workspace branch before asking GitHub to open its pull request.
+/// Commits and publishes a workspace branch before asking the forge to open its pull request.
 /// Each step is explicit so a failure leaves the completed git work in place and reports it.
 public enum DirectPullRequestCreation {
-    public static func create(for workspace: Workspace) async throws -> PullRequest {
+    public static func create(for workspace: Workspace, forge: Forge = .gitHub) async throws -> PullRequest {
+        let client = ForgeResolver.client(of: forge)
         let worktree = workspace.path
         guard try await Git.currentBranch(of: worktree) == workspace.branch else {
             throw GitHubError("This worktree is no longer on \(workspace.branch).")
@@ -12,9 +13,9 @@ public enum DirectPullRequestCreation {
             throw GitHubError("The target branch is not a valid Git branch name.")
         }
 
-        switch await GitHub.readPullRequest(for: workspace, maxAge: .zero) {
+        switch await client.readPullRequest(for: workspace, maxAge: .zero) {
         case .current(.some(let existing)):
-            throw GitHubError("Pull request #\(existing.number) already exists for this branch.")
+            throw GitHubError("\(forge.titledRequest) \(forge.reference(existing.number)) already exists for this branch.")
         case .current(nil):
             break
         case .unavailable(let failure):
@@ -38,6 +39,7 @@ public enum DirectPullRequestCreation {
         }
 
         do {
+            if forge == .gitLab { try await GitLab.routePushes(of: workspace.branch, in: worktree) }
             try await GitHub.push(
                 worktree: worktree, branch: workspace.branch, setUpstream: !local.hasUpstream
             )
@@ -48,11 +50,11 @@ public enum DirectPullRequestCreation {
             throw GitHubError(prefix + String(describing: error))
         }
         do {
-            return try await GitHub.createPullRequestFromCommits(
+            return try await client.createPullRequestFromCommits(
                 worktree: worktree, base: workspace.baseBranch, title: title
             )
         } catch {
-            throw GitHubError("The branch was pushed, but GitHub did not create the pull request: \(error)")
+            throw GitHubError("The branch was pushed, but \(forge.name) did not create the \(forge.request): \(error)")
         }
     }
 }

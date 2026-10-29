@@ -369,6 +369,13 @@ struct TempRepo {
 /// walking up from this file. Symlinks are resolved too, because the core suite is run from a mirrored
 /// package that has no app target (see Tools/test-core.sh).
 func bloomFixtureLines(_ name: String) throws -> [String] {
+    guard let fixture = bloomFixtureURL(name) else { throw CocoaError(.fileNoSuchFile) }
+    return try String(contentsOf: fixture, encoding: .utf8)
+        .components(separatedBy: "\n")
+        .filter { $0.isEmpty == false }
+}
+
+func bloomFixtureURL(_ name: String) -> URL? {
     let starts = [
         URL(fileURLWithPath: #filePath),
         URL(fileURLWithPath: #filePath).resolvingSymlinksInPath(),
@@ -378,16 +385,11 @@ func bloomFixtureLines(_ name: String) throws -> [String] {
         var directory = start.deletingLastPathComponent()
         for _ in 0..<8 {
             let candidate = directory.appendingPathComponent("fixtures").appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return try String(contentsOf: candidate, encoding: .utf8)
-                    .components(separatedBy: "\n")
-                    .filter { $0.isEmpty == false }
-            }
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
             directory = directory.deletingLastPathComponent()
         }
     }
-
-    throw CocoaError(.fileNoSuchFile)
+    return nil
 }
 
 // MARK: - Output collection

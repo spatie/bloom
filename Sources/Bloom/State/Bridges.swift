@@ -5,13 +5,18 @@ import BloomCore
 /// The one place the app layer touches `GitHub`. Keeping it behind a single adapter means a
 /// change to the gh wrapper's signature is a one-file fix rather than a sweep through views.
 ///
-/// Pull requests can be prepared by an agent or directly through git and gh. Direct merges and
-/// marking a draft ready also use the GitHub CLI without involving an agent.
+/// Pull requests can be prepared by an agent or directly through git and gh, or glab on GitLab.
+/// Direct merges and marking a draft ready also use the forge's CLI without involving an agent.
 enum GitHubBridge {
     static func createPullRequestDirectly(for workspace: Workspace) async throws -> PullRequest {
-        try await DirectPullRequestCreation.create(for: workspace)
+        try await DirectPullRequestCreation.create(
+            for: workspace, forge: await ForgeResolver.forge(for: workspace.path)
+        )
     }
     static func readPullRequest(for workspace: Workspace, maxAge: Duration = .zero) async -> PullRequestRead {
+        guard await ForgeResolver.forge(for: workspace.path) == .gitHub else {
+            return await GitLab.readPullRequest(for: workspace, maxAge: maxAge)
+        }
         let availability = await GitHubAvailability.shared.check()
         if availability == .notInstalled {
             return .unavailable(GitHubReadFailure(reason: .unavailable, message: "Install the GitHub CLI to refresh pull requests."))
@@ -42,14 +47,14 @@ enum GitHubBridge {
     }
 
     static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
-        try await GitHub.markReadyForReview(pullRequest, worktree: worktree)
+        try await ForgeResolver.client(for: worktree).markReadyForReview(pullRequest, worktree: worktree)
     }
 
     static func mergePullRequest(
         _ pullRequest: PullRequest, base: String, method: GitHub.MergeMethod,
         squashMessage: SquashCommitMessage?, worktree: String
     ) async throws -> DirectMergeOutcome {
-        try await GitHub.mergePullRequest(
+        try await ForgeResolver.client(of: pullRequest.forge).mergePullRequest(
             pullRequest, into: base, method: method, squashMessage: squashMessage, worktree: worktree
         )
     }
@@ -58,7 +63,7 @@ enum GitHubBridge {
     /// as it always was, because `try?` would flatten it into that nil.
     static func checks(for workspace: Workspace) async -> [CheckRun]? {
         do {
-            return try await GitHub.checks(for: workspace)
+            return try await ForgeResolver.client(for: workspace.path).checks(for: workspace)
         } catch {
             return []
         }

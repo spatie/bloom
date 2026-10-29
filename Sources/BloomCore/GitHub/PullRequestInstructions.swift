@@ -50,8 +50,10 @@ public enum PullRequestInstructions {
     /// path in a turn is a promise to the agent that it can read what it names. `ComposerView`
     /// takes the same last look before it sends a prompt somebody typed, and this is the same
     /// look taken for the one attachment Bloom makes for itself.
-    public static func ensure(in worktree: String, contents: String = defaultMarkdown) async -> String? {
-        guard let path = await choose(in: worktree, contents: contents) else { return nil }
+    public static func ensure(
+        in worktree: String, contents: String = defaultMarkdown, scratch: String = scratchPath
+    ) async -> String? {
+        guard let path = await choose(in: worktree, contents: contents, scratch: scratch) else { return nil }
         // Deliberately after every branch below rather than inside them, so a case added later
         // cannot answer with a path nobody looked at.
         return InstructionFile.isFile(path, in: worktree) ? path : nil
@@ -64,12 +66,13 @@ public enum PullRequestInstructions {
     }
 
     /// Which of the two files this worktree is going to use, writing Bloom's own if it has to.
-    private static func choose(in worktree: String, contents: String) async -> String? {
+    private static func choose(in worktree: String, contents: String, scratch scratchPath: String) async -> String? {
         let project = (worktree as NSString).appendingPathComponent(projectPath)
 
         if InstructionFile.isFile(projectPath, in: worktree) {
-            if let moved = await reclaimStrayDefault(at: project, in: worktree) { return moved }
-            return projectPath
+            guard let moved = await reclaimStrayDefault(at: project, in: worktree) else { return projectPath }
+            // A stray GitHub default is GitHub's scratch copy now; GitLab writes its own below.
+            if scratchPath == Self.scratchPath { return moved }
         }
 
         WorktreeScratch.shield(WorktreeScratch.generated, in: worktree)

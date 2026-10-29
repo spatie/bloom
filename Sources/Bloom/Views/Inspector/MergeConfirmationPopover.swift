@@ -39,7 +39,7 @@ struct MergeConfirmationPopover: View {
         ) {
             Picker("Merge using", selection: executionBinding) {
                 ForEach(MergeExecution.allCases, id: \.self) { choice in
-                    Text(choice.label).tag(choice)
+                    Text(choice.label(on: pullRequest.forge)).tag(choice)
                 }
             }
             .pickerStyle(.radioGroup)
@@ -61,11 +61,16 @@ struct MergeConfirmationPopover: View {
             }
 
             if execution == .direct {
-                Text("Bloom will run gh pr merge with the selected \(method.label.lowercased()) method. GitHub may queue the merge if this repository requires it.")
-                Text("Bloom will not delete the branch or change this checkout. GitHub may delete the remote branch if the repository is configured to do so.")
+                let forge = pullRequest.forge
+                Text("Bloom will run \(forge.command("merge")) with the selected \(method.label.lowercased()) method. \(forge.name) may queue the merge if this repository requires it.")
+                if forge == .gitLab, method == .rebase {
+                    Text("GitLab rebases the branch first, which starts a new pipeline. A project that waits for it will not merge yet.")
+                        .foregroundStyle(.secondary)
+                }
+                Text("Bloom will not delete the branch or change this checkout. \(forge.name) may delete the remote branch if the repository is configured to do so.")
                     .foregroundStyle(.secondary)
                 if !canMergeDirectly {
-                    Text("Refresh this pull request before merging directly.")
+                    Text("Refresh this \(forge.request) before merging directly.")
                         .foregroundStyle(Palette.negative)
                 }
             } else {
