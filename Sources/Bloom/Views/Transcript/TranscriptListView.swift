@@ -1584,7 +1584,9 @@ struct TranscriptListView: View {
         case .rowOffset(let seq, let delta):
             controller.scroll(to: .row(seq), delta: CGFloat(delta))
         case .liveEnd:
-            controller.goToEnd()
+            // As the jump pill does: a follower started on a table still at its top owns no gap,
+            // and while it drives `goToEnd` sets no standing end to retry once the pane is laid out.
+            goToLiveEnd()
         case .offset(let y):
             controller.scroll(toY: y)
         case nil:
