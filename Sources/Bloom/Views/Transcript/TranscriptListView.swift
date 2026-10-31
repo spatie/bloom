@@ -1172,6 +1172,7 @@ struct TranscriptListView: View {
                 reduceMotion: reduceMotion,
                 onOpen: showPinnedQuestion
             )
+            .blursWhileFileDragged(into: transcript.session.id.rawValue)
         }
         .overlay { TranscriptHoverOverlay(host: hoverHost) }
         .overlay {
@@ -1181,6 +1182,7 @@ struct TranscriptListView: View {
                     emptyState: emptyState,
                     onSuggestion: { prompt in Task { await transcript.submit(prompt) } }
                 )
+                    .blursWhileFileDragged(into: transcript.session.id.rawValue)
                     .padding(.bottom, composerRoom?.clearance ?? 0)
             }
         }

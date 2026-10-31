@@ -218,6 +218,7 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         handle?.textView = textView
         handle?.coordinator = context.coordinator
+        textView.dropHint = handle?.dropHint
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
@@ -233,6 +234,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         handle?.textView = textView
         handle?.coordinator = context.coordinator
+        textView.dropHint = handle?.dropHint
         let theme = ColourThemePreference.shared.choice
         if let previous = context.coordinator.lastTheme, previous != theme {
             textView.needsDisplay = true
@@ -524,11 +526,21 @@ final class ComposerEditorHandle {
     fileprivate weak var textView: ComposerTextView?
     fileprivate weak var coordinator: ComposerTextEditor.Coordinator?
 
+    /// What a file dropped elsewhere in the window is handed to. See `TypeToComposer.dropTarget`.
+    var dropEndpoint: ComposerDropEndpoint?
+    let dropHint = ComposerDropHint()
+
+    /// Whether the editor is on screen in `window`, which a composer kept laid out for a workspace
+    /// the window has left is not.
+    func isShown(in window: NSWindow) -> Bool {
+        guard let textView else { return false }
+        return textView.window === window && !textView.isHiddenOrHasHiddenAncestor
+    }
+
     /// The binding is set first: the deferred focus report would let a redraw in between read
     /// "not focused" and take the keyboard back.
     func takeKeyboard(in window: NSWindow) -> Bool {
-        guard let textView, let coordinator, textView.window === window,
-              !textView.isHiddenOrHasHiddenAncestor else { return false }
+        guard let textView, let coordinator, isShown(in: window) else { return false }
         coordinator.parent.isFocused = true
         textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
         return window.makeFirstResponder(textView)
@@ -600,4 +612,11 @@ final class ComposerEditorHandle {
         textView.setSelectedRange(NSRange(location: replaced.location + written.length, length: 0))
         return true
     }
+}
+
+/// The two things a composer lets the rest of the window do with a file dropped away from it:
+/// attach it, and report that it could not be read.
+struct ComposerDropEndpoint {
+    var attach: @MainActor @Sendable ([AttachmentSource]) -> Bool
+    var fail: @MainActor @Sendable (String) -> Void
 }

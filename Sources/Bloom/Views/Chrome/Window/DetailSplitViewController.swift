@@ -69,6 +69,7 @@ private final class PaneContainerView: NSView {
     private let host: NSView
     private let minimumWidth: CGFloat
     private let pinsTrailingEdge: Bool
+    private let fileDrop = WindowFileDrop()
     private static let resizeFadeKey = "bloom.pane.resize"
     var reflowStep: CGFloat? {
         didSet { fitHost() }
@@ -86,10 +87,34 @@ private final class PaneContainerView: NSView {
         wantsLayer = true
         host.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host)
+        registerForDraggedTypes(AttachmentDrop.types)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not decoded from a nib") }
+
+    // A file let go anywhere in the pane that has no drop target of its own. See `WindowFileDrop`.
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        fileDrop.entered(sender.draggingPasteboard, in: window, at: sender.draggingLocation)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        fileDrop.updated(in: window, at: sender.draggingLocation)
+    }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { fileDrop.hasTarget }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        fileDrop.perform(sender.draggingPasteboard, in: window, at: sender.draggingLocation)
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) { fileDrop.exited() }
+    override func draggingEnded(_ sender: any NSDraggingInfo) { fileDrop.exited() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        fileDrop.windowChanged(to: window)
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         let widthMoved = abs(newSize.width - frame.width) > 0.5

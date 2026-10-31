@@ -30,7 +30,17 @@ enum AttachmentDrop {
         onReceive: @escaping @MainActor @Sendable ([AttachmentSource]) -> Bool,
         onFailure: @escaping @MainActor @Sendable (String) -> Void
     ) -> Bool {
-        let pasteboard = sender.draggingPasteboard
+        receive(sender.draggingPasteboard, session: session, onReceive: onReceive, onFailure: onFailure)
+    }
+
+    /// For a SwiftUI `onDrop`, which hands over item providers and no `NSDraggingInfo`: the drag
+    /// pasteboard behind them is the same one, and the one this reads.
+    static func receive(
+        _ pasteboard: NSPasteboard,
+        session: AttachmentDropSession,
+        onReceive: @escaping @MainActor @Sendable ([AttachmentSource]) -> Bool,
+        onFailure: @escaping @MainActor @Sendable (String) -> Void
+    ) -> Bool {
         if let promises = pasteboard.readObjects(
             forClasses: [NSFilePromiseReceiver.self], options: nil
         ) as? [NSFilePromiseReceiver], !promises.isEmpty {

@@ -55,6 +55,7 @@ final class ComposerDropController: NSViewController {
 
 final class ComposerDropSurface: NSView {
     private var attachmentDropSession = AttachmentDropSession()
+    private lazy var sheetSuspension = SheetDropSuspension(self)
     var onReceive: @MainActor @Sendable ([AttachmentSource]) -> Bool = { _ in false }
     var onFailure: @MainActor @Sendable (String) -> Void = { _ in }
     var onTarget: @MainActor (Bool) -> Void = { _ in }
@@ -89,6 +90,7 @@ final class ComposerDropSurface: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        sheetSuspension.windowChanged(to: window)
         if window == nil { attachmentDropSession.cancelAll() }
         if window != nil, !attachmentDropSession.isActive {
             attachmentDropSession = AttachmentDropSession()

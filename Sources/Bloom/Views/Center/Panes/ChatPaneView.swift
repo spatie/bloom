@@ -75,6 +75,7 @@ struct ChatPaneView: View {
                 .padding(.bottom, room.clearance)
                 .allowsHitTesting(false)
         }
+        .overlay { FileDropChatCue(sessionKey: transcript.session.id.rawValue) }
         .overlay(alignment: .bottom) {
             ComposerDock(
                 showsJumpToNewest: isTranscriptScrolledUp,

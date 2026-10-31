@@ -69,8 +69,6 @@ struct ComposerPrompt<Footer: View>: View {
     /// The chip the pointer has settled on, which is the card that is up. Nil is the resting
     /// state, and so is a chip that has since been edited out of the draft.
     @State private var hoveredPath: String?
-    /// Whether a drag is currently over the box, so the border can say it will be taken.
-    @State private var isDropTarget = false
     /// How wide the box is, which is all the hover card is allowed to be.
     @State private var boxWidth: CGFloat = 0
     /// How far the box is from the top of the window it is in, which is all the room a card that
@@ -169,21 +167,17 @@ struct ComposerPrompt<Footer: View>: View {
         }
         .composerBox(
             isFocused: $isFocused,
-            isDropTarget: isDropTarget,
+            dropHint: editor.dropHint,
             isFloating: isFloating
         )
         // The editor takes the drops that land on the text itself; this takes the ones that land
         // on the chips, the footer and the padding, which is most of the box.
-        // A drop on the chrome has no character under it, so it goes to the end of the draft,
-        // which is where the next word would have been typed.
         .composerDropDestination(
-            isTargeted: $isDropTarget,
-            onReceive: { sources in
-                attach(
-                    sources: sources,
-                    replacing: NSRange(location: (command.body as NSString).length, length: 0)
-                )
-            },
+            isTargeted: Binding(
+                get: { false },
+                set: { [hint = editor.dropHint] in hint.set(.box, $0) }
+            ),
+            onReceive: attachAtEnd(_:),
             onFailure: attachmentFailed
         )
         // Publish this from the shared prompt rather than individual screens. This keeps prose
@@ -242,6 +236,8 @@ struct ComposerPrompt<Footer: View>: View {
         // `CentrePaneMeasure.soloPane`.
         .task(id: attachmentKey) {
             TypeToComposer.register(editor, showing: attachmentKey)
+            editor.dropHint.sessionKey = attachmentKey
+            editor.dropEndpoint = ComposerDropEndpoint(attach: attachAtEnd(_:), fail: attachmentFailed)
             PromptAttachmentStore.shared.load(sessionID: attachmentKey)
             adoptAttachmentsKeptBesideTheDraft()
             applyCaptureDraft()
@@ -649,6 +645,12 @@ struct ComposerPrompt<Footer: View>: View {
         guard !sources.isEmpty else { return false }
         Task { await add(sources, replacing: range) }
         return true
+    }
+
+    /// A drop on the chrome has no character under it, so it goes to the end of the draft, which
+    /// is where the next word would have been typed.
+    private func attachAtEnd(_ sources: [AttachmentSource]) -> Bool {
+        attach(sources: sources, replacing: NSRange(location: (command.body as NSString).length, length: 0))
     }
 
     private func add(_ sources: [AttachmentSource], replacing range: NSRange) async {

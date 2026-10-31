@@ -59,6 +59,7 @@ struct SideConversationView: View {
         // The content stops at the body's corners; the tail below it is glass and nothing else.
         .clipShape(RoundedRectangle(cornerRadius: Self.corner))
         .padding(.bottom, tailX == nil ? 0 : SideConversationPlacement.tailSize.height)
+        .background { CardAnchor(state: state) }
         // `.regular`, as `MenuPanel` argues: this opens over the transcript, where a user bubble
         // is an accent fill, and clear glass would carry that colour through the card.
         .glassEffect(.regular, in: shape)
@@ -125,6 +126,7 @@ struct SideConversationView: View {
             drawsBackground: false
         )
         .environment(\.composerRoom, room)
+        .overlay { FileDropChatCue(sessionKey: child.session.id.rawValue) }
         .overlay(alignment: .bottom) {
             ComposerView(
                 transcript: child, model: model, room: room,
@@ -159,5 +161,22 @@ struct SideConversationView: View {
         .font(.caption)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+}
+
+/// Hands the state the view behind the card, tail included, and lets every click through it.
+private struct CardAnchor: NSViewRepresentable {
+    var state: SideConversationState
+
+    func makeNSView(context: Context) -> NSView {
+        let view = PassThroughView()
+        state.cardAnchor = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) { state.cardAnchor = view }
+
+    private final class PassThroughView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
