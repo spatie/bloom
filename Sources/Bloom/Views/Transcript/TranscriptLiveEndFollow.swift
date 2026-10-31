@@ -284,6 +284,8 @@ final class TranscriptLiveEndFollower {
 
         // Whose gap this is, decided before anything is done with it. Upwards only: see
         // `lastPut`.
+        // The mark `startLink` could not take in a pane that was not laid out yet.
+        if ownsGap, lastPut == nil { lastPut = offset }
         if ownsGap, let lastPut, offset < lastPut - CGFloat(TranscriptFollow.arrived) {
             ownsGap = false
         }
