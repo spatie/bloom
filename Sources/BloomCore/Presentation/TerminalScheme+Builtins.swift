@@ -5,6 +5,15 @@ extension TerminalScheme {
     public static let charcoal = builtin(
         id: "charcoal", title: "Charcoal", background: ColourTheme.charcoalGlass.surfaces.sunken
     )
+    public static let lagoon = themed(.lagoon)
+    public static let sakura = themed(.sakura)
+    public static let matcha = themed(.matcha)
+    public static let synthwave = themed(.synthwave)
+    public static let dune = themed(.dune)
+
+    private static func themed(_ theme: ColourTheme) -> Self {
+        builtin(id: theme.id, title: theme.title, background: theme.surfaces.sunken)
+    }
 
     private static func builtin(id: String, title: String, background: PaletteInk.Pair) -> Self {
         Self(id: id, title: title,

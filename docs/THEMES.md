@@ -12,7 +12,7 @@ The definitions are plain Swift data with Foundation `Codable` support:
 
 | File under `Sources/BloomCore/Presentation` | Purpose |
 | --- | --- |
-| `ColourTheme+Builtins.swift` | Bloom and Charcoal Glass presets, including scheme references and font defaults |
+| `ColourTheme+Builtins.swift` | Bloom, Charcoal Glass, Lagoon, Sakura, Matcha, Synthwave and Dune presets, including scheme references and font defaults |
 | `CodeScheme+Builtins.swift` | Code backgrounds, text, gutter, selection, caret, diff tints and token colours |
 | `TerminalScheme+Builtins.swift` | Complete light/dark terminal palettes using the existing `GhosttyTheme` data |
 | `ThemeTypography.swift` | Optional font family, point size and line-height multiplier for code and terminal |
@@ -20,6 +20,11 @@ The definitions are plain Swift data with Foundation `Codable` support:
 | `TypographyOverrides.swift` | Code, terminal and conversation typography changes shared by every theme |
 
 Charcoal Glass keeps the stable key `neutral`, so previous selections still work.
+Lagoon, Sakura, Matcha, Synthwave and Dune each share their id with a code and a terminal scheme
+of their own, standing on the theme's surface and sunken colours. Their light reading grounds
+keep Bloom's relative luminance steps, the surface within one percent of white, because the
+tertiary ink and the syntax comment only just clear 4.5 to 1 there; the colour lives in the sidebar, selection and rule in light, and in every
+ground in dark. The reason is written above them in `ColourTheme+Builtins.swift`.
 Colour pairs contain light and dark RGB integers. Swift definitions use `0xRRGGBB`; JSON
 uses decimal integers. Glass is `off`, `thin`, `regular` or `thick`, mapped to a tint over native AppKit
 sidebar material. Conversation typography retains its existing font names and size/spacing enums.
@@ -73,4 +78,4 @@ preset file, VS Code colour themes for code and Ghostty or `.itermcolors` files 
 can be adapted later without renderers knowing about external formats.
 
 Charcoal Glass keeps its approved dark glass tint `#212938` at 40% opacity. Bloom uses its
-blue sidebar colour at 80% opacity, leaving a subtler native glass effect.
+blue sidebar colour at 80% opacity, leaving a subtler native glass effect. The five tinted presets do the same with their own sidebar colour.

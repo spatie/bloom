@@ -17,6 +17,14 @@ struct ColourThemeTests {
         #expect(decoded == theme)
     }
 
+    /// `find` falls back to Bloom's schemes, so a mistyped id would put the editor on Bloom's
+    /// navy inside another theme without anything failing.
+    @Test(arguments: ColourTheme.allCases)
+    func schemesExist(theme: ColourTheme) {
+        #expect(CodeScheme.all.contains { $0.id == theme.codeScheme })
+        #expect(TerminalScheme.all.contains { $0.id == theme.terminalScheme })
+    }
+
     @Test func charcoalKeepsApprovedGlass() {
         let theme = ColourTheme.charcoalGlass
         #expect(theme.glass == .thick)
