@@ -172,11 +172,6 @@ public enum TranscriptResume {
         rowCount: Int
     ) -> TranscriptPlacement {
         guard let remembered, rowCount > 0 else { return .first }
-        // A session with fewer rows than it had is not the session that offset was measured in.
-        // Rows are appended and never removed while a pane is away, so this is a transcript that
-        // was read again from the start rather than one that grew, and nothing written about the
-        // old one carries.
-        guard remembered.rowCount <= rowCount else { return .first }
         // The end has moved if a turn ran while the reader was away, and it is still the end. A
         // width change moves nobody who was there, because the end is a place rather than a
         // measurement, so this is asked before the measure is looked at.
@@ -199,6 +194,9 @@ public enum TranscriptResume {
         // The row they were reading, which survives every re-measurement and every width, and how
         // far into it they were. See `TranscriptPaneState.anchorSeq`.
         if let seq = remembered.anchorSeq { return .row(seq: seq, delta: remembered.anchorDelta) }
+        // Fewer rows than it had is a transcript read again from the store, which can fold a few
+        // rows a live one kept apart. The end and a row survive that; a point into it does not.
+        guard remembered.rowCount <= rowCount else { return .first }
         // **Nought is a place: it is the top of the conversation.** This used to refuse it, on the
         // reasoning that a pane which has never been laid out reports nought and restoring that
         // would be a restore of nothing. The pane not being laid out is a fact about the PANE, and

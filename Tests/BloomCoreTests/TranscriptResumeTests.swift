@@ -195,6 +195,15 @@ struct TranscriptResumeTests {
         #expect(placement == .first)
     }
 
+    /// Seen in the owner's log: a chat read again from the store had a few rows fewer than when
+    /// its place was written, and opened on its first unread row instead.
+    @Test("a row or the end is restored in a session read again with fewer rows")
+    func shrunkSessionKeepsItsRowAndEnd() {
+        #expect(TranscriptResume.placement(for: state(anchorSeq: 300, anchorDelta: -40, rowCount: 400), rowCount: 396)
+            == .row(seq: 300, delta: -40))
+        #expect(TranscriptResume.placement(for: state(isAtLiveEnd: true, rowCount: 400), rowCount: 396) == .liveEnd)
+    }
+
     @Test("the top of a conversation is a place, and is restored")
     func theTopIsAPlace() {
         #expect(TranscriptResume.placement(for: state(offset: 0), rowCount: 400) == .offset(0))
