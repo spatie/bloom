@@ -62,6 +62,11 @@ final class TranscriptLiveEndFollower {
     /// nudges must not reclaim the bottom until that placement has finished.
     private(set) var isSeekingLiveEnd = false
 
+    /// The conversation arriving in a pane still hidden. The table moves under it while it is
+    /// measured, and the follower read one of those moves to the top as a reader scrolling up and
+    /// let the end go; the table's own standing end holds the view until the pane is shown.
+    var arriving: SessionID? { didSet { refresh() } }
+
     func seekLiveEnd(_ seeking: Bool) {
         isSeekingLiveEnd = seeking
         if seeking {
@@ -192,7 +197,9 @@ final class TranscriptLiveEndFollower {
     // MARK: - The link
 
     private var wants: Bool {
-        guard travels, isFrontmost, !isPaused, !isSeekingLiveEnd, scrollView != nil else { return false }
+        guard travels, isFrontmost, !isPaused, !isSeekingLiveEnd, arriving == nil, scrollView != nil else {
+            return false
+        }
         return isStreaming || CACurrentMediaTime() < deadline
     }
 

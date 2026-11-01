@@ -1247,6 +1247,10 @@ struct TranscriptListView: View {
             arrivalSession = nil
         }
         .task(id: transcript.session.id) {
+            // Cleared only by its own arrival: a cancelled one ends after the next has begun.
+            let session = transcript.session.id
+            follower.arriving = session
+            defer { if follower.arriving == session { follower.arriving = nil } }
             // **The table's half of the hand-off with the follower, and it is the argument the
             // lazy stack made about `ScrollPosition` arriving in AppKit.**
             //
