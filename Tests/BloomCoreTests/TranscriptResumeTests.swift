@@ -185,8 +185,8 @@ struct TranscriptResumeTests {
         #expect(placement == .offset(1_200))
     }
 
-    /// Rows are appended and never removed while a pane is away, so fewer of them means the
-    /// session was read again from the start and nothing measured against the old one carries.
+    /// Fewer rows means the session was read again from the store, and a point measured against
+    /// the old rows does not carry. A row or the end does: see the test below.
     @Test("a session with fewer rows than it had is not the one that offset was measured in")
     func shrunkSessionIsNotResumed() {
         let placement = TranscriptResume.placement(
