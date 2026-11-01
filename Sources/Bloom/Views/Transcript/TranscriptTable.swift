@@ -390,6 +390,10 @@ struct TranscriptTable: NSViewRepresentable {
         /// there cannot have left it: an end refused for a pane of no height must outlive the
         /// clip view moving as the pane is laid out.
         private var endLanded = false
+        /// A row or a point asked of a pane with no height yet, made once it has one. Refused twice
+        /// and then forgotten, it left a returning reader at the top: in the lab, coming back to
+        /// the middle of `longue` revealed it at nought with its remembered row never applied.
+        private var pendingPlacement: (() -> Void)?
         /// A pane reflow that began at the end is not a user scroll. AppKit can deliver the
         /// bounds changes caused by its row-height corrections after `noteHeightOfRows` returns,
         /// so `isPutting` alone cannot distinguish them from a wheel event. Keep that distinction
@@ -1306,6 +1310,7 @@ struct TranscriptTable: NSViewRepresentable {
             // hold back the moment it is paused, which is the moment the reader grabbed the view,
             // and obeying that would be this file yanking somebody down as they scroll away.
             guard !isLiveScrolling else { return }
+            pendingPlacement = nil
             endLanded = false
             putEnd()
             // **A movement rather than an instruction while the follower is running**, because
@@ -1379,6 +1384,7 @@ struct TranscriptTable: NSViewRepresentable {
         func scroll(to entryID: TranscriptEntryID, anchor: UnitPoint) {
             // Somewhere that is not the end, so whatever asked to be at the end has been overruled.
             aimingElsewhere()
+            keepIfNoRoom { [weak self] in self?.scroll(to: entryID, anchor: anchor) }
             put(at: entryID, anchor: anchor)
             // **And once more on the next turn, for the same reason `goToEnd` says it twice.** A
             // row is scrolled to at the height the table currently believes it is. Unfolding 1,381
@@ -1414,6 +1420,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// twice for the same reason.
         func scroll(to entryID: TranscriptEntryID, delta: CGFloat) {
             aimingElsewhere()
+            keepIfNoRoom { [weak self] in self?.scroll(to: entryID, delta: delta) }
             put(at: entryID, delta: delta)
             reaimWork?.cancel()
             reaimWork = Task { @MainActor [weak self] in
@@ -1447,6 +1454,7 @@ struct TranscriptTable: NSViewRepresentable {
 
         func scroll(toY y: CGFloat) {
             aimingElsewhere()
+            keepIfNoRoom { [weak self] in self?.scroll(toY: y) }
             guard let scrollView else { return }
             measureLanding(at: y)
             put(y, in: scrollView)
@@ -1454,7 +1462,22 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// Somebody is taking the view somewhere that is not the end, so every standing claim on
         /// it comes down first.
+        /// See `pendingPlacement`.
+        private func keepIfNoRoom(_ again: @escaping () -> Void) {
+            let viewport = Double(scrollView?.contentView.bounds.height ?? 0)
+            pendingPlacement = TranscriptAnchor.canPlace(viewportHeight: viewport) ? nil : again
+        }
+
+        private func applyPendingPlacement() {
+            guard let pending = pendingPlacement, !isPutting,
+                  TranscriptAnchor.canPlace(viewportHeight: Double(scrollView?.contentView.bounds.height ?? 0))
+            else { return }
+            pendingPlacement = nil
+            pending()
+        }
+
         private func aimingElsewhere() {
+            pendingPlacement = nil
             viewportWork?.cancel()
             viewportWork = nil
             viewportPlace = nil
@@ -1589,6 +1612,7 @@ struct TranscriptTable: NSViewRepresentable {
             // Correcting prepared heights can move the document while the reader's row is held
             // still. It must not release the live end or restart the idle task that made it.
             guard !isApplyingWarmHeights else { return }
+            applyPendingPlacement()
             // **However the view got away from the end, the standing instruction goes with it.**
             //
             // `willStartLiveScroll` below is the ordinary way a reader takes hold, and it covers a
@@ -1927,6 +1951,7 @@ struct TranscriptTable: NSViewRepresentable {
         }
 
         private func viewportDidResize() {
+            applyPendingPlacement()
             guard viewportPlace != nil else { return }
             viewportWork?.cancel()
             viewportWork = Task { @MainActor [weak self] in
