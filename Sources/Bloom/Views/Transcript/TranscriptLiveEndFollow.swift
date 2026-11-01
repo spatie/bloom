@@ -62,9 +62,9 @@ final class TranscriptLiveEndFollower {
     /// nudges must not reclaim the bottom until that placement has finished.
     private(set) var isSeekingLiveEnd = false
 
-    /// The conversation arriving in a pane still hidden. The table moves under it while it is
-    /// measured, and the follower read one of those moves to the top as a reader scrolling up and
-    /// let the end go; the table's own standing end holds the view until the pane is shown.
+    /// One token per arrival, set while a conversation arrives in a pane still hidden. The table
+    /// moves under it while it is measured, and the follower read one of those moves to the top as
+    /// a reader scrolling up; the table's own standing end holds the view until the pane is shown.
     var arriving: UUID? { didSet { refresh() } }
 
     func seekLiveEnd(_ seeking: Bool) {
