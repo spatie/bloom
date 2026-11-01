@@ -329,4 +329,10 @@ struct TranscriptFollowTests {
         #expect(TranscriptFollow.mark(origin: 16_586, viewportHeight: 0) == nil)
         #expect(TranscriptFollow.mark(origin: 16_586, viewportHeight: 1_238) == 16_586)
     }
+
+    @Test("a point of rounding is not a reader scrolling up, a wheel notch is")
+    func roundingIsNotAReader() {
+        #expect(!TranscriptFollow.readerMovedUp(offset: 24_142.5, mark: 24_143.5))
+        #expect(TranscriptFollow.readerMovedUp(offset: 24_100, mark: 24_143.5))
+    }
 }

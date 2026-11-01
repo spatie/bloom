@@ -127,6 +127,16 @@ public enum TranscriptFollow {
         return max(offset, end - takeBack)
     }
 
+    /// How far above the follower's mark the view may stand and still be where it left it. A point
+    /// or two is a row's height correction rounding the origin: in the owner's log the follower let
+    /// the end go at 24,142.5 against a mark of 24,143.5. A wheel notch is tens of points.
+    public static let markSlack: Double = 2
+
+    /// Whether the view stands far enough above the follower's mark to be a reader scrolling up.
+    public static func readerMovedUp(offset: Double, mark: Double) -> Bool {
+        offset < mark - markSlack
+    }
+
     /// Where the view stands when following starts, the mark a later frame compares against to
     /// tell a reader's scroll from its own. Nil in a pane not laid out yet: its origin is layout,
     /// and read as a mark it made the first laid out frame look like a reader scrolling up.
