@@ -386,6 +386,10 @@ struct TranscriptTable: NSViewRepresentable {
         /// was at the live end and an instruction to be there is where somebody is. Written here
         /// and nowhere else: `goToEnd` and `releaseEnd` are the only two things that move it.
         fileprivate private(set) var holdsEnd = false
+        /// Whether the held end has been reached since it was asked for. A view that never got
+        /// there cannot have left it: an end refused for a pane of no height must outlive the
+        /// clip view moving as the pane is laid out.
+        private var endLanded = false
         /// A pane reflow that began at the end is not a user scroll. AppKit can deliver the
         /// bounds changes caused by its row-height corrections after `noteHeightOfRows` returns,
         /// so `isPutting` alone cannot distinguish them from a wheel event. Keep that distinction
@@ -1302,6 +1306,7 @@ struct TranscriptTable: NSViewRepresentable {
             // hold back the moment it is paused, which is the moment the reader grabbed the view,
             // and obeying that would be this file yanking somebody down as they scroll away.
             guard !isLiveScrolling else { return }
+            endLanded = false
             putEnd()
             // **A movement rather than an instruction while the follower is running**, because
             // keeping the view at the end during a turn is precisely the follower's job and it is
@@ -1368,6 +1373,7 @@ struct TranscriptTable: NSViewRepresentable {
             // The only number that means the end. A row being *visible* is not it: the last row of
             // a transcript is often taller than the pane. See `NSScrollView.endOffset`.
             put(scrollView.endOffset, in: scrollView)
+            if TranscriptAnchor.canPlace(viewportHeight: Double(scrollView.contentView.bounds.height)) { endLanded = true }
         }
 
         func scroll(to entryID: TranscriptEntryID, anchor: UnitPoint) {
@@ -1591,7 +1597,7 @@ struct TranscriptTable: NSViewRepresentable {
             // must still be able to scroll up and stay there. So the position itself is the last
             // word: if the view is no longer at the end and this file did not put it there, then
             // nobody is holding it any more.
-            if holdsEnd, !isPutting, viewportPlace == nil,
+            if holdsEnd, endLanded, !isPutting, viewportPlace == nil,
                !isSettlingResizeAtEnd, !currentGeometry.isAtEnd {
                 releaseEnd()
             }
@@ -2038,6 +2044,7 @@ struct TranscriptTable: NSViewRepresentable {
             // scrolls away in the next moment is not pinned: see `clipMoved`.
             if wasAtEnd, !isFollowerDriving, !isLiveScrolling {
                 holdsEnd = true
+                endLanded = true
                 isSettlingResizeAtEnd = true
                 scheduleSettle()
             }
