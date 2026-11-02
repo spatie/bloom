@@ -127,6 +127,13 @@ public enum TranscriptFollow {
         return max(offset, end - takeBack)
     }
 
+    /// Where the view stands when following starts, the mark a later frame compares against to
+    /// tell a reader's scroll from its own. Nil in a pane not laid out yet: its origin is layout,
+    /// and read as a mark it made the first laid out frame look like a reader scrolling up.
+    public static func mark(origin: Double, viewportHeight: Double) -> Double? {
+        TranscriptAnchor.canPlace(viewportHeight: viewportHeight) ? origin : nil
+    }
+
     /// This frame's offset, or `rest`.
     ///
     /// `frame` is the time since the last one, in seconds. `ownsGap` is whether the view is where
