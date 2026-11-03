@@ -342,4 +342,10 @@ struct TranscriptFollowTests {
         #expect(TranscriptFollow.readerMovedUp(offset: 6_911, mark: 7_361, shrunk: 0))
         #expect(TranscriptFollow.readerMovedUp(offset: 6_811, mark: 7_361, shrunk: 450))
     }
+
+    @Test("a fold spent on one move is not credited to the next")
+    func shrinkIsSpent() {
+        #expect(TranscriptFollow.shrinkLeft(offset: 7_161, mark: 7_361, shrunk: 450) == 250)
+        #expect(TranscriptFollow.shrinkLeft(offset: 6_911, mark: 7_361, shrunk: 450) == 0)
+    }
 }

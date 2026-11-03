@@ -140,6 +140,12 @@ public enum TranscriptFollow {
         offset < mark - shrunk - markSlack
     }
 
+    /// What is left of `shrunk` once it has explained the view moving up from `mark` to `offset`,
+    /// so a fold spent on one move cannot hide a reader's scroll on the next.
+    public static func shrinkLeft(offset: Double, mark: Double, shrunk: Double) -> Double {
+        max(0, shrunk - (mark - offset))
+    }
+
     /// Where the view stands when following starts, the mark a later frame compares against to
     /// tell a reader's scroll from its own. Nil in a pane not laid out yet: its origin is layout,
     /// and read as a mark it made the first laid out frame look like a reader scrolling up.

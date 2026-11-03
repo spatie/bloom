@@ -312,7 +312,9 @@ final class TranscriptLiveEndFollower {
         }
         // A move the shrink explains is spent here, so it cannot hide a reader's scroll later.
         if ownsGap, let mark = lastPut, offset < mark - CGFloat(TranscriptFollow.markSlack) {
-            shrunkSinceMark = max(0, shrunkSinceMark - (mark - offset))
+            shrunkSinceMark = CGFloat(TranscriptFollow.shrinkLeft(
+                offset: Double(offset), mark: Double(mark), shrunk: Double(shrunkSinceMark)
+            ))
             lastPut = offset
         }
 
