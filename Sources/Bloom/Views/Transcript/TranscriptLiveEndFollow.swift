@@ -224,7 +224,6 @@ final class TranscriptLiveEndFollower {
         ownsGap = onStart?() ?? false
         if ownsGap {
             let clip = scrollView.contentView.bounds
-            shrunkSinceMark = 0
             lastPut = TranscriptFollow.mark(origin: Double(clip.origin.y), viewportHeight: Double(clip.height))
                 .map { CGFloat($0) }
         }
@@ -310,6 +309,11 @@ final class TranscriptLiveEndFollower {
             offset: Double(offset), mark: Double(lastPut), shrunk: Double(shrunkSinceMark)
         ) {
             ownsGap = false
+        }
+        // A move the shrink explains is spent here, so it cannot hide a reader's scroll later.
+        if ownsGap, let mark = lastPut, offset < mark - CGFloat(TranscriptFollow.markSlack) {
+            shrunkSinceMark = max(0, shrunkSinceMark - (mark - offset))
+            lastPut = offset
         }
 
         if lastHeight > 0, height > lastHeight {
