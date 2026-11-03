@@ -335,4 +335,11 @@ struct TranscriptFollowTests {
         #expect(!TranscriptFollow.readerMovedUp(offset: 24_142.5, mark: 24_143.5))
         #expect(TranscriptFollow.readerMovedUp(offset: 24_100, mark: 24_143.5))
     }
+
+    @Test("a view moved up by a row folding above is not a reader scrolling up")
+    func foldingAboveIsNotAReader() {
+        #expect(!TranscriptFollow.readerMovedUp(offset: 6_911, mark: 7_361, shrunk: 450))
+        #expect(TranscriptFollow.readerMovedUp(offset: 6_911, mark: 7_361, shrunk: 0))
+        #expect(TranscriptFollow.readerMovedUp(offset: 6_811, mark: 7_361, shrunk: 450))
+    }
 }

@@ -133,8 +133,11 @@ public enum TranscriptFollow {
     public static let markSlack: Double = 2
 
     /// Whether the view stands far enough above the follower's mark to be a reader scrolling up.
-    public static func readerMovedUp(offset: Double, mark: Double) -> Bool {
-        offset < mark - markSlack
+    /// `shrunk` is how much shorter the document has become since the mark: a row above folding
+    /// moves the view up by its height, as the table keeps the text still or the clip view keeps
+    /// the origin inside the document, which let go of the end after a 450 point fold.
+    public static func readerMovedUp(offset: Double, mark: Double, shrunk: Double = 0) -> Bool {
+        offset < mark - shrunk - markSlack
     }
 
     /// Where the view stands when following starts, the mark a later frame compares against to

@@ -150,6 +150,8 @@ final class TranscriptLiveEndFollower {
     /// deduction for the same reason). Down is either us or something pinning the end, and neither
     /// is a reader leaving.
     private var lastPut: CGFloat?
+    /// How much shorter the document has become since `lastPut`. See `TranscriptFollow.readerMovedUp`.
+    private var shrunkSinceMark: CGFloat = 0
     private var ownsGap = false
 
     /// Whether this object is holding the view at the live end: the link is up and the view is
@@ -195,6 +197,7 @@ final class TranscriptLiveEndFollower {
     /// this object has placed the view itself.
     private func forgetTheView() {
         lastPut = nil
+        shrunkSinceMark = 0
         ownsGap = false
     }
 
@@ -221,6 +224,7 @@ final class TranscriptLiveEndFollower {
         ownsGap = onStart?() ?? false
         if ownsGap {
             let clip = scrollView.contentView.bounds
+            shrunkSinceMark = 0
             lastPut = TranscriptFollow.mark(origin: Double(clip.origin.y), viewportHeight: Double(clip.height))
                 .map { CGFloat($0) }
         }
@@ -294,11 +298,17 @@ final class TranscriptLiveEndFollower {
         var offset = clip.bounds.origin.y
 
         // The mark `startLink` could not take in a pane that was not laid out yet.
-        if ownsGap, lastPut == nil { lastPut = offset }
+        if ownsGap, lastPut == nil {
+            lastPut = offset
+            shrunkSinceMark = 0
+        }
+        if lastHeight > 0, height < lastHeight { shrunkSinceMark += lastHeight - height }
 
         // Whose gap this is, decided before anything is done with it. Upwards only: see
         // `lastPut`.
-        if ownsGap, let lastPut, TranscriptFollow.readerMovedUp(offset: Double(offset), mark: Double(lastPut)) {
+        if ownsGap, let lastPut, TranscriptFollow.readerMovedUp(
+            offset: Double(offset), mark: Double(lastPut), shrunk: Double(shrunkSinceMark)
+        ) {
             ownsGap = false
         }
 
@@ -328,6 +338,7 @@ final class TranscriptLiveEndFollower {
         // store and clamps it to the document: what the next frame compares against has to be
         // where the view actually is, or every frame would read its own rounding as a reader.
         lastPut = clip.bounds.origin.y
+        shrunkSinceMark = 0
         ownsGap = true
     }
 }
