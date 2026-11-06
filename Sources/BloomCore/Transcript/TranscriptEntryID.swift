@@ -45,16 +45,21 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// Breathing room after all content, including streaming output and queued messages.
     case bottomSpacing
 
-    /// The sequence number this entry names, or nothing for entries that are not stored rows.
-    ///
-    /// What the pane writes down as the reader's place. Nothing else may guess at it: the whole
-    /// point of the type is that a caller cannot mistake the streaming tail for row zero. A fold
-    /// answers nothing here even though it holds a number, because the number is the identity of
-    /// a run rather than a row the reader can be put back on: the row it names is usually the one
-    /// the fold is hiding.
+    /// The sequence number of a whole stored row. Search and unread targets name that row's first
+    /// line; scroll anchors use `scrollPlace` so a later answer part keeps its own offset.
     public var seq: Int? {
         guard case .row(let seq) = self else { return nil }
         return seq
+    }
+
+    /// A stored row or answer part that can be remembered as a scroll anchor. Unlike selection,
+    /// this excludes live slots whose text has no stable place in the stored conversation.
+    public var scrollPlace: TranscriptSelection.Place? {
+        switch self {
+        case .row(let seq): .init(seq: seq)
+        case .answerPart(let seq, let part): .init(seq: seq, part: part)
+        default: nil
+        }
     }
 
     /// **Whether this entry can change what it draws without its content key moving.**

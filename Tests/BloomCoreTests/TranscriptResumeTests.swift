@@ -13,6 +13,7 @@ struct TranscriptResumeTests {
         expanded: Set<Int> = [],
         offset: Double = 1_200,
         anchorSeq: Int? = nil,
+        anchorPart: Int = 0,
         anchorDelta: Double = 0,
         isAtLiveEnd: Bool = false,
         rowCount: Int = 400,
@@ -22,6 +23,7 @@ struct TranscriptResumeTests {
             expanded: expanded,
             offset: offset,
             anchorSeq: anchorSeq,
+            anchorPart: anchorPart,
             anchorDelta: anchorDelta,
             isAtLiveEnd: isAtLiveEnd,
             rowCount: rowCount,
@@ -53,6 +55,18 @@ struct TranscriptResumeTests {
             for: state(anchorSeq: 120, anchorDelta: -1_840), rowCount: 400
         )
         #expect(placement == .row(seq: 120, delta: -1_840))
+    }
+
+    @Test("a return to a split answer remembers its part rather than the heights before it")
+    func answerPartIsRestored() {
+        let remembered = state(offset: 12_000, anchorSeq: 120, anchorPart: 8, anchorDelta: -35)
+        #expect(TranscriptResume.placement(for: remembered, rowCount: 396) == .row(seq: 120, part: 8, delta: -35))
+    }
+
+    @Test("the live end outranks a remembered answer part")
+    func liveEndOutranksThePart() {
+        let remembered = state(anchorSeq: 120, anchorPart: 8, anchorDelta: -35, isAtLiveEnd: true)
+        #expect(TranscriptResume.placement(for: remembered, rowCount: 400) == .liveEnd)
     }
 
     @Test("the row outranks the point, because the point is what answers without one")

@@ -148,7 +148,7 @@ struct TranscriptListView: View {
     /// Both halves, because the row alone is the top of the row: see
     /// `TranscriptPaneState.anchorDelta`. Nil until the table has a stored row to name, and never
     /// cleared by a pane that cannot see one, so what is written down is the last real place.
-    @State private var topPlace = GeometryBox<(seq: Int, delta: CGFloat)?>(nil)
+    @State private var topPlace = GeometryBox<(seq: Int, part: Int, delta: CGFloat)?>(nil)
     /// Scroll navigation belongs to the pinned question overlay. Moving between turns must not
     /// rebuild the table's entries just to update that compact header.
     @State private var scrollNavigation = TranscriptScrollNavigation()
@@ -230,10 +230,10 @@ struct TranscriptListView: View {
     private enum Opening: Equatable {
         case liveEnd
         case row(Int, UnitPoint)
-        /// A row and how far above its top the pane started, which is where a reader who was part
-        /// way down a long answer left off. Not the same as `.row(seq, .top)`, which is a row
+        /// A row, its answer part and how far above its top the pane started, which is where a reader
+        /// part way down a long answer left off. Not the same as `.row(seq, .top)`, which is a row
         /// somebody is being SHOWN. See `TranscriptPaneState.anchorDelta`.
-        case rowOffset(Int, Double)
+        case rowOffset(Int, Int, Double)
         case offset(Double)
 
         /// The row this opening names, for the two cases that name one.
@@ -247,7 +247,7 @@ struct TranscriptListView: View {
         /// answering this.
         var seq: Int? {
             switch self {
-            case .row(let seq, _), .rowOffset(let seq, _): seq
+            case .row(let seq, _), .rowOffset(let seq, _, _): seq
             case .liveEnd, .offset: nil
             }
         }
@@ -1513,7 +1513,7 @@ struct TranscriptListView: View {
     /// Updates the compact header only when the reader crosses a user-turn boundary. The geometry
     /// callback reaches this every frame, but the binary lookup and one equality check do not make
     /// scrolling invalidate the transcript.
-    private func updatePinnedQuestion(at place: (seq: Int, delta: CGFloat)?) {
+    private func updatePinnedQuestion(at place: (seq: Int, part: Int, delta: CGFloat)?) {
         guard let place,
               let question = transcript.pinnedQuestion(atOrBefore: place.seq)
         else {
@@ -1553,13 +1553,13 @@ struct TranscriptListView: View {
             opening = .liveEnd
         case .offset(let y):
             opening = .offset(y)
-        case .row(let seq, let delta):
+        case .row(let seq, let part, let delta):
             // The row the reader had at the top of the pane, put back where it was rather than at
             // the top of the pane: an answer two thousand points tall read half way down is a
             // place, and `.top` on its row is that answer's first line. Not centred either, which
             // is what a search result gets, because a search result is a row somebody is being
             // shown rather than a place somebody is being put back.
-            opening = .rowOffset(seq, delta)
+            opening = .rowOffset(seq, part, delta)
         case .first:
             // A search result outranks both of the others. Somebody who clicked a line of a
             // transcript in the search screen asked for that line. Centred rather than at the top,
@@ -1590,8 +1590,9 @@ struct TranscriptListView: View {
         switch opening {
         case .row(let seq, let anchor):
             controller.scroll(to: .row(seq), anchor: anchor)
-        case .rowOffset(let seq, let delta):
-            controller.scroll(to: .row(seq), delta: CGFloat(delta))
+        case .rowOffset(let seq, let part, let delta):
+            let entry: TranscriptEntryID = part == 0 ? .row(seq) : .answerPart(seq: seq, part: part)
+            controller.scroll(to: entry, delta: CGFloat(delta))
         case .liveEnd:
             // As the jump pill does: a follower started on a table still at its top owns no gap,
             // and while it drives `goToEnd` sets no standing end to retry once the pane is laid out.
@@ -1634,6 +1635,7 @@ struct TranscriptListView: View {
                 // The row at the top of the pane and how far into it the reader was, which is the
                 // place; the offset above is what answers when there is no row to name.
                 anchorSeq: place?.seq,
+                anchorPart: place?.part ?? 0,
                 anchorDelta: Double(place?.delta ?? 0),
                 isAtLiveEnd: atLiveEnd.value,
                 rowCount: rowCount,

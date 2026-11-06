@@ -78,7 +78,9 @@ public struct TranscriptPaneState: Equatable, Sendable {
     /// Nil when the pane had no row on screen to name, which is an empty conversation and the
     /// frames before the first layout. The offset carries those.
     public var anchorSeq: Int?
-    /// How far above that row's top the pane started, which is `TranscriptAnchor.delta`.
+    /// The part of a split answer, so restoring does not depend on heights of earlier parts.
+    public var anchorPart: Int
+    /// How far above that row or answer part's top the pane started, which is `TranscriptAnchor.delta`.
     ///
     /// **The row alone puts a reader back at the top of the row they were in, and that is not
     /// where they were.** A single answer is regularly two thousand points tall, so somebody who
@@ -115,6 +117,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
         unfoldedTurns: Set<Int> = [],
         offset: Double,
         anchorSeq: Int? = nil,
+        anchorPart: Int = 0,
         anchorDelta: Double = 0,
         isAtLiveEnd: Bool,
         rowCount: Int,
@@ -126,6 +129,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
         self.unfoldedTurns = unfoldedTurns
         self.offset = offset
         self.anchorSeq = anchorSeq
+        self.anchorPart = anchorPart
         self.anchorDelta = anchorDelta
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
@@ -143,9 +147,9 @@ public enum TranscriptPlacement: Equatable, Sendable {
     case liveEnd
     /// The reader left this many points down. The fallback, for a pane that could not name a row.
     case offset(Double)
-    /// The reader left this row at the top of the pane, this far above the row's own top, so
-    /// that is where they go back. See `TranscriptPaneState.anchorDelta`.
-    case row(seq: Int, delta: Double)
+    /// The reader left this row or answer part at the top of the pane, with an offset within it.
+    /// See `TranscriptPaneState.anchorDelta`.
+    case row(seq: Int, part: Int = 0, delta: Double)
 }
 
 /// The rule for what a pane may do with what it remembers.
@@ -193,7 +197,9 @@ public enum TranscriptResume {
         // the row is what an AppKit list would buy, and until then this is the honest fallback.
         // The row they were reading, which survives every re-measurement and every width, and how
         // far into it they were. See `TranscriptPaneState.anchorSeq`.
-        if let seq = remembered.anchorSeq { return .row(seq: seq, delta: remembered.anchorDelta) }
+        if let seq = remembered.anchorSeq {
+            return .row(seq: seq, part: remembered.anchorPart, delta: remembered.anchorDelta)
+        }
         // Fewer rows than it had is a transcript read again from the store, which can fold a few
         // rows a live one kept apart. The end and a row survive that; a point into it does not.
         guard remembered.rowCount <= rowCount else { return .first }

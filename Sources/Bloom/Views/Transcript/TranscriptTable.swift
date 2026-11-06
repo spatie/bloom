@@ -156,7 +156,7 @@ final class TranscriptTableController {
 
     /// Where the reader is, as the pair that puts them back: the stored row at the top of the
     /// pane, and how far above its own top the pane starts. See `Coordinator.topmostPlace`.
-    var topmostPlace: (seq: Int, delta: CGFloat)? { coordinator?.topmostPlace }
+    var topmostPlace: (seq: Int, part: Int, delta: CGFloat)? { coordinator?.topmostPlace }
 
     /// Whether the whole entry is above the viewport. Nil when it is outside the drawn window.
     func isAboveViewport(_ entryID: TranscriptEntryID) -> Bool? {
@@ -1299,14 +1299,14 @@ struct TranscriptTable: NSViewRepresentable {
         /// for: it is normally negative anyway, and the row starting above the viewport restores
         /// the same place exactly. Downwards only when there is nothing above, which is a reader at
         /// the very top of a conversation with the setup log over it.
-        var topmostPlace: (seq: Int, delta: CGFloat)? {
+        var topmostPlace: (seq: Int, part: Int, delta: CGFloat)? {
             guard let tableView, let scrollView else { return nil }
             let visible = scrollView.contentView.documentVisibleRect
             let range = tableView.rows(in: visible)
             guard range.length > 0 else { return nil }
-            func place(_ row: Int) -> (seq: Int, delta: CGFloat)? {
-                guard entries.indices.contains(row), let seq = entries[row].id.seq else { return nil }
-                return (seq, CGFloat(TranscriptAnchor.delta(
+            func place(_ row: Int) -> (seq: Int, part: Int, delta: CGFloat)? {
+                guard entries.indices.contains(row), let place = entries[row].id.scrollPlace else { return nil }
+                return (place.seq, place.part, CGFloat(TranscriptAnchor.delta(
                     rowTop: tableView.rect(ofRow: row).minY, viewportTop: visible.minY
                 )))
             }
@@ -1470,7 +1470,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// The entry asked for, or what is drawn in its place. See `TranscriptLanding`.
         private func landing(for entryID: TranscriptEntryID) -> (row: Int, isExact: Bool)? {
             if let row = index[entryID] { return (row, true) }
-            guard let seq = entryID.seq,
+            guard let seq = entryID.scrollPlace?.seq,
                   let row = TranscriptLanding.index(of: seq, in: entries.map(\.id)) else { return nil }
             return (row, false)
         }
