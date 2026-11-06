@@ -784,6 +784,7 @@ translation between them.
 | `base_branch`, or nothing | Create new branch | It lands on a new branch, and merges into the branch that was named |
 | `existing_branch` | Continue on existing branch | It lands on the branch that was named, and merges when that branch does |
 | `pull_request` | Continue on existing branch | It checks out the pull request and keeps its GitHub identity, base branch, checks and merge controls |
+| `project_checkout: true` | Continue on existing branch, in place | It lands in the project's own folder, on whatever branch it has checked out |
 
 Nothing said is a new branch from the project's default branch, which is exactly what the tool did
 before there was a choice, so every caller written against the older tool keeps working. Naming
@@ -803,6 +804,21 @@ is already sitting on is refused with what has it, git's own worktrees included 
 Bloom's rows, because git allows one worktree per branch and the alternative is git exiting 128 in
 the middle of a start. Both refusals end by offering `base_branch` on the same name, which is a
 different intention and Bloom does not take it on a caller's behalf.
+
+`project_checkout` is the one source that makes no worktree. It works in the project's own folder,
+which is the owner's real working copy, so only the owner's client may ask for it and a workspace
+agent is refused in a sentence: a workspace agent is held to its own worktree everywhere else, and
+this would be the way out of it. A project has at most one project checkout workspace. When it
+already has one, the call does not make a second: the prompt goes into a new chat in the existing
+one, through the same door as `chat_create`, and the answer says `chat_added`. A repeat of the same
+call is answered `already_started` either way. See `WorkspaceKind` for what Bloom refuses to do in
+that folder (set it up, archive it as a worktree, rename its branch, open pull requests from it).
+
+The owner's own client standing in that folder raises the question `BridgeOwnerPlacement` exists
+for: every agent Bloom starts there runs the owner's user scope shim too. Inside a live project
+checkout the caller's process lineage decides it. A process started by Bloom, directly or through
+its private tmux server, is refused like any workspace agent; the owner's `claude` in their own
+terminal is let through.
 
 A pull request can be named by number, `#number` or GitHub URL. Bloom resolves it through `gh` and
 hands the resulting `WorkspaceCheckout.pullRequest` to the same path as the create sheet. This is

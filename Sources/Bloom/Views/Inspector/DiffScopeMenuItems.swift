@@ -17,12 +17,19 @@ import BloomCore
 struct DiffScopeMenuItems: View {
     let model: WorkspaceModel
 
+    private var kind: WorkspaceKind { model.workspace.kind }
+
     var body: some View {
         let scope = model.diffScope
 
         Section {
-            row(.all, subtitle: "Everything measured from \(model.workspace.baseBranch)", scope: scope)
-            row(.uncommitted, subtitle: "Everything not committed yet", scope: scope)
+            // The project's own checkout offers one scope: see `DiffScope.offered(for:)`.
+            if DiffScope.offered(for: kind).contains(.uncommitted) {
+                row(.all, subtitle: "Everything measured from \(model.workspace.baseBranch)", scope: scope)
+                row(.uncommitted, subtitle: "Everything not committed yet", scope: scope)
+            } else {
+                row(.all, subtitle: "Everything not committed yet", scope: scope)
+            }
         }
 
         if !model.branchCommits.commits.isEmpty {
@@ -61,7 +68,7 @@ struct DiffScopeMenuItems: View {
             // falling back to All changes under the reader.
             set: { isOn in if isOn { model.setDiffScope(target) } }
         )) {
-            Text(title ?? target.title)
+            Text(title ?? target.title(for: kind))
             Text(subtitle)
         }
     }

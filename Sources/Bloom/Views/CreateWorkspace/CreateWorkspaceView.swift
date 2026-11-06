@@ -77,6 +77,9 @@ struct CreateWorkspaceView: View {
     /// this is about a branch something else already has. Drawn in the same place, which is the
     /// full width line under the composer, because a path is unreadable anywhere narrower.
     @State private var heldProblem: String?
+    /// The branch picked is the one the project itself is on, and Create works in the project's
+    /// own folder rather than cutting a worktree. See `WorkspaceKind`.
+    @State private var inProjectCheckout = false
     @State private var isResolvingReference = false
     @State private var branchPrefix: String?
     /// Whether this project runs anything after the worktree is cut, so the footer can say so.
@@ -222,6 +225,9 @@ struct CreateWorkspaceView: View {
             if isConversation {
                 Text("A plain conversation without a repository.")
                     .transition(.opacity)
+            } else if inProjectCheckout {
+                Text("Works in the project's own folder, on the branch it is on. Nothing is copied and no setup runs.")
+                    .transition(.opacity)
             } else {
                 Text("Creates a separate copy of the project on this Mac, on its own branch.")
                     .transition(.opacity)
@@ -244,7 +250,7 @@ struct CreateWorkspaceView: View {
                     .padding(Metrics.gutter)
             } else {
                 composer
-                if hasSetupScript && !isConversation {
+                if hasSetupScript && !isConversation && !inProjectCheckout {
                     WorkspaceSetupOption(isEnabled: $runSetupScript)
                         .disabled(isLoading)
                         .padding(.horizontal, Metrics.gutter)
@@ -1004,6 +1010,7 @@ struct CreateWorkspaceView: View {
         // so it goes with the project. Left standing, it would name a folder in a repository the
         // window is no longer looking at.
         heldProblem = nil
+        inProjectCheckout = false
         runSetupScript = true
         hasSetupScript = false
 
@@ -1087,6 +1094,7 @@ struct CreateWorkspaceView: View {
     /// question by pretending the branch was not there.
     private func pick(_ source: WorkspaceSource) {
         heldProblem = nil
+        inProjectCheckout = false
         switch source {
         case .newBranch(let ref):
             checkout = nil
@@ -1133,6 +1141,19 @@ struct CreateWorkspaceView: View {
             dismiss()
             return
         }
+        // The project's own branch is no longer a refusal: it is worked on where it stands. A
+        // project checkout that is already live is gone to, whatever branch its row last saw,
+        // because the folder has only one checkout and the row may not have caught up with it.
+        if case .projectCheckout = holder, case .branch = chosen, let repo {
+            if let live = WorkspaceKind.liveProjectCheckout(in: repo.id, among: app.workspaces) {
+                app.selection = .workspace(live.id)
+                dismiss()
+                return
+            }
+            choose(chosen)
+            inProjectCheckout = true
+            return
+        }
         heldProblem = holder.refusal(branch: branch)
     }
 
@@ -1153,6 +1174,7 @@ struct CreateWorkspaceView: View {
         isEnteringReference = false
         referenceProblem = nil
         heldProblem = nil
+        inProjectCheckout = false
         reference = ""
         focusTheBox()
     }
@@ -1265,9 +1287,11 @@ struct CreateWorkspaceView: View {
             isChatWorkspace: chosen.runsAnAgent, draft: prompt, name: typedName
         )
         let base = baseBranch.isEmpty ? selectedRepo?.defaultBranch : baseBranch
-        let source = checkout
+        // The project checkout takes no checkout: the folder already has its branch.
+        let kind: WorkspaceKind = inProjectCheckout ? .projectCheckout : .worktree
+        let source = inProjectCheckout ? nil : checkout
         let chosenControls = controls
-        let shouldRunSetup = runSetupScript
+        let shouldRunSetup = runSetupScript && !inProjectCheckout
 
         // A file can be moved or deleted between being attached and Create being pressed, and
         // naming a path that is not there only teaches the agent that Bloom lies about paths.
@@ -1300,7 +1324,8 @@ struct CreateWorkspaceView: View {
                     controls: chosenControls,
                     staged: staged,
                     checkout: source,
-                    runSetupScript: shouldRunSetup
+                    runSetupScript: shouldRunSetup,
+                    kind: kind
                 )
             }
             // Whatever survived is in the worktree now, and whatever did not was never going to be.

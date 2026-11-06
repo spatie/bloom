@@ -100,9 +100,14 @@ public enum RunScriptAutostart: Sendable, Hashable {
     /// A script that stopped asking, or went away, needs no new approval. Removing a command from
     /// the set cannot make anything run that the owner did not approve, so it is not a change
     /// worth a question.
+    ///
+    /// A workspace whose kind does not autostart gets nothing, before the scripts are looked at:
+    /// in the project's own checkout the owner's dev server is usually up already, on its own
+    /// port, and a run script there is started by hand. See `WorkspaceKind.autostartsRunScripts`.
     public static func decide(
-        scripts: [RunScript], approval: RunScriptAutostartApproval?
+        scripts: [RunScript], approval: RunScriptAutostartApproval?, kind: WorkspaceKind = .worktree
     ) -> RunScriptAutostart {
+        guard kind.autostartsRunScripts else { return .nothing }
         let candidates = candidates(in: scripts)
         guard !candidates.isEmpty else { return .nothing }
 

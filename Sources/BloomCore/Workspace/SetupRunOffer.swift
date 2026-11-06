@@ -43,12 +43,17 @@ public struct SetupRunOffer: Sendable, Hashable {
     /// only one of them is on the row. Whether the repository has a setup script is what the
     /// settings file said the last time it was read, and whether a run is going is a fact about a
     /// child process of this app. Both of those are a live `WorkspaceModel`'s to answer.
+    ///
+    /// `allowsSetup` is the workspace's kind answering. The project's own checkout is the folder
+    /// the setup script was written from, and running it there would migrate and seed the
+    /// database the owner develops against. See `WorkspaceKind.allowsSetup`.
     public static func offer(
         hasSetupScript: Bool,
         hasRunSetup: Bool,
-        isRunning: Bool
+        isRunning: Bool,
+        allowsSetup: Bool = true
     ) -> SetupRunOffer? {
-        guard hasSetupScript else { return nil }
+        guard hasSetupScript, allowsSetup else { return nil }
         return SetupRunOffer(
             title: hasRunSetup ? "Run Setup Again" : "Run Setup",
             isEnabled: !isRunning

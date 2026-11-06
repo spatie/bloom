@@ -216,6 +216,13 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     /// Not on the public initialiser, for the reason `state` is not: outside the module there is
     /// nothing that legitimately knows this at the moment a workspace is created.
     public var pullRequestNumber: Int?
+    /// Whether the folder is a worktree Bloom cut or the project's own checkout. See
+    /// `WorkspaceKind`, which holds what each of the two may have done to it.
+    ///
+    /// `internal(set)` and absent from the public initialiser, for the reason `state` is: a row
+    /// that changed kind after it was made would be a project checkout archived as a worktree, and
+    /// only `WorkspaceManager` makes one. `Store.upsert` writes it on insert and never again.
+    public internal(set) var kind: WorkspaceKind
 
     /// A workspace as it is at rest: the three lifecycle columns spelled out.
     ///
@@ -255,7 +262,8 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         colour: String? = nil,
         origin: WorkspaceOrigin = .user,
         port: Int = 0,
-        pullRequestNumber: Int? = nil
+        pullRequestNumber: Int? = nil,
+        kind: WorkspaceKind = .worktree
     ) {
         self.id = id
         self.repoID = repoID
@@ -279,6 +287,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         self.origin = origin
         self.port = port
         self.pullRequestNumber = pullRequestNumber
+        self.kind = kind
     }
 
     /// A brand new workspace, which is the only kind anybody outside the module has any business

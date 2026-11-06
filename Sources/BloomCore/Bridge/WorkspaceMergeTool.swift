@@ -206,6 +206,9 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
         guard FileManager.default.fileExists(atPath: workspace.path) else {
             return .failure(WorkspaceMergeTrouble.worktreeGone(workspace: workspace.name).sentence)
         }
+        guard workspace.kind.hasPullRequests else {
+            return .failure(WorkspaceMergeTrouble.projectCheckout(workspace: workspace.name).sentence)
+        }
 
         // Asked before GitHub, because a busy workspace is refused whatever GitHub says and a gh
         // call costs a second the caller would spend for nothing.

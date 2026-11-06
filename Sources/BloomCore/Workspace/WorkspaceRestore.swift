@@ -5,11 +5,19 @@ public enum WorkspaceRestoreRefusal: Error, CustomStringConvertible, Sendable {
     /// The branch is gone from this Mac and from every remote, so the commits it held are no
     /// longer reachable by name and there is nothing to rebuild a worktree from.
     case branchGone(branch: String)
+    /// A project checkout's folder is no longer a repository, so there is nothing to work in.
+    case projectGone(path: String)
+    /// The project already has a live project checkout, and it may have only one.
+    case projectCheckoutTaken(name: String)
 
     public var description: String {
         switch self {
         case .branchGone(let branch):
             "the branch \(branch) no longer exists here or on its configured remote"
+        case .projectGone(let path):
+            "the project's folder at \(path) is no longer a Git repository"
+        case .projectCheckoutTaken(let name):
+            "the project already has a live project checkout, '\(name)'. Archive that one first"
         }
     }
 }
@@ -31,6 +39,9 @@ public enum RestoreSource: Sendable, Equatable {
     /// sides ends here, and so does an archive that deleted the branch. The commits may still be
     /// in the base branch's history, but there is no ref to check out and no worktree to rebuild.
     case gone
+    /// The workspace is the project's own checkout, which archiving never removed. Restoring it
+    /// is the row coming back and nothing else. See `WorkspaceKind`.
+    case projectCheckout
 
     /// Whether a worktree can be built from this at all. The one question the UI asks.
     public var canRebuild: Bool { self != .gone }
@@ -65,6 +76,11 @@ public enum RestoreSource: Sendable, Equatable {
             The branch \(branch) no longer exists here or on \(remote), so there is nothing left \
             to build a worktree from and this workspace cannot be worked in again. Everything it \
             said is still here to read.
+            """
+        case .projectCheckout:
+            """
+            This is the project's own checkout. Archiving left the folder where it was, so \
+            restoring brings the workspace back on whatever branch the project is on now.
             """
         }
     }
@@ -171,6 +187,9 @@ public extension WorkspaceManager {
     /// there would put the whole undo registration behind a twenty second timeout. The deliberate
     /// restore asks the fuller question through `restoreSource`.
     func canRestore(workspace: Workspace, repo: Repo) async -> Bool {
+        // The undo after an archive. A project checkout is never offered one: archiving it
+        // changed nothing on disk, so there is nothing for an undo to put back.
+        guard workspace.kind == .worktree else { return false }
         guard !FileManager.default.fileExists(atPath: workspace.path) else { return false }
         return await Git.branchExists(workspace.branch, in: repo.path)
     }
@@ -183,6 +202,7 @@ public extension WorkspaceManager {
     /// (offline, or credentials nobody has given) leaves whatever was last fetched in place, which
     /// is the honest fallback rather than an error.
     func restoreSource(workspace: Workspace, repo: Repo) async -> RestoreSource {
+        if workspace.kind == .projectCheckout { return .projectCheckout }
         if await Git.branchExists(workspace.branch, in: repo.path) { return .localBranch }
 
         guard let context = try? await Git.repositoryContext(
@@ -220,7 +240,13 @@ public extension WorkspaceManager {
         let repositoryKey = Git.repositoryPaths(in: repo.path)?.commonDirectory
             ?? URL(fileURLWithPath: repo.path).resolvingSymlinksInPath().standardized.path
         return try await WorktreeCutQueue.shared.cut(in: repositoryKey) {
-            try await rebuild(workspace: workspace, repo: repo, from: source)
+            // Asked of the row rather than of `source`, so that no caller can hand a project
+            // checkout to `rebuild`, which would cut a worktree beside the project.
+            if workspace.kind == .projectCheckout {
+                let restored = try await reactivateProjectCheckout(workspace, repo: repo)
+                return RestoreOutcome(workspace: restored, source: .projectCheckout)
+            }
+            return try await rebuild(workspace: workspace, repo: repo, from: source)
         }
     }
 

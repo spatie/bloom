@@ -55,4 +55,11 @@ public extension Workspace {
         self.path = path
         apply(.worktreeRebuilt(hasSetupScript: hasSetupScript))
     }
+
+    /// A project checkout is live again. Two columns, because nothing was removed: the folder,
+    /// the path and whatever the setup state said are all as they were. See `WorkspaceKind`.
+    mutating func reactivate() {
+        state = .active
+        archivedAt = nil
+    }
 }

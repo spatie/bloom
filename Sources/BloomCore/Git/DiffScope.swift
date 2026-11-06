@@ -53,27 +53,49 @@ public enum DiffScope: Sendable, Hashable {
         }
     }
 
-    public var title: String {
-        switch self {
-        case .all: "All branch changes"
-        case .uncommitted: "Uncommitted changes"
-        case .commit(let commit): commit.subject
+    public var title: String { title(for: .worktree) }
+
+    public var badge: String { badge(for: .worktree) }
+
+    public func emptyMessage(base: String) -> String { emptyMessage(base: base, kind: .worktree) }
+
+    /// The scopes a workspace of this kind offers in the Changes tab.
+    ///
+    /// One for the project's own checkout. Its base is the branch it is on, so the merge base is
+    /// `HEAD` and "everything on this branch" is exactly the work not committed yet: offering both
+    /// would be two rows drawing the same diff under two names.
+    public static func offered(for kind: WorkspaceKind) -> [DiffScope] {
+        switch kind {
+        case .worktree: [.all, .uncommitted]
+        case .projectCheckout: [.all]
         }
     }
 
-    public var badge: String {
-        switch self {
-        case .all: "All branch changes"
-        case .uncommitted: "Uncommitted"
-        case .commit(let commit): "Commit \(commit.abbreviated)"
+    /// Said of the project's own checkout, `.all` is the uncommitted work and is called that.
+    /// "All branch changes" there would promise the branch's commits too, which it does not show.
+    public func title(for kind: WorkspaceKind) -> String {
+        switch (self, kind) {
+        case (.all, .worktree): "All branch changes"
+        case (.all, .projectCheckout), (.uncommitted, _): "Uncommitted changes"
+        case (.commit(let commit), _): commit.subject
         }
     }
 
-    public func emptyMessage(base: String) -> String {
-        switch self {
-        case .all: "Nothing in this worktree differs from \(base)."
-        case .uncommitted: "Everything in this worktree is committed."
-        case .commit(let commit): "Commit \(commit.abbreviated) introduces no file changes."
+    public func badge(for kind: WorkspaceKind) -> String {
+        switch (self, kind) {
+        case (.all, .worktree): "All branch changes"
+        case (.all, .projectCheckout), (.uncommitted, _): "Uncommitted"
+        case (.commit(let commit), _): "Commit \(commit.abbreviated)"
+        }
+    }
+
+    public func emptyMessage(base: String, kind: WorkspaceKind) -> String {
+        switch (self, kind) {
+        case (.all, .worktree): "Nothing in this worktree differs from \(base)."
+        case (.all, .projectCheckout), (.uncommitted, .projectCheckout):
+            "Everything in this checkout is committed."
+        case (.uncommitted, .worktree): "Everything in this worktree is committed."
+        case (.commit(let commit), _): "Commit \(commit.abbreviated) introduces no file changes."
         }
     }
 

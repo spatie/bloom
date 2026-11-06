@@ -26,13 +26,16 @@ public enum AgentStartSource: Sendable, Hashable {
     case existingBranch(ExistingBranch)
     /// Open a pull request through the same checkout path as the create window.
     case pullRequest(PullRequestListing)
+    /// Work in the project's own checkout on whatever branch it is on, with no worktree at all.
+    /// The owner's client only; see `WorkspaceStartTool`. See `WorkspaceKind`.
+    case projectCheckout
 
     /// Which of the sheet's two tabs this is. The tool's description is written out of these, so
     /// an agent reading the tool list and a person reading the tab strip are told the same thing.
     public var tab: WorkspaceSourceTab {
         switch self {
         case .newBranch: .newBranch
-        case .existingBranch, .pullRequest: .existingBranch
+        case .existingBranch, .pullRequest, .projectCheckout: .existingBranch
         }
     }
 
@@ -41,7 +44,7 @@ public enum AgentStartSource: Sendable, Hashable {
     public var baseBranch: String? {
         switch self {
         case .newBranch(let ref): ref
-        case .existingBranch, .pullRequest: nil
+        case .existingBranch, .pullRequest, .projectCheckout: nil
         }
     }
 
@@ -49,10 +52,16 @@ public enum AgentStartSource: Sendable, Hashable {
     /// route Bloom has always had.
     public var checkout: WorkspaceCheckout? {
         switch self {
-        case .newBranch: nil
+        case .newBranch, .projectCheckout: nil
         case .existingBranch(let branch): .branch(branch)
         case .pullRequest(let request): .pullRequest(request)
         }
+    }
+
+    /// What kind of workspace this source makes, for `WorkspaceStartRequest.kind`.
+    public var kind: WorkspaceKind {
+        if case .projectCheckout = self { return .projectCheckout }
+        return .worktree
     }
 
     /// Whichever branch this call actually named, or nil when it named none.
@@ -65,6 +74,7 @@ public enum AgentStartSource: Sendable, Hashable {
         case .newBranch(let ref): ref
         case .existingBranch(let branch): branch.name
         case .pullRequest(let request): request.headRefName
+        case .projectCheckout: nil
         }
     }
 
@@ -81,6 +91,9 @@ public enum AgentStartSource: Sendable, Hashable {
         case .newBranch(let ref): [ref ?? ""]
         case .existingBranch(let branch): ["", "on\u{0}" + branch.name]
         case .pullRequest(let request): ["", "pr\u{0}" + String(request.number)]
+        // An element of its own, so it digests apart from every older call, which leaves each of
+        // those spawn ids exactly as it was.
+        case .projectCheckout: ["", "checkout\u{0}"]
         }
     }
 }
@@ -95,6 +108,8 @@ public enum AgentStartRequest: Sendable, Equatable {
     case existingBranch(String)
     /// A number or GitHub URL as the caller wrote it. Resolution happens after the project is known.
     case pullRequest(String)
+    /// `project_checkout: true`.
+    case projectCheckout
     case refused(String)
 
     /// Which verb `base_branch` and `existing_branch` name between them.
@@ -103,21 +118,25 @@ public enum AgentStartRequest: Sendable, Equatable {
     /// keystroke apart in intent and opposite in effect, which is the whole reason the sheet draws
     /// them as two tabs, and a call that asked for both has not decided which it wants.
     public static func read(
-        baseBranch: String?, existingBranch: String?, pullRequest: String? = nil
+        baseBranch: String?, existingBranch: String?, pullRequest: String? = nil,
+        projectCheckout: Bool = false
     ) -> AgentStartRequest {
         let named = [baseBranch, existingBranch, pullRequest].compactMap { $0 }
+            + (projectCheckout ? ["true"] : [])
         guard named.count <= 1 else {
             let arguments = [
                 baseBranch.map { "base_branch '\($0)'" },
                 existingBranch.map { "existing_branch '\($0)'" },
                 pullRequest.map { "pull_request '\($0)'" },
+                projectCheckout ? "project_checkout" : nil,
             ].compactMap { $0 }.joined(separator: ", ")
             return .refused(
                 "workspace_start takes only one source, and this call named \(arguments). Ask "
-                    + "again with only base_branch, existing_branch or pull_request."
+                    + "again with only base_branch, existing_branch, pull_request or project_checkout."
             )
         }
 
+        if projectCheckout { return .projectCheckout }
         switch (baseBranch, existingBranch, pullRequest) {
         case let (_, _, request?):
             return .pullRequest(request)
