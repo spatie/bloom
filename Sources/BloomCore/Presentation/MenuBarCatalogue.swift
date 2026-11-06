@@ -98,6 +98,10 @@ public enum MenuBarCatalogue {
         MenuBarItem(.previousTab, in: .view, "Previous Tab", key: .init("[", .command, .shift), availability: .needsSeveralTabs),
         MenuBarItem(.nextTab, in: .view, "Next Tab", key: .init("]", .command, .shift), availability: .needsSeveralTabs),
         MenuBarItem(.goToTab, in: .view, "Go to Tab", availability: .needsTab),
+        // No key here: Control+Tab is a local monitor, because a terminal and a text view would
+        // each take it before a menu equivalent. See `TabCycleShortcut`.
+        MenuBarItem(.navigateBack, in: .view, "Back", availability: .sometimes),
+        MenuBarItem(.navigateForward, in: .view, "Forward", availability: .sometimes),
         MenuBarItem(.fileBack, in: .view, "Go Back in Files", key: .init("[", .command), availability: .needsReview),
         MenuBarItem(.fileForward, in: .view, "Go Forward in Files", key: .init("]", .command), availability: .needsReview),
         MenuBarItem(.nextChangedFile, in: .view, "Next Changed File", key: .init("j", .command, .option), availability: .needsReview),
@@ -208,6 +212,8 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case previousTab
     case nextTab
     case goToTab
+    case navigateBack
+    case navigateForward
     case fileBack
     case fileForward
     case nextChangedFile

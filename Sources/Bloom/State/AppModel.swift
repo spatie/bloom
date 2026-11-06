@@ -89,6 +89,7 @@ final class AppModel {
             // sidebar row can arrive here again, and without this guard it writes defaults,
             // rebuilds the subagent rows and starts another settings read for no state change.
             guard newValue != storedSelection else { return }
+            defer { recordNavigation() }
             highlightedSidebarSelection = nil
             if let id = newValue.workspaceID, id != storedSelection.workspaceID {
                 SwitchTrace.begin(workspaceID: id)
@@ -123,6 +124,12 @@ final class AppModel {
     }
 
     private var storedSelection: SidebarSelection = .home
+
+    /// Back and Forward over `selection` and each workspace's tab. Observed, so the toolbar's
+    /// buttons grey themselves; written only by `AppModel+NavigationHistory`.
+    var navigationHistory = NavigationHistory()
+    /// Set while Back or Forward puts the window back, so that move is not recorded as a visit.
+    @ObservationIgnored var isRestoringNavigation = false
 
     /// The row the sidebar has highlighted while its display-link activation is pending.
     /// Menu shortcuts must follow that row, not the workspace the centre column is still showing.

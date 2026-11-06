@@ -78,6 +78,7 @@ contribute for free.
 | Focus Pane > Left / Right / Up / Down | | a split shell is in front |
 | Previous Tab / Next Tab | `⇧⌘[` `⇧⌘]` | the strip has more than one tab |
 | Go to Tab > (each tab) | `⌘1`…`⌘9` | the strip is not empty |
+| Back / Forward | `⌃⇧⇥` `⌃⇥` (not menu keys) | there is a place to go to |
 | Next / Previous Changed File | `⌥⌘J` `⌥⌘K` | a review is open and something changed |
 | Toggle Sidebar | `⌃⌘S` | always |
 | Toggle Inspector | `⌥⌘I` | a workspace is selected |
