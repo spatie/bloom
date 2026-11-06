@@ -122,7 +122,8 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
-                    home: home
+                    home: home,
+                    sentAt: row.createdAt
                 )
             } else {
                 // Attachments reach the agent as paths in the prompt text, which is the only
@@ -135,7 +136,8 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: turn.body,
                     attachments: turn.paths,
-                    home: home
+                    home: home,
+                    sentAt: row.createdAt
                 )
             }
 
@@ -154,7 +156,10 @@ struct TranscriptRowView: View, Equatable {
 
         case .assistantText:
             if let text = assistantText, !text.isEmpty {
-                ProseRowView(text: text, copyText: responseCopyText, smoothMarkdownHandoff: smoothMarkdownHandoff)
+                ProseRowView(
+                    text: text, copyText: responseCopyText,
+                    smoothMarkdownHandoff: smoothMarkdownHandoff, sentAt: row.createdAt
+                )
             }
 
         case .thinking:
