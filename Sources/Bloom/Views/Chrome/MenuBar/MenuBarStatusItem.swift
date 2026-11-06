@@ -410,8 +410,13 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         let title = "Keep Awake With the Lid Closed"
         let item = ClosureMenuItem(isApproved ? title : title + "\u{2026}") {
             keepAwake.keepsLidClosed.toggle()
-            if keepAwake.keepsLidClosed, SleepSwitch.shared.standing == .needsApproval {
-                SleepSwitch.shared.openApprovalSettings()
+            if keepAwake.keepsLidClosed {
+                Task {
+                    let standing = await SleepSwitch.shared.enable()
+                    if keepAwake.keepsLidClosed, standing == .needsApproval {
+                        SleepSwitch.shared.openApprovalSettings()
+                    }
+                }
             }
         }
         item.state = keepAwake.keepsLidClosed && isApproved ? .on : .off

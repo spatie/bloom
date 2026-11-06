@@ -100,8 +100,10 @@ struct WelcomeView: View {
             flow.offerCommandLine(isOffered)
         }
         // A Mac with no lid is never asked, and neither is one whose helper is already approved.
-        .onAppear {
-            flow.offerKeepAwake(Machine.isPortable && SleepSwitch.shared.standing != .ready)
+        .task {
+            let standing = await SleepSwitch.shared.refresh()
+            guard !Task.isCancelled else { return }
+            flow.offerKeepAwake(Machine.isPortable && standing != .ready)
         }
         .onAppear {
             inspection.revealsInstantly = reduceMotion
