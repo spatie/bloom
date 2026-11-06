@@ -30,6 +30,8 @@ import SwiftUI
 /// - `linkActions` for what a link inside a row's markdown does when it is pressed or chosen from
 ///   a menu. Equatable on its values, which is what keeps a fresh struct per pass from counting
 ///   as a change.
+/// - `table` for `CodeBlockView`, which warns it before a preview changes the row's height, so
+///   the button stays under the pointer.
 /// - `fontScale`, `chatFont` and `chatLineHeight`, set by `ChatPaneView` from the reader's own
 ///   appearance settings. Nothing under a row reads a setting; they all read these.
 /// - `reduceMotion`, which is the one value here that is carried and **not** applied.
@@ -51,6 +53,7 @@ struct TranscriptRowEnvironment: Equatable {
     let bubbleWidth: TranscriptBubbleWidth
     let conversation: TranscriptConversationSelection
     let linkActions: TranscriptLinkActions
+    let table: TranscriptTableController
     let fontScale: CGFloat
     let chatFont: ChatFont
     let lineHeight: ChatLineHeight
@@ -68,6 +71,7 @@ struct TranscriptRowEnvironment: Equatable {
             && lhs.bubbleWidth === rhs.bubbleWidth
             && lhs.conversation === rhs.conversation
             && lhs.linkActions == rhs.linkActions
+            && lhs.table === rhs.table
             && lhs.fontScale == rhs.fontScale
             && lhs.chatFont == rhs.chatFont
             && lhs.lineHeight == rhs.lineHeight
@@ -102,6 +106,10 @@ struct TranscriptRowEnvironment: Equatable {
     }
 }
 
+extension EnvironmentValues {
+    @Entry var transcriptTable: TranscriptTableController?
+}
+
 extension View {
     /// Puts a hosted transcript row back in the environment its pane would have given it.
     func transcriptRowEnvironment(_ values: TranscriptRowEnvironment) -> some View {
@@ -110,6 +118,7 @@ extension View {
             .environment(\.transcriptBubbleWidth, values.bubbleWidth)
             .environment(\.transcriptConversationSelection, values.conversation)
             .markdownLinkActions(values.linkActions)
+            .environment(\.transcriptTable, values.table)
             .environment(\.fontScale, values.fontScale)
             .environment(\.chatFont, values.chatFont)
             .environment(\.chatLineHeight, values.lineHeight)
