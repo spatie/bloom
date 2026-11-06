@@ -4,18 +4,23 @@ import Foundation
 /// created. A base left behind measured the Changes tab, the diff stat and Create PR against the
 /// wrong branch: 495 files for a branch that changed 32.
 public enum BaseBranchChange {
-    /// Every branch this clone knows, local or on the primary remote, less the workspace's own.
-    public static func load(repoPath: String, excluding branch: String) async -> [String] {
-        // Empty for a workspace with no worktree on this Mac, and git would answer for the
-        // process's own directory instead.
-        guard !repoPath.isEmpty else { return [] }
+    /// Local branches and targets on the workspace's base remote, rather than always origin.
+    public static func load(repoPath: String, excluding branch: String, baseBranch: String) async -> [String] {
+        // An empty cwd asks git about the app's own directory instead of this workspace.
+        guard !repoPath.isEmpty,
+              let config = try? await Git.repositoryConfiguration(in: repoPath) else { return [] }
+        let current = GitRepositoryContext.resolve(config: config, base: baseBranch, branch: branch)
         async let local = Git.branches(of: repoPath)
         async let remote = Git.remoteBranches(of: repoPath)
-        async let remoteNames = Git.remoteNames(of: repoPath)
-        let primary = WorkspaceStartContext.primaryRemoteBranches(
-            references: (try? await remote) ?? [], remoteNames: (try? await remoteNames) ?? []
-        )
-        return options(local: (try? await local) ?? [], remote: primary, excluding: branch)
+        let targets = ((try? await remote) ?? []).compactMap { reference -> String? in
+            guard let name = current.baseRemote else { return nil }
+            return WorkspaceCheckoutPlan.remoteBranchName(reference, remote: name)
+        }
+        let localTargets = ((try? await local) ?? []).filter {
+            guard let tracking = config["branch.\($0).remote"] else { return true }
+            return (tracking == "." ? nil : tracking) == current.baseRemote
+        }
+        return options(local: localTargets, remote: targets, excluding: branch)
     }
 
     static func options(local: [String], remote: [String], excluding branch: String) -> [String] {
@@ -26,8 +31,25 @@ public enum BaseBranchChange {
     /// Writes the base where git keeps it too, as creating the workspace did: `gh pr create`
     /// without `--base` reads `gh-merge-base`, and so does every context resolved without a base.
     public static func record(_ base: String, for workspace: Workspace) async throws {
-        let context = try await Git.repositoryContext(in: workspace.path, baseBranch: base, branch: workspace.branch)
+        try Git.validate(branch: base)
+        let current = try await Git.repositoryContext(
+            in: workspace.path, baseBranch: workspace.baseBranch, branch: workspace.branch
+        )
+        // A remote-only target has no branch.<target>.remote. Resolving its bare name afresh
+        // would silently switch an unpinned upstream workspace back to origin.
+        let context = GitRepositoryContext(
+            baseBranch: base, baseRemote: current.baseRemote,
+            publishBranch: current.publishBranch, publishRemote: current.publishRemote,
+            baseRemoteURL: current.baseRemoteURL, publishRemoteURL: current.publishRemoteURL
+        )
         try await Git.recordBase(context, for: workspace.branch, in: workspace.path)
+        if current.baseRemote == nil {
+            // Moving away from a local base tracked with remote "." must keep that choice,
+            // even if another remote exists and the new branch has no tracking configuration.
+            try await Git.check(
+                ["config", "branch.\(workspace.branch).bloom-base-remote", "."], in: workspace.path
+            )
+        }
     }
 
     /// The target of an open pull request, when the stored base has fallen behind it: changed on
@@ -42,14 +64,21 @@ public enum BaseBranchChange {
     /// `adopted`, once this clone can resolve it. Fetched first, because the diff never fetches
     /// and a target it has never seen would turn the Changes tab into an error.
     ///
-    /// Only on the remote the current base resolves to, which is the repository the pull request
-    /// was found in: a local `main` tracking `upstream` is another repository's `main`.
+    /// A local branch with the same name is insufficient when the pull request belongs to a
+    /// remote repository. Fetch and resolve on the current base remote explicitly.
     public static func adoptable(from pullRequest: PullRequest?, by workspace: Workspace) async -> String? {
         guard !workspace.path.isEmpty, let base = adopted(from: pullRequest, by: workspace),
-              let current = try? await Git.repositoryContext(in: workspace.path, baseBranch: workspace.baseBranch),
-              let next = try? await Git.repositoryContext(in: workspace.path, baseBranch: base),
-              current.baseRemote == next.baseRemote,
-              (try? await Git.baseRevision(branch: base, in: workspace.path)) != nil else { return nil }
+              let current = try? await Git.repositoryContext(
+                in: workspace.path, baseBranch: workspace.baseBranch, branch: workspace.branch
+              ) else { return nil }
+        if let remote = current.baseRemote {
+            _ = await Git.fetch(base, in: workspace.path, remote: remote)
+            guard await Git.revision(of: "refs/remotes/\(remote)/\(base)", in: workspace.path) != nil else {
+                return nil
+            }
+        } else {
+            guard await Git.revision(of: "refs/heads/\(base)", in: workspace.path) != nil else { return nil }
+        }
         return base
     }
 

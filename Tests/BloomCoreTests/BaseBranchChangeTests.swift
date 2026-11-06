@@ -33,7 +33,7 @@ struct BaseBranchChangeTests {
 
     @Test("A workspace with no worktree on this Mac lists nothing rather than asking elsewhere")
     func noWorktreeListsNothing() async {
-        #expect(await BaseBranchChange.load(repoPath: "", excluding: "quiet-harbour").isEmpty)
+        #expect(await BaseBranchChange.load(repoPath: "", excluding: "quiet-harbour", baseBranch: "main").isEmpty)
     }
 
     @Test("A listed branch is accepted")
@@ -92,7 +92,9 @@ struct BaseBranchChangeListingTests {
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Fix draft tickets")
         try await Shell.check("git", ["branch", "ownweb"], cwd: repo.path)
 
-        let options = await BaseBranchChange.load(repoPath: workspace.path, excluding: workspace.branch)
+        let options = await BaseBranchChange.load(
+            repoPath: workspace.path, excluding: workspace.branch, baseBranch: workspace.baseBranch
+        )
 
         #expect(options.contains("main"))
         #expect(options.contains("ownweb"))
@@ -153,4 +155,101 @@ struct BaseBranchChangeListingTests {
         )
         #expect(await BaseBranchChange.adoptable(from: retargeted, by: workspace) == nil)
     }
+
+    @Test("Targets come from the base remote for both pinned and tracked upstream bases", arguments: [true, false])
+    func listsUpstreamTargets(pinned: Bool) async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try await Shell.check("git", ["checkout", "-b", "feature"], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "origin", repo.path], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "upstream", repo.path], cwd: repo.path)
+        let remoteKey = pinned ? "branch.feature.bloom-base-remote" : "branch.main.remote"
+        try await Shell.check("git", ["config", remoteKey, "upstream"], cwd: repo.path)
+        try await Shell.check("git", ["update-ref", "refs/remotes/origin/fork-only", "HEAD"], cwd: repo.path)
+        try await Shell.check("git", ["update-ref", "refs/remotes/upstream/upstream-only", "HEAD"], cwd: repo.path)
+        try await Shell.check("git", ["branch", "local-only"], cwd: repo.path)
+        try await Shell.check("git", ["branch", "fork-tracked"], cwd: repo.path)
+        try await Shell.check("git", ["config", "branch.fork-tracked.remote", "origin"], cwd: repo.path)
+
+        let options = await BaseBranchChange.load(repoPath: repo.path, excluding: "feature", baseBranch: "main")
+
+        #expect(options.contains("upstream-only"))
+        #expect(options.contains("local-only"))
+        #expect(!options.contains("fork-only"))
+        #expect(!options.contains("fork-tracked"))
+    }
+
+    @Test("Recording a remote-only target preserves an unpinned upstream base")
+    func recordsUpstreamRemote() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try await Shell.check("git", ["checkout", "-b", "feature"], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "origin", repo.path], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "upstream", repo.path], cwd: repo.path)
+        try await Shell.check("git", ["config", "branch.main.remote", "upstream"], cwd: repo.path)
+        let workspace = Workspace(repoID: RepoID("repo"), name: "Sea", branch: "feature", path: repo.path, baseBranch: "main")
+
+        try await BaseBranchChange.record("release", for: workspace)
+
+        let context = try await Git.repositoryContext(in: repo.path)
+        #expect(context.baseBranch == "release")
+        #expect(context.baseRemote == "upstream")
+        #expect(context.publishRemote == "origin")
+    }
+
+    @Test("PR retargeting fetches the upstream branch even when no local target exists")
+    func adoptsRemoteOnlyUpstreamTarget() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        let upstream = try await TempRepo()
+        defer { upstream.cleanUp() }
+        try await Shell.check("git", ["branch", "release"], cwd: upstream.path)
+        try await Shell.check("git", ["checkout", "-b", "feature"], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "origin", repo.path], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "upstream", upstream.path], cwd: repo.path)
+        try await Shell.check("git", ["config", "branch.main.remote", "upstream"], cwd: repo.path)
+        let workspace = Workspace(repoID: RepoID("repo"), name: "Sea", branch: "feature", path: repo.path, baseBranch: "main")
+        let pullRequest = PullRequest(number: 1, title: "", url: "", state: "OPEN", branch: "feature", baseBranch: "release")
+
+        #expect(await BaseBranchChange.adoptable(from: pullRequest, by: workspace) == "release")
+        #expect(await Git.revision(of: "refs/remotes/upstream/release", in: repo.path) != nil)
+        #expect(await Git.revision(of: "refs/remotes/origin/release", in: repo.path) == nil)
+    }
+
+    @Test("A local or fork namesake cannot stand in for a missing upstream PR target")
+    func refusesWrongRemoteNamesake() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        let upstream = try await TempRepo()
+        defer { upstream.cleanUp() }
+        try await Shell.check("git", ["checkout", "-b", "feature"], cwd: repo.path)
+        try await Shell.check("git", ["branch", "release"], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "origin", repo.path], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "upstream", upstream.path], cwd: repo.path)
+        try await Shell.check("git", ["config", "branch.feature.bloom-base-remote", "upstream"], cwd: repo.path)
+        try await Shell.check("git", ["update-ref", "refs/remotes/origin/release", "HEAD"], cwd: repo.path)
+        let workspace = Workspace(repoID: RepoID("repo"), name: "Sea", branch: "feature", path: repo.path, baseBranch: "main")
+        let pullRequest = PullRequest(number: 1, title: "", url: "", state: "OPEN", branch: "feature", baseBranch: "release")
+
+        #expect(await BaseBranchChange.adoptable(from: pullRequest, by: workspace) == nil)
+    }
+
+    @Test("Changing a local base does not silently select origin when the new branch has no tracking")
+    func recordsLocalBase() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try await Shell.check("git", ["checkout", "-b", "feature"], cwd: repo.path)
+        try await Shell.check("git", ["remote", "add", "origin", repo.path], cwd: repo.path)
+        try await Shell.check("git", ["config", "branch.main.remote", "."], cwd: repo.path)
+        try await Shell.check("git", ["branch", "release"], cwd: repo.path)
+        let workspace = Workspace(repoID: RepoID("repo"), name: "Sea", branch: "feature", path: repo.path, baseBranch: "main")
+
+        try await BaseBranchChange.record("release", for: workspace)
+
+        let context = try await Git.repositoryContext(in: repo.path)
+        #expect(context.baseBranch == "release")
+        #expect(context.baseRemote == nil)
+        #expect(context.publishRemote == "origin")
+    }
+
 }

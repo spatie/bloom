@@ -56,6 +56,55 @@ struct NavigationHistoryTests {
         #expect(!history.canMove(1, isReachable: everywhere))
     }
 
+    @Test("the first departure from Home leaves somewhere for Back to return")
+    func firstDepartureKeepsHome() {
+        var history = NavigationHistory()
+        let home = NavigationPlace(selection: .home, tab: nil)!
+        history.recordDeparture(home)
+        history.visit(place(first))
+
+        let back = history.move(-1, isReachable: everywhere)
+        #expect(back == home)
+    }
+
+    @Test("leaving a workspace preserves its tab even after later visits choose another")
+    func workspaceDeparturePreservesTab() {
+        var history = visited(place(first))
+        history.recordDeparture(place(first, chat))
+        history.visit(place(second))
+        history.recordDeparture(place(second, terminal))
+        history.visit(place(first))
+        history.settle(chat, in: first)
+        history.visit(place(first, terminal))
+
+        _ = history.move(-1, isReachable: everywhere)
+        let secondWorkspace = history.move(-1, isReachable: everywhere)
+        let originalTab = history.move(-1, isReachable: everywhere)
+        #expect(secondWorkspace == place(second, terminal))
+        #expect(originalTab == place(first, chat))
+    }
+
+    @Test("going Back completes the current workspace so Forward restores its tab")
+    func departureBeforeBackPreservesForward() {
+        var history = visited(place(first, chat), place(second))
+        history.recordDeparture(place(second, terminal))
+        _ = history.move(-1, isReachable: everywhere)
+
+        let forward = history.move(1, isReachable: everywhere)
+        #expect(forward == place(second, terminal))
+    }
+
+    @Test("a close fallback does not become a new visit on departure")
+    func automaticFallbackIsNotAVisit() {
+        var history = visited(place(first, chat), place(first, terminal))
+        history.recordDeparture(place(first, chat))
+        history.visit(place(second))
+
+        #expect(history.places == [place(first, chat), place(first, terminal), place(second)])
+        let back = history.move(-1) { $0 != place(first, terminal) }
+        #expect(back == place(first, chat))
+    }
+
     @Test("the place you are already on is not recorded twice")
     func repeatedPlaceIsIgnored() {
         let history = visited(place(first, chat), place(first, chat))
@@ -69,6 +118,18 @@ struct NavigationHistoryTests {
 
         let later = visited(place(first, chat), place(first, terminal))
         #expect(later.places.count == 2)
+    }
+
+    @Test("a narrowed selection in the current workspace keeps its settled tab")
+    func narrowedSelectionDoesNotAddAVisit() {
+        var history = visited(place(first, chat), place(second))
+        _ = history.move(-1, isReachable: everywhere)
+        let narrowed = NavigationPlace(selection: .subagent(first, SubagentID("agent")), tab: nil)!
+        history.visit(narrowed)
+
+        #expect(history.places == [place(first, chat), place(second)])
+        #expect(history.index == 0)
+        #expect(history.canMove(1, isReachable: everywhere))
     }
 
     /// Arriving on a workspace with two chats files it before the strip has loaded. Moving to the
@@ -146,6 +207,34 @@ struct NavigationHistoryTests {
         let moved = history.move(-1, isReachable: nowhere)
         #expect(moved == nil)
         #expect(history.index == 1)
+    }
+
+    @Test("closed project-free conversations are skipped in both directions")
+    func closedConversationsAreSkipped() {
+        let closed = SessionID("closed")
+        let open = SessionID("open")
+        let closedPlace = NavigationPlace(selection: .conversation(closed), tab: nil)!
+        let openPlace = NavigationPlace(selection: .conversation(open), tab: nil)!
+        var history = visited(place(first), closedPlace, openPlace)
+        let reachable: (NavigationPlace) -> Bool = { destination in
+            destination.isReachable(workspace: { _, _ in true }, conversation: { $0 == open })
+        }
+
+        let back = history.move(-1, isReachable: reachable)
+        let forward = history.move(1, isReachable: reachable)
+        #expect(back == place(first))
+        #expect(forward == openPlace)
+    }
+
+    @Test("Home and Mail stay reachable while workspace and conversation lists change")
+    func permanentDestinationsStayReachable() {
+        for selection in [SidebarSelection.home, .mail] {
+            let destination = NavigationPlace(selection: selection, tab: nil)!
+            let reachable = destination.isReachable(
+                workspace: { _, _ in false }, conversation: { _ in false }
+            )
+            #expect(reachable)
+        }
     }
 
     @Test("the oldest place falls off past the capacity")

@@ -7,9 +7,18 @@ import BloomCore
 /// `WorkspaceTabsStore.select`. What a place is, and how the history walks, is
 /// `NavigationHistory` in the core.
 extension AppModel {
+    func recordNavigationDeparture() {
+        guard !isRestoringNavigation,
+              let place = NavigationPlace(
+                  selection: selection,
+                  tab: selectedModel.flatMap { WorkspaceTabsStore.shared.selectedTab(in: $0) }
+              ) else { return }
+        navigationHistory.recordDeparture(place)
+    }
+
     /// Filed without a tab: a workspace's strip loads after it is selected, so the tab read here
-    /// would be a guess (the first terminal, before the chats have arrived). The tab is named by
-    /// `recordTabSelection` the first time the user leaves it.
+    /// would be a guess (the first terminal, before the chats have arrived). A tab change or the
+    /// next departure names it after the strip has loaded.
     func recordNavigation() {
         guard !isRestoringNavigation,
               let place = NavigationPlace(selection: selection, tab: nil) else { return }
@@ -17,7 +26,7 @@ extension AppModel {
     }
 
     func recordTabSelection(_ tab: PaneContent, in workspace: WorkspaceID, leaving previous: PaneContent?) {
-        guard !isRestoringNavigation, selection.workspaceID == workspace else { return }
+        guard !isRestoringNavigation, selection.workspaceID == workspace, tab != previous else { return }
         if let previous { navigationHistory.settle(previous, in: workspace) }
         guard let place = NavigationPlace(selection: selection, tab: tab) else { return }
         navigationHistory.visit(place)
@@ -28,6 +37,7 @@ extension AppModel {
     }
 
     func stepNavigation(by step: Int) {
+        recordNavigationDeparture()
         guard let place = navigationHistory.move(step, isReachable: isReachable) else { return }
         isRestoringNavigation = true
         defer { isRestoringNavigation = false }
@@ -36,11 +46,14 @@ extension AppModel {
         WorkspaceTabsStore.shared.select(tab, in: model)
     }
 
-    /// A workspace archived since, or a tab closed since, is not somewhere to go back to.
+    /// Archived workspaces, closed tabs and closed project-free conversations are skipped.
     private func isReachable(_ place: NavigationPlace) -> Bool {
-        guard case .workspace(let id) = place.selection else { return true }
-        guard workspaces.contains(where: { $0.id == id }) else { return false }
-        guard let tab = place.tab, let model = existingModel(for: id) else { return true }
-        return WorkspaceTabsStore.shared.entries(in: model).contains(tab)
+        place.isReachable { id, tab in
+            guard workspaces.contains(where: { $0.id == id }) else { return false }
+            guard let tab, let model = existingModel(for: id) else { return true }
+            return WorkspaceTabsStore.shared.entries(in: model).contains(tab)
+        } conversation: { id in
+            ask.sessions.contains(where: { $0.id == id })
+        }
     }
 }

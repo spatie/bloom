@@ -255,6 +255,7 @@ struct CreateWorkspaceView: View {
         }
         .frame(width: Self.width)
         .background(Palette.surface)
+        .routesFileDropsToComposer()
         // One task keyed on the project, not a task plus an onChange: the pair ran `load` twice on
         // every open (the first pass writes `repoID`, which fired the onChange), and a load left
         // in flight when the project changed could land another project's branches on this one's

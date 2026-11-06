@@ -92,22 +92,36 @@ extension AppModel {
     /// The branch the Changes tab, the diff stat and Create PR measure from.
     func changeBaseBranch(of workspace: Workspace, to base: String) async {
         guard base != workspace.baseBranch else { return }
-        let available = await BaseBranchChange.load(repoPath: workspace.path, excluding: workspace.branch)
+        let request = baseBranchChanges.begin(for: workspace.id)
+        let available = await BaseBranchChange.load(
+            repoPath: workspace.path, excluding: workspace.branch, baseBranch: workspace.baseBranch
+        )
+        guard baseBranchChanges.isCurrent(request) else { return }
         if let refusal = BaseBranchChange.refusal(of: base, branch: workspace.branch, available: available) {
             alert = BloomAlert(title: "Could not change the target branch", message: refusal)
             return
         }
-        do {
-            try await writeBaseBranch(base, of: workspace)
-        } catch {
-            alert = BloomAlert(title: "Could not change the target branch", message: error.readableMessage)
+        await baseBranchChanges.write(request) {
+            do {
+                try await self.writeBaseBranch(base, of: workspace)
+            } catch {
+                self.alert = BloomAlert(title: "Could not change the target branch", message: error.readableMessage)
+            }
         }
     }
 
     /// An open pull request's target, taken without a word: it arrives from a poll, not a press.
-    func adoptPullRequestBase(_ pullRequest: PullRequest?, for workspace: Workspace) async {
-        guard let base = await BaseBranchChange.adoptable(from: pullRequest, by: workspace) else { return }
-        try? await writeBaseBranch(base, of: workspace)
+    func adoptPullRequestBase(
+        _ pullRequest: PullRequest?, for workspace: Workspace,
+        isCurrent: @MainActor @escaping () -> Bool
+    ) async {
+        guard isCurrent(), BaseBranchChange.adopted(from: pullRequest, by: workspace) != nil else { return }
+        let request = baseBranchChanges.begin(for: workspace.id)
+        guard let base = await BaseBranchChange.adoptable(from: pullRequest, by: workspace),
+              isCurrent() else { return }
+        await baseBranchChanges.write(request, isCurrent: isCurrent) {
+            try? await self.writeBaseBranch(base, of: workspace)
+        }
     }
 
     private func writeBaseBranch(_ base: String, of workspace: Workspace) async throws {

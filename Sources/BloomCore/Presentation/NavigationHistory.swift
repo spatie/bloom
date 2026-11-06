@@ -23,6 +23,19 @@ public struct NavigationPlace: Hashable, Sendable {
         self.selection = selection
         self.tab = tab
     }
+
+    /// The live lists own reachability, including project-free conversations that have closed.
+    public func isReachable(
+        workspace: (WorkspaceID, PaneContent?) -> Bool,
+        conversation: (SessionID) -> Bool
+    ) -> Bool {
+        switch selection {
+        case .home, .mail: true
+        case .workspace(let id): workspace(id, tab)
+        case .conversation(let id): conversation(id)
+        case .archived, .archivedConversation, .subagent, .subagentCall, .crew: false
+        }
+    }
 }
 
 /// Back and Forward across workspaces and their tabs, the way a browser steps through pages.
@@ -44,15 +57,26 @@ public struct NavigationHistory: Sendable {
             return
         }
         guard places[index] != place else { return }
-        // A workspace opened before its strip exists is filed without a tab; the tab it then lands
-        // on completes that entry instead of adding a Back press that changes nothing.
-        if places[index].tab == nil, places[index].selection == place.selection {
-            places[index] = place
+        // An arriving tab completes its unresolved workspace entry. A narrowed sidebar selection
+        // names that workspace without a tab and must not discard the tab or add another step.
+        if places[index].selection == place.selection,
+           places[index].tab == nil || place.tab == nil {
+            if place.tab != nil { places[index] = place }
             return
         }
         places = Array(places.prefix(index + 1)) + [place]
         if places.count > Self.capacity { places.removeFirst() }
         index = places.count - 1
+    }
+
+    /// The first departure keeps Home available to Back. Later departures only complete an
+    /// unresolved arrival, so an automatic fallback after closing a tab does not add a visit.
+    public mutating func recordDeparture(_ place: NavigationPlace) {
+        if places.isEmpty {
+            visit(place)
+        } else if let workspace = place.selection.workspaceID, let tab = place.tab {
+            settle(tab, in: workspace)
+        }
     }
 
     /// A workspace is filed on arrival, before its strip has loaded, so it has no tab. When the

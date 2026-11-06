@@ -401,6 +401,7 @@ private struct RootSidebarColumn: View {
 
     var body: some View {
         SidebarView()
+            .routesFileDropsToComposer()
             // Replaced by `SidebarToggleButton`, so it can share glass with New.
             .toolbar(removing: .sidebarToggle)
             .environment(\.isSidebarFolded, !isSidebarVisible)

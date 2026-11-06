@@ -156,6 +156,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         }
         textView.onWindowChange = { [weak coordinator = context.coordinator, weak textView] in
             guard let coordinator, let textView else { return }
+            coordinator.parent.handle?.resumeRoutedDrops()
             coordinator.applyFocus(to: textView)
         }
         textView.onAttach = { [weak coordinator = context.coordinator] sources, range in
@@ -220,6 +221,8 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         handle?.textView = textView
         handle?.coordinator = context.coordinator
+        textView.dropHint = handle?.dropHint
+        textView.routedDropSession = handle?.dropEndpoint?.session
 
         let scrollView = NSScrollView()
         scrollView.contentView = ComposerClipView()
@@ -236,6 +239,8 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         handle?.textView = textView
         handle?.coordinator = context.coordinator
+        textView.dropHint = handle?.dropHint
+        textView.routedDropSession = handle?.dropEndpoint?.session
         let theme = ColourThemePreference.shared.choice
         if let previous = context.coordinator.lastTheme, previous != theme {
             textView.needsDisplay = true
@@ -555,11 +560,42 @@ final class ComposerEditorHandle {
     fileprivate weak var textView: ComposerTextView?
     fileprivate weak var coordinator: ComposerTextEditor.Coordinator?
 
+    /// What a file dropped elsewhere in the window is handed to. See `TypeToComposer.dropTarget`.
+    var dropEndpoint: ComposerDropEndpoint? {
+        didSet {
+            oldValue?.session.cancelAll()
+            dropHint.reset()
+            textView?.routedDropSession = dropEndpoint?.session
+        }
+    }
+
+    /// A relay can outlive the sheet or chat it delivered to. Its pending files belong to this
+    /// endpoint and must stop before the discarded draft can be written again.
+    func cancelRoutedDrops() {
+        dropEndpoint = nil
+        dropHint.reset()
+    }
+
+    /// AppKit can detach and reattach a retained editor without changing its SwiftUI identity.
+    /// Old promises stay cancelled while the reattached composer gets a fresh destination.
+    func resumeRoutedDrops() {
+        guard let endpoint = dropEndpoint, !endpoint.session.isActive else { return }
+        dropEndpoint = ComposerDropEndpoint(attach: endpoint.attach, fail: endpoint.fail)
+    }
+
+    let dropHint = ComposerDropHint()
+
+    /// Whether the editor is on screen in `window`, which a composer kept laid out for a workspace
+    /// the window has left is not.
+    func isShown(in window: NSWindow) -> Bool {
+        guard let textView else { return false }
+        return textView.window === window && !textView.isHiddenOrHasHiddenAncestor
+    }
+
     /// The binding is set first: the deferred focus report would let a redraw in between read
     /// "not focused" and take the keyboard back.
     func takeKeyboard(in window: NSWindow) -> Bool {
-        guard let textView, let coordinator, textView.window === window,
-              !textView.isHiddenOrHasHiddenAncestor else { return false }
+        guard let textView, let coordinator, isShown(in: window) else { return false }
         coordinator.parent.isFocused = true
         textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
         return window.makeFirstResponder(textView)
@@ -631,4 +667,13 @@ final class ComposerEditorHandle {
         textView.setSelectedRange(NSRange(location: replaced.location + written.length, length: 0))
         return true
     }
+}
+
+/// The two things a composer lets the rest of the window do with a file dropped away from it:
+/// attach it, and report that it could not be read.
+@MainActor
+struct ComposerDropEndpoint {
+    let session = AttachmentDropSession()
+    var attach: @MainActor @Sendable ([AttachmentSource]) -> Bool
+    var fail: @MainActor @Sendable (String) -> Void
 }

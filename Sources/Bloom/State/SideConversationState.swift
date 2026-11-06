@@ -1,3 +1,4 @@
+import AppKit
 import BloomCore
 import Foundation
 import Observation
@@ -14,4 +15,9 @@ final class SideConversationState {
     var error: String?
     var pendingQuestion = ""
     @ObservationIgnored var task: Task<Void, Never>?
+    /// The view behind the card, so a drag can ask where the card is in the window when it needs
+    /// to and nothing has to track it while it animates. See `FileDropTarget`.
+    @ObservationIgnored weak var cardAnchor: NSView?
+
+    var windowFrame: CGRect { cardAnchor.map { $0.convert($0.bounds, to: nil) } ?? .zero }
 }

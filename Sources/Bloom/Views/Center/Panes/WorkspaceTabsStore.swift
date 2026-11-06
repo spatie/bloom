@@ -215,7 +215,7 @@ final class WorkspaceTabsStore {
               layout(of: current).panes.allSatisfy({ self.content(of: $0, in: current) == content })
         else { return }
         if let next = TabClosure.selectionAfterClosing(content, selected: current, tabs: entries) {
-            select(next, in: model)
+            select(next, in: model, recordingNavigation: false)
         }
     }
 
@@ -339,13 +339,13 @@ final class WorkspaceTabsStore {
     /// request button all speak about one conversation, so a tab whose focused pane is a chat says
     /// which one that is. A tab whose focused pane is a shell or a page says nothing about it and
     /// leaves the last answer standing, which is what clicking a terminal tab has always done.
-    func select(_ tab: PaneContent, in model: WorkspaceModel) {
+    func select(_ tab: PaneContent, in model: WorkspaceModel, recordingNavigation: Bool = true) {
         let previous = selectedTab(in: model)
         // A selected tab remains clickable. Do not turn that click into an observed dictionary
         // mutation and a redraw of the strip and panes when the selection did not move.
         if selected[model.workspace.id] != tab { selected[model.workspace.id] = tab }
         adoptActiveSession(of: tab, in: model)
-        onTabSelected?(model.workspace.id, tab, previous)
+        if recordingNavigation { onTabSelected?(model.workspace.id, tab, previous) }
     }
 
     /// Next Tab and Previous Tab, which is the pointer-free way round the strip.

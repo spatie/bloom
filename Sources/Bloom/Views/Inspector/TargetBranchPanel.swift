@@ -52,7 +52,7 @@ struct TargetBranchPanel: View {
         }
         .frame(width: Self.width)
         .task {
-            options = await BaseBranchChange.load(repoPath: worktree, excluding: branch)
+            options = await BaseBranchChange.load(repoPath: worktree, excluding: branch, baseBranch: baseBranch)
             let current = WorkspaceSource.newBranch(from: baseBranch)
             selected = self.matches.settled(after: current, in: .newBranch)
         }
