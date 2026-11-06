@@ -534,7 +534,7 @@ extension AppModel {
         let departure = ArchiveNavigation.destination(leaving: selection, archiving: workspace.id)
         if let departure { selection = departure }
 
-        var facts = archiveFacts(of: workspace, in: repo)
+        var facts = archiveFacts(of: workspace, in: repo, skipArchiveScript: skipArchiveScript)
         do {
             try await manager.archive(
                 workspace: workspace,
