@@ -42,16 +42,11 @@ struct ContextWindowUsage: Equatable {
     /// number and no indication that the number was a problem.
     var isCrowded: Bool { fraction >= Self.crowdedAt }
 
-    /// The most recent reading a whole transcript holds, or nil when the session has not run a
-    /// turn yet and so has never been told either number.
-    ///
-    /// For the one caller that has the whole list and nothing held: a session being read back off
-    /// disk. Everything after that goes through `updated(_:with:)` below, because this walk cannot
-    /// stop early when there is no answer to find.
-    @MainActor
-    static func latest(in rows: [TranscriptRow]) -> Self? {
-        updated(nil, with: rows)
-    }
+    /// Neither number heard yet. See `updated(_:with:)` for why a half reading is held.
+    static let unknown = Self(used: 0, limit: 0)
+
+    /// Nil until both numbers have been heard, so nothing draws a gauge from half a reading.
+    var known: Self? { used > 0 && limit > 0 ? self : nil }
 
     /// What newly arrived rows say about the window, folded onto what was already known.
     ///
@@ -61,6 +56,9 @@ struct ContextWindowUsage: Equatable {
     /// recomputed from the whole transcript. Nought means "this line did not say", never "the
     /// window is empty", which is why neither is ever overwritten with one.
     ///
+    /// **Half a reading is kept too.** The two lines usually land in separate batches, so a fold
+    /// that dropped whatever lacked its partner never had both and the live gauge never appeared.
+    ///
     /// Walked backwards and stopped as soon as both numbers are in hand, because the answer is in
     /// the last few rows of whatever it is handed.
     ///
@@ -68,8 +66,8 @@ struct ContextWindowUsage: Equatable {
     /// own window, and its usage says nothing about the one the composer is about to add to.
     @MainActor
     static func updated(
-        _ held: Self?, with rows: some BidirectionalCollection<TranscriptRow>
-    ) -> Self? {
+        _ held: Self, with rows: some BidirectionalCollection<TranscriptRow>
+    ) -> Self {
         var used = 0
         var limit = 0
 
@@ -94,10 +92,7 @@ struct ContextWindowUsage: Equatable {
             if used > 0, limit > 0 { break }
         }
 
-        if used == 0 { used = held?.used ?? 0 }
-        if limit == 0 { limit = held?.limit ?? 0 }
-        guard used > 0, limit > 0 else { return nil }
-        return Self(used: used, limit: limit)
+        return Self(used: used > 0 ? used : held.used, limit: limit > 0 ? limit : held.limit)
     }
 
     @MainActor
