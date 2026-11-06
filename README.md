@@ -114,8 +114,8 @@ read when a browser pane opens.
 #### Laravel Herd
 
 Herd 2 serves a worktree as a site of its own with `herd workspace`: a `.test` domain, a
-certificate and, if asked, a database. The domain is named after the worktree's folder and the
-parent site, `<folder>.<site>.test`, so it cannot be stated once in `browser.url`. Hand Herd's answer
+certificate and, if asked, a database. The domain is named after the workspace and the
+parent site, `<workspace>.<site>.test`, so it cannot be stated once in `browser.url`. Hand Herd's answer
 to Bloom from the setup script instead, and let the archive script take the site down again:
 
 ```bash
