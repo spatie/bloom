@@ -1,13 +1,16 @@
 import SwiftUI
+import BloomCore
 
 /// What the composer's context gauge says when it is opened.
 ///
-/// Three rows and a bar, and no more than that. Conductor's version of this popover breaks the
-/// window down by system prompt, memory files, skills, MCP tools and custom agents. Claude Code's
-/// stream reports none of those, so those rows would be numbers we made up, and a made-up number
-/// next to a real one makes the real one unbelievable too.
+/// The breakdown is the CLI's own count, asked of the running process as the popover opens.
+/// Where nothing can answer (Codex, Grok, no process yet) the popover says so rather than guess.
 struct ContextWindowDetail: View {
     var usage: ContextWindowUsage
+    var loadBreakdown: (@MainActor () async -> ContextBreakdown?)?
+
+    @State private var breakdown: ContextBreakdown?
+    @State private var hasAsked = false
 
     private static let width: CGFloat = 252
     private static let barHeight: CGFloat = 6
@@ -31,6 +34,9 @@ struct ContextWindowDetail: View {
 
             VStack(spacing: Metrics.spacingSmall) {
                 row("In context", tokens: usage.used, tint: Palette.accent)
+                ForEach(breakdown?.categories ?? [], id: \.name) { category in
+                    detailRow(category)
+                }
                 row(
                     "Available",
                     tokens: usage.remaining,
@@ -38,13 +44,34 @@ struct ContextWindowDetail: View {
                 )
             }
 
-            Text("Detailed allocation is not reported by the agent.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            if hasAsked, breakdown == nil {
+                Text("Detailed allocation is not reported by the agent.")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(Metrics.gutter)
         .frame(width: Self.width)
+        .task {
+            breakdown = await loadBreakdown?()
+            hasAsked = true
+        }
+    }
+
+    /// Indented under "In context" by the width of its dot, so the names line up with its title.
+    private func detailRow(_ category: ContextBreakdown.Category) -> some View {
+        HStack(spacing: Metrics.spacing) {
+            Text(category.name)
+
+            Spacer(minLength: Metrics.spacing)
+
+            Text(ContextWindowUsage.format(category.tokens))
+                .monospacedDigit()
+        }
+        .font(Typo.caption)
+        .foregroundStyle(Palette.textSecondary)
+        .padding(.leading, Metrics.dot + Metrics.spacing)
     }
 
     private func row(_ title: String, tokens: Int, tint: Color) -> some View {

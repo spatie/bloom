@@ -40,6 +40,8 @@ public protocol SessionRunner: Actor {
     /// answers it separately, because there Stop makes the process count as gone before it is.
     var mayStillEndTurn: Bool { get }
     func evictIfIdle(for duration: Duration) async -> Bool
+    /// What fills the context window, or nil where the backend does not say.
+    func contextBreakdown() async -> ContextBreakdown?
 
     /// Write one turn. Starts whatever has to be started, on first use.
     ///
@@ -81,6 +83,7 @@ public protocol SessionRunner: Actor {
 extension SessionRunner {
     public var mayStillEndTurn: Bool { isProcessAlive }
     public func evictIfIdle(for duration: Duration) async -> Bool { false }
+    public func contextBreakdown() async -> ContextBreakdown? { nil }
     public nonisolated var presentationFeed: AgentPresentationFeed? { nil }
     public func sendDelivery(_ delivery: Delivery) async throws {
         try await send(delivery.sent, recording: delivery.crewPayload)

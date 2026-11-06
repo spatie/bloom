@@ -14,6 +14,8 @@ struct ComposerFooterView: View, Equatable {
     /// anything about the window. Absent rather than zero: a gauge reading 0% would be a claim.
     /// Always nil in the create window, where there is not yet anything to report.
     var context: ContextWindowUsage?
+    /// Compared through `actionIdentity`, like the other callbacks.
+    var loadContextBreakdown: (@MainActor () async -> ContextBreakdown?)?
     /// Whether a turn is running, which is what decides whether Stop is drawn.
     var isRunning: Bool = false
     /// Whether Send would queue the message rather than hand it over. Not the same question as
@@ -192,7 +194,7 @@ struct ComposerFooterView: View, Equatable {
             arrowEdge: .top
         ) {
             if let context {
-                ContextWindowDetail(usage: context)
+                ContextWindowDetail(usage: context, loadBreakdown: loadContextBreakdown)
                     .environment(\.fontScale, 1)
             }
         }

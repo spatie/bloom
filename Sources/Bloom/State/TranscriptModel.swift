@@ -1493,6 +1493,10 @@ final class TranscriptModel {
         }
     }
 
+    func contextBreakdown() async -> ContextBreakdown? {
+        await runner?.contextBreakdown()
+    }
+
     private var isWorkspaceArchiving: Bool {
         workspace.map { app.isArchiving($0.id) } ?? false
     }
