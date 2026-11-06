@@ -91,6 +91,7 @@ final class GitHubSignIn {
     /// `gitlab_username` without a relaunch.
     func gitLabAccess(in directory: String, host: String?) async -> GitHubAvailability.State {
         guard GitLab.isInstalled else { return .notInstalled }
+        await ForgeResolver.invalidateAuthentication()
         var asked = host
         if asked == nil { asked = await GitLab.host(in: directory) }
         await GitLabIdentity.resolve(force: true)

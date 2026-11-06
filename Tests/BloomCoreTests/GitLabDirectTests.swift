@@ -26,6 +26,42 @@ struct GitLabDirectTests {
         }
     }
 
+    @Test("a fork checkout's local alias can merge at the exact confirmed head")
+    func mergesAnAssociatedAlias() async throws {
+        let repo = try await featureRepo()
+        defer { repo.cleanUp() }
+        let head = try await Git.headSHA(of: repo.path)
+        try await git(repo, "branch", "-m", "contributor-feature")
+        try await git(repo, "config", "branch.contributor-feature.bloom-merge-request", "\(project)/-/merge_requests/42")
+        let glab = MergeGlab(head: head)
+        let outcome = try await GitLab.$commandOverride.withValue({ arguments, _ in
+            await glab.execute(arguments)
+        }) {
+            try await GitLab.mergePullRequest(expected(head: head), into: "main", method: .merge, worktree: repo.path)
+        }
+        #expect(outcome == .merged)
+        #expect(await glab.merges.count == 1)
+    }
+
+    @Test("a non-squash choice refuses an MR configured to squash before merging or rebasing")
+    func refusesImplicitSquash() async throws {
+        let repo = try await featureRepo()
+        defer { repo.cleanUp() }
+        let head = try await Git.headSHA(of: repo.path)
+        for method in [GitHub.MergeMethod.merge, .rebase] {
+            let glab = MergeGlab(head: head, squash: true)
+            await #expect(throws: GitHubError.self) {
+                try await GitLab.$commandOverride.withValue({ arguments, _ in
+                    await glab.execute(arguments)
+                }) {
+                    try await GitLab.mergePullRequest(expected(head: head), into: "main", method: method, worktree: repo.path)
+                }
+            }
+            #expect(await glab.merges.isEmpty)
+            #expect(await glab.rebases == 0)
+        }
+    }
+
     @Test("a rebase runs first, and the rebased head is what gets merged")
     func rebasesThenMerges() async throws {
         let repo = try await featureRepo()
@@ -293,15 +329,17 @@ private actor MergeGlab {
     private var head: String
     private let rebasedHead: String?
     private let extraAfterRebase: String?
+    private let squash: Bool
     private var merged = false
     private(set) var merges: [[String]] = []
     private(set) var creates: [[String]] = []
     private(set) var rebases = 0
 
-    init(head: String, rebasedHead: String? = nil, extraAfterRebase: String? = nil) {
+    init(head: String, rebasedHead: String? = nil, extraAfterRebase: String? = nil, squash: Bool = false) {
         self.head = head
         self.rebasedHead = rebasedHead
         self.extraAfterRebase = extraAfterRebase
+        self.squash = squash
     }
 
     func execute(_ arguments: [String]) -> ShellResult {
@@ -330,7 +368,7 @@ private actor MergeGlab {
             {"iid":42,"title":"Feature","web_url":"https://gitlab.com/group/app/-/merge_requests/42",\
             "state":"\(state)","draft":false,"has_conflicts":false,"detailed_merge_status":"mergeable",\
             "source_branch":"feature","target_branch":"main","sha":"\(head)",\
-            "source_project_id":1,"target_project_id":1}
+            "source_project_id":1,"target_project_id":1,"squash_on_merge":\(squash)}
             """, stderr: "")
     }
 }

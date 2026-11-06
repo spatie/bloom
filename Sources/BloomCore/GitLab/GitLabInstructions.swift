@@ -56,7 +56,7 @@ public enum GitLabInstructions {
     public static func defaultTemplate(for id: PromptID) -> String? {
         switch id {
         case .mergePullRequest:
-            "Merge merge request !{{number}} into {{base_branch}} as a {{method}} ({{method_flag}}). "
+            "Merge merge request !{{number}} into {{base_branch}} using {{method}} ({{method_flag}}). "
                 + "It is on the branch {{branch}}."
         case .createPullRequest, .pushLocalWork, .fixConflicts, .continueAfterMerge:
             translate(PromptRegistry.definition(for: id).defaultTemplate)

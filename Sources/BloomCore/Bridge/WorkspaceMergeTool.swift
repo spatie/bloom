@@ -387,11 +387,16 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
     /// cached "Ready to merge" from before somebody pushed a broken commit is the wrong kind of
     /// cheap.
     public static let ask: Reading = { workspace in
-        let forge = await ForgeResolver.client(for: workspace.path)
+        let kind = await ForgeResolver.forge(for: workspace.path)
+        let forge = ForgeResolver.client(of: kind)
         do {
-            guard let pullRequest = try await forge.pullRequest(
-                forBranch: workspace.branch, worktree: workspace.path
-            ) else {
+            let found: PullRequest?
+            if kind == .gitLab {
+                found = try await forge.pullRequest(for: workspace, maxAge: .zero)
+            } else {
+                found = try await forge.pullRequest(forBranch: workspace.branch, worktree: workspace.path)
+            }
+            guard let pullRequest = found else {
                 // gh answered and there is nothing, but only if gh could answer at all. Asked
                 // second because it costs a subprocess and the common case never needs it.
                 let access = await forge.access(in: workspace.path)

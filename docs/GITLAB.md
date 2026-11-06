@@ -29,11 +29,14 @@ this machine's git config, so the answer is not committed for the team. "Not now
 table above stays in charge, so GitHub, and the question comes back the next time the folder is
 added.
 
-The answer is cached per directory until git's config or a settings file is written, or for five
+The answer is cached per directory until git's config, a settings file or glab's installation
+state changes, or for five
 minutes when it is GitHub only because `glab` said no. Where the
 config file's own text settles it, which is every GitHub remote and every machine without `glab`,
 no process runs at all. The `glab` probe runs at most once per host at a time, a yes is kept for
 the launch and a no for five minutes.
+Signing in through Bloom also invalidates routing and remote selection, including any probes
+that were still in flight.
 
 ## What runs
 
@@ -74,13 +77,22 @@ remote to compare them, so a push with the same titles and other contents is ref
 that changed a line beside a confirmed change is not. The description is what `gh pr create --fill`
 writes: one commit's body, or the subjects of several. Not glab's `--fill`, which pushes again.
 
-A merge request is found by its source branch, which GitLab keeps after the branch is deleted, and
-otherwise by the number on the workspace row, as on GitHub: written when a workspace is opened from
+A merge request is found first by the checkout association in git, then by the number on the
+workspace row, and otherwise by its source branch. The number is written when a workspace is opened from
 a merge request and when one is first found. A fork's merge request is only ever found by that
 number, because `glab mr checkout` tracks the fork's branch under a local name GitLab does not know,
 and the same number keeps a branch renamed after its merge request was found. A project that moves
 to the other forge, through the question when it is added or through "Hosted on", forgets these
-numbers, which the other forge would read as its own.
+numbers, which the other forge would read as its own. Clearing them also invalidates displayed
+requests and pending reads. Each read carries a persisted generation, so a late answer cannot
+restore an old forge's number. Mutations refuse a request from another forge or project.
+
+GitLab's project decides whether a merge creates a merge commit or fast-forwards. Bloom labels
+that choice as the project merge method. A rebase merge rebases first and then uses that method.
+If the MR or project is configured to squash, non-squash choices are refused before confirmation
+and checked again before execution. Bloom does not change those settings to make a merge work.
+Rebase and agent merge instructions name the target project explicitly and use the checkout's
+source remote and original source branch, including when the local branch is an alias for a fork.
 
 ## What GitLab says that GitHub has no word for
 

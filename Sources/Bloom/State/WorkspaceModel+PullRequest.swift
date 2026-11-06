@@ -5,6 +5,10 @@ import BloomCore
 
 /// GitHub state and actions shared by the pull request strip and Checks tab.
 extension WorkspaceModel {
+    func invalidatePullRequest() {
+        cancelPullRequestRefresh()
+        WorkspacePullRequests.shared.forget(workspace.id)
+    }
     /// Through `gh`, which is what this Mac has. Nil when GitHub refused this token the runs: an
     /// empty list there would say "no checks", which is the one thing that is not known.
     func readChecks() async -> [CheckRun]? {

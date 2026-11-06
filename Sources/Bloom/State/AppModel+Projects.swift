@@ -143,8 +143,20 @@ extension AppModel {
 
     /// After a project moved forge. See `Store.clearPullRequestNumbers`.
     func forgetPullRequestNumbers(of repoID: RepoID) async {
+        let ids = Set(workspaces.filter { $0.repoID == repoID }.map(\.id))
+        for id in ids {
+            WorkspacePullRequests.shared.suspend(id)
+            workspaceModels[id]?.invalidatePullRequest()
+        }
+        defer {
+            for id in ids { WorkspacePullRequests.shared.resume(id) }
+        }
         do {
             try await store?.clearPullRequestNumbers(repoID: repoID)
+            await reload()
+            for id in ids {
+                Task { await workspaceModels[id]?.refreshPullRequest() }
+            }
         } catch {
             alert = BloomAlert(title: "Could not forget the old pull request numbers", message: error.readableMessage)
         }

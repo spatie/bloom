@@ -198,6 +198,23 @@ struct MergedPullRequestTests {
         #expect(try await store.workspace(id: other.id)?.pullRequestNumber == 333)
     }
 
+    @Test("a forge change rejects an outstanding read even when the row had no number yet")
+    func forgeChangeRejectsLateReads() async throws {
+        let store = try makeTestStore("pr-forge-observation")
+        let workspace = try await seed(store)
+        let before = try #require(try await store.observePullRequest(workspaceID: workspace.id))
+        try await store.clearPullRequestNumbers(repoID: workspace.repoID)
+        let acceptedOld = try await store.acceptPullRequestRead(pullRequest(number: 222), observed: before)
+        #expect(!acceptedOld)
+        #expect(try await store.workspace(id: workspace.id)?.pullRequestNumber == nil)
+        let after = try #require(try await store.observePullRequest(workspaceID: workspace.id))
+        let acceptedNew = try await store.acceptPullRequestRead(pullRequest(number: 333), observed: after)
+        #expect(acceptedNew)
+        #expect(try await store.workspace(id: workspace.id)?.pullRequestNumber == 333)
+        let lateFailure = try await store.acceptPullRequestRead(nil, observed: before)
+        #expect(!lateFailure)
+    }
+
     @Test("the other writers of a workspace row leave the number alone")
     func writersKeepTheNumber() async throws {
         let store = try makeTestStore("pr-number-writers")

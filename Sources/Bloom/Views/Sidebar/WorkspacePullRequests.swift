@@ -27,6 +27,16 @@ final class WorkspacePullRequests {
 
     private var states: [WorkspaceID: PullRequestRefreshState] = [:]
     @ObservationIgnored private var generations: [WorkspaceID: UInt64] = [:]
+    @ObservationIgnored private var suspended: Set<WorkspaceID> = []
+
+    func isSuspended(_ id: WorkspaceID) -> Bool { suspended.contains(id) }
+
+    func suspend(_ id: WorkspaceID) {
+        suspended.insert(id)
+        forget(id)
+    }
+
+    func resume(_ id: WorkspaceID) { suspended.remove(id) }
 
     func failure(for workspaceID: WorkspaceID) -> GitHubReadFailure? { states[workspaceID]?.visibleFailure }
 
@@ -104,6 +114,7 @@ final class WorkspacePullRequests {
     }
 
     private func refresh(_ workspace: Workspace, store: Store?, maxAge: Duration = WorkspacePullRequests.maxAge) async {
+        guard !isSuspended(workspace.id) else { return }
         // A worktree identical to its base has nothing to open a pull request for. Skipping it
         // is what keeps a project full of fresh workspaces from launching a process per row.
         //
@@ -124,12 +135,11 @@ final class WorkspacePullRequests {
         let lookup = Task { @MainActor in
             await previous.value
             guard !Task.isCancelled, self.generations[id, default: 0] == generation else { return }
-            let read = await GitHubBridge.readPullRequest(for: asked, maxAge: maxAge)
+            let observed = await GitHubBridge.observePullRequest(for: asked, maxAge: maxAge, store: store)
             guard !Task.isCancelled, self.generations[id, default: 0] == generation else { return }
-            self.record(read, for: id)
-            guard case .current(let fresh) = read else { return }
-            guard let fresh else { return }
-            await PullRequestNumber.record(fresh, for: asked, in: store)
+            guard await observed.accept(in: store) else { return }
+            guard !Task.isCancelled, self.generations[id, default: 0] == generation else { return }
+            self.record(observed.read, for: id)
         }
         queue = lookup
         await withTaskCancellationHandler { await lookup.value } onCancel: { lookup.cancel() }

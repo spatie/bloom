@@ -107,7 +107,7 @@ struct GitLabCommandTests {
 
         let found = try await lookUp(
             workspace(repo, branch: "8591-iteration-list-total-2", number: 4020),
-            searching: "8591-iteration-list-total-2", detail: "mr-draft-conflicting-fork.json"
+            detail: "mr-draft-conflicting-fork.json"
         )
         #expect(found?.number == 4020)
     }
@@ -120,7 +120,7 @@ struct GitLabCommandTests {
         try await Shell.check("git", ["checkout", "-q", "-b", "renamed-here"], cwd: repo.path)
 
         let found = try await lookUp(
-            workspace(repo, branch: "feature/x", number: 4021), searching: "renamed-here", detail: "mr-not-approved.json"
+            workspace(repo, branch: "feature/x", number: 4021), detail: "mr-not-approved.json"
         )
         #expect(found?.number == 4021)
     }
@@ -128,7 +128,7 @@ struct GitLabCommandTests {
     /// The source branch search answers nothing, as GitLab does for a name it has no merge request
     /// from; only reading the row's number by iid answers.
     private func lookUp(
-        _ workspace: Workspace, searching branch: String, detail name: String
+        _ workspace: Workspace, detail name: String
     ) async throws -> PullRequest? {
         let detail = try fixture(name)
         let jobs = try fixture("jobs-failed-pipeline.json")
@@ -142,7 +142,7 @@ struct GitLabCommandTests {
         }) {
             try await GitLab.pullRequest(for: workspace, maxAge: .zero)
         }
-        #expect(await log.commands.first?.last?.contains("source_branch=\(branch)&") == true)
+        #expect(await log.commands.first?.last?.hasSuffix("/merge_requests/\(workspace.pullRequestNumber ?? 0)") == true)
         return found
     }
 
@@ -159,7 +159,7 @@ struct GitLabCommandTests {
         defer { repo.cleanUp() }
         // Its own host, so the finished pipeline another test reads is not served from the cache.
         try await Shell.check("git", ["remote", "add", "origin", "git@gitlab.unreadable.example:gitlab-org/cli.git"], cwd: repo.path)
-        let detail = try fixture("mr-not-approved.json")
+        let detail = try fixture("mr-not-approved.json").replacingOccurrences(of: "\"status\": \"success\"", with: "\"status\": \"failed\"")
 
         let found = try await GitLab.$commandOverride.withValue({ arguments, _ in
             let endpoint = arguments.last ?? ""
@@ -180,7 +180,7 @@ struct GitLabCommandTests {
         defer { repo.cleanUp() }
         let host = "gitlab-pagination-\(UUID().uuidString).example"
         try await Shell.check("git", ["remote", "add", "origin", "https://\(host)/group/app.git"], cwd: repo.path)
-        let detail = try fixture("mr-not-approved.json")
+        let detail = try fixture("mr-not-approved.json").replacingOccurrences(of: "\"status\": \"success\"", with: "\"status\": \"failed\"")
         let firstPage = "[" + (1...100).map {
             #"{"id":\#($0),"name":"job-\#($0)","status":"success"}"#
         }.joined(separator: ",") + "]"
@@ -212,7 +212,7 @@ struct GitLabCommandTests {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
         try await Shell.check("git", ["remote", "add", "origin", "https://gitlab.example.com/group/app.git"], cwd: repo.path)
-        let draft = PullRequest(number: 7, title: "", url: "", state: "OPEN", isDraft: true, forge: .gitLab)
+        let draft = PullRequest(number: 7, title: "", url: "https://gitlab.example.com/group/app/-/merge_requests/7", state: "OPEN", isDraft: true, forge: .gitLab)
         let log = GlabLog()
 
         try await GitLab.$commandOverride.withValue({ arguments, _ in

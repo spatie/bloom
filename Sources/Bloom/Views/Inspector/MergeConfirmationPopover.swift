@@ -27,9 +27,9 @@ struct MergeConfirmationPopover: View {
     var body: some View {
         ConfirmationPopover(
             title: pullRequest.mergeConfirmationTitle(base: pullRequest.baseBranch ?? baseBranch),
-            confirmLabel: execution == .direct ? method.label : "Ask agent to merge",
+            confirmLabel: execution == .direct ? method.label(on: pullRequest.forge) : "Ask agent to merge",
             tint: tint,
-            canConfirm: canMerge && (execution == .agent || canMergeDirectly),
+            canConfirm: canMerge && pullRequest.mergeMethodProblem(method) == nil && (execution == .agent || canMergeDirectly),
             onConfirm: {
                 let message = SquashCommitMessage(subject: subject, body: messageBody)
                 onConfirm(method == .squash ? message.edited(from: proposed) : nil)
@@ -59,10 +59,13 @@ struct MergeConfirmationPopover: View {
                 Text(warning)
                     .foregroundStyle(Palette.negative)
             }
+            if let problem = pullRequest.mergeMethodProblem(method) {
+                Text(problem).foregroundStyle(Palette.negative)
+            }
 
             if execution == .direct {
                 let forge = pullRequest.forge
-                Text("Bloom will run \(forge.command("merge")) with the selected \(method.label.lowercased()) method. \(forge.name) may queue the merge if this repository requires it.")
+                Text("Bloom will run \(forge.command("merge")) using \(method.phrase(on: forge)). \(forge.name) may queue the merge if this repository requires it.")
                 if forge == .gitLab, method == .rebase {
                     Text("GitLab rebases the branch first, which starts a new pipeline. A project that waits for it will not merge yet.")
                         .foregroundStyle(.secondary)

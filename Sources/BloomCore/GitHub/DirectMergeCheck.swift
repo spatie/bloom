@@ -5,7 +5,7 @@ import Foundation
 enum DirectMergeCheck {
     /// The confirmed head commit and base branch, once this checkout is known to be exactly that.
     static func confirmed(
-        _ expected: PullRequest, base: String, worktree: String
+        _ expected: PullRequest, base: String, worktree: String, allowsBranchAlias: Bool = false
     ) async throws -> (head: String, base: String) {
         let forge = expected.forge
         guard expected.number > 0, !expected.url.isEmpty,
@@ -13,7 +13,7 @@ enum DirectMergeCheck {
               let expectedBase = expected.baseBranch, !expectedBase.isEmpty else {
             throw GitHubError("Refresh the \(forge.request) before merging directly.")
         }
-        if !expected.branch.isEmpty,
+        if !allowsBranchAlias, !expected.branch.isEmpty,
            try await Git.currentBranch(of: worktree) != expected.branch {
             throw GitHubError("This worktree is no longer on the \(forge.request)'s branch.")
         }

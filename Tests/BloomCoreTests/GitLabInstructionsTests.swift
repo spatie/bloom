@@ -56,7 +56,7 @@ struct GitLabInstructionsTests {
         )
         let template = GitLabInstructions.defaultTemplate(for: .mergePullRequest) ?? ""
         let rendered = context.render(template: template).text
-        #expect(rendered.hasPrefix("Merge merge request !12 into main as a "))
+        #expect(rendered.hasPrefix("Merge merge request !12 into main using "))
         #expect(rendered.contains("(\(flag))"))
         let turn = ProjectInstructions.turn(rendered, for: .merge, adding: .nothing, forge: .gitLab)
         #expect(turn.contains(GitLabInstructions.merge))

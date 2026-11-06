@@ -374,7 +374,7 @@ final class WorkspaceModel {
     private var arrivalTask: Task<Void, Never>?
 
     private var changesTask: Task<Result<ChangesAnswer, GitFailure>, Never>?
-    private var pullRequestTask: Task<PullRequestRead, Never>?
+    private var pullRequestTask: Task<GitHubBridge.ObservedRead, Never>?
     /// One repository settings read at a time. A request that arrives during a read is remembered,
     /// so the burst ends with one fresh read rather than silently keeping the older answer.
     @ObservationIgnored private var settingsRefresh = RefreshDemand()
@@ -2460,12 +2460,21 @@ final class WorkspaceModel {
     }
 
     /// - Parameter maxAge: how old a cached answer may be. Zero always asks GitHub.
+    func cancelPullRequestRefresh() {
+        pullRequestTask?.cancel()
+        pullRequestTask = nil
+        isLoadingPullRequest = false
+        hasReadPullRequest = false
+    }
+
     func refreshPullRequest(maxAge: Duration = .zero) async {
+        guard !WorkspacePullRequests.shared.isSuspended(workspace.id) else { return }
         pullRequestTask?.cancel()
         let asked = workspace
+        let requestStore = store
 
         let task = Task.detached(priority: .utility) {
-            await GitHubBridge.readPullRequest(for: asked, maxAge: maxAge)
+            await GitHubBridge.observePullRequest(for: asked, maxAge: maxAge, store: requestStore)
         }
         pullRequestTask = task
         // Only before there has been any answer at all, for the same reason the changed file list
@@ -2479,10 +2488,15 @@ final class WorkspaceModel {
         // Before the read is awaited, so the supersession guard below still has nothing after it.
         forge = await ForgeResolver.forge(for: asked.path)
 
-        let read = await task.value
+        let observed = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
+        let accepted = await observed.accept(in: store)
+        guard pullRequestTask == task, !task.isCancelled else { return }
+        let read = observed.read
         pullRequestTask = nil
+        isLoadingPullRequest = false
+        guard accepted else { return }
         // Before the write below, and set whatever came back: a nil from gh is still this
         // workspace having been looked at, and the next refresh has an answer on screen to leave
         // alone. Only a superseded or cancelled refresh, which returns above, says nothing.
@@ -2490,16 +2504,6 @@ final class WorkspaceModel {
         // Failed refreshes retain the last good content. An explicit no-PR answer can now
         // clear it, because the read result distinguishes absence from an unavailable service.
         WorkspacePullRequests.shared.record(read, for: workspace.id)
-        guard case .current(let current) = read else {
-            isLoadingPullRequest = false
-            return
-        }
-        let fresh = current
-        // The number, written where a deleted branch cannot take it. This is the path the band
-        // polls on, so it is the one that fills the column in for a workspace whose pull request
-        // an agent opened rather than the create sheet. See `Workspace.pullRequestNumber`.
-        await PullRequestNumber.record(fresh, for: asked, in: store)
-        isLoadingPullRequest = false
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
     }
 
@@ -2634,6 +2638,9 @@ final class WorkspaceModel {
         squashMessage: SquashCommitMessage? = nil,
         overrides: PromptOverrides = PromptOverrides()
     ) async -> String? {
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
+        catch { return error.readableMessage }
+        if let problem = pullRequest.mergeMethodProblem(method) { return problem }
         guard let session = await sessionForPullRequest(titledIfNew: "Merge") else {
             return "Could not open a session in \(workspace.name) to send the request to."
         }
@@ -2650,9 +2657,16 @@ final class WorkspaceModel {
         let render = context.render(template: overrides.template(for: .mergePullRequest, forge: pullRequest.forge))
 
         let asked = squashMessage?.instruction(proposed: .proposed(for: pullRequest), forge: pullRequest.forge)
+        let location: String?
+        do {
+            location = pullRequest.forge == .gitLab
+                ? try await GitLab.mergeContext(pullRequest, method: method, worktree: workspace.path) : nil
+        } catch { return error.readableMessage }
         let text = await turn(
-            [render.text, asked].compactMap { $0 }.joined(separator: "\n\n"), for: .merge, forge: pullRequest.forge
+            [render.text, location, asked].compactMap { $0 }.joined(separator: "\n\n"), for: .merge, forge: pullRequest.forge
         )
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
+        catch { return error.readableMessage }
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil
@@ -2739,6 +2753,8 @@ final class WorkspaceModel {
             ConflictInstructions.asking(rendered, in: path, contents: contents)
         }.value
         let text = await turn(asked, for: .fixConflicts, forge: forge)
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
+        catch { return error.readableMessage }
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil
@@ -2746,15 +2762,16 @@ final class WorkspaceModel {
 
     /// Asks the agent to have GitLab rebase the merge request onto its target, and nothing more.
     func requestRebase(_ pullRequest: PullRequest) async -> String? {
+        let text: String
+        do {
+            try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path)
+            text = try await GitLab.rebasePrompt(pullRequest, worktree: workspace.path)
+        } catch { return error.readableMessage }
         guard let session = await sessionForPullRequest(titledIfNew: "Rebase") else {
             return "Could not open a session in \(workspace.name) to send the request to."
         }
-        let reference = pullRequest.forge.reference(pullRequest.number)
-        let text = "GitLab will not merge \(reference) until it is rebased onto \(workspace.baseBranch). "
-            + "Run `glab mr rebase \(pullRequest.number)` from this worktree and wait for it to finish, "
-            + "then bring this worktree up to date with `git pull --rebase origin \(workspace.branch)`, so it does not hold the "
-            + "commits from before the rebase. If GitLab or git reports a conflict, stop and say so. "
-            + "Do not merge \(reference) and do not force push."
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
+        catch { return error.readableMessage }
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil

@@ -14,6 +14,8 @@ actor GitLabReads {
     private var finishedJobs: [String: (status: String, runs: [CheckRun], at: ContinuousClock.Instant)] = [:]
     private var remotes: [String: (configWritten: Date?, remote: GitLabRemote?)] = [:]
 
+    func invalidateRemotes() { remotes.removeAll() }
+
     func snapshot(
         for worktree: String, maxAge: Duration,
         read: @escaping @Sendable () async throws -> GitLab.Snapshot?

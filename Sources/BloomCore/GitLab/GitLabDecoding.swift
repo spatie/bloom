@@ -32,6 +32,8 @@ enum GitLabDecoding {
         let targetProjectId: Int?
         let headPipeline: Pipeline?
         let author: Author?
+        let squash: Bool?
+        let squashOnMerge: Bool?
     }
 
     struct JobPayload: Decodable {
@@ -92,7 +94,8 @@ enum GitLabDecoding {
             // GitLab leaves `closed_at` null on a merge; ownership needs it set, as GitHub does.
             closedAt: date(payload.mergedAt) ?? date(payload.closedAt),
             forge: .gitLab,
-            blockers: state == "OPEN" ? MergeBlocker(detailedMergeStatus: detailed).map { [$0] } ?? [] : []
+            blockers: state == "OPEN" ? MergeBlocker(detailedMergeStatus: detailed).map { [$0] } ?? [] : [],
+            squashesOnMerge: payload.squashOnMerge ?? payload.squash
         )
     }
 

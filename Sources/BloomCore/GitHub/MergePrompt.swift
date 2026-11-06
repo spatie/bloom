@@ -50,7 +50,7 @@ public struct MergePromptContext: Sendable, Hashable {
             PromptRegistry.MergePullRequest.title: title.isEmpty ? Self.noTitle : title,
             PromptRegistry.MergePullRequest.branch: branch.isEmpty ? Self.noBranch : branch,
             PromptRegistry.MergePullRequest.baseBranch: baseBranch,
-            PromptRegistry.MergePullRequest.method: method.phrase,
+            PromptRegistry.MergePullRequest.method: method.phrase(on: forge),
             PromptRegistry.MergePullRequest.methodFlag: forge == .gitLab ? GitLabInstructions.flag(for: method) : method.flag,
         ]
     }

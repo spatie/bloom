@@ -43,6 +43,19 @@ public enum ForgeRouting {
 public enum ForgeResolver {
     private static let resolutions = ForgeResolutions()
 
+    fileprivate struct Fingerprint: Sendable, Equatable {
+        let written: [Date?]
+        let glabInstalled: Bool
+    }
+
+    /// Installing a CLI or changing its account can settle a previously refused self-hosted
+    /// remote without touching any repository files.
+    public static func invalidateAuthentication() async {
+        await GlabSignIn.shared.invalidate()
+        await resolutions.invalidate()
+        await GitLabReads.shared.invalidateRemotes()
+    }
+
     public static func client(for directory: String) async -> any ForgeClient.Type {
         client(of: await forge(for: directory))
     }
@@ -58,13 +71,18 @@ public enum ForgeResolver {
         let paths = Git.repositoryPaths(in: directory)
         let checkout = mainCheckout(paths) ?? directory
         let configPath = paths.map { ($0.commonDirectory as NSString).appendingPathComponent("config") }
-        let fingerprint = fingerprint(of: [configPath].compactMap { $0 } + SettingsLoader.candidatePaths(repo: checkout))
+        let fingerprint = Fingerprint(
+            written: fingerprint(of: [configPath].compactMap { $0 } + SettingsLoader.candidatePaths(repo: checkout)),
+            glabInstalled: GlabSignIn.isInstalled()
+        )
+        let generation = await resolutions.generation
         if let known = await resolutions.forge(for: directory, fingerprint: fingerprint) { return known }
 
         let (forge, lasting) = await resolve(directory: directory, checkout: checkout, configPath: configPath)
         // GitHub because glab said no is kept no longer than that no: a VPN that was down comes back.
         let expiry = lasting ? nil : ContinuousClock.now + GlabSignIn.refusalLifetime
-        await resolutions.store(forge, for: directory, fingerprint: fingerprint, expiry: expiry)
+        guard await resolutions.store(forge, for: directory, fingerprint: fingerprint, expiry: expiry, generation: generation)
+        else { return await ForgeResolver.forge(for: directory) }
         return forge
     }
 
@@ -142,16 +160,27 @@ public enum ForgeResolver {
 }
 
 private actor ForgeResolutions {
-    private var entries: [String: (fingerprint: [Date?], forge: Forge, expiry: ContinuousClock.Instant?)] = [:]
+    private var entries: [String: (fingerprint: ForgeResolver.Fingerprint, forge: Forge, expiry: ContinuousClock.Instant?)] = [:]
+    private(set) var generation: UInt64 = 0
 
-    func forge(for directory: String, fingerprint: [Date?]) -> Forge? {
+    func invalidate() {
+        generation &+= 1
+        entries.removeAll()
+    }
+
+    func forge(for directory: String, fingerprint: ForgeResolver.Fingerprint) -> Forge? {
         guard let entry = entries[directory], entry.fingerprint == fingerprint,
               entry.expiry.map({ ContinuousClock.now < $0 }) ?? true else { return nil }
         return entry.forge
     }
 
-    func store(_ forge: Forge, for directory: String, fingerprint: [Date?], expiry: ContinuousClock.Instant?) {
+    func store(
+        _ forge: Forge, for directory: String, fingerprint: ForgeResolver.Fingerprint,
+        expiry: ContinuousClock.Instant?, generation observed: UInt64
+    ) -> Bool {
+        guard observed == generation else { return false }
         entries[directory] = (fingerprint, forge, expiry)
+        return true
     }
 }
 
@@ -164,6 +193,14 @@ actor GlabSignIn {
 
     private var answers: [String: (signedIn: Bool, at: ContinuousClock.Instant)] = [:]
     private var probes: [String: Task<Bool, Never>] = [:]
+    private var generation: UInt64 = 0
+
+    func invalidate() {
+        generation &+= 1
+        answers.removeAll()
+        for probe in probes.values { probe.cancel() }
+        probes.removeAll()
+    }
 
     static func isInstalled() -> Bool {
         GitLab.isInstalled
@@ -173,10 +210,16 @@ actor GlabSignIn {
         if let known = answers[host], known.signedIn || known.at.duration(to: .now) < Self.refusalLifetime {
             return known.signedIn
         }
-        if let running = probes[host] { return await running.value }
+        let observed = generation
+        if let running = probes[host] {
+            let answer = await running.value
+            if observed == generation { return answer }
+            return await isSignedIn(to: host)
+        }
         let probe = Task { await Self.probe(host) }
         probes[host] = probe
         let answer = await probe.value
+        guard observed == generation else { return await isSignedIn(to: host) }
         probes[host] = nil
         answers[host] = (answer, .now)
         return answer

@@ -552,6 +552,7 @@ struct PullRequestSummary: View {
     private var mergeControl: some View {
         MergeSplitButton(
             method: mergeMethod,
+            forge: pullRequest.forge,
             fill: status.tone.fill,
             // Queueing a request does not bypass GitHub's merge restrictions, and neither does a
             // workspace that cannot act on the pull request at all.

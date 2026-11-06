@@ -13,6 +13,28 @@ enum GitHubBridge {
             for: workspace, forge: await ForgeResolver.forge(for: workspace.path)
         )
     }
+    struct ObservedRead: Sendable {
+        let read: PullRequestRead
+        let observation: PullRequestObservation?
+
+        func accept(in store: Store?) async -> Bool {
+            guard let store, let observation else { return true }
+            let found: PullRequest?
+            if case .current(let current) = read { found = current } else { found = nil }
+            return (try? await store.acceptPullRequestRead(found, observed: observation)) == true
+        }
+    }
+
+    static func observePullRequest(for workspace: Workspace, maxAge: Duration, store: Store?) async -> ObservedRead {
+        do {
+            let observed = try await store?.observePullRequest(workspaceID: workspace.id)
+            let read = await readPullRequest(for: observed?.workspace ?? workspace, maxAge: maxAge)
+            return ObservedRead(read: read, observation: observed)
+        } catch {
+            return ObservedRead(read: .unavailable(GitHubReadFailure.classify(error)), observation: nil)
+        }
+    }
+
     static func readPullRequest(for workspace: Workspace, maxAge: Duration = .zero) async -> PullRequestRead {
         guard await ForgeResolver.forge(for: workspace.path) == .gitHub else {
             return await GitLab.readPullRequest(for: workspace, maxAge: maxAge)
@@ -47,16 +69,24 @@ enum GitHubBridge {
     }
 
     static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
-        try await ForgeResolver.client(for: worktree).markReadyForReview(pullRequest, worktree: worktree)
+        try await validateForge(pullRequest, worktree: worktree)
+        try await ForgeResolver.client(of: pullRequest.forge).markReadyForReview(pullRequest, worktree: worktree)
     }
 
     static func mergePullRequest(
         _ pullRequest: PullRequest, base: String, method: GitHub.MergeMethod,
         squashMessage: SquashCommitMessage?, worktree: String
     ) async throws -> DirectMergeOutcome {
-        try await ForgeResolver.client(of: pullRequest.forge).mergePullRequest(
+        try await validateForge(pullRequest, worktree: worktree)
+        return try await ForgeResolver.client(of: pullRequest.forge).mergePullRequest(
             pullRequest, into: base, method: method, squashMessage: squashMessage, worktree: worktree
         )
+    }
+
+    static func validateForge(_ request: PullRequest, worktree: String) async throws {
+        guard await ForgeResolver.forge(for: worktree) == request.forge else {
+            throw GitHubError("The project's forge changed. Refresh the request before continuing.")
+        }
     }
 
     /// Nil when GitHub refused this token the check runs. A failed read is still an empty list,

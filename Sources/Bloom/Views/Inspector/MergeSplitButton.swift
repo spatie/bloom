@@ -35,6 +35,7 @@ struct MergeSplitButton: View {
     /// The method in force for this project. The button promises it and the menu ticks it, and
     /// they are the same value: see `body` for what it takes to keep that true.
     var method: GitHub.MergeMethod
+    var forge: Forge = .gitHub
     /// The colour of the band this stands in.
     var fill: Color
     /// Whether GitHub will take a merge at all. A running agent is not in here: the cluster
@@ -100,7 +101,7 @@ struct MergeSplitButton: View {
                 ForEach(MergeMethodChoice.offered, id: \.self) { offered in
                     // GitHub's own wording here, because this menu is read beside the web UI.
                     // The button says `buttonLabel`, which is a promise about the next press.
-                    Text(offered.label).tag(offered)
+                    Text(offered.label(on: forge)).tag(offered)
                 }
             }
             .pickerStyle(.inline)

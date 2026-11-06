@@ -315,7 +315,8 @@ public enum WorkspaceCheckoutPlan {
                   let number = positiveNumber(parts[index + 1])
             else { return nil }
             return PullRequestReference(
-                number: number, repository: "\(parts[index - 2])/\(parts[index - 1])"
+                number: number, repository: "\(parts[index - 2])/\(parts[index - 1])",
+                host: forge == .gitLab ? host.lowercased() : nil
             )
         }
 
@@ -336,7 +337,7 @@ public enum WorkspaceCheckoutPlan {
               parts.indices.contains(separator + 2), parts[separator + 1] == "merge_requests",
               let number = positiveNumber(parts[separator + 2])
         else { return nil }
-        return PullRequestReference(number: number, repository: parts[..<separator].joined(separator: "/"))
+        return PullRequestReference(number: number, repository: parts[..<separator].joined(separator: "/"), host: url.host?.lowercased())
     }
 
     private static func positiveNumber(_ text: String) -> Int? {
@@ -435,10 +436,12 @@ public struct PullRequestReference: Sendable, Hashable {
     public let number: Int
     /// `owner/name` when the reference came from a URL, nil when a bare number was typed.
     public let repository: String?
+    public let host: String?
 
-    public init(number: Int, repository: String? = nil) {
+    public init(number: Int, repository: String? = nil, host: String? = nil) {
         self.number = number
         self.repository = repository
+        self.host = host
     }
 }
 
@@ -460,13 +463,16 @@ public enum WorkspaceCheckoutResolver {
     /// to have as number 42. Being told the numbers belong to different repositories is a fixable
     /// mistake; silently reviewing the wrong pull request is not.
     public static func problem(
-        with text: String, in repository: String?, forge: Forge = .gitHub
+        with text: String, in repository: String?, forge: Forge = .gitHub, host: String? = nil
     ) -> String? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "Type a pull request number or paste its URL."
         }
         guard let reference = WorkspaceCheckoutPlan.parseReference(text, forge: forge) else {
             return "'\(text.trimmingCharacters(in: .whitespacesAndNewlines))' is not a \(forge.request) number or URL."
+        }
+        if forge == .gitLab, let host, let named = reference.host, named.lowercased() != host.lowercased() {
+            return "That merge request belongs to \(named), and this project is on \(host)."
         }
         if let repository, let named = reference.repository,
            named.lowercased() != repository.lowercased() {
@@ -481,7 +487,8 @@ public enum WorkspaceCheckoutResolver {
         let kind = await ForgeResolver.forge(for: repoPath)
         let forge = await ForgeResolver.client(for: repoPath)
         let slug = await forge.repositorySlug(repoPath: repoPath)
-        if let problem = problem(with: text, in: slug, forge: kind) { return .failure(problem) }
+        let host = kind == .gitLab ? await GitLab.host(in: repoPath) : nil
+        if let problem = problem(with: text, in: slug, forge: kind, host: host) { return .failure(problem) }
         guard let reference = WorkspaceCheckoutPlan.parseReference(text, forge: kind) else {
             return .failure("That is not a pull request number or URL.")
         }

@@ -6,6 +6,7 @@ import Foundation
 /// glab's own JSON and remote guessing. `GitLabReads` shares what can be shared.
 public enum GitLab: ForgeClient {
     @TaskLocal static var commandOverride: (@Sendable ([String], String?) async throws -> ShellResult)?
+    @TaskLocal static var installedOverride: Bool?
 
     private static let readTimeout = Duration.seconds(20)
     /// Checking out fetches objects, so it gets what `gh pr checkout` gets.
@@ -79,6 +80,7 @@ public enum GitLab: ForgeClient {
             throw GitHubError("This merge request is no longer an open draft.")
         }
         guard let project = await project(in: worktree) else { throw notAProject }
+        try validateIdentity(pullRequest, in: project)
         try await check(["mr", "update", String(pullRequest.number), "--ready", "-R", project.webURL], cwd: worktree)
     }
 
@@ -130,6 +132,11 @@ public enum GitLab: ForgeClient {
             ["mr", "checkout", String(number), "--branch", localBranch, "-R", project.webURL],
             cwd: worktree, timeout: checkoutTimeout
         )
+        // Unlike gh, glab records only the source branch. That cannot distinguish two forks
+        // using the same name, or the local alias Bloom chose when that name was taken.
+        try await Git.check([
+            "config", "branch.\(localBranch).bloom-merge-request", "\(project.webURL)/-/merge_requests/\(number)",
+        ], in: worktree)
     }
 
     // MARK: Creating and merging directly
@@ -169,12 +176,16 @@ public enum GitLab: ForgeClient {
         _ expected: PullRequest, into base: String, method: GitHub.MergeMethod,
         squashMessage: SquashCommitMessage? = nil, worktree: String
     ) async throws -> DirectMergeOutcome {
-        let (head, expectedBase) = try await DirectMergeCheck.confirmed(expected, base: base, worktree: worktree)
+        let alias = await checkoutMatches(expected, worktree: worktree)
+        let (head, expectedBase) = try await DirectMergeCheck.confirmed(
+            expected, base: base, worktree: worktree, allowsBranchAlias: alias
+        )
         guard let remote = await remote(in: worktree) else { throw notAProject }
         let project = remote.project
         let number = expected.number
         let current = try await snapshot(number: number, in: project, worktree: worktree).pullRequest
         try DirectMergeCheck.verify(current, against: expected, head: head, base: expectedBase)
+        if let problem = current.mergeMethodProblem(method) { throw GitHubError(problem) }
 
         var mergeHead = head
         if method == .rebase {
@@ -285,7 +296,7 @@ public enum GitLab: ForgeClient {
 
     /// A worktree whose branch changed is asking a different question.
     private static func readKey(_ workspace: Workspace) -> String {
-        "\(workspace.path)\n\(workspace.branch)"
+        "\(workspace.path)\n\(workspace.branch)\n\(workspace.pullRequestNumber ?? 0)"
     }
 
     struct Snapshot: Sendable {
@@ -300,6 +311,10 @@ public enum GitLab: ForgeClient {
     static func snapshot(for workspace: Workspace) async throws -> Snapshot? {
         guard let project = await project(in: workspace.path) else { return nil }
         let head = await GitHub.headBranch(of: workspace)
+        if let number = await checkedOutNumber(branch: head, project: project, worktree: workspace.path)
+            ?? workspace.pullRequestNumber {
+            return try await snapshot(number: number, in: project, worktree: workspace.path)
+        }
         let candidates = try await mergeRequests(withSource: head, in: project, worktree: workspace.path)
         // A fork's merge request with the same branch name is somebody else's.
         let matches = candidates.compactMap { candidate -> PullRequestHeadMatch? in
@@ -308,7 +323,7 @@ public enum GitLab: ForgeClient {
             return PullRequestHeadMatch(number: iid, closedAt: ended)
         }
         let chosen = PullRequestOwnership.choose(from: matches, startedAt: workspace.createdAt, checkedOutAs: nil)
-        guard let number = chosen ?? workspace.pullRequestNumber else { return nil }
+        guard let number = chosen else { return nil }
         return try await snapshot(number: number, in: project, worktree: workspace.path)
     }
 
@@ -364,7 +379,7 @@ public enum GitLab: ForgeClient {
 
     /// Whether glab is on this Mac: a walk of the PATH, no process.
     public static var isInstalled: Bool {
-        commandOverride != nil || Shell.which("glab") != nil
+        installedOverride ?? (commandOverride != nil || Shell.which("glab") != nil)
     }
 
     /// The GitLab host this repository's base remote is on, for signing in to it.
@@ -405,6 +420,46 @@ public enum GitLab: ForgeClient {
     }
 
     private static let notAProject = GitHubError("This repository has no GitLab remote Bloom can read.")
+
+    static func validateIdentity(_ request: PullRequest, in project: GitLabProject) throws {
+        guard request.forge == .gitLab,
+              request.url == "\(project.webURL)/-/merge_requests/\(request.number)" else {
+            throw GitHubError("The merge request belongs to another forge or project. Refresh it before continuing.")
+        }
+    }
+
+    static func validateMergeMethod(_ request: PullRequest, method: GitHub.MergeMethod, worktree: String) async throws {
+        guard let project = await project(in: worktree) else { throw notAProject }
+        try validateIdentity(request, in: project)
+        let current = try await snapshot(number: request.number, in: project, worktree: worktree).pullRequest
+        guard let head = request.headRevision, let base = request.baseBranch else {
+            throw GitHubError("Refresh the merge request before merging.")
+        }
+        try DirectMergeCheck.verify(current, against: request, head: head, base: base)
+        if let problem = current.mergeMethodProblem(method) { throw GitHubError(problem) }
+    }
+
+    private static func checkedOutNumber(branch: String, project: GitLabProject, worktree: String) async -> Int? {
+        guard Git.isValidBranchName(branch),
+              let result = try? await Git.run(["config", "--get", "branch.\(branch).bloom-merge-request"], in: worktree),
+              result.ok, let number = mergeRequestNumber(in: result.trimmed),
+              result.trimmed == "\(project.webURL)/-/merge_requests/\(number)" else { return nil }
+        return number
+    }
+
+    /// The head SHA and fresh server read are still checked by DirectMergeCheck. This only
+    /// recognises the alternate local name of an explicitly associated GitLab checkout.
+    private static func checkoutMatches(_ request: PullRequest, worktree: String) async -> Bool {
+        guard request.forge == .gitLab, let project = await project(in: worktree),
+              let branch = try? await Git.currentBranch(of: worktree) else { return false }
+        if await checkedOutNumber(branch: branch, project: project, worktree: worktree) == request.number { return true }
+        // Checkouts made before Bloom recorded the MR still have glab's source tracking ref.
+        guard let config = try? await Git.repositoryConfiguration(in: worktree),
+              config["branch.\(branch).merge"] == "refs/heads/\(request.branch)",
+              let remote = config["branch.\(branch).remote"],
+              let source = GitLabProject(remote: config["remote.\(remote).url"] ?? remote) else { return false }
+        return source.host == project.host
+    }
 
     private static func api(_ host: String, _ endpoint: String) -> [String] {
         ["api", "--hostname", host, endpoint]

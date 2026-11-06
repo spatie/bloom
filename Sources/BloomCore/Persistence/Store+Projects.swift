@@ -516,15 +516,6 @@ extension Store {
         )
     }
 
-    /// Forgets the request numbers of a project's workspaces once its forge changed, because the
-    /// other forge would read them as its own. The next lookup finds each by branch and records it.
-    public func clearPullRequestNumbers(repoID: RepoID) throws {
-        try db.run(
-            "UPDATE workspaces SET pull_request_number = NULL WHERE repo_id = ? AND pull_request_number IS NOT NULL",
-            [.text(repoID)]
-        )
-    }
-
     public func touch(workspaceID: WorkspaceID, unread: Bool? = nil) throws {
         if let unread {
             try db.run(
