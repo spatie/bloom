@@ -6,4 +6,3 @@ public struct PullRequestObservation: Sendable {
     public let workspace: Workspace
     let generation: String
 }
-

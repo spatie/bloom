@@ -189,13 +189,15 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
         }
 
         let workspace: Workspace
+        let observed: PullRequestObservation
         do {
-            guard let found = try await store.workspace(id: WorkspaceID(given)) else {
+            guard let found = try await store.observePullRequest(workspaceID: WorkspaceID(given)) else {
                 return .failure(WorkspaceMergeTrouble.unknownWorkspace(
                     id: given, alias: try await alias(for: given, store: store)
                 ).sentence)
             }
-            workspace = found
+            observed = found
+            workspace = found.workspace
         } catch {
             return .failure("Bloom could not read that workspace: \(error.readableMessage)")
         }
@@ -233,6 +235,10 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
         case let .found(found, foundLocal):
             pullRequest = found
             local = foundLocal
+        }
+
+        guard (try? await store.acceptPullRequestRead(nil, observed: observed)) == true else {
+            return .failure("The workspace or its forge changed during refresh. Ask again before merging.")
         }
 
         // The same gate the button asks, weighed the same way, quoted rather than re-derived. See

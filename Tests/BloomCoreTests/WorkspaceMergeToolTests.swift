@@ -565,6 +565,23 @@ struct WorkspaceMergeToolTests {
         #expect(!json["state"]!.stringValue!.contains("merge"))
     }
 
+    @Test("a forge change while reading never hands a stale request to the agent")
+    func changedForgeRefusesTheHandoff() async throws {
+        let store = try makeTestStore("merge-forge-changed")
+        let target = try await workspace(in: store)
+        let tool = WorkspaceMergeTool(read: { _ in
+            do { try await store.clearPullRequestNumbers(repoID: target.repoID) }
+            catch { Issue.record("Could not change the forge generation: \(error)") }
+            return .found(Self.open(), local: nil)
+        }) { _, _, _ in
+            Issue.record("A stale request was sent to the agent")
+            return .turnBegun(chat: "Merge")
+        }
+        let result = await tool.call(request(["workspace": .string(target.id.rawValue)]), as: .owner, store: store)
+        #expect(result.isError)
+        #expect(result.text.contains("forge changed"))
+    }
+
     @Test("on GitLab the answer names the merge request, glab and GitLab")
     func theAnswerOnGitLab() async throws {
         let store = try makeTestStore("merge-answer-gitlab")
