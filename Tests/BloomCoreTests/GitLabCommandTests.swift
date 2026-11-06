@@ -8,9 +8,11 @@ struct GitLabCommandTests {
     func readsByBranch() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
-        try await Shell.check("git", ["remote", "add", "origin", "git@gitlab.com:group/sub/app.git"], cwd: repo.path)
-        let detail = try fixture("mr-not-approved.json")
-        let jobs = try fixture("jobs-failed-pipeline.json")
+        // The command assertion needs a cold read, independent of other fixtures of this pipeline.
+        let host = "gitlab-read-\(UUID().uuidString.lowercased()).example"
+        try await Shell.check("git", ["remote", "add", "origin", "git@\(host):group/sub/app.git"], cwd: repo.path)
+        let detail = try fixture("mr-not-approved.json").replacingOccurrences(of: "gitlab.com", with: host)
+        let jobs = try fixture("jobs-failed-pipeline.json").replacingOccurrences(of: "gitlab.com", with: host)
         let log = GlabLog()
 
         let found = try await GitLab.$commandOverride.withValue({ arguments, _ in
@@ -26,10 +28,10 @@ struct GitLabCommandTests {
         #expect(found?.number == 4021)
         #expect(found?.checks == .failing)
         #expect(await log.commands == [
-            ["api", "--hostname", "gitlab.com",
+            ["api", "--hostname", host,
              "projects/group%2Fsub%2Fapp/merge_requests?source_branch=feature%2Fx&state=all&order_by=created_at&sort=desc&per_page=20"],
-            ["api", "--hostname", "gitlab.com", "projects/group%2Fsub%2Fapp/merge_requests/4021"],
-            ["api", "--hostname", "gitlab.com", "projects/34675721/pipelines/2923303483/jobs?per_page=100"],
+            ["api", "--hostname", host, "projects/group%2Fsub%2Fapp/merge_requests/4021"],
+            ["api", "--hostname", host, "projects/34675721/pipelines/2923303483/jobs?per_page=100"],
         ])
     }
 
