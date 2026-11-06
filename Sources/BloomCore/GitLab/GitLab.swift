@@ -71,7 +71,7 @@ public enum GitLab: ForgeClient {
         }
         // Nil when the jobs could not be read, as on GitHub, so the tab says so.
         guard let found else { return [] }
-        return found.pullRequest.checks == .unavailable ? nil : found.runs
+        return found.runs
     }
 
     public static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
@@ -290,7 +290,7 @@ public enum GitLab: ForgeClient {
 
     struct Snapshot: Sendable {
         let pullRequest: PullRequest
-        let runs: [CheckRun]
+        let runs: [CheckRun]?
     }
 
     /// The newest merge request from the workspace's head that had not ended before it existed,
@@ -325,15 +325,27 @@ public enum GitLab: ForgeClient {
         if let runs = await GitLabReads.shared.jobs(of: pipelineKey, status: pipeline.status) {
             return Snapshot(pullRequest: GitLabDecoding.pullRequest(payload, runs: runs), runs: runs)
         }
-        // An unreadable pipeline (a private fork) means unknown checks, not no merge request.
-        guard let jobs = try? await check(
-            api(project.host, "projects/\(pipelineProject)/pipelines/\(pipeline.id)/jobs?per_page=\(jobLimit)"),
-            cwd: worktree
-        ), let runs = try? GitLabDecoding.jobs(from: Data(jobs.stdout.utf8)) else {
-            return Snapshot(pullRequest: GitLabDecoding.pullRequest(payload, runs: nil), runs: [])
+        // A private fork may hide its jobs. Keep the merge request and its known pipeline status.
+        let endpoint = "projects/\(pipelineProject)/pipelines/\(pipeline.id)/jobs?per_page=\(jobLimit)"
+        guard let runs = try? await pipelineJobs(endpoint, host: project.host, worktree: worktree) else {
+            return Snapshot(pullRequest: GitLabDecoding.pullRequest(payload, runs: nil), runs: nil)
         }
         await GitLabReads.shared.remember(runs, of: pipelineKey, status: pipeline.status)
         return Snapshot(pullRequest: GitLabDecoding.pullRequest(payload, runs: runs), runs: runs)
+    }
+
+    /// A later page may hold the only failed job. Refuse a partial list if any page fails.
+    private static func pipelineJobs(_ endpoint: String, host: String, worktree: String) async throws -> [CheckRun] {
+        var runs: [CheckRun] = []
+        var page = 1
+        while true {
+            try Task.checkCancellation()
+            let result = try await check(api(host, endpoint + (page == 1 ? "" : "&page=\(page)")), cwd: worktree)
+            let batch = try GitLabDecoding.jobs(from: Data(result.stdout.utf8))
+            runs += batch
+            guard batch.count == jobLimit else { return runs }
+            page += 1
+        }
     }
 
     private static func mergeRequests(

@@ -40,7 +40,7 @@ struct GitLabDecodingTests {
         #expect(pullRequest.closedAt != nil)
         #expect(pullRequest.blockers.isEmpty)
         #expect(pullRequest.status.blockedReason == "This merge request is already merged.")
-        #expect(WorkspaceStatus.merged.summary(pullRequest: pullRequest) == "Merged, merge request !4015: No jobs")
+        #expect(WorkspaceStatus.merged.summary(pullRequest: pullRequest) == "Merged, merge request !4015: Pipeline passed")
     }
 
     @Test("unresolved threads block the merge")
@@ -48,6 +48,24 @@ struct GitLabDecodingTests {
         let pullRequest = try decode("mr-unresolved-discussions.json")
         #expect(pullRequest.blockers == [.unresolvedDiscussions])
         #expect(pullRequest.status.text == "Unresolved threads")
+    }
+
+    @Test("the pipeline's status survives successful, empty or unreadable job lists", arguments: [
+        (status: "failed", checks: PullRequest.Checks.failing),
+        (status: "running", checks: .pending),
+        (status: "pending", checks: .pending),
+        (status: "manual", checks: .pending),
+        (status: "success", checks: .passing),
+    ])
+    func pipelineStatus(status: String, checks: PullRequest.Checks) throws {
+        let payload = try GitLabDecoding.mergeRequest(from: Data("""
+            {"iid":1,"state":"opened","head_pipeline":{"id":1,"status":"\(status)"}}
+            """.utf8))
+        let success = CheckRun(name: "test", status: "COMPLETED", conclusion: "SUCCESS")
+        let variants: [[CheckRun]?] = [[success], [], nil]
+        for runs in variants {
+            #expect(GitLabDecoding.pullRequest(payload, runs: runs).checks == checks)
+        }
     }
 
     @Test("jobs become check runs, required unless allowed to fail")

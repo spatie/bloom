@@ -73,7 +73,7 @@ enum GitLabDecoding {
     static func pullRequest(_ payload: MergeRequestPayload, runs: [CheckRun]?) -> PullRequest {
         let detailed = payload.detailedMergeStatus ?? ""
         let state = state(payload.state)
-        let (checks, rollup) = runs.map(GitHub.rollup) ?? (.unavailable, "Pipeline unavailable")
+        let (checks, rollup) = pipelineRollup(status: payload.headPipeline?.status, runs: runs)
         // GitLab's word for a check run is a job.
         let summary = rollup.replacingOccurrences(of: "check", with: "job")
         return PullRequest(
@@ -94,6 +94,26 @@ enum GitLabDecoding {
             forge: .gitLab,
             blockers: state == "OPEN" ? MergeBlocker(detailedMergeStatus: detailed).map { [$0] } ?? [] : []
         )
+    }
+
+    /// Jobs omit downstream pipeline bridges, and can be unreadable even when the pipeline is
+    /// visible. Their rollup must never turn a failed or unfinished pipeline green.
+    private static func pipelineRollup(status: String?, runs: [CheckRun]?) -> (PullRequest.Checks, String) {
+        let jobs: (PullRequest.Checks, String) = runs.map(GitHub.rollup) ?? (.unavailable, "Pipeline unavailable")
+        if jobs.0 == .failing { return jobs }
+        switch status {
+        case "failed": return (.failing, "Pipeline failed")
+        case "canceled", "canceling": return (.failing, "Pipeline cancelled")
+        case "running": return (.pending, jobs.0 == .pending ? jobs.1 : "Pipeline running")
+        case "created", "pending", "preparing", "waiting_for_resource", "scheduled":
+            return (.pending, jobs.0 == .pending ? jobs.1 : "Pipeline queued")
+        case "manual": return (.pending, "Pipeline waiting for manual action")
+        case "success":
+            return jobs.0 == .passing || jobs.0 == .pending ? jobs : (.passing, "Pipeline passed")
+        case "skipped": return (.none, "Pipeline skipped")
+        case nil: return jobs
+        default: return (.unavailable, "Pipeline unavailable")
+        }
     }
 
     static func listing(_ payload: MergeRequestPayload) -> PullRequestListing {

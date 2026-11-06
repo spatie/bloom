@@ -42,7 +42,9 @@ than letting `glab` guess it from the remotes. The project is the base remote's 
 GitLab, else the GitLab remote beside it, gitlab.com and hosts `glab` is signed in to first, so a
 GitLab project mirrored to a GitHub `origin` is read, checked out, pushed to and merged through
 its GitLab remote. `GitLabReads` shares them: one read in flight per
-workspace, `maxAge` honoured as on GitHub, and the jobs of a finished pipeline read once.
+workspace, `maxAge` honoured as on GitHub, and the jobs of a finished pipeline cached for thirty
+seconds. Job reads follow every page, and an unreadable page leaves the list unavailable. The
+pipeline's own status is retained even when its jobs cannot all be read.
 
 | Need | Call |
 |---|---|

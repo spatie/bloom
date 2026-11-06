@@ -153,7 +153,7 @@ struct GitLabCommandTests {
         )
     }
 
-    @Test("a pipeline whose jobs cannot be read leaves the checks unknown, not the merge request")
+    @Test("a pipeline whose jobs cannot be read keeps its known failure")
     func unreadableJobs() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
@@ -170,7 +170,41 @@ struct GitLabCommandTests {
             try await GitLab.pullRequest(forBranch: "feature", worktree: repo.path)
         }
         #expect(found?.number == 4021)
-        #expect(found?.checks == .unavailable)
+        #expect(found?.checks == .failing)
+        #expect(found?.checksSummary == "Pipeline failed")
+    }
+
+    @Test("all pipeline jobs are read, and a failed later page is never a partial success", arguments: [false, true])
+    func paginatedJobs(secondPageFails: Bool) async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        let host = "gitlab-pagination-\(UUID().uuidString).example"
+        try await Shell.check("git", ["remote", "add", "origin", "https://\(host)/group/app.git"], cwd: repo.path)
+        let detail = try fixture("mr-not-approved.json")
+        let firstPage = "[" + (1...100).map {
+            #"{"id":\#($0),"name":"job-\#($0)","status":"success"}"#
+        }.joined(separator: ",") + "]"
+        let log = GlabLog()
+        let workspace = Workspace(repoID: RepoID("r"), name: "w", branch: "main", path: repo.path, baseBranch: "main")
+
+        let found = try await GitLab.$commandOverride.withValue({ arguments, _ in
+            await log.append(arguments)
+            let endpoint = arguments.last ?? ""
+            if endpoint.contains("&page=2") {
+                return secondPageFails
+                    ? ShellResult(status: 1, stdout: "", stderr: "HTTP 502")
+                    : ShellResult(status: 0, stdout: #"[{"id":101,"name":"tests","status":"failed"}]"#, stderr: "")
+            }
+            if endpoint.contains("/jobs") { return ShellResult(status: 0, stdout: firstPage, stderr: "") }
+            if endpoint.contains("source_branch=") { return ShellResult(status: 0, stdout: "[\(detail)]", stderr: "") }
+            return ShellResult(status: 0, stdout: detail, stderr: "")
+        }) {
+            try await GitLab.snapshot(for: workspace)
+        }
+
+        #expect(found?.pullRequest.checks == .failing)
+        #expect(found?.runs?.count == (secondPageFails ? nil : 101))
+        #expect(await log.commands.contains { $0.last?.hasSuffix("&page=2") == true })
     }
 
     @Test("marking ready and checking out name the project rather than letting glab guess")
@@ -221,6 +255,24 @@ struct GitLabReadSharingTests {
         #expect(await reads.jobs(of: "host/1/11", status: "failed") == runs)
         // A retried job moves the same pipeline back to running: the old jobs must not be served.
         #expect(await reads.jobs(of: "host/1/11", status: "running") == nil)
+    }
+
+    @Test("a retry that finishes between polls cannot keep the original job forever")
+    func finishedJobsExpire() async {
+        let reads = GitLabReads()
+        let now = ContinuousClock.now
+        let original = [CheckRun(
+            name: "test", status: "COMPLETED", conclusion: "FAILURE", detailsURL: "https://host/g/p/-/jobs/1"
+        )]
+        let retried = [CheckRun(
+            name: "test", status: "COMPLETED", conclusion: "FAILURE", detailsURL: "https://host/g/p/-/jobs/2"
+        )]
+        await reads.remember(original, of: "host/1/10", status: "failed", now: now)
+        #expect(await reads.jobs(of: "host/1/10", status: "failed", now: now) == original)
+        let later = now + .seconds(31)
+        #expect(await reads.jobs(of: "host/1/10", status: "failed", now: later) == nil)
+        await reads.remember(retried, of: "host/1/10", status: "failed", now: later)
+        #expect(await reads.jobs(of: "host/1/10", status: "failed", now: later) == retried)
     }
 
     @Test("an answer is reused only for a caller that allows one")
