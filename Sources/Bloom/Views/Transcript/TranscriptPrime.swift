@@ -68,6 +68,7 @@ enum TranscriptPrime {
     /// wrong cache is work done twice rather than nought times. A notice is absent on purpose,
     /// because it is drawn from the payload itself and goes through no cache at all.
     private static func prime(_ row: TranscriptRow, worktree: String) {
+        _ = TranscriptTurnVisibilityCache.keepsVisible(row)
         switch row.kind {
         // The bubble is read straight out of the stored request, and an error's exit out of the
         // same tree, so both want the JSON rather than the decoded event.
@@ -86,6 +87,7 @@ enum TranscriptPrime {
                 _ = TranscriptPresentationCache.presentation(
                     rowID: row.id, use: use, worktree: worktree
                 )
+                TranscriptActivityCache.prime(rowID: row.id, use: use)
             default:
                 break
             }

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# No services or authentication are needed for the Linux checks. Do not download on wake.
+for tool in zsh shellcheck swiftlint actionlint gitleaks node make git; do
+  if ! command -v "$tool" >/dev/null; then
+    echo "Missing $tool. Run .agents/setup to repair the orb." >&2
+    exit 1
+  fi
+done
+echo 'Bloom Linux checks ready. Native builds and core tests need macOS 26 and Xcode 26.'

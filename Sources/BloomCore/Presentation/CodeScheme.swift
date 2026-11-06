@@ -16,7 +16,7 @@ public struct CodeScheme: Codable, Hashable, Sendable, Identifiable {
         tokens[kind] ?? foreground
     }
 
-    public static let all: [Self] = [.bloom, .charcoal]
+    public static let all: [Self] = [.bloom, .charcoal, .lagoon, .sakura, .matcha, .synthwave, .dune]
     public static func find(_ key: String?, fallback: Self = .bloom) -> Self {
         all.first { $0.id == key } ?? fallback
     }

@@ -71,6 +71,7 @@ private struct DetailBlock: View {
                     Text(shown)
                         .font(font)
                         .foregroundStyle(Palette.textPrimary)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     // Whole, and deliberately not `shown`: a block that has been folded to

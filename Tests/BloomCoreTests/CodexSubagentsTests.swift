@@ -40,8 +40,17 @@ import Foundation
         for signal in tracker.receive(.turnStarted(turn), parentThreadID: "parent") { roster.apply(signal) }
         #expect(roster.isWorking)
         let child = try #require(roster[CodexSubagents.id(for: "child")])
-        #expect(child.description == "component_audit")
+        #expect(child.description == "Component Audit")
         #expect(child.finishedAt == nil)
+    }
+
+    @Test func anAgentPathReadsAsANameButCopiesAsTheOriginalPath() {
+        let item = CodexItem.subAgentActivity(CodexSubAgentActivity(
+            id: "spawn", agentPath: "/root/product_review", agentThreadID: "child", kind: "started"
+        ))
+        let presentation = CodexItemPresenter.present(item)
+        #expect(presentation.detail == "Product Review")
+        #expect(presentation.literal == "/root/product_review")
     }
 
     @Test func neverCreatesAChildForRootAndNeverTrustsAnUnrelatedThread() {

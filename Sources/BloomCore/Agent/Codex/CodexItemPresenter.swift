@@ -136,10 +136,10 @@ enum CodexItemPresenter {
     /// Spelled the way `ToolPresenter` spells an MCP call, because there it really is the same
     /// tool reached through the same protocol.
     private static func mcp(_ call: CodexMcpToolCall) -> ToolPresentation {
-        let tool = call.tool.replacing("_", with: " ")
+        let name = MCPToolName("mcp__\(call.server)__\(call.tool)")
         return ToolPresentation(
-            glyph: "puzzlepiece.extension",
-            label: tool.isEmpty ? call.server : "\(call.server): \(tool)",
+            glyph: name?.callGlyph ?? "puzzlepiece.extension",
+            label: name?.callLabel ?? "Called \(call.server)",
             detail: call.errorMessage ?? "",
             tint: call.status == .failed ? .negative : .neutral
         )
@@ -184,7 +184,7 @@ enum CodexItemPresenter {
         ToolPresentation(
             glyph: "person.2",
             label: "Sub-agent",
-            detail: ToolPresenter.basename(activity.agentPath),
+            detail: CodexSubagentName.display(activity.agentPath),
             tint: .neutral,
             chips: activity.kind.isEmpty ? [] : [.code(activity.kind)]
         )

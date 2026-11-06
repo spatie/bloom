@@ -4,63 +4,55 @@ import BloomCore
 /// One message in Mail's list: who sent it, when, what it is about, and the first
 /// line of it.
 ///
-/// Three lines rather than the one a changed file gets, because the question a reader brings to
-/// this list is "which of these is the email I just triggered", and the sender and the time answer
-/// it faster than the subject does when an app sends five of the same subject in a row.
+/// Sender, subject and preview share a left edge, with the time at the far right of the sender.
+/// The sender and subject carry the unread emphasis without moving every row for a separate dot.
 struct MailRow: View {
     var summary: MailpitSummary
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
     var body: some View {
-        HStack(alignment: .top, spacing: InspectorLayout.gap) {
-            // The unread dot, in a column of its own so read and unread rows keep one left edge.
-            Circle()
-                .fill(summary.isRead ? Color.clear : (isOnSelection ? Palette.selectedEmphasizedText : Palette.accent))
-                .frame(width: 7, height: 7)
-                .padding(.top, 5)
-                .frame(width: InspectorLayout.glyphWidth / 2)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: Metrics.spacingSmall) {
-                    Text(summary.from?.display ?? "Unknown sender")
-                        .font(summary.isRead ? Typo.body : Typo.bodyEmphasis)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: Metrics.spacingSmall)
-                    if summary.attachments > 0 {
-                        Image(systemName: "paperclip")
-                            .font(Typo.micro)
-                            .imageScale(.small)
-                            .foregroundStyle(secondary)
-                            .accessibilityLabel(summary.attachments == 1 ? "1 attachment" : "\(summary.attachments) attachments")
-                    }
-                    // A minute's resolution, so "4 min. ago" keeps counting while the list sits
-                    // still instead of saying it until the next message redraws the row.
-                    TimelineView(.everyMinute) { context in
-                        Text(Self.when(summary.created, now: context.date))
-                            .font(Typo.micro)
-                            .monospacedDigit()
-                            .foregroundStyle(secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Text(summary.subject.isEmpty ? "No subject" : summary.subject)
-                    .font(Typo.caption)
+        VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
+                Text(summary.from?.display ?? "Unknown sender")
+                    .font(summary.isRead ? Typo.labelEmphasis : Typo.title)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if !summary.snippet.isEmpty {
-                    Text(summary.snippet)
+                    .layoutPriority(1)
+                Spacer(minLength: Metrics.spacingSmall)
+                TimelineView(.everyMinute) { context in
+                    Text(Self.when(summary.created, now: context.date))
                         .font(Typo.caption)
+                        .monospacedDigit()
                         .foregroundStyle(secondary)
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
+
+            HStack(spacing: Metrics.spacingSmall) {
+                Text(summary.subject.isEmpty ? "No subject" : summary.subject)
+                    .font(summary.isRead ? Typo.label : Typo.labelEmphasis)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if summary.attachments > 0 {
+                    Spacer(minLength: Metrics.spacingSmall)
+                    Image(systemName: "paperclip")
+                        .font(Typo.caption)
+                        .foregroundStyle(secondary)
+                        .accessibilityLabel(summary.attachments == 1 ? "1 attachment" : "\(summary.attachments) attachments")
+                }
+            }
+            if !summary.snippet.isEmpty {
+                Text(summary.snippet)
+                    .font(Typo.caption)
+                    .foregroundStyle(secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
-        .padding(.horizontal, InspectorLayout.gap)
-        .padding(.vertical, Metrics.spacingSmall)
+        .padding(.horizontal, Metrics.inset)
+        .padding(.vertical, Metrics.spacingWide)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -71,13 +63,18 @@ struct MailRow: View {
         isOnSelection ? Palette.selectedEmphasizedText : Palette.textSecondary
     }
 
-    /// "4 min. ago" for today's mail, which is nearly all of it, and the date for anything older,
-    /// where how many hours ago stops being the useful half.
+    /// Clock time for today's mail, yesterday by name, and a calendar date for older mail.
     static func when(_ date: Date, now: Date = .now) -> String {
         guard date != .distantPast else { return "" }
-        if Calendar.current.isDate(date, inSameDayAs: now) {
-            return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
+        let calendar = Calendar.current
+        if calendar.isDate(date, inSameDayAs: now) {
+            return date.formatted(.dateTime.hour().minute())
         }
-        return date.formatted(.dateTime.day().month(.abbreviated))
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) { return "Yesterday" }
+        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            return date.formatted(.dateTime.day().month(.abbreviated))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year())
     }
 }

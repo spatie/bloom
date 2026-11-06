@@ -137,15 +137,14 @@ struct CrewPresentationTests {
         #expect(row.detail == "tests and docs")
     }
 
-    // MARK: - Everything else on the bridge is untouched
+    // MARK: - Other bridge tools
 
-    /// The generic row is still the right answer for the rest of Bloom's own tools, and for
-    /// somebody else's server.
-    @Test("another bridge tool keeps the row it had")
-    func anotherBridgeToolIsUnchanged() {
+    /// A bridge call names the action and does not invent a file literal.
+    @Test("another bridge tool names its action")
+    func anotherBridgeToolNamesItsAction() {
         let row = present("pane_open")
 
-        #expect(row.label == "Bloom: pane open")
+        #expect(row.label == "Called pane open")
         #expect(row.literal == nil)
     }
 

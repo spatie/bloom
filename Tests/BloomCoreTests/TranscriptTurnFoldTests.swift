@@ -134,13 +134,8 @@ struct TranscriptTurnFoldTests {
         #expect(turn.durationMS == 2_000)
     }
 
-    @Test("only a completed turn with folded action rows offers the duration disclosure")
-    func availableDisclosures() {
-        let completed = TranscriptTurnFold.Turn(
-            span: 1..<5, firstSeq: 1, isComplete: true, durationMS: 2_000
-        )
-        let live = TranscriptTurnFold.Turn(span: 6..<9, firstSeq: 6, isComplete: false)
-        let turns = TranscriptTurnFold.Folds(all: [completed, live], scannedRows: 9, resumeIndex: 5)
+    @Test("activity groups report the rows their own disclosure hides")
+    func availableActivity() {
         func work(_ start: Int) -> TranscriptFold.Work {
             TranscriptFold.Work(
                 span: start..<(start + 3),
@@ -151,18 +146,43 @@ struct TranscriptTurnFoldTests {
         }
         let groups = TranscriptFold.Folds(all: [work(1), work(6)], scannedRows: 9, resumeIndex: 5)
 
-        let shown = TranscriptTurnFold.disclosures(
-            work: groups, turns: turns, revealed: [], drawn: 0..<9
+        let shown = TranscriptTurnFold.hiddenActivity(
+            work: groups, revealed: [], drawn: 0..<9
         )
-        #expect(shown.hiddenByWork[1] == [1, 2, 3])
-        #expect(shown.turnByWork[1] == 1)
-        #expect(shown.turnByWork[6] == nil)
-        #expect(shown.expandableTurns == [1])
+        #expect(shown[1] == [1, 2, 3])
+        #expect(shown[6] == [6, 7, 8])
 
-        let clipped = TranscriptTurnFold.disclosures(
-            work: groups, turns: turns, revealed: [], drawn: 2..<9
+        let clipped = TranscriptTurnFold.hiddenActivity(
+            work: groups, revealed: [], drawn: 2..<9
         )
-        #expect(clipped.expandableTurns.isEmpty)
+        #expect(clipped[1] == nil)
+    }
+
+    @Test("the turn disclosure hides interim prose and actions but keeps the final answer")
+    func workBeforeAnswer() {
+        let turn = TranscriptTurnFold.Turn(
+            span: 1..<7, firstSeq: 1, isComplete: true, durationMS: 15_000
+        )
+        let rows = (0..<7).map { TranscriptTurnFold.Visibility(seq: $0) }
+        #expect(TranscriptTurnFold.hiddenIndices(
+            turn: turn, answerIndex: 5, in: rows, revealed: [], drawn: 0..<7
+        ) == [1, 2, 3, 4])
+    }
+
+    @Test("content and navigation targets stay visible, and a partial window does not fold")
+    func protectedWork() {
+        let turn = TranscriptTurnFold.Turn(span: 1..<7, firstSeq: 1, isComplete: true)
+        var rows = (0..<7).map { TranscriptTurnFold.Visibility(seq: $0) }
+        rows[3].keepsVisible = true
+        #expect(TranscriptTurnFold.hiddenIndices(
+            turn: turn, answerIndex: 5, in: rows, revealed: [], drawn: 0..<7
+        ) == [1, 2, 4])
+        #expect(TranscriptTurnFold.hiddenIndices(
+            turn: turn, answerIndex: 5, in: rows, revealed: [2], drawn: 0..<7
+        ).isEmpty)
+        #expect(TranscriptTurnFold.hiddenIndices(
+            turn: turn, answerIndex: 5, in: rows, revealed: [], drawn: 2..<7
+        ).isEmpty)
     }
 
     @Test("an incremental scan keeps completed turns and updates the live tail")

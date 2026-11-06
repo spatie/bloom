@@ -3,6 +3,15 @@ extension CodeScheme {
     public static let charcoal = builtin(
         id: "charcoal", title: "Charcoal", background: .init(light: 0xFFFFFF, dark: 0x292C33)
     )
+    public static let lagoon = themed(.lagoon)
+    public static let sakura = themed(.sakura)
+    public static let matcha = themed(.matcha)
+    public static let synthwave = themed(.synthwave)
+    public static let dune = themed(.dune)
+
+    private static func themed(_ theme: ColourTheme) -> Self {
+        builtin(id: theme.id, title: theme.title, background: theme.surfaces.surface)
+    }
 
     /// A constant is a number as far as these schemes are concerned, and saying so is cheaper than
     /// keeping two copies of one pair in step.

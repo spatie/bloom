@@ -6,30 +6,10 @@ import BloomCore
 /// This is the one row allowed to grow past a single line, because it is the row the user is
 /// actually watching.
 ///
-/// It uses the same columns as a stored row, so the moment a streamed line is replaced by its
-/// persisted twin nothing moves. A transcript that jumps as rows land is the main way this screen
-/// reads as unfinished. That is why the text goes through `MarkdownView`, the renderer the stored
-/// row uses, rather than the plain `Text` it used to: drawn raw, a fenced block showed its own
-/// backtick fence markers as prose for the length of the answer and then turned into a titled code
-/// block with a copy button the instant the turn ended, which is exactly the jump the columns are
-/// lined up to avoid. An agent writes fenced code in most answers of any length, so this was most
-/// answers.
-///
-/// **And then it went back to plain text, for a reason that outranks the jump.** Every crash of
-/// one shape inside SwiftUI's stack layout landed while a long answer was streaming through
-/// `MarkdownView`. `ProseRowView.prose` carries the evidence; the jump described above is the price.
-///
-/// The reason it was plain `Text` was cost, and that was worth measuring rather than assuming.
-/// A release build parses a finished 2KB answer in 1.1ms and a 10KB one in 2.9ms; the worst single
-/// delta over a whole 10KB stream measured 2.7ms, well inside a frame, and the parser was written
-/// for this (`MarkdownParser` is a bounded hand-written scanner, and every prefix of a document
-/// parses). What it must not do is evict the transcript's parse cache one prefix at a time, which
-/// is why streaming text is parsed through a slot of its own.
-///
-/// A fence that has not closed yet is not a problem to be worked around: `parseFence` runs to the
-/// end of the input and hands back a code block whether the closing marker has arrived or not, so
-/// the block appears the moment the opening marker does and then grows. Nothing swaps layout when
-/// the fence completes. `MarkdownParserTests` holds that property down.
+/// It uses the same columns as a stored row. Live Markdown is flattened into one styled text view
+/// while it grows, then the settled answer gains the full block layout and controls. Keeping one
+/// live view avoids the SwiftUI stack layout crashes seen when a long answer changed its block
+/// tree on every delta.
 ///
 /// ## What fades here, and what must never
 ///

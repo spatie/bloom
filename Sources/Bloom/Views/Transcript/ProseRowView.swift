@@ -6,7 +6,24 @@ struct ProseRowView: View {
     var isStreaming = false
     /// Present only on the response that closes a completed turn.
     var copyText: String?
+    var smoothMarkdownHandoff = false
+    /// When the answer was stored, shown beside the copy slot on hover. Nil on streaming prose.
+    var sentAt: Date?
     @State private var isHovered = false
+    @State private var markdownReady = false
+    @State private var markdownSettled = false
+    @State private var rowWidth: CGFloat = 0
+    @State private var timeWidth: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The copy button's column and the gap before it, which the time sits to the left of.
+    private static let copySlot = MessageTimeLabel.height + TranscriptLayout.block
+
+    /// The time is drawn right of the text column and never over it, so a pane too narrow to leave
+    /// it that room shows none. Covering the end of a line was the alternative.
+    private var timeFits: Bool {
+        rowWidth - Self.copySlot - timeWidth >= TranscriptLayout.proseMeasure + TranscriptLayout.block
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: TranscriptLayout.block) {
@@ -38,29 +55,60 @@ struct ProseRowView: View {
             }
             .frame(width: 18, height: 18)
         }
+        // Measured only under the pointer, so no other row pays for a geometry read.
+        .background {
+            if isHovered {
+                Color.clear.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if isHovered, let sentAt {
+                MessageTimeLabel(date: sentAt)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { timeWidth = $0 }
+                    .opacity(timeFits ? 1 : 0)
+                    .padding(.trailing, Self.copySlot)
+            }
+        }
         .padding(.horizontal, TranscriptLayout.inset)
-        // The old rule occupied this boundary. Two clean rungs preserve the separation without
-        // putting a hard line between the work and the response.
-        .padding(.top, TranscriptLayout.block * 2)
+        // Equal air above and below keeps an activity disclosure centred between paragraphs.
+        .padding(.top, TranscriptLayout.block)
         .padding(.bottom, TranscriptLayout.block)
         .onHover { isHovered = $0 }
     }
 
-    /// **Plain text while it is still arriving, markdown once it has landed.**
-    ///
-    /// Every crash of one shape, `EXC_BAD_ACCESS` and once an impossible allocation inside SwiftUI's
-    /// stack layout with no frame of ours on the stack, landed while a long answer was streaming,
-    /// and the layout frames that were there read back to this row's `MarkdownBlocksView`: a stack
-    /// over a `ForEach` of blocks, several of them `NSTextView`s, whose number and kinds change
-    /// with every delta. A single `Text` has no stack of blocks to change under itself.
-    ///
-    /// It costs the jump `StreamingRowView` describes: a fenced block shows its markers as prose
-    /// until the answer lands and then becomes a code block. That was the reason streaming moved to
-    /// `MarkdownView`, and it is a smaller cost than an app that quits while somebody reads it.
+    /// Keep the live answer in one text view. The full block tree changes shape on every delta,
+    /// which previously crashed SwiftUI's stack layout during long streamed answers. Once saved,
+    /// retain that drawing until the complete Markdown view has laid out, then fade between them.
     @ViewBuilder
     private var prose: some View {
         if isStreaming {
-            Text(verbatim: text)
+            StreamingMarkdownView(text)
+        } else if smoothMarkdownHandoff {
+            ZStack(alignment: .topLeading) {
+                MarkdownView(text)
+                    .onGeometryChange(for: Bool.self) { proxy in
+                        proxy.size.width > 0 && proxy.size.height > 0
+                    } action: { markdownReady = $0 }
+                    .opacity(markdownSettled ? 1 : 0)
+                    .allowsHitTesting(markdownSettled)
+                    .accessibilityHidden(!markdownSettled)
+                StreamingMarkdownView(text)
+                    .opacity(markdownSettled ? 0 : 1)
+                    .allowsHitTesting(!markdownSettled)
+                    .accessibilityHidden(markdownSettled)
+            }
+            .task(id: markdownReady) {
+                guard markdownReady, !markdownSettled else { return }
+                // Draw the same text as the live tail for the first frames of the saved row.
+                // The complete block layout is already in the stack when it fades in.
+                try? await Task.sleep(for: .milliseconds(35))
+                guard !Task.isCancelled else { return }
+                if reduceMotion {
+                    markdownSettled = true
+                } else {
+                    withAnimation(.easeOut(duration: 0.18)) { markdownSettled = true }
+                }
+            }
         } else {
             MarkdownView(text)
         }

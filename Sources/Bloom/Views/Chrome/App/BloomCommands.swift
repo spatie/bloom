@@ -541,11 +541,14 @@ struct BloomCommands: Commands {
 
             // Keep Archive disabled in prose editors. Its shortcut also requires Shift because
             // fields without a published focus value must keep Command-Backspace for editing.
-            MenuCommand(.archive) {
-                guard let workspace = workspace(for: .archive) else { return }
-                archive(workspace)
+            MenuCommand(.archive, title: selectedConversationID == nil ? nil : "Archive Conversation") {
+                if let conversationID = selectedConversationID {
+                    model.ask.requestClose(conversationID)
+                } else if let workspace = workspace(for: .archive) {
+                    archive(workspace)
+                }
             }
-            .disabled(workspace(for: .archive) == nil || isTypingProse == true)
+            .disabled((workspace(for: .archive) == nil && selectedConversationID == nil) || isTypingProse == true)
 
             // The way back, which the menu bar had no item for at all. Before this the only path
             // to `restoreArchived` in the whole app was the undo registered by the archive that
@@ -1047,6 +1050,12 @@ struct BloomCommands: Commands {
         return [model.selectedWorkspace, model.selectedArchivedWorkspace]
             .compactMap { $0 }
             .first { $0.id == subject.id }
+    }
+
+    /// A conversation has no workspace, so the sidebar selection names it directly and the
+    /// workspace shortcut closes it, which archives it.
+    private var selectedConversationID: SessionID? {
+        if case .conversation(let id) = model.selection { id } else { nil }
     }
 
     /// Restore, which additionally has to say no while one is already running.

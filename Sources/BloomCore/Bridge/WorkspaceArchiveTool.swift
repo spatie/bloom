@@ -3,7 +3,7 @@ import Foundation
 /// What became of an archive request.
 ///
 /// `archived` is only returned after the normal archive lifecycle has completed. `requested` is
-/// the answer to a workspace's own agent and is deliberately a third case rather than a success
+/// the answer to a workspace's own agent and is deliberately separate from a success
 /// with a hedge in its sentence: the caller is mid turn, nothing has been removed, and a model
 /// handed `archived` would go on to tell the owner that a worktree it is still standing in has
 /// gone.
@@ -11,6 +11,8 @@ public enum WorkspaceArchiveOutcome: Sendable, Equatable {
     case archived
     /// Booked, and it runs when the asking turn ends. See `WorkspaceArchiveOrder.afterTurnOf`.
     case requested
+    /// The worktree is kept until the owner answers the archive confirmation in Bloom.
+    case confirmationRequired(String)
     case refused(String)
 }
 
@@ -24,10 +26,13 @@ public struct WorkspaceArchiveOrder: Sendable, Hashable {
     /// The chat whose turn has to end before the worktree can go, or nil for the owner's own
     /// client, which is sitting in no turn and can be acted on at once.
     public let afterTurnOf: SessionID?
+    /// Offer Bloom's normal confirmation when files prevent an automatic archive.
+    public let review: Bool
 
-    public init(workspace: Workspace, afterTurnOf: SessionID?) {
+    public init(workspace: Workspace, afterTurnOf: SessionID?, review: Bool = false) {
         self.workspace = workspace
         self.afterTurnOf = afterTurnOf
+        self.review = review
     }
 }
 
@@ -61,9 +66,9 @@ public typealias WorkspaceArchiving = @Sendable (WorkspaceArchiveOrder) async ->
 /// is why `AppModel.performArchive` stops the agents first, and stopping the agent that is waiting
 /// on this tool call means killing the turn that made it. So the call is booked and the tool says
 /// so: the safety check runs again once that turn has ended, with nothing excused, and the archive
-/// runs then. The answer says "requested" in those words because a model that reads it as done
-/// tells the owner something that has not happened yet, and because there is nothing left for it
-/// to say afterwards: whatever it was keeping back is keeping back for ever.
+/// runs then, or offers a confirmation if review was requested and files block it. The answer
+/// says "requested" because a model that reads it as done tells the owner something that has not
+/// happened yet, and because there is nothing left for it to say afterwards: whatever it was keeping back is keeping back for ever.
 ///
 /// A refusal after the fact reaches the owner rather than the agent, because by then there is no
 /// agent to reach. See `AppModel.archiveIfRequested`.
@@ -76,7 +81,8 @@ public typealias WorkspaceArchiving = @Sendable (WorkspaceArchiveOrder) async ->
 /// ## Why it is not self-approved
 ///
 /// It removes a worktree, and `BridgeToolApproval`'s own head names it as the example of what is
-/// deliberately off that list: a tool that can lose work is a tool a person answers for. Deferring
+/// deliberately off that list: a tool that can lose work is a tool a person answers for. Review
+/// offers the normal archive confirmation rather than permission to bypass safety checks. Deferring
 /// the cleanup does not change that, and the ask lands in front of the owner while the agent is
 /// still running, which is the one moment they can still say no.
 public struct WorkspaceArchiveTool: BridgeToolHandling {
@@ -95,7 +101,7 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
             terminals and dev servers. Its branch, notes and chat history are kept, and the \
             workspace moves to Archived.
 
-            If you are working in a workspace, pass nothing to archive your own. You are still \
+            If you are working in a workspace, omit 'id' to archive your own. You are still \
             running, so the worktree cannot go yet. The call is a request: Bloom checks again once \
             your turn has ended and archives then. Say everything you have to say in this same \
             turn, because there will not be another one, and do not report the workspace as \
@@ -112,9 +118,13 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
 
             The normal archive script runs if the project has one. Another agent running, queued \
             messages, uncommitted changes, local files that would be lost, or a failed safety \
-            check refuses the call. There is no force option and no way to delete the branch. \
-            Explain a refusal and let the owner resolve it or archive manually in Bloom. Do not \
-            discard files just to make this tool succeed. An already archived workspace is a no-op.
+            check refuses the call by default. Pass 'review': true to offer Bloom's normal archive \
+            confirmation when files or a failed safety check block it. The owner sees what would \
+            be removed and must confirm in Bloom. This does not bypass running agents or queued \
+            messages. For your own workspace, review happens only after your turn ends. \
+            A result awaiting confirmation is not an archive: stop and let the owner answer before \
+            requesting another review. There is no force option and no way to delete the branch. \
+            Do not discard files just to make this tool succeed. An already archived workspace is a no-op.
             """,
         inputSchema: .object([
             "type": .string("object"),
@@ -126,6 +136,13 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
                             + "workspace_list returns. From an agent working in a workspace, only "
                             + "the id of a workspace it started with workspace_start; leave it out "
                             + "to archive your own."
+                    ),
+                ]),
+                "review": .object([
+                    "type": .string("boolean"),
+                    "description": .string(
+                        "Offer an archive confirmation in Bloom if safety checks block the archive. "
+                            + "A blocked archive removes nothing until the owner confirms. Defaults to false."
                     ),
                 ]),
             ]),
@@ -152,19 +169,30 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
             return .failure(objection)
         }
 
-        switch await archive(WorkspaceArchiveOrder(workspace: workspace, afterTurnOf: asking)) {
+        switch await archive(WorkspaceArchiveOrder(
+            workspace: workspace, afterTurnOf: asking, review: request.param("review")?.boolValue == true
+        )) {
         case .archived:
             return BridgeToolResult(text: "Archived '\(workspace.name)'. Its branch, notes and chat history were kept.")
         case .requested:
+            let reviewNote = request.param("review")?.boolValue == true
+                ? " If files block it, Bloom will offer an archive confirmation for the owner to answer."
+                : ""
             return BridgeToolResult(text: """
                 Archiving '\(workspace.name)' is requested, not done. Nothing has been removed and \
                 you are still in the worktree. Bloom checks again when this turn ends, and \
                 archives then if no agent is running here and nothing is queued; if it refuses, \
                 the workspace stays and the owner is told why. This is your last turn in this \
-                workspace, so finish what you were saying now, and do not report it as archived.
+                workspace, so finish what you were saying now, and do not report it as archived.\(reviewNote)
                 """)
+        case .confirmationRequired(let reason):
+            return BridgeToolResult(text: "Archiving '\(workspace.name)' is awaiting confirmation in Bloom. "
+                + "Nothing has been removed. \(reason) Answer the confirmation before requesting another review.")
         case .refused(let reason):
-            return .failure("The archive request was refused. \(reason)")
+            let nextStep = request.param("review")?.boolValue == true ? ""
+                : " To review files that block the archive, retry with 'review': true. "
+                    + "A blocked archive removes nothing until the owner confirms in Bloom."
+            return .failure("The archive request was refused. \(reason)\(nextStep)")
         }
     }
 
@@ -192,11 +220,16 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
         var arguments: [String: JSONValue] = [:]
         if case .object(let object)? = request.params { arguments = object }
 
+        if let review = arguments["review"], review.boolValue == nil {
+            return .refused("'review' must be a boolean. Nothing was archived.")
+        }
+        let subjectArguments = arguments.filter { $0.key != "review" }
+
         guard identity.role == .owner else {
             guard let workspaceID = identity.workspaceID, let sessionID = identity.sessionID else {
                 return .refused(BridgeWorkspaceScope.refusal(tool: "workspace_archive", doing: "archives"))
             }
-            if arguments.isEmpty {
+            if subjectArguments.isEmpty {
                 do {
                     guard let own = try await store.workspace(id: workspaceID) else {
                         return .refused("That workspace is no longer in Bloom, so there is nothing to archive.")
@@ -206,13 +239,13 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
                     return .refused("Bloom could not read this workspace. Nothing was archived; try again shortly.")
                 }
             }
-            return await started(request, arguments: arguments, by: workspaceID, store: store)
+            return await started(request, arguments: subjectArguments, by: workspaceID, store: store)
         }
 
-        guard Set(arguments.keys) == ["id"],
+        guard Set(subjectArguments.keys) == ["id"],
               let rawID = request.stringParam("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
               !rawID.isEmpty else {
-            return .refused("Pass only 'id', using the exact workspace id from workspace_list. There is no force option.")
+            return .refused("Pass 'id' using the exact workspace id from workspace_list, and optionally 'review'. There is no force option.")
         }
         do {
             guard let found = try await store.workspace(id: WorkspaceID(rawID)) else {
@@ -235,8 +268,8 @@ public struct WorkspaceArchiveTool: BridgeToolHandling {
               let rawID = request.stringParam("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
               !rawID.isEmpty else {
             return .refused("""
-                workspace_archive takes nothing, to archive the workspace you are in, or only 'id', \
-                with the id workspace_start reported for a workspace you started. There is no force \
+                workspace_archive takes no id for the workspace you are in, or 'id', \
+                with the id workspace_start reported for a workspace you started. 'review' is optional. There is no force \
                 option and no way to delete the branch.
                 """)
         }

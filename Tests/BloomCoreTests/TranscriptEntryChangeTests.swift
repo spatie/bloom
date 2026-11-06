@@ -228,6 +228,19 @@ struct TranscriptEntryChangeTests {
         #expect(TranscriptEntryChange.between(open, folded) == .shrank(head: 3..<10, tail: 0..<0))
     }
 
+    @Test("closing a turn hides only work between the prompt and final answer")
+    func completedTurnDisclosure() {
+        let open = turn([.turnFold(1), .fold(1)] + rows([1, 2, 3, 4, 5, 6]))
+        let closed = turn([.turnFold(1)] + rows([5, 6]))
+        if case .shrank = TranscriptEntryChange.between(open, closed) {
+            // The final answer and result stay below the disclosure.
+            #expect(closed.contains(.row(5)))
+            #expect(closed.contains(.row(6)))
+        } else {
+            Issue.record("closing the work rebuilt the transcript")
+        }
+    }
+
     /// **And the shape that would happen if the turns were computed in the body rather than held
     /// one pass behind it.** Here so that anybody who moves them back finds out from a test rather
     /// than from a scroll.

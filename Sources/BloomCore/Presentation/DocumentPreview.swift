@@ -40,6 +40,15 @@ public enum DocumentPreview {
         }
     }
 
+    /// Whether a code fence in an answer can be shown rendered rather than as source.
+    public static func kind(language: Language) -> Kind? {
+        switch language {
+        case .markdown: .markdown
+        case .html: .html
+        default: nil
+        }
+    }
+
     /// The directory a preview may read from. A workspace file reads its worktree. A file opened
     /// from outside any worktree reads only the folder it sits in, because granting its whole disk
     /// is not what opening one file asked for.

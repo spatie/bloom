@@ -5,8 +5,8 @@ import BloomCore
 
 /// The line that opens a turn the CLI started by itself, because a background task finished.
 ///
-/// It stands where a prompt would, drawn in the shape of `SessionStartRowView`: a glyph, a label
-/// and chips. Whether the row exists, what it says and why it never folds are all decided in the
+/// It stands where a prompt would, with a glyph, a label and chips. Whether the row exists,
+/// what it says and why it never folds are all decided in the
 /// core; see `BackgroundWake`.
 struct BackgroundWakeRowView: View {
     var wake: BackgroundWake

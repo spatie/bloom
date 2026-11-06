@@ -20,6 +20,14 @@ struct ComposerTypeAheadTests {
         #expect(ComposerTypeAhead.belongsToComposer(characters: characters, modifiers: .command))
     }
 
+    @Test("only command V is a paste")
+    func isPaste() {
+        #expect(ComposerTypeAhead.isPaste(characters: "v", modifiers: .command))
+        #expect(!ComposerTypeAhead.isPaste(characters: "v", modifiers: []))
+        #expect(!ComposerTypeAhead.isPaste(characters: "r", modifiers: .command))
+        #expect(!ComposerTypeAhead.isPaste(characters: "v", modifiers: [.command, .shift]))
+    }
+
     @Test("other shortcuts keep their meaning", arguments: [
         MenuShortcut.Modifiers.control, [MenuShortcut.Modifiers.command, .shift],
         [MenuShortcut.Modifiers.command, .option],

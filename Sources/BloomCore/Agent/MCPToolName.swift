@@ -53,6 +53,18 @@ public struct MCPToolName: Equatable, Sendable {
         tool.isEmpty ? displayServer : "\(displayServer): \(tool)"
     }
 
+    /// An individual call in an opened activity group names the operation first. Bloom's own
+    /// server adds no useful context here; another server still needs its name for disambiguation.
+    public var callLabel: String {
+        guard !tool.isEmpty else { return "Called \(displayServer)" }
+        return isBloom ? "Called \(tool)" : "Called \(label)"
+    }
+
+    public var callGlyph: String {
+        if bare.hasPrefix("mail_") { return "envelope" }
+        return isBloom ? "square.stack.3d.up" : "puzzlepiece.extension"
+    }
+
     /// Any tool's name as it should be said out loud, MCP or not.
     ///
     /// A built-in is already a word (`Bash`, `Read`), so it comes back untouched. This is what the

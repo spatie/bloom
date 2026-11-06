@@ -499,8 +499,8 @@ public enum ToolPresenter {
 
     // MARK: Unknown shapes
 
-    /// `mcp__linear__create_issue` reads as "linear: create issue", and the puzzle piece says
-    /// "some extension" about a server that is not Bloom's own.
+    /// `mcp__linear__create_issue` reads as "Called linear: create issue", and the puzzle piece
+    /// says "some extension" about a server that is not Bloom's own.
     ///
     /// The name itself is taken apart by `MCPToolName`, which is where the reasoning about the
     /// wire name and about saying the bridge as "Bloom" now lives. It is a type of its own because
@@ -514,8 +514,8 @@ public enum ToolPresenter {
         // the other subagent rows because that is what it is about.
         if parsed.isBloom, let row = crew(tool: parsed.bare, input: input) { return row }
 
-        let label = parsed.label
-        let glyph = parsed.isBloom ? "square.stack.3d.up" : "puzzlepiece.extension"
+        let label = parsed.callLabel
+        let glyph = parsed.callGlyph
 
         // An MCP server can name a file as plainly as a built in tool does, and one that does gets
         // the same chip. Nothing here knows the server's schema, so the value has to survive the

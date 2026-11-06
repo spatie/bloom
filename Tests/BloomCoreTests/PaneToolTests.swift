@@ -333,12 +333,11 @@ struct BloomBridgePresentationTests {
         )
     }
 
-    /// "bloom-workspace-bridge: pane open" names the transport where every other row names the
-    /// thing that happened.
+    /// The bridge's wire name names the transport where every other row names the action.
     @Test("the transport does not appear in the row")
     func theTransportIsNotTheLabel() {
         let row = present("pane_open")
-        #expect(row.label == "Bloom: pane open")
+        #expect(row.label == "Called pane open")
         #expect(!row.label.contains("bridge"))
         #expect(!row.label.contains("workspace-bridge"))
     }
@@ -354,7 +353,14 @@ struct BloomBridgePresentationTests {
     @Test("another server is still named after itself")
     func anotherServerKeepsItsName() {
         let row = ToolPresenter.present(name: "mcp__linear__create_issue", input: .object([:]))
-        #expect(row.label == "linear: create issue")
+        #expect(row.label == "Called linear: create issue")
         #expect(row.glyph == "puzzlepiece.extension")
+    }
+
+    @Test("mail calls have a readable name and icon")
+    func mailHasItsOwnGlyph() {
+        let row = present("mail_send")
+        #expect(row.label == "Called mail send")
+        #expect(row.glyph == "envelope")
     }
 }

@@ -47,6 +47,7 @@ struct MarkdownFilePreview: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
                             MarkdownView(document.text)
+                                .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             if document.isTruncated {
                                 Text("Showing the first \(MarkdownFileDocument.lineLimit.formatted()) lines")

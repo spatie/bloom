@@ -21,14 +21,16 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// The line over a turn's working, by the sequence number of the FIRST row of it. See
     /// `TranscriptFold`.
     ///
-    /// **It is in the list from the working's second row onwards, whether it is folded or not, and
+    /// **It is in the list from the working's first row onwards, whether it is folded or not, and
     /// drawing nothing when it is not.** That is the same argument the four singletons below carry
     /// and it is the whole reason folding is cheap: an entry that came and went in the middle of
     /// the list would make the pass that folds a run both an insertion and a removal, which
     /// `TranscriptEntryChange` can only answer `.rebuilt` to. In place before the run is long
     /// enough to fold, folding is a removal on its own and unfolding is an insertion on its own.
-    /// See `TranscriptFold.leastGroup`, which is that gap.
+    /// See `TranscriptFold.leastWork`, which is that gap.
     case fold(Int)
+    /// The line after a prompt that opens the interim work of a completed turn.
+    case turnFold(Int)
     /// The bubble drawn from the moment Return is pressed until its stored row arrives. Its own
     /// case rather than a row, so that the stored row taking its place is an entry the table has
     /// not seen: that makes the swap a replacement rather than a row changing under the reader.
@@ -70,7 +72,7 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// promise that holds until the key moves.
     public var redrawsItself: Bool {
         switch self {
-        case .row, .fold, .bottomSpacing: false
+        case .row, .fold, .turnFold, .bottomSpacing: false
         case .setup, .sending, .streaming, .pending: true
         }
     }
@@ -80,6 +82,7 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
         case .setup: "setup"
         case .row(let seq): "row.\(seq)"
         case .fold(let seq): "fold.\(seq)"
+        case .turnFold(let seq): "turnFold.\(seq)"
         case .sending: "sending"
         case .streaming: "streaming"
         case .pending(let id): "pending.\(id)"

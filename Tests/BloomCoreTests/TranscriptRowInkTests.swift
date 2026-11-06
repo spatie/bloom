@@ -43,17 +43,14 @@ struct TranscriptRowInkTests {
         #expect(!TranscriptRowInk.isDefinitelySilent(kind: .system, payload: nested))
     }
 
-    /// The one system row that does draw: `SessionStartRowView`, the line that says the session
-    /// started and which model it is on.
-    @Test("an init row draws something")
-    func initIsNotBlank() {
+    @Test("session init metadata no longer draws a transcript line")
+    func initIsBlank() {
         let row = payload(#"{"type":"system","subtype":"init","cwd":"/tmp","model":"opus"}"#)
-        #expect(!TranscriptRowInk.drawsNothing(kind: .system, payload: row))
+        #expect(TranscriptRowInk.drawsNothing(kind: .system, payload: row))
     }
 
-    /// The other subtypes in the same database: `command`, `hook`, `vcs_`, `code`, `back`. None of
-    /// them decodes to an init, so none of them draws.
-    @Test("a system row that is not an init draws nothing, whatever its subtype")
+    /// The other subtypes in the same database: `command`, `hook`, `vcs_`, `code`, `back`.
+    @Test("other silent system rows draw nothing, whatever their subtype")
     func otherSubtypesAreBlank() {
         for subtype in ["command", "hook_result", "vcs_status", "code_review", "background"] {
             let row = payload(#"{"type":"system","subtype":"\#(subtype)","x":1}"#)

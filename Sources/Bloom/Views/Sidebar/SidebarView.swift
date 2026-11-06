@@ -1097,6 +1097,8 @@ struct SidebarToolbar: ToolbarContent {
     var onCreateWorkspace: (Repo) -> Void
     var recentProjects: [Repo]
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some ToolbarContent {
         if !isFolded {
             // Pushes the pair to the sidebar's trailing edge. Without it they sat against the
@@ -1116,6 +1118,9 @@ struct SidebarToolbar: ToolbarContent {
                 }
                 .menuIndicator(.hidden)
                 .help("New workspace, project or conversation")
+                // AppKit draws a toolbar menu's label once, so switching appearance left a white
+                // `+` on a light title bar. A new identity per scheme makes it draw again.
+                .id(colorScheme)
 
                 SidebarToggleButton()
             }

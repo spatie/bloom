@@ -45,7 +45,7 @@ struct MergeConfirmationPopover: View {
             .pickerStyle(.radioGroup)
 
             if method == .squash {
-                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                VStack(alignment: .leading, spacing: Metrics.spacingWide) {
                     TextField("Commit subject", text: $subject)
                         .textFieldStyle(.roundedBorder)
                     TextField("Commit body, empty for GitHub's own", text: $messageBody, axis: .vertical)

@@ -4,6 +4,15 @@ import Testing
 
 @Suite("Client transcript rows")
 struct TranscriptClientRowTests {
+    @Test("session init metadata is omitted from the client transcript")
+    func sessionInitIsHidden() {
+        let stored = message(
+            .system,
+            #"{"type":"system","subtype":"init","session_id":"s1","model":"opus"}"#
+        )
+        #expect(TranscriptClientRow.present(stored)?.title == nil)
+    }
+
     private func message(_ kind: MessageKind, _ payload: String, seq: Int = 1) -> Message {
         Message(sessionID: .new(), seq: seq, kind: kind, payload: Data(payload.utf8))
     }

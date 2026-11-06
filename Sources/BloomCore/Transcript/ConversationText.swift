@@ -62,9 +62,24 @@ public enum ConversationText {
                 line: String(decoding: row.payload, as: UTF8.self)
             ) else { return nil }
             return block.text
+        case .permissionAsk:
+            guard case .permissionAsk(let ask)? = AgentEvent.decode(
+                line: String(decoding: row.payload, as: UTF8.self)
+            ), AgentQuestionnaire.isQuestion(toolName: ask.toolName) else { return nil }
+            return AgentQuestionnaire.questions(in: ask.input).map(questionBody).joined(separator: "\n\n")
         default:
             return nil
         }
+    }
+
+    /// A question as the card shows it, without ticks: what was chosen lives in no stored row.
+    private static func questionBody(_ question: AgentQuestion) -> String {
+        let heading = [question.header.uppercased(), question.question].filter { !$0.isEmpty }
+        let options = question.options.map { option in
+            ["- \(option.label)", option.description.replacingOccurrences(of: "\n", with: "\n  ")]
+                .filter { !$0.isEmpty }.joined(separator: "\n  ")
+        }
+        return (heading + options).joined(separator: "\n")
     }
 
     /// The words the bubble shows: a review turn's typed message, or the sentence without the

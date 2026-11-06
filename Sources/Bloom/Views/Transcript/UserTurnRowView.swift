@@ -39,6 +39,9 @@ struct UserTurnRowView: View {
     var reviewChips: [ReviewTurnRecord.Chip] = []
     /// Which worktree those paths are relative to, and which review the chips open into.
     var home: TranscriptHome
+    /// When the turn was stored, shown beside the bubble on hover. Nil where there is no stored
+    /// turn to date, such as a subagent's prompt.
+    var sentAt: Date?
     private var background: Color { Palette.accentFill }
 
     @Environment(AppModel.self) private var app
@@ -75,12 +78,13 @@ struct UserTurnRowView: View {
     /// probe below and the timer beside it off every other row in the transcript.
     @State private var hovered: FileChipHover?
     @State private var isBubbleHovered = false
+    /// The time label's measured width, kept after the first hover so the next one places at once.
+    @State private var timeWidth: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Where the sentence is in the window, read only while a pill in it is under the pointer. See
     /// `chipProbe`.
     @State private var textFrame: CGRect = .zero
     @State private var hoverTask: Task<Void, Never>?
-    /// Whether the pointer is anywhere on this row, which is when the copy control shows itself.
-    @State private var isPointerOnRow = false
     /// The card this bubble put up, if it is still up. Recorded rather than recomputed, exactly as
     /// `ToolRowHeader` records its own: what has to be taken down is what was PUT up, and the
     /// pointer crossing from one chip to the next raises the second before the first is told it
@@ -113,26 +117,6 @@ struct UserTurnRowView: View {
     static let padding = EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
 
     private var side: HorizontalEdge { .trailing }
-
-    /// The square the copy control is drawn and hit in, the same one the agent's answers use.
-    private static let copyControlSize: CGFloat = 18
-
-    /// Drawn in the empty margin beside the bubble as an overlay, which takes no width: the
-    /// bubble's cap is measured by the list, and a control that shared the row's width would wrap
-    /// the text differently from the height the table was told.
-    @ViewBuilder
-    private var copyControl: some View {
-        if !text.isEmpty {
-            CopyButton(
-                text: text,
-                title: "Copy this message",
-                isVisible: isPointerOnRow,
-                size: Self.copyControlSize,
-                imageScale: .small
-            )
-            .offset(x: -(Self.copyControlSize + Metrics.spacingSmall))
-        }
-    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -182,9 +166,21 @@ struct UserTurnRowView: View {
                     // surface whatever the page around it is doing. AppKit cannot read it, which is why
                     // the text view below is handed `Palette.bubbleTextSelection` as well.
                     .environment(\.colorScheme, .dark)
-                    .overlay(alignment: .bottomLeading) { copyControl }
                 }
             }
+            // Placed with an offset by its own measured width: an `alignmentGuide` here was ignored
+            // in the real list and left the label on top of the bubble. Hidden until measured so it
+            // is never seen at its unshifted position.
+            .overlay(alignment: .topLeading) {
+                if let sentAt, isBubbleHovered || timeWidth > 0 {
+                    MessageTimeLabel(date: sentAt)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { timeWidth = $0 }
+                        .offset(x: -(timeWidth + TranscriptLayout.block))
+                        .opacity(isBubbleHovered && timeWidth > 0 ? 1 : 0)
+                        .padding(.top, Self.padding.top)
+                }
+            }
+            .animation(reduceMotion ? nil : Motion.hover, value: isBubbleHovered)
             .contentShape(Rectangle())
             .onHover { isBubbleHovered = $0 }
 
@@ -192,7 +188,6 @@ struct UserTurnRowView: View {
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
-        .onHover { isPointerOnRow = $0 }
         .onChange(of: hovered) { _, chip in
             hoverTask?.cancel()
             guard let chip else {

@@ -41,7 +41,9 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.resultPayload?.count == rhs.row.resultPayload?.count
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
+            && lhs.summariseTool == rhs.summariseTool
             && lhs.isNested == rhs.isNested
+            && lhs.smoothMarkdownHandoff == rhs.smoothMarkdownHandoff
             && lhs.subagentActions == rhs.subagentActions
             && lhs.subagentHasRun == rhs.subagentHasRun
             && (lhs.responseCopyText != nil) == (rhs.responseCopyText != nil)
@@ -61,7 +63,12 @@ struct TranscriptRowView: View, Equatable {
     /// transcript, so it is handed down rather than looked up per row.
     var home: TranscriptHome
     var isExpanded = false
+    /// A call outside an opened activity group keeps its raw command in the detail behind a
+    /// one-line summary. An explicitly opened group shows each call's original header.
+    var summariseTool = false
     var isNested = false
+    /// The newly saved reply replaces the live text currently on screen.
+    var smoothMarkdownHandoff = false
     /// For a call that started a subagent, how many actions that subagent has taken, which the
     /// chat draws on this row instead of drawing the actions. See `TranscriptFold`.
     var subagentActions: Int?
@@ -115,7 +122,8 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
-                    home: home
+                    home: home,
+                    sentAt: row.createdAt
                 )
             } else {
                 // Attachments reach the agent as paths in the prompt text, which is the only
@@ -128,7 +136,8 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: turn.body,
                     attachments: turn.paths,
-                    home: home
+                    home: home,
+                    sentAt: row.createdAt
                 )
             }
 
@@ -147,7 +156,10 @@ struct TranscriptRowView: View, Equatable {
 
         case .assistantText:
             if let text = assistantText, !text.isEmpty {
-                ProseRowView(text: text, copyText: responseCopyText)
+                ProseRowView(
+                    text: text, copyText: responseCopyText,
+                    smoothMarkdownHandoff: smoothMarkdownHandoff, sentAt: row.createdAt
+                )
             }
 
         case .thinking:
@@ -173,11 +185,7 @@ struct TranscriptRowView: View, Equatable {
                     let run = runLink(for: use)
                     ToolRowView(
                         use: use,
-                        presentation: TranscriptPresentationCache.presentation(
-                            rowID: row.id,
-                            use: use,
-                            worktree: home.worktree
-                        ),
+                        presentation: toolPresentation(use),
                         home: home,
                         result: toolResult,
                         isError: row.isError,
@@ -229,14 +237,14 @@ struct TranscriptRowView: View, Equatable {
         case .notice:
             if let note = ConversationNotResumed.sentence(fromNote: row.payload) {
                 ConversationNotResumedRowView(sentence: note)
+            } else if let lifecycle = WorkspaceLifecycleNote(payload: row.payload) {
+                WorkspaceLifecycleRowView(note: lifecycle)
             } else {
                 RateLimitRowView(payload: row.payload)
             }
 
         case .system:
-            if let info = initInfo {
-                SessionStartRowView(info: info)
-            } else if let wake = backgroundWake {
+            if let wake = backgroundWake {
                 BackgroundWakeRowView(wake: wake)
             } else if let compaction {
                 CompactionBoundaryRowView(compaction: compaction)
@@ -285,6 +293,23 @@ struct TranscriptRowView: View, Equatable {
     private var toolUse: AgentToolUse? {
         guard case .toolUse(let use)? = event else { return nil }
         return use
+    }
+
+    private func toolPresentation(_ use: AgentToolUse) -> ToolPresentation {
+        var presentation = TranscriptPresentationCache.presentation(
+            rowID: row.id, use: use, worktree: home.worktree
+        )
+        let isOpenedMCP = isExpanded && MCPToolName(use.name) != nil
+        if summariseTool && !isOpenedMCP, let label = TranscriptActivitySummary.singleCallLabel(
+            use, isRunning: row.resultPayload == nil
+        ) {
+            presentation.label = label
+            presentation.detail = ""
+            presentation.detailLead = .none
+            presentation.literal = nil
+            presentation.chips = []
+        }
+        return presentation
     }
 
     /// A media call becomes content only after its successful result arrives. Before that it stays
@@ -347,11 +372,6 @@ struct TranscriptRowView: View, Equatable {
     private var permissionAsk: PermissionAsk? {
         guard case .permissionAsk(let ask)? = event else { return nil }
         return ask
-    }
-
-    private var initInfo: AgentInit? {
-        guard case .initialized(let info)? = event else { return nil }
-        return info
     }
 
     /// Asked of the bytes as well as the event, because rows stored before the summary was

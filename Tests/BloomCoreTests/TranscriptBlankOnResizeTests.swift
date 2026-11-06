@@ -205,7 +205,7 @@ struct TranscriptBlankOnResizeTests {
         let ordinary = Data(#"{"type":"assistant","subtype":"text"}"#.utf8)
         #expect(!TranscriptRowInk.drawsNothing(kind: .assistantText, payload: ordinary))
         let start = Data(#"{"type":"system","subtype":"init"}"#.utf8)
-        #expect(!TranscriptRowInk.drawsNothing(kind: .system, payload: start))
+        #expect(TranscriptRowInk.drawsNothing(kind: .system, payload: start))
         let noise = Data(#"{"type":"system","subtype":"status"}"#.utf8)
         #expect(TranscriptRowInk.drawsNothing(kind: .system, payload: noise))
         // The boundary that closes a compaction draws a rule across the pane, so it is not noise.

@@ -104,6 +104,7 @@ public actor AgentRunner {
     /// which is the one moment the actor is least available and the one moment a pending ask
     /// absolutely has to be answered.
     private let pending = PendingAsks()
+    private let contextAsks = ContextBreakdownAsks()
 
     /// What this project has already approved, and the one place either runner asks it.
     /// See `SessionGrants`, which this and `CodexRunner` used to hold four copies of between them.
@@ -385,6 +386,22 @@ public actor AgentRunner {
         try await send(text, recording: recording, deliveryID: nil, interactionMode: nil)
     }
 
+    /// Nil when no process is running: starting one only to count it would cost a launch.
+    public func contextBreakdown() async -> ContextBreakdown? {
+        guard let process = handle.current else { return nil }
+        let id = "bloom-context-\(UUID().uuidString)"
+        let asks = contextAsks
+        return await withCheckedContinuation { continuation in
+            asks.add(id, continuation)
+            process.writeLine(ContextBreakdown.request(id: id))
+            Task {
+                // A cap on a CLI that never answers, not a measurement: it answers in milliseconds.
+                try? await Task.sleep(for: .seconds(30))
+                asks.giveUp(id)
+            }
+        }
+    }
+
     public func evictIfIdle(for duration: Duration) async -> Bool {
         guard !wasEvicted, sendsInFlight == 0, !session.state.isMidTurn,
               session.agentSessionID != nil, pending.isEmpty, !sink.hasBackgroundWork else { return false }
@@ -555,6 +572,7 @@ public actor AgentRunner {
         do {
             for try await line in lines {
                 guard let event = AgentEvent.decode(line: line) else { continue }
+                if case .unknown(let raw) = event, contextAsks.answer(raw) { continue }
                 // A stray result does not count as the turn having reported itself. Letting it
                 // would mean a process that printed one and then died on a non-zero status
                 // exited without `finish` ever drawing the error row that says so.
@@ -565,6 +583,7 @@ public actor AgentRunner {
             appendStderr("\(error)")
         }
 
+        contextAsks.giveUpAll()
         let status = await process.exitStatus
         await finish(status: status, sawResult: sawResult, generation: generation)
     }

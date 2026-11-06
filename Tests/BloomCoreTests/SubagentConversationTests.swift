@@ -84,11 +84,11 @@ struct SubagentConversationTests {
         ])
     }
 
-    /// Two calls are not worth a control, which is `TranscriptFold.leastHidden` in the chat too.
-    @Test func tooShortARunIsDrawnAsItsRows() {
+    /// Two settled calls now use the same compact summary as the main transcript.
+    @Test func twoCallsFoldInASubagentRun() {
         let facts = [tool(1), tool(2), prose(3)]
         let entries = SubagentConversation.entries(facts: facts, unfolded: [], revealed: [])
-        #expect(entries.map(\.id) == [.row(1), .row(2), .row(3)])
+        #expect(entries.map(\.id) == [.fold(1), .row(3)])
     }
 
     /// A result somebody opened is not folded away under them when the rest of the run settles.

@@ -52,9 +52,9 @@ final class SearchPanelModel {
         isOpen = true
     }
 
-    /// - Parameter scope: the chip to open on. Shift+Cmd+F opens on Transcripts, which is what that
-    ///   key has always meant, and Cmd+K opens on Everything.
-    func open(scope: HomeScope = .all, app: AppModel) {
+    /// - Parameter scope: the chip to open on. Shift+Cmd+F opens on Transcripts; Cmd+K opens on
+    ///   Home's chip while Home is showing, so a search started from Archived searches the archive.
+    func open(scope: HomeScope? = nil, app: AppModel) {
         if files != nil { close(app: app) }
         if isOpen {
             // The platform's rule for pressing a find key at an open find: select what is there,
@@ -66,7 +66,8 @@ final class SearchPanelModel {
             highlighted = nil
             listing = .empty
         }
-        self.scope = HomeScope.settle(scope, searching: true)
+        let homeScope = app.selection == .home ? app.homeFilter.scope : .all
+        self.scope = HomeScope.settle(scope ?? homeScope, searching: true)
         Task { archived = await app.archivedWorkspaces() }
         rebuild(app: app)
     }
@@ -125,6 +126,10 @@ final class SearchPanelModel {
 
     func setScope(_ scope: HomeScope, app: AppModel) {
         self.scope = scope
+        // Only the chips Home also offers: Workspaces and Transcripts leave Home's narrowing alone.
+        if app.selection == .home, HomeScope.offered(searching: false).contains(scope) {
+            app.homeFilter.scope = scope
+        }
         rebuild(app: app)
     }
 

@@ -18,3 +18,6 @@ output/
 # that were committed had outlived their sources, which are in no commit here and referenced by
 # nothing, so they were caches of files that no longer exist.
 __pycache__/
+
+# Orb portal registrations are local to the running orb.
+.amp/portals/*

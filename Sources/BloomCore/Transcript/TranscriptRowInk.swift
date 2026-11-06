@@ -4,8 +4,8 @@ import Foundation
 /// laid out view.
 ///
 /// **Sixty per cent of a real session draws nothing.** Measured on an 1,855 row conversation and
-/// again on a 2,981 row one: 1,804 of the latter are `system` stream events, and a `system` row
-/// that is not an init draws no view at all. They are ordinary rows in the table, three to five of
+/// again on a 2,981 row one: 1,804 of the latter are `system` stream events, and most `system` rows
+/// draw no view at all. They are ordinary rows in the table, three to five of
 /// them between every pair of tool calls, and until something has drawn one there is nothing to
 /// tell the table but the running mean of the rows that HAVE been drawn.
 ///
@@ -69,13 +69,11 @@ public enum TranscriptRowInk {
     /// result whose call is on the row above draws nothing either, but which rows those are is a
     /// question about the row before it rather than about the row, so it is not answered here.
     ///
-    /// Three `system` rows draw: an init, a background task's notification, which is stored only
-    /// when it opens a turn the CLI started by itself, and the boundary that closes a compaction.
-    /// See `BackgroundWake` and `ContextCompaction`.
+    /// A background task's notification and a compaction boundary draw. Session init metadata
+    /// stays stored, but it no longer gets a line in the transcript.
     public static func drawsNothing(kind: MessageKind, payload: Data) -> Bool {
         guard kind == .system else { return false }
-        return payload.prefix(probeLength).range(of: initMarker) == nil
-            && !BackgroundWake.isRow(kind: kind, payload: payload)
+        return !BackgroundWake.isRow(kind: kind, payload: payload)
             && !ContextCompaction.isRow(kind: kind, payload: payload)
     }
 }
