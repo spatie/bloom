@@ -81,9 +81,15 @@ lane_copy() {
   codesign --force --deep --sign - "$app" >/dev/null 2>&1
 }
 
-# The running binary as `pgrep -f` sees it. LaunchServices starts it from its real path, under
-# /private and without the doubled slash TMPDIR leaves, so the pattern starts at the lab's own part.
-process_pattern() { print -r -- "bloom-scroll-lab/apps/${1:h:t}/Bloom Scroll Lab.app/Contents/MacOS/Bloom" }
+# LaunchServices uses the resolved executable path. Escape it as a process pattern so a custom
+# lab directory, including one with regexp characters, cannot match another app.
+process_pattern() {
+  python3 -I - "$1" <<'PY'
+import pathlib, re, sys
+binary = pathlib.Path(sys.argv[1]).resolve() / "Contents/MacOS/Bloom"
+print("^" + re.escape(str(binary)) + "([[:space:]]|$)")
+PY
+}
 
 inject() {
   local source="$1"
@@ -186,7 +192,7 @@ fresh_defaults() {
 }
 
 launch() {
-  local app="$1" directory="$2" plan="$3" started=$SECONDS
+  local app="$1" directory="$2" plan="$3" started=$SECONDS launch_status=0
   fresh_defaults
   open -g -n -W -a "$app" --env BLOOM_DB_PATH="$directory/bloom.sqlite" \
     --stdout "$directory/stdout.log" --stderr "$directory/stderr.log" \
@@ -195,13 +201,22 @@ launch() {
   while kill -0 "$waiter" 2>/dev/null; do
     if (( SECONDS - started > run_ceiling_seconds )); then
       say "run in $directory passed $run_ceiling_seconds s; stopping it"
-      pkill -f "$(process_pattern "$app")" || true
+      local pattern="$(process_pattern "$app")"
+      pkill -TERM -f "$pattern" || true
+      kill -TERM "$waiter" 2>/dev/null || true
+      sleep 1
+      pkill -KILL -f "$pattern" || true
+      kill -KILL "$waiter" 2>/dev/null || true
+      launch_status=124
       break
     fi
     sleep 2
   done
-  wait "$waiter" 2>/dev/null || true
+  local waiter_status=0
+  wait "$waiter" 2>/dev/null || waiter_status=$?
+  if (( launch_status == 0 )); then launch_status=$waiter_status; fi
   print -r -- $(( SECONDS - started ))
+  return $launch_status
 }
 
 run() {
@@ -227,7 +242,7 @@ run() {
   # Resolved once, before building: a commit made meanwhile must not move what HEAD names.
   for ref in "${refs[@]}"; do commits+=("$(commit_of "$ref")"); done
   for commit in "${commits[@]}"; do build_one "$commit"; done
-  local commit label directory seconds load
+  local commit label directory seconds load launch_status
   claim_lane
   for commit in "${commits[@]}"; do lane_copy "$commit"; done
   python3 -I "$repo/Tools/scroll-lab.py" seed "$out/corpus" >/dev/null
@@ -245,9 +260,10 @@ run() {
         cp "$out/corpus/bloom.sqlite" "$directory/bloom.sqlite"
         say "pass $pass/$repeat, $size, $label ($commit)"
         load="$(LC_ALL=C sysctl -n vm.loadavg | awk '{print $2}' | tr , .)"
-        seconds="$(launch "$(lane_app_path "$commit")" "$directory" "$out/plan-$size.json")"
+        launch_status=0
+        seconds="$(launch "$(lane_app_path "$commit")" "$directory" "$out/plan-$size.json")" || launch_status=$?
         mv "$directory/trace.ndjson" "$directory/run.ndjson" 2>/dev/null || say "no trace in $directory"
-        print -r -- "{\"build\": \"$label\", \"commit\": \"$commit\", \"size\": \"$size\", \"pass\": $pass, \"seconds\": $seconds, \"loadBefore\": $load}" \
+        print -r -- "{\"build\": \"$label\", \"commit\": \"$commit\", \"size\": \"$size\", \"pass\": $pass, \"seconds\": $seconds, \"loadBefore\": $load, \"exitStatus\": $launch_status}" \
           > "$directory/run.meta.json"
         rm -f "$directory/bloom.sqlite"*
       done

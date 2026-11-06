@@ -827,10 +827,18 @@ def blank_failures(place, blank):
 
 def report(directory):
     runs = []
-    for trace in sorted(Path(directory).glob("*/run.ndjson")):
+    root = Path(directory)
+    # Metadata records every attempted run, including a launch that failed before opening a trace.
+    # Keep old trace-only runs readable as well.
+    directories = {path.parent for pattern in ("*/run.ndjson", "*/run.meta.json") for path in root.glob(pattern)}
+    for run_directory in sorted(directories):
+        trace = run_directory / "run.ndjson"
         meta_path = trace.with_suffix(".meta.json")
-        analysed = analyse(trace)
+        analysed = analyse(trace) if trace.exists() else {
+            "trace": str(trace), "boot": {}, "finished": False, "steps": []}
         analysed["meta"] = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        if analysed["meta"].get("exitStatus", 0) != 0:
+            analysed["finished"] = False
         trace.with_suffix(".analysis.json").write_text(json.dumps(analysed, indent=1))
         runs.append(analysed)
     if not runs:
