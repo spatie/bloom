@@ -44,7 +44,7 @@ struct WelcomeKeepAwake: View {
         }
         .padding(Metrics.pane)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { sleepSwitch.refresh() }
+        .task { await sleepSwitch.watchStanding() }
     }
 
     @ViewBuilder
@@ -81,14 +81,16 @@ struct WelcomeKeepAwake: View {
     /// who pressed this button asked for the thing, so the preference follows the press rather
     /// than waiting to be found in Settings afterwards.
     private func setUp() {
-        switch sleepSwitch.enable() {
-        case .ready:
-            keepAwake.keepsLidClosed = true
-        case .needsApproval:
-            keepAwake.keepsLidClosed = true
-            sleepSwitch.openApprovalSettings()
-        case .unavailable:
-            break
+        Task {
+            switch await sleepSwitch.enable() {
+            case .ready:
+                keepAwake.keepsLidClosed = true
+            case .needsApproval:
+                keepAwake.keepsLidClosed = true
+                sleepSwitch.openApprovalSettings()
+            case .unavailable:
+                break
+            }
         }
     }
 }

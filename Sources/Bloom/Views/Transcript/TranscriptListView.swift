@@ -203,9 +203,6 @@ struct TranscriptListView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Whether this window is the one in front, which is the whole of what the follower needs it
-    /// for: a display link in a backgrounded app is a battery cost with nobody watching it.
-    @Environment(\.controlActiveState) private var activeState
     /// The text scale the rows are drawn at, which is part of what the height cache is keyed on: a
     /// row at a different size is a different height, and an offset written down at one size is a
     /// point into a document laid out at another.
@@ -1244,8 +1241,8 @@ struct TranscriptListView: View {
         // than read from a body: it writes no state and reads none, so nothing else would tell it.
         // Both of these move when a person changes something about the window, which is not a
         // thing that happens while an answer arrives.
-        .onChange(of: activeState, initial: true) { _, state in
-            follower.isFrontmost = isVisible.value && state != .inactive
+        .background {
+            TranscriptWindowActivitySignal(follower: follower)
         }
         .onChange(of: reduceMotion, initial: true) { _, reduced in
             follower.travels = TranscriptFollow.travels(reduceMotion: reduced)
@@ -1444,7 +1441,7 @@ struct TranscriptListView: View {
         let wasActive = isVisible.value
         isVisible.value = active
         controller.setColumnActive(active)
-        follower.isFrontmost = active && activeState != .inactive
+        follower.isColumnActive = active
         guard active else {
             remember()
             follower.stop()
