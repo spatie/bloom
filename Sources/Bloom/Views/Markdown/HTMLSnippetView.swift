@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 import WebKit
 
 /// An HTML fence drawn by WebKit, its own `<style>` included. No page JavaScript and nothing
