@@ -68,4 +68,25 @@ struct TranscriptEntryIDTests {
         #expect(TranscriptEntryID.turnFold(12) != TranscriptEntryID.fold(12))
         #expect(TranscriptEntryID.turnFold(12).description == "turnFold.12")
     }
+
+    @Test("scroll anchors retain answer parts and exclude live or folded entries")
+    func scrollPlaces() {
+        #expect(TranscriptEntryID.row(7).scrollPlace == TranscriptSelection.Place(seq: 7))
+        #expect(TranscriptEntryID.answerPart(seq: 7, part: 8).scrollPlace == TranscriptSelection.Place(seq: 7, part: 8))
+        let decorations: [TranscriptEntryID] = [.setup, .streaming, .sending, .fold(7), .turnFold(7), .bottomSpacing]
+        for id in decorations {
+            #expect(id.scrollPlace == nil)
+        }
+    }
+
+    @Test("an answer's parts sit between its row and the next one in reading order")
+    func answerPartsReadInOrder() throws {
+        let row = try #require(TranscriptEntryID.row(7).selectionPlace)
+        let second = try #require(TranscriptEntryID.answerPart(seq: 7, part: 1).selectionPlace)
+        let third = try #require(TranscriptEntryID.answerPart(seq: 7, part: 2).selectionPlace)
+        let next = try #require(TranscriptEntryID.row(8).selectionPlace)
+        #expect(row < second && second < third && third < next)
+        #expect(TranscriptEntryID.answerPart(seq: 7, part: 1).seq == nil)
+        #expect(TranscriptEntryID.turnFold(7).selectionPlace == nil)
+    }
 }

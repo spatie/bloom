@@ -40,6 +40,7 @@ struct DetailColumn: View {
                 let _ = isActive ? SwitchTrace.mark("column.body", workspace: id) : ()
                 CenterColumnView(model: model)
                     .environment(\.workspaceColumnActivity, activity)
+                    .modifier(HeldWidth(isActive: isActive))
                     .allowsHitTesting(isActive)
                     .accessibilityHidden(!isActive)
                     // Mail replaced the centre column, but a short Mail view let these retained
@@ -218,5 +219,24 @@ private struct CrewChatColumn: View {
             if !model.hasReadSessions { await model.reloadSessions() }
             model.prepareTranscript(for: sessionID)
         }
+    }
+}
+
+/// A retained column keeps the width it was last shown at. The inspector is per conversation, so a
+/// switch can change the centre's width, and the column behind reflowed its transcript each time,
+/// then again on return, moving the reader's place by up to 57 points a round trip.
+private struct HeldWidth: ViewModifier {
+    let isActive: Bool
+    @State private var shownWidth: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: isActive ? nil : shownWidth)
+            // Zero, or a held column wider than the pane widens the stack, and the visible column
+            // is laid out at that width, centred, its tabs cut at both ends.
+            .frame(minWidth: isActive ? nil : 0, maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                if isActive { shownWidth = width }
+            }
     }
 }

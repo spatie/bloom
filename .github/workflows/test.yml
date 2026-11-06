@@ -110,6 +110,9 @@ jobs:
       - name: Check the browser client script
         run: node Tools/check-local-web-client.mjs
 
+      - name: Check scroll lab reports
+        run: python3 -I Tools/scroll-lab-tests.py
+
       # And the rules that are the language's rather than ours, which is the other half.
       # `.swiftlint.yml` is tuned rather than default: the head of that file has the counts every
       # disabled rule produced and why each one is off.

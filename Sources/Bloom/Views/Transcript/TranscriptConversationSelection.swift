@@ -8,20 +8,6 @@ extension EnvironmentValues {
     @Entry var transcriptEntryID: TranscriptEntryID?
 }
 
-extension TranscriptEntryID {
-    /// Where an entry sits in reading order, for the entries that hold selectable text. The rows
-    /// are numbered by sequence; the setup log is before all of them and a message on its way is
-    /// after all of them.
-    var selectionOrder: Int? {
-        switch self {
-        case .row(let seq): seq
-        case .setup: Int.min
-        case .sending, .streaming, .pending: Int.max
-        default: nil
-        }
-    }
-}
-
 /// A selection that spans rows: Select All, and a drag that leaves the answer it started in.
 /// `TranscriptTextSelection` is an answer's and stops at its edge.
 ///
@@ -42,10 +28,11 @@ final class TranscriptConversationSelection {
         case span(Span)
     }
 
-    /// The highlight for a drag across rows, and the words it copies.
+    /// The highlight for a drag across rows, and the words it copies. A part of a long answer
+    /// counts as a row of its own, so a drag through an answer survives its parts being recycled.
     private struct Span {
-        var first: Int
-        var last: Int
+        var first: TranscriptSelection.Place
+        var last: TranscriptSelection.Place
         /// Keyed by a block's text: the row's views come and go, their strings do not.
         var firstRanges: [String: NSRange]
         var lastRanges: [String: NSRange]
@@ -61,7 +48,7 @@ final class TranscriptConversationSelection {
             let separator: String
         }
 
-        let seq: Int
+        let place: TranscriptSelection.Place
         let blocks: [Block]
         var lengths: [Int] { blocks.map { $0.text.length } }
 
@@ -138,29 +125,30 @@ final class TranscriptConversationSelection {
 
     /// A press in `view`, which is where a drag across rows would start.
     func beginDrag(in view: LinkTextView, offset: Int) {
-        guard let seq = view.rowSeq else {
+        guard let place = view.selectionPlace else {
             anchorView = nil
             anchorRow = nil
             return
         }
-        let snapshot = Self.snapshot(of: rowViews(seq))
+        let views = rowViews(place)
         anchorView = view
-        anchorRow = snapshot
-        anchorPosition = .init(block: rowViews(seq).firstIndex(of: view) ?? 0, offset: offset)
+        anchorRow = Self.snapshot(of: views, at: place)
+        anchorPosition = .init(block: views.firstIndex(of: view) ?? 0, offset: offset)
     }
 
     /// The pointer moved to `point`. True when that is in a different row from where the press
     /// was, and this selection has painted it; false when the answer's own selection should.
     func drag(to point: NSPoint) -> Bool {
-        guard let anchorRow, let target = nearestView(to: point), let targetSeq = target.rowSeq else {
+        guard let anchorRow, let target = nearestView(to: point), let targetPlace = target.selectionPlace else {
             return false
         }
-        guard targetSeq != anchorRow.seq else {
+        guard targetPlace != anchorRow.place else {
             return leaveSpan()
         }
-        let endRow = Self.snapshot(of: rowViews(targetSeq))
+        let targetViews = rowViews(targetPlace)
+        let endRow = Self.snapshot(of: targetViews, at: targetPlace)
         let end = TranscriptSelection.Position(
-            block: rowViews(targetSeq).firstIndex(of: target) ?? 0,
+            block: targetViews.firstIndex(of: target) ?? 0,
             offset: target.selectionOffset(at: point)
         )
         mode = .span(span(from: anchorRow, to: endRow, anchoredAt: anchorPosition, endingAt: end))
@@ -185,7 +173,7 @@ final class TranscriptConversationSelection {
         from anchorRow: RowSnapshot, to endRow: RowSnapshot,
         anchoredAt anchor: TranscriptSelection.Position, endingAt end: TranscriptSelection.Position
     ) -> Span {
-        let anchorComesFirst = anchorRow.seq < endRow.seq
+        let anchorComesFirst = anchorRow.place < endRow.place
         let (firstRow, firstFrom) = anchorComesFirst ? (anchorRow, anchor) : (endRow, end)
         let (lastRow, lastTo) = anchorComesFirst ? (endRow, end) : (anchorRow, anchor)
         let firstRanges = firstRow.ranges(
@@ -193,10 +181,10 @@ final class TranscriptConversationSelection {
         )
         let lastRanges = lastRow.ranges(from: .init(block: 0, offset: 0), to: lastTo)
         return Span(
-            first: firstRow.seq, last: lastRow.seq,
+            first: firstRow.place, last: lastRow.place,
             firstRanges: firstRow.keyed(firstRanges), lastRanges: lastRow.keyed(lastRanges),
             slice: ConversationText.Slice(
-                first: firstRow.seq, last: lastRow.seq,
+                first: firstRow.place, last: lastRow.place,
                 firstText: firstRow.text(in: firstRanges), lastText: lastRow.text(in: lastRanges)
             )
         )
@@ -232,10 +220,10 @@ final class TranscriptConversationSelection {
         case .everything:
             return everything
         case .span(let span):
-            guard let seq = view.rowSeq else { return nil }
-            if seq < span.first || seq > span.last { return nothing }
-            if seq == span.first { return span.firstRanges[view.string] ?? nothing }
-            if seq == span.last { return span.lastRanges[view.string] ?? nothing }
+            guard let place = view.selectionPlace else { return nil }
+            if place < span.first || place > span.last { return nothing }
+            if place == span.first { return span.firstRanges[view.string] ?? nothing }
+            if place == span.last { return span.lastRanges[view.string] ?? nothing }
             return everything
         }
     }
@@ -249,9 +237,9 @@ final class TranscriptConversationSelection {
 
     // MARK: Finding views
 
-    /// The text views of one row, in reading order.
-    private func rowViews(_ seq: Int) -> [LinkTextView] {
-        Self.inReadingOrder(members.allObjects.filter { $0.window != nil && $0.rowSeq == seq })
+    /// The text views of one row, or of one part of a long answer, in reading order.
+    private func rowViews(_ place: TranscriptSelection.Place) -> [LinkTextView] {
+        Self.inReadingOrder(members.allObjects.filter { $0.window != nil && $0.selectionPlace == place })
     }
 
     private static func inReadingOrder(_ views: [LinkTextView]) -> [LinkTextView] {
@@ -263,8 +251,8 @@ final class TranscriptConversationSelection {
         }
     }
 
-    private static func snapshot(of views: [LinkTextView]) -> RowSnapshot {
-        RowSnapshot(seq: views.first?.rowSeq ?? 0, blocks: views.map { view in
+    private static func snapshot(of views: [LinkTextView], at place: TranscriptSelection.Place) -> RowSnapshot {
+        RowSnapshot(place: place, blocks: views.map { view in
             RowSnapshot.Block(
                 key: view.string,
                 text: NSAttributedString(attributedString: view.textStorage ?? NSTextStorage()),
@@ -277,7 +265,7 @@ final class TranscriptConversationSelection {
     /// Among the views that belong to a row, the one whose rectangle is closest to the point.
     private func nearestView(to point: NSPoint) -> LinkTextView? {
         members.allObjects
-            .filter { $0.window != nil && $0.rowSeq != nil }
+            .filter { $0.window != nil && $0.selectionPlace != nil }
             .min { $0.squaredDistance(fromWindowPoint: point) < $1.squaredDistance(fromWindowPoint: point) }
     }
 }

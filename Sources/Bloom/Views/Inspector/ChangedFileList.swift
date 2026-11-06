@@ -323,7 +323,7 @@ struct ChangedFileList: View {
             // different operations.
             message: {
                 FileRevert.losses(
-                    for: file, baseBranch: model.workspace.baseBranch,
+                    for: file, baseBranch: model.workspace.reviewBase,
                     hasDraft: fullPath(file.path).map { FileEditSession.shared.isDirty($0) } ?? false
                 )
             },

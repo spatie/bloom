@@ -6,6 +6,13 @@ import Foundation
 /// and duration so the work before its final answer can sit under one disclosure after the prompt.
 /// It keeps completed turns when new rows arrive and rescans only the live tail.
 public enum TranscriptTurnFold {
+    /// Whether a pass takes freshly scanned turns over those held from the pass before. Held turns
+    /// lag a pass so a result and its disclosure are two edits; held from an empty conversation,
+    /// they only turned the first rows' disclosures into a scattered edit that reloaded every cell.
+    public static func takesFreshTurns(held: Folds, heldFor heldSession: SessionID?, showing session: SessionID) -> Bool {
+        heldSession != session || held.scannedRows == 0
+    }
+
     public struct Fact: Equatable, Sendable {
         public var seq: Int
         public var kind: MessageKind
@@ -97,26 +104,61 @@ public enum TranscriptTurnFold {
         }
     }
 
-    public static func hiddenIndices<Rows: RandomAccessCollection>(
+    /// The rows before a completed turn's final answer, as the range they span, or nil when the
+    /// turn folds nothing. The answer and anything after it stay visible, and so does every row
+    /// in the range that `keepsVisible` says to keep.
+    public static func foldedWork<Rows: RandomAccessCollection>(
         turn: Turn,
         answerIndex: Int?,
         in rows: Rows,
         revealed: Set<Int>,
         drawn: Range<Int>
-    ) -> Set<Int> where Rows.Element == Visibility, Rows.Index == Int {
+    ) -> Range<Int>? where Rows.Element == Visibility, Rows.Index == Int {
         guard turn.isComplete,
               let answerIndex,
               turn.span.lowerBound < answerIndex,
               answerIndex < turn.span.upperBound,
               drawn.lowerBound <= turn.span.lowerBound,
               turn.span.upperBound <= drawn.upperBound
-        else { return [] }
+        else { return nil }
 
         let work = turn.span.lowerBound..<answerIndex
         // A search result or an opened tool row needs its context. Keep the whole turn open until
         // the reader leaves it rather than hiding the target behind a control above the viewport.
-        guard !work.contains(where: { revealed.contains(rows[$0].seq) }) else { return [] }
-        return Set(work.filter { !rows[$0].keepsVisible })
+        // By sequence number, which rises down a session, so no row of the work is read for it.
+        let workSeqs = rows[work.lowerBound].seq..<rows[answerIndex].seq
+        guard !revealed.contains(where: workSeqs.contains),
+              work.contains(where: { !rows[$0].keepsVisible })
+        else { return nil }
+        return work
+    }
+
+    /// The work of every collapsed turn in a pass. A row is looked up here instead of in a set of
+    /// every hidden index, which rebuilt on each pass came to twelve milliseconds of every row an
+    /// agent wrote into a 10,000 row chat.
+    public struct Collapsed: Sendable {
+        private var spans: [Range<Int>] = []
+
+        public init() {}
+
+        /// Spans are added in the order of the turns, which is the order of their rows.
+        public mutating func add(_ span: Range<Int>) { spans.append(span) }
+
+        public func contains(_ index: Int) -> Bool {
+            var low = 0
+            var high = spans.count
+            while low < high {
+                let middle = (low + high) / 2
+                if spans[middle].upperBound <= index {
+                    low = middle + 1
+                } else if index < spans[middle].lowerBound {
+                    high = middle
+                } else {
+                    return true
+                }
+            }
+            return false
+        }
     }
 
     /// The activity groups that have rows to hide in the current drawing window.

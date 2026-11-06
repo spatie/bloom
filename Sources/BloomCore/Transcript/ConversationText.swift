@@ -14,12 +14,15 @@ public enum ConversationText {
     /// and ended in, where only the words under the drag are taken. Those two are given as text
     /// because they were read off screen while their rows were on it.
     public struct Slice: Equatable, Sendable {
-        public var first: Int
-        public var last: Int
+        public var first: TranscriptSelection.Place
+        public var last: TranscriptSelection.Place
         public var firstText: String
         public var lastText: String
 
-        public init(first: Int, last: Int, firstText: String, lastText: String) {
+        public init(
+            first: TranscriptSelection.Place, last: TranscriptSelection.Place,
+            firstText: String, lastText: String
+        ) {
             self.first = first
             self.last = last
             self.firstText = firstText
@@ -35,18 +38,26 @@ public enum ConversationText {
 
     private static func turn(of row: TurnAnswer.Row, in slice: Slice?) -> String? {
         guard !row.isNested, let body = body(of: row) else { return nil }
-        let wanted = selected(body, of: row.seq, in: slice)
+        let wanted = selected(body, of: row, in: slice)
         let trimmed = wanted.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        // A drag between the parts of one answer copies like a drag inside an answer, unlabelled.
+        if let slice, slice.first.seq == slice.last.seq { return trimmed }
         return "\(label(of: row.kind)):\n\(trimmed)"
     }
 
-    private static func selected(_ body: String, of seq: Int, in slice: Slice?) -> String {
+    private static func selected(_ body: String, of row: TurnAnswer.Row, in slice: Slice?) -> String {
         guard let slice else { return body }
-        if seq < slice.first || seq > slice.last { return "" }
-        if seq == slice.first { return slice.firstText }
-        if seq == slice.last { return slice.lastText }
-        return body
+        if row.seq < slice.first.seq || row.seq > slice.last.seq { return "" }
+        if row.seq != slice.first.seq, row.seq != slice.last.seq { return body }
+        let parts = row.kind == .assistantText ? TranscriptAnswerParts.split(body) : [body]
+        return parts.indices.compactMap { part -> String? in
+            let place = TranscriptSelection.Place(seq: row.seq, part: part)
+            if place < slice.first || place > slice.last { return nil }
+            if place == slice.first { return slice.firstText }
+            if place == slice.last { return slice.lastText }
+            return parts[part]
+        }.joined(separator: "\n\n")
     }
 
     private static func label(of kind: MessageKind) -> String {

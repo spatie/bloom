@@ -30,6 +30,8 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
 
     public var layer: ChangeLayer?
     public var stagingRevision: String?
+    /// The HEAD a project-checkout review read, so Discard can refuse an obsolete target.
+    public var reviewRevision: String?
 
     public var id: String { layer.map { "\($0.rawValue):\(path)" } ?? path }
 
@@ -161,6 +163,10 @@ extension Git {
             )
         }
 
+        if base == "HEAD" {
+            guard try await headSHA(of: worktree) == mergeBase else { throw FileRevertRefusal.changed }
+            for path in byPath.keys { byPath[path]?.reviewRevision = mergeBase }
+        }
         return byPath.values.sorted { $0.path < $1.path }
     }
 

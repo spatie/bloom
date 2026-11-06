@@ -91,10 +91,23 @@ public indirect enum MarkdownBlock: Identifiable, Sendable, Hashable {
 /// A bounded hand-written parser keeps partial, rapidly changing transcript text cheap and deterministic.
 public enum MarkdownParser: Sendable {
     public static func parse(_ text: String) -> [MarkdownBlock] {
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        var parser = BlockParser(lines: normalized.components(separatedBy: "\n"), allowIndentedCode: true)
+        var parser = BlockParser(lines: lines(of: text), allowIndentedCode: true)
         return parser.parse()
+    }
+
+    /// The text's lines, and the lines each top-level block was read from. A block is read from
+    /// its own first line onwards with nothing carried over, so text cut where one starts parses
+    /// to the same blocks. See `TranscriptAnswerParts`.
+    public static func topLevelBlocks(of text: String) -> (lines: [String], blocks: [Range<Int>]) {
+        let lines = lines(of: text)
+        var parser = BlockParser(lines: lines, allowIndentedCode: true)
+        return (lines, parser.parseTracked().map(\.lines))
+    }
+
+    private static func lines(of text: String) -> [String] {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
     }
 }
 
@@ -112,32 +125,36 @@ private struct BlockParser {
     var index = 0
 
     mutating func parse() -> [MarkdownBlock] {
-        var blocks: [MarkdownBlock] = []
+        parseTracked().map(\.block)
+    }
+
+    mutating func parseTracked() -> [(block: MarkdownBlock, lines: Range<Int>)] {
+        var blocks: [(block: MarkdownBlock, lines: Range<Int>)] = []
         while index < lines.count {
             let previous = index
             if isBlank(lines[index]) {
                 index += 1
-            } else if let block = parseFence() {
-                blocks.append(block)
-            } else if let block = parseATXHeading() {
-                blocks.append(block)
-            } else if let block = parseQuote() {
-                blocks.append(block)
-            } else if let block = parseList() {
-                blocks.append(block)
-            } else if let block = parseIndentedCode() {
-                blocks.append(block)
-            } else if isThematicBreak(lines[index]) {
-                blocks.append(.thematicBreak)
-                index += 1
-            } else if let block = parseTable() {
-                blocks.append(block)
-            } else {
-                blocks.append(parseParagraphOrSetext())
+                continue
             }
+            let block = parseBlock()
             if index <= previous { index = previous + 1 }
+            blocks.append((block, previous..<index))
         }
         return blocks
+    }
+
+    private mutating func parseBlock() -> MarkdownBlock {
+        if let block = parseFence() { return block }
+        if let block = parseATXHeading() { return block }
+        if let block = parseQuote() { return block }
+        if let block = parseList() { return block }
+        if let block = parseIndentedCode() { return block }
+        if isThematicBreak(lines[index]) {
+            index += 1
+            return .thematicBreak
+        }
+        if let block = parseTable() { return block }
+        return parseParagraphOrSetext()
     }
 
     private mutating func parseFence() -> MarkdownBlock? {

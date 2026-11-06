@@ -1773,7 +1773,7 @@ final class WorkspaceModel {
 
         changesTask?.cancel()
         let path = workspace.path
-        let base = workspace.baseBranch
+        let base = workspace.reviewBase
         // Read here rather than inside the task: the failure below names the workspace, because
         // its worktree path is a directory inside Bloom's workspaces root that the reader neither
         // chose nor can act on.
@@ -2324,7 +2324,7 @@ final class WorkspaceModel {
 
     func readPatch(for file: ChangedFile) async throws -> String {
         let path = workspace.path
-        let base = workspace.baseBranch
+        let base = workspace.reviewBase
         // The same scope the list was built with, or the pane opens a file the list narrowed and
         // shows it in full.
         let scope = diffScope
@@ -2385,7 +2385,7 @@ final class WorkspaceModel {
     ) -> DiffPresentationCache.Key {
         DiffPresentationCache.Key(
             worktree: workspace.path,
-            base: workspace.baseBranch,
+            base: workspace.reviewBase,
             file: file,
             scope: diffScope,
             ignoresWhitespace: ignoringWhitespace

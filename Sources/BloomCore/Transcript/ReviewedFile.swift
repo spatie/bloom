@@ -56,7 +56,7 @@ public enum ReviewedFileFingerprint {
         return Dictionary(uniqueKeysWithValues: files.map { file in
             if scope.isHistorical { return (file.id, comparison) }
             if file.layer == .staged { return (file.id, file.stagingRevision ?? comparison) }
-            let comparison = comparison + (file.layer == nil ? "" : ":" + (file.stagingRevision ?? "missing"))
+            let comparison = (file.reviewRevision ?? comparison) + (file.layer == nil ? "" : ":" + (file.stagingRevision ?? "missing"))
             let path = (worktree as NSString).appendingPathComponent(file.path)
             let attributes = try? FileManager.default.attributesOfItem(atPath: path)
             let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate

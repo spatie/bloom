@@ -85,7 +85,9 @@ final class TranscriptTextSelection {
 
     /// Keyboard movement and AppKit's contextual selection start a new selection in one block.
     func nativeSelectionChanged(in view: LinkTextView) {
-        guard !updating else { return }
+        // Setting the text of a view not yet in a window resets its selection. Clearing every
+        // member for each new view made building a long answer quadratic.
+        guard !updating, view.window != nil else { return }
         selectsWholeAnswer = false
         anchorView = view
         anchorOffset = view.selectedRange().location

@@ -94,14 +94,17 @@ enum MarkdownPrime {
 public struct MarkdownView: View {
     private let text: String
     private let isStreaming: Bool
+    /// A later part of a long answer cut into rows: its first block is not the answer's first.
+    private let continuesAnswer: Bool
     @State private var selection = TranscriptTextSelection()
 
     /// - Parameter isStreaming: whether this text is still being written. It changes nothing about
     ///   what is drawn, only which cache the parse goes through. See
     ///   `MarkdownParseCache.streamingParsed(for:)`.
-    public init(_ text: String, isStreaming: Bool = false) {
+    public init(_ text: String, isStreaming: Bool = false, continuesAnswer: Bool = false) {
         self.text = text
         self.isStreaming = isStreaming
+        self.continuesAnswer = continuesAnswer
     }
 
     public var body: some View {
@@ -116,7 +119,7 @@ public struct MarkdownView: View {
         let parsed = isStreaming
             ? MarkdownParseCache.streamingParsed(for: text)
             : MarkdownParseCache.parsed(for: text)
-        MarkdownBlocksView(blocks: parsed.blocks)
+        MarkdownBlocksView(blocks: parsed.blocks, continuesAnswer: continuesAnswer)
             .environment(\.transcriptTextSelection, selection)
             .onAppear { selection.source = text }
             .onChange(of: text) { _, value in selection.source = value }
@@ -151,6 +154,7 @@ extension EnvironmentValues {
 
 private struct MarkdownBlocksView: View {
     let blocks: [MarkdownBlock]
+    var continuesAnswer = false
     var foreground = Palette.textPrimary
     var copyPrefix = ""
 
@@ -161,7 +165,7 @@ private struct MarkdownBlocksView: View {
             // everywhere below it, and the identity is what it always was: a block's position.
             ForEach(blocks.indices, id: \.self) { offset in
                 MarkdownBlockView(
-                    block: blocks[offset], foreground: foreground, isFirst: offset == 0,
+                    block: blocks[offset], foreground: foreground, isFirst: offset == 0 && !continuesAnswer,
                     copyPrefix: offset == 0 ? copyPrefix : ""
                 )
             }

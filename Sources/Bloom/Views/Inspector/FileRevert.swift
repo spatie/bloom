@@ -46,6 +46,7 @@ enum FileRevert {
 
         if file.change == .untracked {
             do {
+                try await Git.validateRevertTarget(file, worktree: worktree)
                 try FileManager.default.trashItem(
                     at: URL(fileURLWithPath: absolute), resultingItemURL: nil
                 )
@@ -56,7 +57,7 @@ enum FileRevert {
         }
 
         do {
-            try await Git.revertTrackedFile(file, worktree: worktree, base: workspace.baseBranch)
+            try await Git.revertTrackedFile(file, worktree: worktree, base: workspace.reviewBase)
             return nil
         } catch let error as ShellError {
             return "Could not discard \(file.filename): \(error.stderr)"
@@ -72,7 +73,7 @@ enum FileRevert {
     ) async -> String? {
         do {
             try await Git.discardHunk(
-                hunk, of: file, worktree: workspace.path, base: workspace.baseBranch, scope: scope
+                hunk, of: file, worktree: workspace.path, base: workspace.reviewBase, scope: scope
             )
             return nil
         } catch let error as ShellError {
