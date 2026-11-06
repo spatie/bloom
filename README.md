@@ -125,7 +125,9 @@ set -euo pipefail
 served_url() {
     herd workspaces --json | php -r '
         foreach (json_decode(stream_get_contents(STDIN)) as $workspace) {
-            if ($workspace->path === getcwd()) echo $workspace->url;
+            if ($workspace->path === getcwd()) {
+                echo $workspace->url;
+            }
         }'
 }
 
