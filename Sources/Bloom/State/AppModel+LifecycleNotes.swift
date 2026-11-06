@@ -11,7 +11,9 @@ extension AppModel {
     /// Read before the archive, because afterwards the worktree is gone and a script that ran cannot
     /// be told from one that was skipped. The branch and the kept folder are filled in once the
     /// archive has settled them.
-    func archiveFacts(of workspace: Workspace, in repo: Repo) -> WorkspaceLifecycleNote.ArchiveFacts {
+    func archiveFacts(
+        of workspace: Workspace, in repo: Repo, skipArchiveScript: Bool
+    ) -> WorkspaceLifecycleNote.ArchiveFacts {
         let settings = SettingsLoader.load(repo: repo.path)
         let launch = ScriptLaunch.resolve(
             text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: repo.path
@@ -24,7 +26,8 @@ extension AppModel {
         return WorkspaceLifecycleNote.ArchiveFacts(
             branch: workspace.branch,
             branchKept: true,
-            ranArchiveScript: scriptIsRunnable && FileManager.default.fileExists(atPath: workspace.path),
+            ranArchiveScript: !skipArchiveScript && scriptIsRunnable
+                && FileManager.default.fileExists(atPath: workspace.path),
             hasSetupScript: settings.setupScript != nil
         )
     }
