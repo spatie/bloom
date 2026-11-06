@@ -48,6 +48,7 @@ struct PullRequestCreator: View {
     var action: (PullRequestCreationRoute) -> Void
 
     @State private var isShowingBranchActions = false
+    @State private var isChoosingTarget = false
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
@@ -68,11 +69,15 @@ struct PullRequestCreator: View {
                     .accessibilityLabel("Branch \(branch)")
 
                 if github.isUsable {
-                    Text(subtitle)
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else {
+                        targetLine
+                    }
                 } else {
                     // The one place the strip admits it cannot see GitHub, and the natural place
                     // to hang the fix off. Quiet, because the button beside it works regardless.
@@ -97,6 +102,13 @@ struct PullRequestCreator: View {
                 }
             }
             .layoutPriority(-1)
+            // On the column rather than on the target, so the context menu can open it in the
+            // states where the line under the branch does not name one.
+            .popover(isPresented: $isChoosingTarget, arrowEdge: .bottom) {
+                TargetBranchPanel(worktree: worktree, branch: branch, baseBranch: baseBranch) {
+                    changeBaseBranch(to: $0)
+                }
+            }
 
             Spacer(minLength: Metrics.spacingSmall)
 
@@ -136,6 +148,9 @@ struct PullRequestCreator: View {
         // and share items on the strip for the same reason.
         .contextMenu {
             Button("Copy Branch Name") { Clipboard.copy(branch) }
+            // Also here for the lines that do not name the target: a branch continued after a
+            // merge, a held back band, and one GitHub cannot be asked about.
+            Button("Change Target Branch…") { isChoosingTarget = true }
         }
         // Optimistic while the probe runs, and silent about the answer either way. Learning that
         // gh is signed out is worth one quiet line here; it is never worth a dialog nobody asked
@@ -143,16 +158,53 @@ struct PullRequestCreator: View {
         .task { await GitHubAvailability.shared.check() }
     }
 
-    /// What the branch is for, in the one line under it: where it is headed, or why the button is
-    /// not going to do anything yet.
-    private var subtitle: String {
+    /// Why the button is not going to do anything yet, in the one line under the branch, or nil
+    /// when that line says where the branch is headed.
+    private var subtitle: String? {
         // The held back band says so on the line it already has, for the reason
         // `PullRequestSummary.detailLine` gives: a disabled button that explains itself only on
         // hover is a button most people never get an explanation from.
         if let note = branchActions.note { return note }
         if !hasChanges, !hasReadChanges { return "Comparing with \(baseBranch)…" }
-        guard hasChanges else { return ContinuedBranch.line(on: branch, continued: continued) }
-        return "No pull request yet. Target \(baseBranch)."
+        // A branch continued after a merge already names the base it was cut from.
+        if !hasChanges, continued?.branch == branch {
+            return ContinuedBranch.line(on: branch, continued: continued)
+        }
+        return nil
+    }
+
+    /// The target can be changed, for a branch rebased onto another one since the workspace was
+    /// cut. Only here, before a pull request: once one exists its target is the forge's. Also on
+    /// an empty branch, which is where a base holding the whole branch leaves it.
+    ///
+    /// A plain button rather than `.link`, which centred a long branch onto a second line off the
+    /// sentence's baseline. The chevron says it opens a list, the way the scope menu below does.
+    private var targetLine: some View {
+        Button { isChoosingTarget = true } label: {
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
+                // No "No pull request yet": the Create button beside it says so.
+                Text(hasChanges ? "Merges into" : "Nothing has changed since")
+                    .foregroundStyle(Palette.textSecondary)
+                    .layoutPriority(1)
+                Text(baseBranch)
+                    .foregroundStyle(Palette.link)
+                    .truncationMode(.head)
+                Image(systemName: "chevron.down")
+                    .imageScale(.small)
+                    .foregroundStyle(Palette.link)
+            }
+            .font(Typo.caption)
+            .lineLimit(1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Change the branch this workspace compares with and targets")
+        .accessibilityLabel("Target branch, \(baseBranch)")
+    }
+
+    private func changeBaseBranch(to base: String) {
+        let workspace = model.workspace
+        Task { await model.app.changeBaseBranch(of: workspace, to: base) }
     }
 
     /// A single title-bar control. Its popover chooses how to create the PR now.

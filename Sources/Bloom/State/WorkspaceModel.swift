@@ -2468,6 +2468,7 @@ final class WorkspaceModel {
             await GitHubBridge.readPullRequest(for: asked, maxAge: maxAge)
         }
         pullRequestTask = task
+        defer { if pullRequestTask == task { pullRequestTask = nil } }
         // Only before there has been any answer at all, for the same reason the changed file list
         // only spins when it has nothing: a refresh of something already on screen leaves it
         // alone. The rule and what it cost to get wrong are `PullRequestProgress`.
@@ -2480,7 +2481,6 @@ final class WorkspaceModel {
         let read = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
-        pullRequestTask = nil
         // Before the write below, and set whatever came back: a nil from gh is still this
         // workspace having been looked at, and the next refresh has an answer on screen to leave
         // alone. Only a superseded or cancelled refresh, which returns above, says nothing.
@@ -2499,6 +2499,10 @@ final class WorkspaceModel {
         await PullRequestNumber.record(fresh, for: asked, in: store)
         isLoadingPullRequest = false
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
+        // After the band has its answer: following a moved target can mean a fetch.
+        await app.adoptPullRequestBase(fresh, for: asked) {
+            self.pullRequestTask == task && !task.isCancelled
+        }
     }
 
     /// Asks the workspace's agent to open the pull request, instead of running `gh` from here.

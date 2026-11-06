@@ -89,6 +89,8 @@ final class AppModel {
             // sidebar row can arrive here again, and without this guard it writes defaults,
             // rebuilds the subagent rows and starts another settings read for no state change.
             guard newValue != storedSelection else { return }
+            recordNavigationDeparture()
+            defer { recordNavigation() }
             highlightedSidebarSelection = nil
             if let id = newValue.workspaceID, id != storedSelection.workspaceID {
                 SwitchTrace.begin(workspaceID: id)
@@ -123,6 +125,12 @@ final class AppModel {
     }
 
     private var storedSelection: SidebarSelection = .home
+
+    /// Back and Forward over `selection` and each workspace's tab. Observed, so the toolbar's
+    /// buttons grey themselves; written only by `AppModel+NavigationHistory`.
+    var navigationHistory = NavigationHistory()
+    /// Set while Back or Forward puts the window back, so that move is not recorded as a visit.
+    @ObservationIgnored var isRestoringNavigation = false
 
     /// The row the sidebar has highlighted while its display-link activation is pending.
     /// Menu shortcuts must follow that row, not the workspace the centre column is still showing.
@@ -352,6 +360,7 @@ final class AppModel {
     /// for reading through `model(for:)`; what widening costs is the write, and the two writers
     /// outside this file both destroy a model whose workspace has genuinely gone.
     @ObservationIgnored var workspaceModels: [WorkspaceID: WorkspaceModel] = [:]
+    @ObservationIgnored let baseBranchChanges = BaseBranchChangeQueue()
 
     /// The conversation that belongs to Bloom rather than to a workspace. See `AskModel`.
     ///
@@ -610,6 +619,9 @@ final class AppModel {
             // check it against. Before `isLoaded`, so the window never paints Home first and then
             // jumps to the workspace.
             restoreLastSelection()
+            // Home was never shown when restoring a workspace, so it is not a Back destination.
+            navigationHistory = NavigationHistory()
+            recordNavigation()
             isLoaded = true
             startLocalWebIfEnabled()
             let blocking = Int(Date().timeIntervalSince(began) * 1000)

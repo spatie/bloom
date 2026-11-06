@@ -395,6 +395,12 @@ struct BloomCommands: Commands {
 
             goToTabMenu
 
+            MenuCommand(.navigateBack) { model.stepNavigation(by: -1) }
+                .disabled(!model.canStepNavigation(by: -1))
+
+            MenuCommand(.navigateForward) { model.stepNavigation(by: 1) }
+                .disabled(!model.canStepNavigation(by: 1))
+
             Divider()
 
             // The walk through a change, which used to be two invisible buttons inside
