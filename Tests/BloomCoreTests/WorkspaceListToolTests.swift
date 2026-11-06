@@ -237,6 +237,35 @@ struct WorkspaceListToolTests {
         #expect(question["summary"]?.stringValue == ask.summary)
     }
 
+    @Test("an AskUserQuestion, which comes with no summary, is listed with its question")
+    func askUserQuestionIsQuoted() async throws {
+        let store = try makeTestStore("list-ask-user-question")
+        let repo = try await store.upsert(
+            Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main")
+        )
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "blocked", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        var session = Session(workspaceID: workspace.id, title: "First chat")
+        session.apply(.turnStarted)
+        session.apply(.blocked)
+        _ = try await store.upsert(session)
+        // The shape the CLI sent for this call when it was measured: no description at all.
+        let line = """
+            {"type":"control_request","request_id":"q1","request":{"subtype":"can_use_tool",\
+            "tool_name":"AskUserQuestion","input":{"questions":[{"question":"Pick A or B?",\
+            "header":"","multiSelect":false,"options":[{"label":"A"},{"label":"B"}]}]}}}
+            """
+        let ask = try #require(PermissionAsk.decode(payload: Data(line.utf8)))
+        try await store.appendPermissionAsk(sessionID: session.id, ask: ask)
+
+        let result = await WorkspaceListTool().call(request(), as: .owner, store: store)
+        let question = try #require(named("blocked", in: result)["sessions"]?[0]?["questions"]?[0])
+
+        #expect(ask.summary.isEmpty)
+        #expect(question["summary"]?.stringValue == "Pick A or B?\n- A\n- B")
+    }
+
     @Test("who asked for it is told the same way whoami tells it")
     func parentageIsReported() async throws {
         let store = try makeTestStore("list-parentage")

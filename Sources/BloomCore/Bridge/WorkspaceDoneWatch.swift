@@ -117,8 +117,9 @@ public enum WorkspaceTurnEnding: Sendable, Hashable {
     case failed(reason: String)
     /// Blocked on a permission prompt for this tool.
     case waitingOnPermission(tool: String)
-    /// Blocked on a question it asked the owner.
-    case waitingOnQuestion
+    /// Blocked on a question it asked the owner. The question as text, empty when the input
+    /// carried none Bloom could read.
+    case waitingOnQuestion(text: String)
     /// The workspace was archived.
     case archived
 
@@ -134,7 +135,9 @@ public enum WorkspaceTurnEnding: Sendable, Hashable {
     /// A question for the owner, or a permission prompt, which a caller elsewhere needs told apart
     /// only in the words: both mean the agent is blocked until a person answers.
     public static func ofAsk(_ ask: PermissionAsk) -> WorkspaceTurnEnding {
-        ask.isQuestion ? .waitingOnQuestion : .waitingOnPermission(tool: ask.toolName)
+        ask.isQuestion
+            ? .waitingOnQuestion(text: AgentQuestionnaire.text(in: ask.input))
+            : .waitingOnPermission(tool: ask.toolName)
     }
 }
 

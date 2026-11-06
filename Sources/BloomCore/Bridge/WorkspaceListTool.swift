@@ -346,7 +346,11 @@ public struct WorkspaceListTool: BridgeToolHandling {
             answer["questions"] = .array(asks.map {
                 .object([
                     "tool": .string($0.ask.label),
-                    "summary": .string($0.ask.summary),
+                    // The CLI sends no description with AskUserQuestion, so its summary was
+                    // empty and a caller saw that something was asked but not what.
+                    "summary": .string(
+                        $0.ask.isQuestion ? AgentQuestionnaire.text(in: $0.ask.input) : $0.ask.summary
+                    ),
                 ])
             })
         }

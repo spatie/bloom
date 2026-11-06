@@ -107,6 +107,23 @@ public enum AgentQuestionnaire {
         (input["questions"]?.arrayValue ?? []).compactMap(AgentQuestion.decode)
     }
 
+    /// The questions in an `AskUserQuestion` input as plain text, the way the card shows them
+    /// without ticks: what was chosen lives in no stored row. A copied conversation reads it, and
+    /// so does a chat elsewhere told this workspace is waiting, because the CLI sends no
+    /// description with this tool and the input is the only place the question is written down.
+    public static func text(in input: JSONValue) -> String {
+        questions(in: input).map(text(of:)).joined(separator: "\n\n")
+    }
+
+    private static func text(of question: AgentQuestion) -> String {
+        let heading = [question.header.uppercased(), question.question].filter { !$0.isEmpty }
+        let options = question.options.map { option in
+            ["- \(option.label)", option.description.replacingOccurrences(of: "\n", with: "\n  ")]
+                .filter { !$0.isEmpty }.joined(separator: "\n  ")
+        }
+        return (heading + options).joined(separator: "\n")
+    }
+
     /// The same input with the answers written into it, ready to be the `updatedInput` of an allow.
     ///
     /// Everything else is left exactly as it arrived. Only `answers` is added, and only for
