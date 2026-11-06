@@ -448,6 +448,17 @@ public enum GitLab: ForgeClient {
         return number
     }
 
+    /// Continue follows the local alias only when checkout recorded this exact MR. Tracking a
+    /// similarly named source branch alone is insufficient authority to move a checkout.
+    static func associatedBranch(of request: PullRequest, worktree: String) async -> String? {
+        guard request.forge == .gitLab, let project = await project(in: worktree),
+              (try? validateIdentity(request, in: project)) != nil,
+              let branch = try? await Git.currentBranch(of: worktree),
+              await checkedOutNumber(branch: branch, project: project, worktree: worktree) == request.number
+        else { return nil }
+        return branch
+    }
+
     /// The head SHA and fresh server read are still checked by DirectMergeCheck. This only
     /// recognises the alternate local name of an explicitly associated GitLab checkout.
     private static func checkoutMatches(_ request: PullRequest, worktree: String) async -> Bool {

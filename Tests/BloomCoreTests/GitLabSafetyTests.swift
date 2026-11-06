@@ -4,6 +4,32 @@ import Testing
 
 @Suite("GitLab request identity", .tags(.git), .scratchDirectory)
 struct GitLabSafetyTests {
+    @Test("Continue accepts only a fork alias recorded for the exact GitLab MR", arguments: [
+        (Forge.gitLab, "https://gitlab.com/group/app/-/merge_requests/42", true),
+        (Forge.gitLab, "https://gitlab.com/other/app/-/merge_requests/42", false),
+        (Forge.gitHub, "https://github.com/group/app/pull/42", false),
+    ])
+    func continueForkAlias(forge: Forge, url: String, allowsAlias: Bool) async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try await Git.check(["remote", "add", "origin", "https://gitlab.com/group/app.git"], in: repo.path)
+        try await Git.check(["checkout", "-qb", "contributor-feature"], in: repo.path)
+        try await Git.check([
+            "config", "branch.contributor-feature.bloom-merge-request",
+            "https://gitlab.com/group/app/-/merge_requests/42",
+        ], in: repo.path)
+        let workspace = Workspace(repoID: RepoID("r"), name: "fork", branch: "contributor-feature", path: repo.path, baseBranch: "main")
+        let request = PullRequest(number: 42, title: "", url: url, state: "MERGED", branch: "feature", baseBranch: "main", forge: forge)
+        let manager = WorkspaceManager(store: try Store.inMemory())
+        let facts = try await manager.continuationFacts(workspace: workspace, pullRequest: request, isAgentRunning: false)
+        let decision = ContinuationGate.decide(facts)
+        if allowsAlias {
+            #expect(decision == .cut(branch: "contributor-feature-2"))
+        } else {
+            #expect(decision.refusal == .switchedByHand(onBranch: "contributor-feature", pullRequestBranch: "feature"))
+        }
+    }
+
     @Test("the owner's project checkout never reads or directly creates a GitLab request")
     func projectCheckoutHasNoRequests() async throws {
         let workspace = Workspace(
