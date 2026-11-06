@@ -5,6 +5,10 @@ import BloomCore
 
 /// GitHub state and actions shared by the pull request strip and Checks tab.
 extension WorkspaceModel {
+    func invalidatePullRequest() {
+        cancelPullRequestRefresh()
+        WorkspacePullRequests.shared.forget(workspace.id)
+    }
     /// Through `gh`, which is what this Mac has. Nil when GitHub refused this token the runs: an
     /// empty list there would say "no checks", which is the one thing that is not known.
     func readChecks() async -> [CheckRun]? {
@@ -15,7 +19,27 @@ extension WorkspaceModel {
         await checkFailures.send(run, in: self)
     }
 
-    var gitHubReadiness: GitHubAvailability.State { GitHubAvailability.shared.state }
+    /// GitLab reports its own access through the read, so gh's state says nothing about it.
+    var gitHubReadiness: GitHubAvailability.State {
+        forge == .gitLab ? .ready : GitHubAvailability.shared.state
+    }
+
+    /// Raises the GitLab sign in sheet for this workspace's host, installing glab first if needed.
+    func signInToGitLab() async {
+        let access = GitHubAvailability.State(await GitLab.access(in: workspace.path))
+        guard access != .ready else {
+            await refreshPullRequest()
+            return
+        }
+        let host = await GitLab.host(in: workspace.path)
+        GitHubSignIn.shared.presentGitLab(directory: workspace.path, host: host, access: access)
+    }
+
+    /// gh's readiness, asked afresh, or ready on GitLab. For the Checks tab's poll.
+    func checksReadiness() async -> GitHubAvailability.State {
+        forge = await ForgeResolver.forge(for: workspace.path)
+        return forge == .gitLab ? .ready : await GitHubAvailability.shared.check()
+    }
 
     func continueAfterMerge(_ pullRequest: PullRequest) async -> AppModel.ContinuationOutcome {
         await app.continueAfterMerge(workspace, pullRequest: pullRequest)

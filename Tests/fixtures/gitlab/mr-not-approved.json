@@ -1,0 +1,31 @@
+{
+  "iid": 4021,
+  "title": "fix(git): validate API-supplied repository URLs before running git",
+  "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4021",
+  "state": "opened",
+  "draft": false,
+  "has_conflicts": false,
+  "detailed_merge_status": "not_approved",
+  "merge_status": "can_be_merged",
+  "source_branch": "phikai/8524-validate-api-repo-urls",
+  "target_branch": "main",
+  "merged_at": null,
+  "closed_at": null,
+  "sha": "d7be98ed462c3011d7fd47a92f0dd1257ec6fdbb",
+  "source_project_id": 34675721,
+  "target_project_id": 34675721,
+  "head_pipeline": {
+    "id": 2923303483,
+    "iid": 14872,
+    "project_id": 34675721,
+    "status": "success",
+    "sha": "bd1f12c63234365990db79745a8ba4022fb306ea",
+    "ref": "refs/merge-requests/4021/merge",
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/pipelines/2923303483"
+  },
+  "references": {
+    "short": "!4021",
+    "relative": "!4021",
+    "full": "gitlab-org/cli!4021"
+  }
+}

@@ -1,0 +1,5 @@
+Merge request !{{pull_request}} is merged, so {{previous_branch}} is finished with.
+
+This worktree is now on a new branch, {{branch}}, cut from an up to date {{base_branch}}, so everything that just landed is already underneath you. Nothing else moved: same directory, same session, and anything that was uncommitted is still here.
+
+Do not redo what the merge request landed, and do not start anything new yet. Say in one line that you are ready, then wait for what I ask next.

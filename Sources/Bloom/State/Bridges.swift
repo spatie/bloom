@@ -5,13 +5,46 @@ import BloomCore
 /// The one place the app layer touches `GitHub`. Keeping it behind a single adapter means a
 /// change to the gh wrapper's signature is a one-file fix rather than a sweep through views.
 ///
-/// Pull requests can be prepared by an agent or directly through git and gh. Direct merges and
-/// marking a draft ready also use the GitHub CLI without involving an agent.
+/// Pull requests can be prepared by an agent or directly through git and gh, or glab on GitLab.
+/// Direct merges and marking a draft ready also use the forge's CLI without involving an agent.
 enum GitHubBridge {
     static func createPullRequestDirectly(for workspace: Workspace) async throws -> PullRequest {
-        try await DirectPullRequestCreation.create(for: workspace)
+        try await DirectPullRequestCreation.create(
+            for: workspace, forge: await ForgeResolver.forge(for: workspace.path)
+        )
     }
+    struct ObservedRead: Sendable {
+        let read: PullRequestRead
+        let observation: PullRequestObservation?
+        let forge: Forge?
+
+        func accept(in store: Store?) async -> Bool {
+            guard let store, let observation else { return true }
+            let found: PullRequest?
+            if case .current(let current) = read { found = current } else { found = nil }
+            return (try? await store.acceptPullRequestRead(found, observed: observation)) == true
+        }
+    }
+
+    static func observePullRequest(for workspace: Workspace, maxAge: Duration, store: Store?) async -> ObservedRead {
+        do {
+            let forge = await ForgeResolver.forge(for: workspace.path)
+            let observed = try await store?.observePullRequest(workspaceID: workspace.id, forge: forge)
+            let read = await readFromForge(for: observed?.workspace ?? workspace, maxAge: maxAge, forge: forge)
+            return ObservedRead(read: read, observation: observed, forge: forge)
+        } catch {
+            return ObservedRead(read: .unavailable(GitHubReadFailure.classify(error)), observation: nil, forge: nil)
+        }
+    }
+
     static func readPullRequest(for workspace: Workspace, maxAge: Duration = .zero) async -> PullRequestRead {
+        await readFromForge(for: workspace, maxAge: maxAge, forge: await ForgeResolver.forge(for: workspace.path))
+    }
+
+    private static func readFromForge(for workspace: Workspace, maxAge: Duration, forge: Forge) async -> PullRequestRead {
+        guard forge == .gitHub else {
+            return await GitLab.readPullRequest(for: workspace, maxAge: maxAge)
+        }
         let availability = await GitHubAvailability.shared.check()
         if availability == .notInstalled {
             return .unavailable(GitHubReadFailure(reason: .unavailable, message: "Install the GitHub CLI to refresh pull requests."))
@@ -42,23 +75,31 @@ enum GitHubBridge {
     }
 
     static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
-        try await GitHub.markReadyForReview(pullRequest, worktree: worktree)
+        try await validateForge(pullRequest, worktree: worktree)
+        try await ForgeResolver.client(of: pullRequest.forge).markReadyForReview(pullRequest, worktree: worktree)
     }
 
     static func mergePullRequest(
         _ pullRequest: PullRequest, base: String, method: GitHub.MergeMethod,
         squashMessage: SquashCommitMessage?, worktree: String
     ) async throws -> DirectMergeOutcome {
-        try await GitHub.mergePullRequest(
+        try await validateForge(pullRequest, worktree: worktree)
+        return try await ForgeResolver.client(of: pullRequest.forge).mergePullRequest(
             pullRequest, into: base, method: method, squashMessage: squashMessage, worktree: worktree
         )
+    }
+
+    static func validateForge(_ request: PullRequest, worktree: String) async throws {
+        guard await ForgeResolver.forge(for: worktree) == request.forge else {
+            throw GitHubError("The project's forge changed. Refresh the request before continuing.")
+        }
     }
 
     /// Nil when GitHub refused this token the check runs. A failed read is still an empty list,
     /// as it always was, because `try?` would flatten it into that nil.
     static func checks(for workspace: Workspace) async -> [CheckRun]? {
         do {
-            return try await GitHub.checks(for: workspace)
+            return try await ForgeResolver.client(for: workspace.path).checks(for: workspace)
         } catch {
             return []
         }

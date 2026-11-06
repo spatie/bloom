@@ -372,7 +372,8 @@ enum SetupRehearsal {
         claude: SetupOutcome = .ready(detail: "you@example.com"),
         codex: SetupOutcome = .ready(detail: "you@example.com"),
         grok: SetupOutcome = .missing,
-        gitHub: SetupOutcome = .ready(detail: "Signed in")
+        gitHub: SetupOutcome = .ready(detail: "Signed in"),
+        gitLab: SetupOutcome = .missing
     ) -> SetupReport {
         // Every row the probe has, Grok included. It was written before Grok joined, and a row
         // the rehearsal did not name stayed pending, so no rehearsal ever settled.
@@ -382,6 +383,7 @@ enum SetupRehearsal {
             SetupCheck(tool: .codex, outcome: codex),
             SetupCheck(tool: .grok, outcome: grok),
             SetupCheck(tool: .gitHub, outcome: gitHub),
+            SetupCheck(tool: .gitLab, outcome: gitLab),
         ])
     }
     #endif

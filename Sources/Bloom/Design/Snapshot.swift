@@ -804,7 +804,8 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(2))
 
                 let path = "\(output)/\(choice.name)-\(name).png"
-                if captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
+                if await captureOwnWindow(window, to: path)
+                    || captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
                     print(path)
                 } else {
                     FileHandle.standardError.write(Data(

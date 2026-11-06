@@ -1,0 +1,3 @@
+Merge request !{{number}} conflicts with {{base_branch}}, so GitLab will not merge it as it stands. Resolve that here, in this worktree, on {{branch}}: bring {{base_branch}} into this branch, work through the conflicts, commit, and push {{branch}}, so the conflict is gone for everybody rather than only here.
+
+Do not merge the merge request.

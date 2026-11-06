@@ -1,0 +1,31 @@
+{
+  "iid": 4020,
+  "title": "Draft: fix(iteration): list header shows the total count, not the page count",
+  "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4020",
+  "state": "opened",
+  "draft": true,
+  "has_conflicts": true,
+  "detailed_merge_status": "draft_status",
+  "merge_status": "cannot_be_merged",
+  "source_branch": "8591-iteration-list-total",
+  "target_branch": "main",
+  "merged_at": null,
+  "closed_at": null,
+  "sha": "f144edffb4240d739d84a54a66bfb78d0cfa54c6",
+  "source_project_id": 45049979,
+  "target_project_id": 34675721,
+  "head_pipeline": {
+    "id": 2923072371,
+    "iid": 1567,
+    "project_id": 45049979,
+    "status": "success",
+    "sha": "f144edffb4240d739d84a54a66bfb78d0cfa54c6",
+    "ref": "8591-iteration-list-total",
+    "web_url": "https://gitlab.com/gitlab-community/gitlab-org/cli/-/pipelines/2923072371"
+  },
+  "references": {
+    "short": "!4020",
+    "relative": "!4020",
+    "full": "gitlab-org/cli!4020"
+  }
+}

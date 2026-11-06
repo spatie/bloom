@@ -34,6 +34,8 @@ extension AppModel {
         case .alreadyRepository(let root):
             guard let repo = await addKnownRepository(at: root) else { return nil }
             if focusing { await focus(repo) }
+            // Not awaited: a glab probe to a host behind a VPN that is down takes seconds.
+            Task { await askForgeIfBoth(repo) }
             return repo
 
         case .refuse(let refusal):
@@ -111,6 +113,53 @@ extension AppModel {
             surface: surface,
             identityProblem: identityProblem
         ))
+    }
+
+    /// Asks which forge `repo` uses when its remotes are on both, and returns once it is answered.
+    func askForgeIfBoth(_ repo: Repo) async {
+        guard forgeQuestion == nil, await ForgeResolver.offersBoth(repo.path), forgeQuestion == nil
+        else { return }
+        await withCheckedContinuation { answered in
+            forgeQuestionAnswered = answered
+            forgeQuestion = repo
+        }
+    }
+
+    /// The answer to `forgeQuestion`, kept for every workspace of the project. `nil` is Not now.
+    func answerForgeQuestion(_ forge: Forge?, for repo: Repo? = nil) {
+        if let forge, let repo {
+            do {
+                try ForgeResolver.remember(forge, for: repo.path)
+                // Unanswered, the project was GitHub's.
+                if forge == .gitLab { Task { await forgetPullRequestNumbers(of: repo.id) } }
+            } catch {
+                alert = BloomAlert(title: "Could not save the forge", message: error.readableMessage)
+            }
+        }
+        let answered = forgeQuestionAnswered
+        forgeQuestionAnswered = nil
+        answered?.resume()
+    }
+
+    /// After a project moved forge. See `Store.clearPullRequestNumbers`.
+    func forgetPullRequestNumbers(of repoID: RepoID) async {
+        let ids = Set(workspaces.filter { $0.repoID == repoID }.map(\.id))
+        for id in ids {
+            WorkspacePullRequests.shared.suspend(id)
+            workspaceModels[id]?.invalidatePullRequest()
+        }
+        defer {
+            for id in ids { WorkspacePullRequests.shared.resume(id) }
+        }
+        do {
+            try await store?.clearPullRequestNumbers(repoID: repoID)
+            await reload()
+            for id in ids {
+                Task { await workspaceModels[id]?.refreshPullRequest() }
+            }
+        } catch {
+            alert = BloomAlert(title: "Could not forget the old pull request numbers", message: error.readableMessage)
+        }
     }
 
     /// Called by `ProjectSetupSheet` once the folder really is a repository.

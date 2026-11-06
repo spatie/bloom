@@ -1,0 +1,87 @@
+[
+  {
+    "iid": 4038,
+    "title": "fix(repo): send topics instead of deprecated tag_list",
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4038",
+    "state": "opened",
+    "draft": false,
+    "source_branch": "anishisbusy/repo-create-topics",
+    "target_branch": "main",
+    "source_project_id": 45049979,
+    "target_project_id": 34675721,
+    "detailed_merge_status": "discussions_not_resolved",
+    "merged_at": null,
+    "closed_at": null,
+    "author": {
+      "username": "contributor-1"
+    }
+  },
+  {
+    "iid": 4037,
+    "title": "fix(repo): correct default visibility in repo create help",
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4037",
+    "state": "opened",
+    "draft": false,
+    "source_branch": "anishisbusy/repo-create-visibility-help",
+    "target_branch": "main",
+    "source_project_id": 45049979,
+    "target_project_id": 34675721,
+    "detailed_merge_status": "discussions_not_resolved",
+    "merged_at": null,
+    "closed_at": null,
+    "author": {
+      "username": "contributor-2"
+    }
+  },
+  {
+    "iid": 4035,
+    "title": "Draft: refactor(issue): reuse cmdutils issue URL parsing",
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4035",
+    "state": "opened",
+    "draft": true,
+    "source_branch": "8398-unify-issue-url-parsing",
+    "target_branch": "main",
+    "source_project_id": 45049979,
+    "target_project_id": 34675721,
+    "detailed_merge_status": "draft_status",
+    "merged_at": null,
+    "closed_at": null,
+    "author": {
+      "username": "contributor-3"
+    }
+  },
+  {
+    "iid": 4034,
+    "title": "Draft: feat(ssh-key): add --replace flag to ssh-key add",
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4034",
+    "state": "opened",
+    "draft": true,
+    "source_branch": "8577-ssh-key-add-replace",
+    "target_branch": "main",
+    "source_project_id": 45049979,
+    "target_project_id": 34675721,
+    "detailed_merge_status": "draft_status",
+    "merged_at": null,
+    "closed_at": null,
+    "author": {
+      "username": "contributor-4"
+    }
+  },
+  {
+    "iid": 4033,
+    "title": "Draft: fix(stack): track the current stack per worktree",
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4033",
+    "state": "opened",
+    "draft": true,
+    "source_branch": "8329-isolate-current-stack-per-worktree",
+    "target_branch": "main",
+    "source_project_id": 45049979,
+    "target_project_id": 34675721,
+    "detailed_merge_status": "draft_status",
+    "merged_at": null,
+    "closed_at": null,
+    "author": {
+      "username": "contributor-5"
+    }
+  }
+]

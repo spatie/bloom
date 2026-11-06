@@ -26,6 +26,7 @@ struct PullRequestBadge: View {
     var url: String
     /// The state's colour, or nil for the states that carry none.
     var tint: Color?
+    var forge: Forge = .gitHub
 
     private var ink: Color { tint ?? Palette.textSecondary }
 
@@ -37,7 +38,7 @@ struct PullRequestBadge: View {
                 // a machine set to Dutch #2631 came out as "#2.631": a pull request number with a
                 // thousands separator in it, which is not a number GitHub has. The chip this
                 // replaces was handed a `String` and never had the problem.
-                Text(verbatim: "#\(number)")
+                Text(verbatim: forge.reference(number))
                     // Monospaced digits, so a four digit number and a five digit one are the same
                     // shape and the badge cannot appear to jitter as a poll comes back.
                     .font(Typo.label)
@@ -70,9 +71,9 @@ struct PullRequestBadge: View {
         // control reports as `AXUnknown` and reads as a label rather than as something to press.
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Pull request \(number), \(title)")
-        .accessibilityHint("Opens on GitHub")
-        .help("Open #\(number) on GitHub: \(title)")
+        .accessibilityLabel("\(forge.request.capitalizedFirst) \(number), \(title)")
+        .accessibilityHint("Opens on \(forge.name)")
+        .help("Open \(forge.reference(number)) on \(forge.name): \(title)")
     }
 
     /// The arrow's own route, unchanged and not duplicated: there is one way this app opens a

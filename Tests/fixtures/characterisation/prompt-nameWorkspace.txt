@@ -1,0 +1,22 @@
+title: Name a new workspace
+
+summary:
+Sent a moment after a workspace is created, to turn what you asked for into a name and a branch.
+
+variables:
+- task: The first thing you asked this workspace for.
+- project: The project it was created in.
+
+template:
+Name this coding task, for a workspace sitting in a list beside twenty others.
+
+Project: {{project}}
+
+Answer at once, without deliberating.
+
+- name: at most five words, sentence case, no full stop, no quotes. Say what the work is, in the words someone would use out loud. Never start it with "Task" or "Workspace".
+- branch: lowercase, words joined by hyphens, at most four words, letters, digits and hyphens only, no slashes and no prefix.
+
+## Task
+
+{{task}}

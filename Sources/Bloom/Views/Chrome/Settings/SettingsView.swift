@@ -37,7 +37,7 @@ struct SettingsView: View {
                     navigationRows([.agents, .sessions, .presets, .permissions, .prompts])
                 }
                 Section("Terminal & connections") {
-                    navigationRows([.terminal, .browserAccess, .passwords, .commandLine, .mail])
+                    navigationRows([.connections, .terminal, .browserAccess, .passwords, .commandLine, .mail])
                 }
             }
             .listStyle(.sidebar)
@@ -121,6 +121,7 @@ struct SettingsView: View {
         case .menuBar: MenuBarSettingsView(app: app)
         case .notifications: NotificationSettingsView()
         case .agents: AgentsSettingsView()
+        case .connections: ConnectionsSettingsView()
         case .sessions: ModelSettingsView(defaults: defaultsBinding).disabled(!isLoaded)
         case .presets: ModelPresetSettingsView()
         case .permissions: ApprovalSettingsView(defaults: defaultsBinding, isReady: isLoaded)

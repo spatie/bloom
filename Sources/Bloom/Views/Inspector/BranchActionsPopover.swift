@@ -5,10 +5,10 @@ enum PullRequestCreationRoute: String, CaseIterable {
     case agent
     case direct
 
-    var label: String {
+    func label(on forge: Forge) -> String {
         switch self {
-        case .agent: "Ask agent to create PR"
-        case .direct: "Commit and create PR with GitHub CLI"
+        case .agent: "Ask agent to create \(forge.shortRequest)"
+        case .direct: "Commit and create \(forge.shortRequest) with \(forge.name) CLI"
         }
     }
 }
@@ -23,8 +23,8 @@ struct BranchActionsPopover: View {
 
     var body: some View {
         ConfirmationPopover(
-            title: "Create pull request?",
-            confirmLabel: "Create PR",
+            title: "Create \(model.forge.request)?",
+            confirmLabel: "Create \(model.forge.shortRequest)",
             tint: Palette.controlAccent,
             canConfirm: route == .agent || (model.gitHubReadiness.isUsable && !model.isRunning),
             onConfirm: {
@@ -36,23 +36,23 @@ struct BranchActionsPopover: View {
         ) {
             Picker("Create using", selection: $route) {
                 ForEach(PullRequestCreationRoute.allCases, id: \.self) { choice in
-                    Text(choice.label).tag(choice)
+                    Text(choice.label(on: model.forge)).tag(choice)
                 }
             }
             .pickerStyle(.radioGroup)
 
             if route == .direct {
-                Text("Bloom stages and commits all local changes as “\(model.workspace.name)”, pushes the branch, then opens a pull request with gh.")
+                Text("Bloom stages and commits all local changes as “\(model.workspace.name)”, pushes the branch, then opens a \(model.forge.request) with \(model.forge.cli).")
                     .foregroundStyle(.secondary)
                 if !model.gitHubReadiness.isUsable {
-                    Text("Connect GitHub to use the direct route.")
+                    Text("Connect \(model.forge.name) to use the direct route.")
                         .foregroundStyle(Palette.negative)
                 } else if model.isRunning {
                     Text("Wait for the agent to finish before committing directly.")
                         .foregroundStyle(Palette.negative)
                 }
             } else {
-                Text("The agent will prepare the commits, push, and create the pull request using this project's instructions.")
+                Text("The agent will prepare the commits, push, and create the \(model.forge.request) using this project's instructions.")
                     .foregroundStyle(.secondary)
             }
         }

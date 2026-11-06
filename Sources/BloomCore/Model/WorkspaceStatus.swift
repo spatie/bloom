@@ -152,6 +152,20 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         }
     }
 
+    /// The label in a forge's words. GitHub's are `label`'s.
+    public func label(for forge: Forge) -> String {
+        guard forge == .gitLab else { return label }
+        switch self {
+        case .closed: return "Merge request closed"
+        case .checksFailing: return "Pipeline failing"
+        case .checksRunning: return "Pipeline running"
+        case .checksPassed: return "Pipeline passed"
+        case .draft: return "Draft merge request"
+        case .pullRequestOpen: return "Merge request open"
+        default: return label
+        }
+    }
+
     /// Whether this verdict came from GitHub rather than from the worktree.
     ///
     /// **Both halves are written out, and the `default` that used to stand for the second one is
@@ -186,7 +200,8 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         }
         guard describesPullRequest, let pullRequest else { return label }
 
-        var text = "\(label), pull request #\(pullRequest.number)"
+        let forge = pullRequest.forge
+        var text = "\(label(for: forge)), \(forge.request) \(forge.reference(pullRequest.number))"
         if let detail = detail(pullRequest: pullRequest) { text += ": \(detail)" }
         return text
     }
@@ -205,7 +220,7 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         // read off the band rather than copied from it, so the two cannot drift.
         if self == .conflicted { return pullRequest.status.detail }
         let detail = pullRequest.checksSummary
-        guard !detail.isEmpty, detail != label else { return nil }
+        guard !detail.isEmpty, detail != label(for: pullRequest.forge) else { return nil }
         return detail
     }
 }

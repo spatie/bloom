@@ -52,7 +52,8 @@ public struct BridgeDispatch: Sendable {
             // rather than left to fall through to method-not-found.
             return .result(id: id, .object([:]))
         case "tools/list":
-            let tools = toolbox.tools(for: identity.role).map(\.listing)
+            let gitLab = await callerForge() == .gitLab
+            let tools = toolbox.tools(for: identity.role).map { gitLab ? GitLabInstructions.listing(of: $0) : $0.listing }
             return .result(id: id, .object(["tools": .array(tools)]))
         case "tools/call":
             return await callTool(request, id: id)
@@ -63,6 +64,13 @@ public struct BridgeDispatch: Sendable {
                 message: "\(BridgeRegistration.serverName) does not implement \(request.method)"
             )
         }
+    }
+
+    /// The forge of the workspace this agent runs in. Callers outside one, the owner included,
+    /// span projects and keep GitHub's descriptions.
+    private func callerForge() async -> Forge {
+        guard let id = identity.workspaceID, let workspace = try? await store.workspace(id: id) else { return .gitHub }
+        return await ForgeResolver.forge(for: workspace.path)
     }
 
     /// The protocol version is echoed back rather than negotiated.

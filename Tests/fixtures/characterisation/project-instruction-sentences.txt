@@ -1,0 +1,11 @@
+This project has its own instructions for merging. Follow the instructions in `.bloom/scratch/instructions.md` as well, and where they disagree with anything above, they win.
+---
+This project has its own instructions for merging. They could not be written to a file in this worktree, so they are below. Where they disagree with anything above, they win.
+
+Squash it.
+---
+This project has its own instructions for resolving merge conflicts. Follow the instructions in `.bloom/scratch/instructions.md` as well, and where they disagree with anything above, they win.
+---
+This project has its own instructions for resolving merge conflicts. They could not be written to a file in this worktree, so they are below. Where they disagree with anything above, they win.
+
+Squash it.

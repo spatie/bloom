@@ -1,0 +1,3 @@
+The GitHub check "Tests" in CI failed. Its log is in `.bloom/scratch/checks/tests.log`. The run is at https://github.com/acme/app/actions/runs/1/job/2.
+---
+The GitHub check "Lint" failed. Bloom could not fetch its log.

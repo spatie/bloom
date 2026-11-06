@@ -513,9 +513,10 @@ extension Store {
     /// seconds. The read and the write are both inside the actor with nothing suspending between
     /// them.
     ///
-    /// Clearing it is not here. That happens exactly once, in `continueOnNewBranch`, in the same
-    /// `update` that moves the branch, because the two are one change: the pull request stops
-    /// being this workspace's because the branch did.
+    /// Clearing it is not here. That happens in `continueOnNewBranch`, in the same `update` that
+    /// moves the branch, because the two are one change: the pull request stops being this
+    /// workspace's because the branch did. And in `clearPullRequestNumbers`, for a project that
+    /// moved forge.
     public func recordPullRequestNumber(_ number: Int, workspaceID: WorkspaceID) throws {
         guard number > 0 else { return }
         guard let current = try db.query(

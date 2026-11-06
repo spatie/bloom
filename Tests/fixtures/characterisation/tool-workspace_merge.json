@@ -1,0 +1,25 @@
+{
+  "description" : "Ask a workspace's own agent to merge its pull request.\n\nThis does not merge anything. It composes the request Bloom's agent-guided merge choice composes, with the project's merge instructions attached, and sends it into that workspace's chat as an ordinary message. The agent runs `gh pr merge` there, in front of the owner, under whatever permission mode they set, and can say what GitHub answered if it refuses.\n\nSo it returns once the turn has begun, and the merging happens inside that turn, after this call is over. Nothing has landed on GitHub when this answers, and the merge may still not happen. Do not report a pull request as merged on the strength of this call. Call workspace_list with include_github afterwards and read the state.\n\nIt refuses a pull request GitHub will not take, a worktree holding work GitHub has not got, and a workspace whose agent is busy. When it refuses, do not run `gh pr merge` yourself and do not ask another agent to. Merging publishes to a server other people share, and this tool only asks the workspace's own agent to do it.\n\nName the workspace by the id workspace_list reports, not by its name. It squash merges unless you say otherwise.",
+  "inputSchema" : {
+    "properties" : {
+      "method" : {
+        "description" : "How to merge it. Leave it out for squash, which is what Bloom's own button proposes.",
+        "enum" : [
+          "merge",
+          "squash",
+          "rebase"
+        ],
+        "type" : "string"
+      },
+      "workspace" : {
+        "description" : "The workspace whose pull request to merge, by the id workspace_list reports. Not its name: two workspaces may share one.",
+        "type" : "string"
+      }
+    },
+    "required" : [
+      "workspace"
+    ],
+    "type" : "object"
+  },
+  "name" : "workspace_merge"
+}

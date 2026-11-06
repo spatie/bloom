@@ -34,6 +34,8 @@ final class RepoSettingsModel {
     private(set) var saveError: String?
     /// The paths the last save touched, so the window can say where the change landed.
     private(set) var savedPaths: [String] = []
+    /// Whether the last save moved the project to the other forge.
+    private(set) var changedForge = false
 
     private var resolveTask: Task<Void, Never>?
 
@@ -157,6 +159,7 @@ final class RepoSettingsModel {
         guard !pending.isEmpty else { return false }
         let path = repo.path
         let settings = loaded
+        let forgeBefore = pending.contains { $0.key == .forge } ? await ForgeResolver.forge(for: path) : nil
 
         do {
             let written = try await Task.detached {
@@ -168,6 +171,7 @@ final class RepoSettingsModel {
             saveError = error.readableMessage
             return false
         }
+        changedForge = if let forgeBefore { await ForgeResolver.forge(for: path) != forgeBefore } else { false }
 
         await load()
         return true

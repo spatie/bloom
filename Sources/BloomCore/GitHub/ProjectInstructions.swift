@@ -167,9 +167,11 @@ public enum ProjectInstructions {
     /// Pure, and the only place the three are put in an order, so what an agent is about to be
     /// told can be asserted without a worktree, a store or GitHub. That is the same reason
     /// `MergePromptContext` is a value rather than a lookup.
-    public static func turn(_ rendered: String, for subject: Subject, adding extra: Extra) -> String {
+    public static func turn(
+        _ rendered: String, for subject: Subject, adding extra: Extra, forge: Forge = .gitHub
+    ) -> String {
         var parts = [rendered.trimmingCharacters(in: .whitespacesAndNewlines)]
-        if let canonical = canonical(for: subject) { parts.append(canonical) }
+        if let canonical = canonical(for: subject, forge: forge) { parts.append(canonical) }
         if let closing = sentence(for: subject, adding: extra) { parts.append(closing) }
         return parts.filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
@@ -188,9 +190,9 @@ public enum ProjectInstructions {
     /// bubble is what stopped anybody reading them. They are added before this call rather than
     /// inside it, by `WorkspaceModel.requestFixConflicts`, because the path they are at is a fact
     /// about one worktree and everything in this switch is a constant.
-    public static func canonical(for subject: Subject) -> String? {
+    public static func canonical(for subject: Subject, forge: Forge = .gitHub) -> String? {
         switch subject {
-        case .merge: MergeInstructions.canonical
+        case .merge: forge == .gitLab ? GitLabInstructions.merge : MergeInstructions.canonical
         case .fixConflicts: nil
         }
     }

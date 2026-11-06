@@ -1,0 +1,31 @@
+{
+  "iid": 4015,
+  "title": "fix(iteration): show the real total in list header",
+  "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4015",
+  "state": "merged",
+  "draft": false,
+  "has_conflicts": false,
+  "detailed_merge_status": "not_open",
+  "merge_status": "can_be_merged",
+  "source_branch": "unstable-code/fix-iteration-list-total",
+  "target_branch": "main",
+  "merged_at": "2026-10-07T16:41:00.770Z",
+  "closed_at": null,
+  "sha": "a4f0330b1b8cfb0a3392696524005025d3342099",
+  "source_project_id": 45049979,
+  "target_project_id": 34675721,
+  "head_pipeline": {
+    "id": 2923247089,
+    "iid": 14865,
+    "project_id": 34675721,
+    "status": "success",
+    "sha": "d5f45439bd471880c6bfe4dd391a24ea2bbcf777",
+    "ref": "refs/merge-requests/4015/train",
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/pipelines/2923247089"
+  },
+  "references": {
+    "short": "!4015",
+    "relative": "!4015",
+    "full": "gitlab-org/cli!4015"
+  }
+}

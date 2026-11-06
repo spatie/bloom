@@ -44,4 +44,17 @@ struct SquashCommitMessageTests {
         let edited = try #require(SquashCommitMessage(subject: proposed.subject, body: "Why").edited(from: proposed))
         #expect(edited == SquashCommitMessage(subject: "Ship it (#12)", body: "Why"))
     }
+
+    @Test("on GitLab the proposal is the bare title, and the agent is asked for --squash-message")
+    func gitLab() throws {
+        let merge = PullRequest(number: 12, title: "Ship it", url: "", state: "opened", forge: .gitLab)
+        let proposed = SquashCommitMessage.proposed(for: merge)
+        #expect(proposed == SquashCommitMessage(subject: "Ship it"))
+
+        let message = SquashCommitMessage(subject: "Ship the thing", body: "Why")
+        #expect(message.commitMessage == "Ship the thing\n\nWhy")
+        let asked = try #require(message.instruction(proposed: proposed, forge: .gitLab))
+        #expect(asked.contains("`--squash-message` to `glab mr merge`"))
+        #expect(asked.contains("```\nShip the thing\n\nWhy\n```"))
+    }
 }

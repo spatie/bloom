@@ -13,6 +13,7 @@ public enum SettingsEdit: Sendable, Hashable {
     case mergeInstructions(String?)
     case conflictInstructions(String?)
     case browserURL(String?)
+    case forge(Forge?)
 
     public var key: SettingsKey {
         switch self {
@@ -26,6 +27,7 @@ public enum SettingsEdit: Sendable, Hashable {
         case .mergeInstructions: .mergeInstructions
         case .conflictInstructions: .conflictInstructions
         case .browserURL: .browserURL
+        case .forge: .forge
         }
     }
 }
@@ -370,6 +372,8 @@ public enum SettingsWriter {
             set(prefix, at: SettingsKey.branchPrefix.path, in: &document, overriding: overriding)
         case .browserURL(let url):
             set(url, at: SettingsKey.browserURL.path, in: &document, overriding: overriding)
+        case .forge(let forge):
+            set(forge?.rawValue, at: SettingsKey.forge.path, in: &document, overriding: overriding)
         case .deleteBranchOnArchive(let flag):
             document.set(.boolean(flag), at: SettingsKey.deleteBranchOnArchive.path)
         case .filesToCopy(let globs):

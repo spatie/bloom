@@ -27,9 +27,9 @@ struct MergeConfirmationPopover: View {
     var body: some View {
         ConfirmationPopover(
             title: pullRequest.mergeConfirmationTitle(base: pullRequest.baseBranch ?? baseBranch),
-            confirmLabel: execution == .direct ? method.label : "Ask agent to merge",
+            confirmLabel: execution == .direct ? method.label(on: pullRequest.forge) : "Ask agent to merge",
             tint: tint,
-            canConfirm: canMerge && (execution == .agent || canMergeDirectly),
+            canConfirm: canMerge && pullRequest.mergeMethodProblem(method) == nil && (execution == .agent || canMergeDirectly),
             onConfirm: {
                 let message = SquashCommitMessage(subject: subject, body: messageBody)
                 onConfirm(method == .squash ? message.edited(from: proposed) : nil)
@@ -39,7 +39,7 @@ struct MergeConfirmationPopover: View {
         ) {
             Picker("Merge using", selection: executionBinding) {
                 ForEach(MergeExecution.allCases, id: \.self) { choice in
-                    Text(choice.label).tag(choice)
+                    Text(choice.label(on: pullRequest.forge)).tag(choice)
                 }
             }
             .pickerStyle(.radioGroup)
@@ -59,13 +59,21 @@ struct MergeConfirmationPopover: View {
                 Text(warning)
                     .foregroundStyle(Palette.negative)
             }
+            if let problem = pullRequest.mergeMethodProblem(method) {
+                Text(problem).foregroundStyle(Palette.negative)
+            }
 
             if execution == .direct {
-                Text("Bloom will run gh pr merge with the selected \(method.label.lowercased()) method. GitHub may queue the merge if this repository requires it.")
-                Text("Bloom will not delete the branch or change this checkout. GitHub may delete the remote branch if the repository is configured to do so.")
+                let forge = pullRequest.forge
+                Text("Bloom will run \(forge.command("merge")) using \(method.phrase(on: forge)). \(forge.name) may queue the merge if this repository requires it.")
+                if forge == .gitLab, method == .rebase {
+                    Text("GitLab rebases the branch first, which starts a new pipeline. A project that waits for it will not merge yet.")
+                        .foregroundStyle(.secondary)
+                }
+                Text("Bloom will not delete the branch or change this checkout. \(forge.name) may delete the remote branch if the repository is configured to do so.")
                     .foregroundStyle(.secondary)
                 if !canMergeDirectly {
-                    Text("Refresh this pull request before merging directly.")
+                    Text("Refresh this \(forge.request) before merging directly.")
                         .foregroundStyle(Palette.negative)
                 }
             } else {

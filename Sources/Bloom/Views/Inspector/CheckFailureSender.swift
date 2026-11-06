@@ -39,7 +39,8 @@ final class CheckFailureSender {
 
         if let target = CheckFailureHandoff.logTarget(detailsURL: run.detailsURL) {
             do {
-                let log = try await GitHub.checkRunLog(target, worktree: model.workspace.path)
+                let worktree = model.workspace.path
+                let log = try await ForgeResolver.client(for: worktree).checkRunLog(target, worktree: worktree)
                 excerpt = CheckFailureHandoff.excerpt(log)
             } catch {
                 // Not fatal, and deliberately so. A check with no log Bloom can reach is still

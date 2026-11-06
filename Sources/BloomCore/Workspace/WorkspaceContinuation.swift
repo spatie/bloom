@@ -388,10 +388,15 @@ public extension WorkspaceManager {
         let live = await checkedOut
         // The row only when there is nothing better. It is what the old comparison used and it is
         // what goes stale, so it is the fallback rather than the source: see `mergedBranch`.
-        let merged = pullRequest.map {
+        var merged = pullRequest.map {
             ContinuationHead.branch(
                 of: $0, recorded: workspace.branch, checkedOut: live, base: workspace.baseBranch
             )
+        }
+        if let pullRequest,
+           let alias = await GitLab.associatedBranch(of: pullRequest, worktree: workspace.path),
+           alias == live {
+            merged = alias
         }
 
         return ContinuationFacts(

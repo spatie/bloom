@@ -395,40 +395,13 @@ public enum GitHub {
         _ expected: PullRequest, into base: String, method: MergeMethod,
         squashMessage: SquashCommitMessage? = nil, worktree: String
     ) async throws -> DirectMergeOutcome {
-        guard expected.number > 0, !expected.url.isEmpty,
-              let expectedHead = expected.headRevision, Self.isCommitID(expectedHead),
-              let expectedBase = expected.baseBranch, !expectedBase.isEmpty else {
-            throw GitHubError("Refresh the pull request before merging directly.")
-        }
-        if !expected.branch.isEmpty,
-           try await Git.currentBranch(of: worktree) != expected.branch {
-            throw GitHubError("This worktree is no longer on the pull request's branch.")
-        }
-
-        let local = try await Git.localWork(worktree: worktree)
-        guard !local.isAhead else {
-            throw GitHubError("This worktree has changes or commits GitHub has not got. Commit and push them, or choose the agent route after reviewing the warning.")
-        }
-        guard try await Git.headSHA(of: worktree) == expectedHead else {
-            throw GitHubError("This checkout is not at the pull request's head commit. Refresh or update it before merging directly.")
-        }
-
-        let context = try await Git.repositoryContext(in: worktree, baseBranch: base)
-        guard expectedBase == context.baseBranch else {
-            throw GitHubError("The pull request targets \(expectedBase), not \(context.baseBranch). Refresh it before merging.")
-        }
-        guard let current = try await snapshot(
+        let (expectedHead, expectedBase) = try await DirectMergeCheck.confirmed(
+            expected, base: base, worktree: worktree
+        )
+        let current = try await snapshot(
             forNumber: expected.number, worktree: worktree, maxAge: .zero
-        )?.pullRequest else {
-            throw GitHubError("GitHub no longer has pull request #\(expected.number).")
-        }
-        guard current.url == expected.url, current.branch == expected.branch,
-              current.baseBranch == expectedBase, current.headRevision == expectedHead else {
-            throw GitHubError("The pull request changed since it was shown. Refresh it before merging.")
-        }
-        guard current.isOpen, current.status.canMerge else {
-            throw GitHubError(current.status.blockedReason ?? "This pull request can no longer be merged.")
-        }
+        )?.pullRequest
+        try DirectMergeCheck.verify(current, against: expected, head: expectedHead, base: expectedBase)
 
         let arguments = [
             "pr", "merge", String(expected.number), method.flag,
@@ -446,12 +419,6 @@ public enum GitHub {
             forNumber: expected.number, worktree: worktree, maxAge: .zero
         )?.pullRequest else { return .acceptedUnverified }
         return after.isMerged ? .merged : .acceptedButOpen
-    }
-
-    private static func isCommitID(_ value: String) -> Bool {
-        (value.count == 40 || value.count == 64) && value.utf8.allSatisfy {
-            (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
-        }
     }
 
     /// Pushes the current HEAD to `branch` on its configured publication remote.

@@ -1,13 +1,13 @@
 import Foundation
 
-/// Whether Bloom sends a merge turn or executes the chosen gh command itself.
+/// Whether Bloom sends a merge turn or executes the chosen gh or glab command itself.
 public enum MergeExecution: String, CaseIterable, Sendable {
     case direct
     case agent
 
-    public var label: String {
+    public func label(on forge: Forge) -> String {
         switch self {
-        case .direct: "Merge with GitHub CLI"
+        case .direct: "Merge with \(forge.name) CLI"
         case .agent: "Ask agent to merge"
         }
     }

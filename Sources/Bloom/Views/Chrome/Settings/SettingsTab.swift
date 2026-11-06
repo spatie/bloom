@@ -5,6 +5,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
     case menuBar
     case notifications
     case agents
+    case connections
     case sessions
     case presets
     case permissions
@@ -22,6 +23,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .menuBar: "Menu Bar"
         case .notifications: "Notifications"
         case .agents: "Agents"
+        case .connections: "GitHub & GitLab"
         case .sessions: "Sessions"
         case .presets: "Model Presets"
         case .permissions: "Permissions"
@@ -41,6 +43,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .menuBar: "menubar.rectangle"
         case .notifications: "bell"
         case .agents: "person.2"
+        case .connections: "person.badge.key"
         case .sessions: "bubble.left.and.bubble.right"
         case .presets: "slider.horizontal.3"
         case .permissions: "hand.raised"

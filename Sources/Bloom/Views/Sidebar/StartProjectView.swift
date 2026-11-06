@@ -702,6 +702,8 @@ struct StartProjectView: View {
             // asking its root view to present it.
             openWindow(id: BloomApp.mainWindowID)
             guard let repo else { return }
+            // Answered before New Workspace goes up: the main window shows one sheet at a time.
+            await app.askForgeIfBoth(repo)
             Task { @MainActor in
                 await Task.yield()
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)

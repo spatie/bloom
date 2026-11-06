@@ -680,6 +680,12 @@ public struct PullRequest: Sendable, Hashable, Codable {
     /// A pull request that ended before the workspace asking about it was created belongs to an
     /// earlier life of that name. See `PullRequestOwnership`.
     public var closedAt: Date?
+    /// Which server answered. Every value built before there was a second forge is GitHub's.
+    public var forge: Forge
+    /// Why the server will refuse a merge that nothing else here explains. Always empty on GitHub.
+    public var blockers: [MergeBlocker]
+    /// GitLab's effective squash choice, including project rules. Nil when it was not read.
+    public var squashesOnMerge: Bool?
 
     public init(
         number: Int,
@@ -694,7 +700,10 @@ public struct PullRequest: Sendable, Hashable, Codable {
         branch: String = "",
         baseBranch: String? = nil,
         headRevision: String? = nil,
-        closedAt: Date? = nil
+        closedAt: Date? = nil,
+        forge: Forge = .gitHub,
+        blockers: [MergeBlocker] = [],
+        squashesOnMerge: Bool? = nil
     ) {
         self.number = number
         self.title = title
@@ -709,6 +718,9 @@ public struct PullRequest: Sendable, Hashable, Codable {
         self.baseBranch = baseBranch
         self.headRevision = headRevision
         self.closedAt = closedAt
+        self.forge = forge
+        self.blockers = blockers
+        self.squashesOnMerge = squashesOnMerge
     }
 }
 

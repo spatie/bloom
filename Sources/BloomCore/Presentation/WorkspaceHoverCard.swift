@@ -33,11 +33,13 @@ public struct WorkspaceHoverCard: Sendable, Hashable {
         public var number: Int
         public var title: String
         public var url: String
+        public var forge: Forge
 
-        public init(number: Int, title: String, url: String) {
+        public init(number: Int, title: String, url: String, forge: Forge = .gitHub) {
             self.number = number
             self.title = title
             self.url = url
+            self.forge = forge
         }
     }
 
@@ -100,7 +102,7 @@ public struct WorkspaceHoverCard: Sendable, Hashable {
     /// `PullRequestOwnership` drops it upstream, which is where that rule lives.
     static func reference(to pullRequest: PullRequest?) -> PullRequestRef? {
         pullRequest.map {
-            PullRequestRef(number: $0.number, title: $0.title, url: $0.url)
+            PullRequestRef(number: $0.number, title: $0.title, url: $0.url, forge: $0.forge)
         }
     }
 }

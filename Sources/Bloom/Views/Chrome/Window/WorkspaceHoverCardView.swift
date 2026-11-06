@@ -176,7 +176,7 @@ struct WorkspaceHoverCardView: View {
                     // `verbatim`, for the reason `PullRequestBadge` writes down: an interpolated
                     // `Int` inside a `LocalizedStringKey` is formatted for the locale, and a
                     // machine set to Dutch drew "#2.631" for a pull request GitHub calls 2631.
-                    Text(verbatim: "#\(pullRequest.number)")
+                    Text(verbatim: pullRequest.forge.reference(pullRequest.number))
                         .font(Typo.caption)
                         .monospacedDigit()
                         .foregroundStyle(Palette.textSecondary)

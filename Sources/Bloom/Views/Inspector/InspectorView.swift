@@ -34,12 +34,18 @@ struct InspectorView: View {
             if let failure = model.pullRequestRefreshFailure {
                 HStack(alignment: .top, spacing: InspectorLayout.gap) {
                     VStack(alignment: .leading, spacing: InspectorLayout.tight) {
-                        Text(model.pullRequest == nil ? "GitHub could not refresh" : "Showing the last GitHub update")
+                        Text(model.pullRequest == nil
+                            ? "\(model.forge.name) could not refresh" : "Showing the last \(model.forge.name) update")
                             .font(Typo.captionEmphasis)
                             .foregroundStyle(Palette.textPrimary)
                         Text(failure.message).font(Typo.micro).foregroundStyle(Palette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
+                        if model.forge == .gitLab, failure.reason != .rateLimited {
+                            Button("Connect GitLab") { Task { await model.signInToGitLab() } }
+                                .linkButton()
+                                .font(Typo.micro)
+                        }
                         if let retryAt = failure.retryAt {
                             Text("Next refresh after \(retryAt.formatted(date: .omitted, time: .shortened))")
                                 .font(Typo.micro).foregroundStyle(Palette.textSecondary)
