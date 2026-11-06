@@ -519,7 +519,8 @@ final class WorkspaceModel {
         session.model = openingControls.model
         session.effort = openingControls.effort
         session.agentKind = openingControls.agentKind
-        session.permissionMode = openingControls.permissionMode
+        // A project checkout does not start a chat on Bypass. See `WorkspaceKind.startingPermission`.
+        session.permissionMode = workspace.kind.startingPermission(openingControls.permissionMode)
         session.interactionMode = openingControls.interactionMode
         guard let stored = try? await store.upsert(session) else { return nil }
         await openingControls.store(sessionID: stored.id, in: store)
@@ -1646,7 +1647,8 @@ final class WorkspaceModel {
         SetupRunOffer.offer(
             hasSetupScript: repo != nil && (settings.setupScript != nil || Git.hasSubmodules(in: workspace.path)),
             hasRunSetup: hasRunSetup,
-            isRunning: isRunningSetup
+            isRunning: isRunningSetup,
+            allowsSetup: workspace.kind.allowsSetup
         )
     }
 
@@ -2466,6 +2468,7 @@ final class WorkspaceModel {
             await GitHubBridge.readPullRequest(for: asked, maxAge: maxAge)
         }
         pullRequestTask = task
+        defer { if pullRequestTask == task { pullRequestTask = nil } }
         // Only before there has been any answer at all, for the same reason the changed file list
         // only spins when it has nothing: a refresh of something already on screen leaves it
         // alone. The rule and what it cost to get wrong are `PullRequestProgress`.
@@ -2478,7 +2481,6 @@ final class WorkspaceModel {
         let read = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
-        pullRequestTask = nil
         // Before the write below, and set whatever came back: a nil from gh is still this
         // workspace having been looked at, and the next refresh has an answer on screen to leave
         // alone. Only a superseded or cancelled refresh, which returns above, says nothing.
@@ -2497,6 +2499,10 @@ final class WorkspaceModel {
         await PullRequestNumber.record(fresh, for: asked, in: store)
         isLoadingPullRequest = false
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
+        // After the band has its answer: following a moved target can mean a fetch.
+        await app.adoptPullRequestBase(fresh, for: asked) {
+            self.pullRequestTask == task && !task.isCancelled
+        }
     }
 
     /// Asks the workspace's agent to open the pull request, instead of running `gh` from here.
@@ -2742,7 +2748,10 @@ final class WorkspaceModel {
     /// When the file cannot be written, the instructions go into the message itself. A read-only
     /// checkout is a reason to say it differently, not a reason for the button to stop working.
     private func pullRequestTurn(text: String) async -> String {
-        if let path = await PullRequestInstructions.ensure(in: workspace.path) {
+        // Never in the project's own checkout, where `ensure` may move or delete a
+        // `.bloom/pr-instructions.md` the owner left there. Inline is the documented fallback.
+        if workspace.kind.hasPullRequests,
+           let path = await PullRequestInstructions.ensure(in: workspace.path) {
             return PullRequestInstructions.asking(text, toFollow: path)
         }
         return text + "\n\n" + PullRequestInstructions.defaultMarkdown

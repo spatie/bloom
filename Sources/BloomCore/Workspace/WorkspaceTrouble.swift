@@ -328,6 +328,16 @@ public enum WorkspaceTrouble: Sendable, Equatable {
         if let inUse = error as? BranchInUse {
             return .createBranchInUse(branch: inUse.branch, holder: inUse.holder)
         }
+        // The same answer as a branch held by a workspace, because it is one: the project's
+        // branch is open in its project checkout, and the way out is to go there.
+        if let taken = error as? ProjectCheckoutTaken {
+            return .createBranchInUse(
+                branch: taken.existing.branch, holder: .workspace(taken.existing.name)
+            )
+        }
+        if let detached = error as? ProjectCheckoutDetached {
+            return .unexplained(detached.description)
+        }
 
         switch await CheckoutStanding.of(projectPath, branch: baseBranch) {
         case .missing: return .projectGone(project: project, path: projectPath)

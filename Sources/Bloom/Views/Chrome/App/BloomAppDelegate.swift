@@ -41,8 +41,12 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // this process and has to execute the same code a click in the create window does, rather
         // than a copy of it written for callers with no window.
         RunningApp.attach(model)
-        // Option+Tab steps through the strip, and the strip is the model's. See `TabCycleShortcut`.
+        // Option+Tab steps through the strip, and the strip is the model's. Control+Tab walks the
+        // navigation history. See `TabCycleShortcut`.
         TabCycleShortcut.attach(model)
+        WorkspaceTabsStore.shared.onTabSelected = { [weak model] workspace, tab, previous in
+            model?.recordTabSelection(tab, in: workspace, leaving: previous)
+        }
         // A selected passage in the current transcript answers plain R by moving into the reply.
         SelectionToChat.attachReplyShortcut()
         // Typing with nothing focused goes to the chat composer.

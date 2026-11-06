@@ -15,6 +15,15 @@ struct BloomWindowToolbar: ToolbarContent {
             }
         }
 
+        ToolbarItemGroup(placement: .navigation) {
+            Button("Back", systemImage: "chevron.left") { app.stepNavigation(by: -1) }
+                .disabled(!app.canStepNavigation(by: -1))
+                .help("Back to the previous workspace or tab (⌃⇧⇥)")
+            Button("Forward", systemImage: "chevron.right") { app.stepNavigation(by: 1) }
+                .disabled(!app.canStepNavigation(by: 1))
+                .help("Forward to the next workspace or tab (⌃⇥)")
+        }
+
         ToolbarItem(placement: .navigation) {
             WindowTitleControl(app: app)
                 .padding(.leading, Metrics.spacingWide)

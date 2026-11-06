@@ -148,9 +148,24 @@ public struct ArchiveRequest: Identifiable, Sendable {
     /// dialogue to say something the name above it had already said. What has to be read here is
     /// the lists, so the path is gone and the name identifies the workspace, which is what it does
     /// everywhere else in the app.
+    /// The notice after an archive that left the folder where it was, in the core so the two
+    /// reasons it happens are told apart where a test can hold them.
+    public static func preservedFolderNotice(for workspace: Workspace, path: String) -> String {
+        if workspace.kind == .projectCheckout {
+            return "\(workspace.name) was archived. The project\u{2019}s own checkout at `\(path)` "
+                + "was left as it is, and the archive script was skipped."
+        }
+        return "\(workspace.name) was archived. Its folder at `\(path)` and its branch "
+            + "were kept because Git no longer recognizes the folder as a worktree. "
+            + "The archive script was skipped."
+    }
+
     public var message: String {
         var text = "\u{201C}\(workspace.name)\u{201D}\n\n"
-        if let path = report.preservedFolderPath {
+        if workspace.kind == .projectCheckout {
+            text += "This is the project\u{2019}s own checkout. Its folder, its branch and its "
+            text += "files are left exactly as they are, and the archive script is skipped."
+        } else if let path = report.preservedFolderPath {
             text += "Git no longer recognizes this folder as a worktree. "
             text += "The folder at \(path) and the branch are kept. The archive script is skipped."
         } else {

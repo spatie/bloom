@@ -5,9 +5,16 @@ import SwiftUI
 struct ComposerBox: ViewModifier {
     @Binding var isFocused: Bool
     var isFloating = false
-    var isDropTarget = false
+    /// Tints the box while a file is being dragged towards it. See `ComposerDropHint`.
+    var dropHint: ComposerDropHint?
     @Environment(\.controlActiveState) private var activeState
     @Environment(\.colorSchemeContrast) private var contrast
+
+    /// Enough of the accent in the glass to say a file let go now will be attached here, little
+    /// enough that the text on it keeps its contrast.
+    private static let dropTint = 0.25
+
+    private var isDropTarget: Bool { dropHint?.isShown == true }
 
     private var isRingVisible: Bool { isFocused && activeState.showsFocusRing }
 
@@ -35,24 +42,26 @@ struct ComposerBox: ViewModifier {
             padded
                 // One material for the whole composer. Its controls keep their ordinary styles,
                 // and completion menus are attached outside this modifier.
-                .glassEffect(.regular, in: shape)
+                .glassEffect(
+                    .regular.tint(isDropTarget ? Palette.accent.opacity(Self.dropTint) : nil),
+                    in: shape
+                )
                 .overlay {
-                    shape.strokeBorder(
-                        isDropTarget ? Palette.controlAccent : focusColour,
-                        lineWidth: isDropTarget || contrast == .increased ? 2 : 0.5
-                    )
-                    .opacity(isDropTarget ? 1 : (isRingVisible ? focusOpacity : 0))
+                    shape.strokeBorder(focusColour, lineWidth: contrast == .increased ? 2 : 0.5)
+                    .opacity(isRingVisible ? focusOpacity : 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
         } else {
             padded
                 .overlay {
-                    shape.strokeBorder(
-                        isDropTarget ? Palette.accent : Palette.border,
-                        lineWidth: isDropTarget ? Metrics.outline * 2 : Metrics.outline
-                    )
-                    .allowsHitTesting(false)
+                    shape.strokeBorder(Palette.border, lineWidth: Metrics.outline)
+                        .allowsHitTesting(false)
+                }
+                .overlay {
+                    if isDropTarget {
+                        shape.fill(Palette.accent.opacity(Self.dropTint)).allowsHitTesting(false)
+                    }
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: Metrics.corner + 1.5)
@@ -74,10 +83,8 @@ struct ComposerBox: ViewModifier {
 
 extension View {
     func composerBox(
-        isFocused: Binding<Bool>, isDropTarget: Bool = false, isFloating: Bool = false
+        isFocused: Binding<Bool>, dropHint: ComposerDropHint? = nil, isFloating: Bool = false
     ) -> some View {
-        modifier(ComposerBox(
-            isFocused: isFocused, isFloating: isFloating, isDropTarget: isDropTarget
-        ))
+        modifier(ComposerBox(isFocused: isFocused, isFloating: isFloating, dropHint: dropHint))
     }
 }

@@ -3,7 +3,8 @@ import WebKit
 import BloomCore
 
 /// Typing or pasting with nothing taking it goes to the focused chat's composer. The event is
-/// handed back rather than replayed, so dead keys and input methods still work.
+/// handed back rather than replayed, so dead keys and input methods still work. A file dropped on
+/// a part of the window with nothing to take it goes there too: see `dropTarget(in:)`.
 @MainActor
 enum TypeToComposer {
     private static var monitor: Any?
@@ -54,13 +55,53 @@ enum TypeToComposer {
         return SelectionToChat.transcript(containing: view)?.session?.rawValue
     }
 
-    private static func focusedChat() -> String? {
-        guard let workspace = model?.selectedModel else { return nil }
-        let tabs = WorkspaceTabsStore.shared
-        guard let tab = tabs.selectedTab(in: workspace),
-              case .chat(let sessionID) = tabs.content(of: tabs.focusedPane(of: tab), in: tab)
-        else { return nil }
-        return sessionID.rawValue
+    private static func focusedChat() -> String? { focusedChatID()?.rawValue }
+
+    private static func focusedChatID() -> SessionID? {
+        guard let model else { return nil }
+        var workspaceChat: SessionID?
+        if let workspace = model.selectedModel {
+            let tabs = WorkspaceTabsStore.shared
+            if let tab = tabs.selectedTab(in: workspace),
+               case .chat(let sessionID) = tabs.content(of: tabs.focusedPane(of: tab), in: tab) {
+                workspaceChat = sessionID
+            }
+        }
+        return FileDropTarget.focusedSession(selection: model.selection, workspaceChat: workspaceChat)
+    }
+
+    /// The composer a file dropped on a part of the window with no drop target of its own goes to:
+    /// the focused chat's, or the side conversation's when the drag is over its card. `point` is in
+    /// window coordinates, like the card's frame.
+    ///
+    /// A sheet has one composer and takes the file whatever part of the window it is let go over,
+    /// the sheet's own area and the window around it alike.
+    static func dropTarget(in window: NSWindow, at point: CGPoint?) -> ComposerEditorHandle? {
+        if let sheet = window.attachedSheet { return composer(in: sheet, keyed: nil) }
+        if window.isSheet { return composer(in: window, keyed: nil) }
+        guard let sessionKey = dropSessionKey(at: point) else { return nil }
+        return composer(in: window, keyed: sessionKey)
+    }
+
+    /// The composer on screen in `window` for `sessionKey`, or the only one there when it is nil.
+    private static func composer(in window: NSWindow, keyed sessionKey: String?) -> ComposerEditorHandle? {
+        for case let editor as ComposerEditorHandle in editors.keyEnumerator()
+        where (sessionKey == nil || editors.object(forKey: editor) as String? == sessionKey)
+            && editor.dropEndpoint?.session.isActive == true && editor.isShown(in: window) {
+            return editor
+        }
+        return nil
+    }
+
+    private static func dropSessionKey(at point: CGPoint?) -> String? {
+        let focused = focusedChatID()
+        let card = focused.flatMap { model?.selectedModel?.sideConversations[$0] }.flatMap { $0.isVisible ? $0 : nil }
+        return FileDropTarget.resolve(
+            focused: focused,
+            sideConversation: card?.transcript?.session.id,
+            cardFrame: card?.windowFrame ?? .zero,
+            at: point
+        )?.rawValue
     }
 
     /// A selected passage keeps typed keys too, because R quotes it into the reply. See

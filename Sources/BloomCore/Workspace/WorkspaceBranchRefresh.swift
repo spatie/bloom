@@ -15,7 +15,19 @@ extension WorkspaceManager {
               URL(fileURLWithPath: lines[0]).resolvingSymlinksInPath().path
                 == URL(fileURLWithPath: workspace.path).resolvingSymlinksInPath().path,
               lines[1] != "HEAD", Git.isValidBranchName(lines[1]),
-              lines[1] != workspace.branch, lines[1] != workspace.baseBranch,
+              lines[1] != workspace.branch, !Task.isCancelled else { return }
+
+        // The project's own checkout goes wherever the owner moved it, the default branch
+        // included, and takes its base along: a branch and a base that disagree would make
+        // "All changes" the distance between two branches rather than the work not committed
+        // yet. Archive never deletes this branch, so following it transfers nothing. A detached
+        // head was turned away above and keeps the last branch. See `WorkspaceKind.followsHead`.
+        if workspace.kind.followsHead {
+            try? await store.updateCheckedOutBranch(lines[1], observed: workspace)
+            return
+        }
+
+        guard lines[1] != workspace.baseBranch,
               let repo = try? await store.repo(id: workspace.repoID),
               lines[1] != repo.defaultBranch,
               !Task.isCancelled else { return }

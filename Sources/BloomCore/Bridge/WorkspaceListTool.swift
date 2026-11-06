@@ -258,6 +258,9 @@ public struct WorkspaceListTool: BridgeToolHandling {
             "branch": .string(workspace.branch),
             "base_branch": .string(workspace.baseBranch),
             "path": .string(workspace.path),
+            // `project_checkout` is the project's own folder rather than a worktree, so changes
+            // there are the owner's real working copy. See `WorkspaceKind`.
+            "kind": .string(workspace.kind.rawValue),
             "state": .string(workspace.state.rawValue),
             "setup_state": .string(workspace.setupState.rawValue),
             // `WorkspaceStatus`'s own word and its own label, not a second vocabulary beside them.

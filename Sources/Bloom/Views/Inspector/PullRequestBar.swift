@@ -93,7 +93,9 @@ struct PullRequestBar: View {
 
     @ViewBuilder
     private var content: some View {
-        if let pullRequest = model.pullRequest {
+        if !model.workspace.kind.hasPullRequests {
+            ProjectCheckoutBand(branch: model.workspace.branch)
+        } else if let pullRequest = model.pullRequest {
             PullRequestSummary(
                 pullRequest: pullRequest,
                 baseBranch: model.workspace.baseBranch,
@@ -154,6 +156,8 @@ struct PullRequestBar: View {
     }
 
     private func poll() async {
+        // Nothing to poll for over the project's own checkout. See `ProjectCheckoutBand`.
+        guard model.workspace.kind.hasPullRequests else { return }
         // The first pass is an arrival rather than a poll, and it is allowed a recent answer.
         // This runs on `.task(id:)`, so it used to send two gh calls to GitHub every time the
         // window landed on a workspace, including landing back on one it had left four seconds
