@@ -29,6 +29,11 @@ import Foundation
 /// person looks to decide whether to keep working. So a changed reset time drops everything the
 /// report did not restate, and the row goes back to `.unknown` until somebody measures it again.
 public enum QuotaMerge {
+    /// How far two reset times may disagree and still name one window. Claude's `get_usage` states
+    /// `10:20:00.415`, its `rate_limit_event` states `10:20:00`, and reading that as a turnover
+    /// blanked the session meter after every turn until the next poll.
+    static let resetJitter: TimeInterval = 60
+
     /// Everything known after `reported` arrives, keeping any row nobody mentioned.
     ///
     /// Rows are matched on `AgentQuota.id`, which is the provider and the window key, because that
@@ -69,7 +74,7 @@ public enum QuotaMerge {
         // claimed the window moved, and a row that never had one has nothing to compare against.
         let turnedOver: Bool
         if let old = known.resetsAt, let new = merged.resetsAt {
-            turnedOver = old != new
+            turnedOver = abs(new.timeIntervalSince(old)) >= resetJitter
         } else {
             turnedOver = false
         }
