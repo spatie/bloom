@@ -1996,9 +1996,12 @@ final class TranscriptModel {
                 NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
             }
             // A turn stuck on the owner looks, from another workspace, exactly like one still
-            // working. Not while replaying: an ask read back after a relaunch may have been
-            // answered long ago, and the watch is spent by whatever it says.
-            if !isReconcilingPresentation, !isReplayingPastTurn, let ask = pendingPermissionAsks.last {
+            // working. Not for an ask from a turn that has since been replaced: it was answered
+            // or abandoned, and the watch is spent by whatever it says. See
+            // `AgentPresentationReconciliation.reportsPermissionAsk` for why catching up is not
+            // part of this test.
+            if AgentPresentationReconciliation.reportsPermissionAsk(isReplayingPastTurn: isReplayingPastTurn),
+               let ask = pendingPermissionAsks.last {
                 await app.noteWorkspaceTurnEnded(WorkspaceTurnEnding.ofAsk(ask), in: session)
             }
 

@@ -157,3 +157,33 @@ extension AgentPresentationFeedTests {
         #expect(feed.retainedLifecycleBytes == 0)
     }
 }
+
+extension AgentPresentationFeedTests {
+    private static let ask = AgentEvent.permissionAsk(
+        PermissionAsk(requestID: "r1", toolName: "Bash", input: .object([:]), summary: "", blockedPath: nil)
+    )
+
+    /// The window reads every live event of a feed runner inside its catch-up pass, so this is
+    /// the case `notify_when_done` missed: an ask in the turn that is still running.
+    @Test func anAskInTheRunningTurnIsReportedToAWatcher() throws {
+        let feed = AgentPresentationFeed()
+        feed.yield(.initialized(AgentInit(sessionID: "session")))
+        feed.yield(Self.ask)
+        let batch = feed.read(after: 0)
+        let index = try #require(batch.events.firstIndex { if case .permissionAsk = $0 { true } else { false } })
+        let replaying = feed.hasLaterTurn(than: batch.eventRevisions[index])
+        #expect(AgentPresentationReconciliation.reportsPermissionAsk(isReplayingPastTurn: replaying))
+    }
+
+    @Test func anAskFromATurnSinceReplacedIsNotReported() throws {
+        let feed = AgentPresentationFeed()
+        feed.yield(.initialized(AgentInit(sessionID: "session")))
+        feed.yield(Self.ask)
+        feed.yield(.result(AgentResult(summary: "answered")))
+        feed.yield(.initialized(AgentInit(sessionID: "session")))
+        let batch = feed.read(after: 0)
+        let index = try #require(batch.events.firstIndex { if case .permissionAsk = $0 { true } else { false } })
+        let replaying = feed.hasLaterTurn(than: batch.eventRevisions[index])
+        #expect(!AgentPresentationReconciliation.reportsPermissionAsk(isReplayingPastTurn: replaying))
+    }
+}

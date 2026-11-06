@@ -167,4 +167,18 @@ public enum AgentPresentationReconciliation {
     public static func permitsAutomaticDrain(isCatchingUp: Bool, isTurnRunning: Bool) -> Bool {
         !isCatchingUp && !isTurnRunning
     }
+
+    /// Whether a permission ask read off the feed is news for a chat waiting on this workspace
+    /// through `notify_when_done`.
+    ///
+    /// **Catching up is not a reason to stay quiet here, and asking it was the bug.** A runner with
+    /// a presentation feed hands every live event to the window inside the catch-up pass, so an ask
+    /// guarded on that flag was never reported at all: the watching chat went on waiting for a
+    /// workspace that sat on the owner's answer. A result is not affected, because the window
+    /// reports it after the pass rather than during it. What is stale is an ask from a turn a later
+    /// one has already replaced. It was answered or abandoned, and spending the watch on it would
+    /// tell the watcher about a question nobody is waiting on any more.
+    public static func reportsPermissionAsk(isReplayingPastTurn: Bool) -> Bool {
+        !isReplayingPastTurn
+    }
 }
