@@ -9,14 +9,17 @@ public final class AttachmentDropSession {
 
     public init() {}
 
-    public func start(_ operation: @escaping @Sendable () async -> Void) {
-        guard isActive else { return }
+    @discardableResult
+    public func start(_ operation: @escaping @Sendable () async -> Void) -> Task<Void, Never>? {
+        guard isActive else { return nil }
         let id = UUID()
-        tasks[id] = Task { [weak self] in
+        let task = Task { [weak self] in
             guard !Task.isCancelled else { return }
             await operation()
             self?.tasks[id] = nil
         }
+        tasks[id] = task
+        return task
     }
 
     /// File promises can call back after their sheet closed. The callback and cancellation both

@@ -1,3 +1,4 @@
+import Synchronization
 import Testing
 @testable import BloomCore
 
@@ -34,12 +35,10 @@ struct AttachmentDropSessionTests {
     @Test("Loads queued before a target closes are cancelled before doing work")
     func queuedLoad() async {
         let target = AttachmentDropSession()
-        let ran = Locked(false)
-        target.start { ran.withLock { $0 = true } }
+        let ran = Mutex(false)
+        let queued = target.start { ran.withLock { $0 = true } }
         target.cancelAll()
-        // A sentinel queued on the same actor follows the cancelled task. This observes its
-        // cancellation without sleeping or asking the scheduler to run within a time interval.
-        await Task { @MainActor in }.value
+        await queued?.value
         #expect(!ran.withLock { $0 })
     }
 }
