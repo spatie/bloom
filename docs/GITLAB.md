@@ -49,6 +49,12 @@ workspace, `maxAge` honoured as on GitHub, and the jobs of a finished pipeline c
 seconds. Job reads follow every page, and an unreadable page leaves the list unavailable. The
 pipeline's own status is retained even when its jobs cannot all be read.
 
+HTTP(S) remotes retain their scheme and web port in project URLs. Configure glab's per-host
+`api_host` and `api_protocol` when its API uses a non-default endpoint, as described in
+[glab configuration](https://docs.gitlab.com/cli/config/). The account host passed to glab is
+still the hostname. An SSH URL's port belongs to SSH, so Bloom does not reuse it for the web
+server. Use an HTTP(S) Git remote when Bloom needs a custom web port or an HTTP web origin.
+
 | Need | Call |
 |---|---|
 | Merge requests from a branch | `projects/<path>/merge_requests?source_branch=<branch>&state=all` |

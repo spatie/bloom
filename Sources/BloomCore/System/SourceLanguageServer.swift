@@ -191,7 +191,7 @@ public actor SourceLanguageServer {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: root)
-        process.environment = Shell.environment()
+        process.environment = ProviderCredentialEnvironment.untrustedProcess(Shell.environment())
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice

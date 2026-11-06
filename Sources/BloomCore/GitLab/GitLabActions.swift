@@ -14,6 +14,11 @@ extension GitLab {
               project.host == GitHub.repositoryHost(request.url) else {
             throw GitHubError("Configure this checkout to track the merge request's source branch before continuing.")
         }
+        let source = URL(string: config["remote.\(remote).url"] ?? remote)
+        if let source, ["http", "https"].contains(source.scheme?.lowercased() ?? ""),
+           let target = URL(string: request.url), project.webHost != GitLabProject.webHost(of: target) {
+            throw GitHubError("This checkout tracks a different GitLab server port. Configure its source remote before continuing.")
+        }
         return remote
     }
 

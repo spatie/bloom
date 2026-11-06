@@ -9,6 +9,8 @@ struct BrowserAddressTests {
         "127.0.0.1:8080/health",
         "0.0.0.0:4000",
         "myapp.localhost",
+        "myapp.localhost:3100",
+        "[::1]:3100",
     ])
     func localHostsGetHTTP(text: String) {
         #expect(BrowserAddress.url(from: text)?.absoluteString == "http://" + text)
@@ -17,6 +19,15 @@ struct BrowserAddressTests {
     @Test("A dotted host gets https")
     func dottedHostGetsHTTPS() {
         #expect(BrowserAddress.url(from: "example.com/docs")?.absoluteString == "https://example.com/docs")
+    }
+
+    @Test("A remote host cannot impersonate a local server by its prefix", arguments: [
+        "localhost.example.com", "localhostevil.example", "127.0.0.1.example",
+        "0.0.0.0.example", "localhost@remote.example",
+    ])
+    func localLookalikesAreRemote(text: String) {
+        #expect(BrowserAddress.url(from: text)?.scheme == "https")
+        #expect(BrowserAddressDisplay.of("http://" + text).security == .insecure)
     }
 
     @Test("An explicit scheme is taken as written")

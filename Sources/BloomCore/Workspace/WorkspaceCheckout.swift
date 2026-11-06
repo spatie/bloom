@@ -316,7 +316,7 @@ public enum WorkspaceCheckoutPlan {
             else { return nil }
             return PullRequestReference(
                 number: number, repository: "\(parts[index - 2])/\(parts[index - 1])",
-                host: forge == .gitLab ? host.lowercased() : nil
+                host: forge == .gitLab ? GitLabProject.webHost(of: url) : nil
             )
         }
 
@@ -337,7 +337,7 @@ public enum WorkspaceCheckoutPlan {
               parts.indices.contains(separator + 2), parts[separator + 1] == "merge_requests",
               let number = positiveNumber(parts[separator + 2])
         else { return nil }
-        return PullRequestReference(number: number, repository: parts[..<separator].joined(separator: "/"), host: url.host?.lowercased())
+        return PullRequestReference(number: number, repository: parts[..<separator].joined(separator: "/"), host: GitLabProject.webHost(of: url))
     }
 
     private static func positiveNumber(_ text: String) -> Int? {
@@ -487,7 +487,7 @@ public enum WorkspaceCheckoutResolver {
         let kind = await ForgeResolver.forge(for: repoPath)
         let forge = await ForgeResolver.client(for: repoPath)
         let slug = await forge.repositorySlug(repoPath: repoPath)
-        let host = kind == .gitLab ? await GitLab.host(in: repoPath) : nil
+        let host = kind == .gitLab ? await GitLab.project(in: repoPath)?.webHost : nil
         if let problem = problem(with: text, in: slug, forge: kind, host: host) { return .failure(problem) }
         guard let reference = WorkspaceCheckoutPlan.parseReference(text, forge: kind) else {
             return .failure("That is not a pull request number or URL.")

@@ -4,14 +4,22 @@ import Foundation
 struct GitLabProject: Sendable, Hashable {
     let host: String
     let path: String
+    private let scheme: String
+    private let webPort: Int?
 
     init?(remote: String?) {
         guard let remote, let host = GitHub.repositoryHost(remote) else { return nil }
         let rawPath: String
         if let url = URL(string: remote), url.host != nil {
             rawPath = url.path
+            let remoteScheme = url.scheme?.lowercased() ?? "https"
+            let web = ["http", "https"].contains(remoteScheme)
+            scheme = web ? remoteScheme : "https"
+            webPort = web ? Self.port(of: url) : nil
         } else if let colon = remote.firstIndex(of: ":") {
             rawPath = String(remote[remote.index(after: colon)...])
+            scheme = "https"
+            webPort = nil
         } else { return nil }
 
         var segments = rawPath.split(separator: "/").map(String.init)
@@ -27,7 +35,22 @@ struct GitLabProject: Sendable, Hashable {
     }
 
     /// What `glab -R` is given, so glab never has to guess the project from the remotes.
-    var webURL: String { "https://\(host)/\(path)" }
+    var webURL: String { "\(scheme)://\(webHost)/\(path)" }
+
+    /// The web authority differs from the glab account host when HTTPS uses a custom port.
+    var webHost: String { host + (webPort.map { ":\($0)" } ?? "") }
+
+    static func webHost(of url: URL) -> String? {
+        guard let host = url.host?.lowercased() else { return nil }
+        return host + (port(of: url).map { ":\($0)" } ?? "")
+    }
+
+    private static func port(of url: URL) -> Int? {
+        guard let port = url.port else { return nil }
+        if url.scheme?.lowercased() == "https", port == 443 { return nil }
+        if url.scheme?.lowercased() == "http", port == 80 { return nil }
+        return port
+    }
 }
 
 /// The remote a GitLab project is reached through: its name for git, its project for glab.

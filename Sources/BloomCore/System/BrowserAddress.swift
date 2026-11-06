@@ -15,20 +15,23 @@ public enum BrowserAddress {
 
         if trimmed.contains("://") { return URL(string: trimmed) }
 
-        let host = trimmed.split(separator: "/", maxSplits: 1).first.map(String.init) ?? trimmed
+        guard let candidate = URL(string: "https://" + trimmed),
+              let host = candidate.host, !host.isEmpty else { return nil }
         let local = isLocal(host: host)
         guard local || host.contains(".") else { return nil }
-        return URL(string: (local ? "http://" : "https://") + trimmed)
+        return local ? URL(string: "http://" + trimmed) : candidate
     }
 
-    /// A server on this Mac, with or without a port on the end.
+    /// A parsed host naming this Mac. Ports and user information belong to the URL parser.
     ///
     /// Read twice: here, to decide that a bare host gets `http` rather than `https`, and by
     /// `BrowserAddressDisplay`, to decide that plain http is a dev server rather than something to
     /// warn about. One policy, so the field cannot call an address local and the parser not.
     public static func isLocal(host: String) -> Bool {
-        host.hasPrefix("localhost") || host.hasPrefix("127.0.0.1")
-            || host.hasPrefix("0.0.0.0") || host.hasSuffix(".localhost")
+        let lower = host.lowercased()
+        let name = lower.hasSuffix(".") ? String(lower.dropLast()) : lower
+        return name == "localhost" || name == "127.0.0.1" || name == "0.0.0.0"
+            || name == "::1" || name == "[::1]" || name.hasSuffix(".localhost")
     }
 
     /// Whether a browser of Bloom's own could show this address at all.

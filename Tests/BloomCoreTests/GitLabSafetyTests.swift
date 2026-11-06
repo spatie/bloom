@@ -4,6 +4,55 @@ import Testing
 
 @Suite("GitLab request identity", .tags(.git), .scratchDirectory)
 struct GitLabSafetyTests {
+    @Test("HTTP remotes retain their web origin while glab uses its configured account host", arguments: [
+        ("https://gitlab.example:8443/group/app.git", "https://gitlab.example:8443/group/app"),
+        ("http://gitlab.example:8080/group/app.git", "http://gitlab.example:8080/group/app"),
+    ])
+    func customWebPort(remote: String, projectURL: String) async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try await Git.check(["remote", "add", "origin", remote], in: repo.path)
+        let project = try #require(GitLabProject(remote: remote))
+        #expect(project.host == "gitlab.example")
+        #expect(project.webURL == projectURL)
+        let url = projectURL + "/-/merge_requests/42"
+        #expect(WorkspaceCheckoutResolver.problem(with: url, in: project.path, forge: .gitLab, host: project.webHost) == nil)
+        #expect(WorkspaceCheckoutResolver.problem(with: "https://gitlab.example:9443/group/app/-/merge_requests/42", in: project.path, forge: .gitLab, host: project.webHost) != nil)
+        let request = PullRequest(number: 42, title: "", url: url, state: "OPEN", isDraft: true, forge: .gitLab)
+        try await GitLab.$commandOverride.withValue({ arguments, _ in
+            #expect(arguments == ["mr", "update", "42", "--ready", "-R", projectURL])
+            return ShellResult(status: 0, stdout: "", stderr: "")
+        }) {
+            try await GitLab.markReadyForReview(request, worktree: repo.path)
+        }
+    }
+
+    @Test("an SSH transport port never becomes the web server's port")
+    func sshPortIsNotAWebPort() throws {
+        let project = try #require(GitLabProject(remote: "ssh://git@gitlab.example:2222/group/app.git"))
+        #expect(project.webURL == "https://gitlab.example/group/app")
+    }
+
+    @Test("rebase refuses a source remote on a different web port", arguments: [8443, 9443])
+    func sourceWebPort(port: Int) async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try await Git.check(["remote", "add", "origin", "https://gitlab.example:8443/group/app.git"], in: repo.path)
+        try await Git.check(["checkout", "-qb", "fork-feature"], in: repo.path)
+        try await Git.check(["config", "branch.fork-feature.remote", "https://gitlab.example:\(port)/fork/app.git"], in: repo.path)
+        try await Git.check(["config", "branch.fork-feature.merge", "refs/heads/feature"], in: repo.path)
+        let request = PullRequest(number: 42, title: "", url: "https://gitlab.example:8443/group/app/-/merge_requests/42", state: "OPEN", branch: "feature", baseBranch: "main", forge: .gitLab)
+        if port == 8443 {
+            let prompt = try await GitLab.rebasePrompt(request, worktree: repo.path)
+            #expect(prompt.contains("'-R' 'https://gitlab.example:8443/group/app'"))
+            #expect(prompt.contains("'https://gitlab.example:8443/fork/app.git'"))
+        } else {
+            await #expect(throws: GitHubError.self) {
+                try await GitLab.rebasePrompt(request, worktree: repo.path)
+            }
+        }
+    }
+
     @Test("Continue accepts only a fork alias recorded for the exact GitLab MR", arguments: [
         (Forge.gitLab, "https://gitlab.com/group/app/-/merge_requests/42", true),
         (Forge.gitLab, "https://gitlab.com/other/app/-/merge_requests/42", false),

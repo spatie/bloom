@@ -338,7 +338,7 @@ id_type_allowed_lines=(
   'Sources/BloomCore/System/TerminalPaneCensus.swift'        # the same tab id, read back off the same bytes
   'Sources/Bloom/Views/Center/Attachments/PromptAttachment.swift' # a draft key, which has no session yet
   'Sources/Bloom/State/TranscriptModel.swift'         # payload ids, read straight off an event
-  'Sources/BloomCore/GitHub/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
+  'Sources/BloomCore/Forge/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
   'Sources/BloomCore/Presentation/SearchPanelListing.swift'  # a section heading key, not a row
 )
 # External tokens carried beside typed Bloom ids. Limit each exemption to its

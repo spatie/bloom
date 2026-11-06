@@ -1,43 +1,6 @@
 import Foundation
 import Synchronization
 
-// MARK: - Process seam
-
-/// What `AgentRunner` needs from a subprocess. `StreamingProcess` is the only production
-/// implementation. It is a protocol so tests can drive the runner without launching the real
-/// `claude` binary, which would need a network, an account, and money.
-public protocol AgentProcessing: Sendable {
-    var lines: AsyncThrowingStream<String, Error> { get }
-    var errorLines: AsyncStream<String> { get }
-    var isRunning: Bool { get }
-    var exitStatus: Int32 { get async }
-
-    func writeLine(_ text: String)
-    func closeStdin()
-    func terminate()
-    func kill()
-}
-
-extension StreamingProcess: AgentProcessing {}
-
-/// Everything needed to spawn the agent, as a value, so argv can be asserted on without a process
-/// ever existing.
-public struct AgentLaunch: Sendable, Hashable {
-    public let executable: String
-    public let arguments: [String]
-    public let cwd: String
-    public let environment: [String: String]
-
-    public init(executable: String, arguments: [String], cwd: String, environment: [String: String]) {
-        self.executable = executable
-        self.arguments = arguments
-        self.cwd = cwd
-        self.environment = environment
-    }
-}
-
-// MARK: - AgentRunner
-
 /// Supervises one `claude` process for one Bloom session.
 ///
 /// The process is long lived: stdin stays open so a follow-up turn is just one more line, and the

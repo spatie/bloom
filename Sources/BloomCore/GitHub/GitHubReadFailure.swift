@@ -61,8 +61,3 @@ public struct GitHubReadFailure: Error, Sendable, Equatable, CustomStringConvert
         return nil
     }
 }
-
-public enum PullRequestRead: Sendable {
-    case current(PullRequest?)
-    case unavailable(GitHubReadFailure)
-}

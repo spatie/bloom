@@ -1,13 +1,6 @@
 import SwiftUI
 import Observation
-import Synchronization
 import BloomCore
-
-/// A git failure carried back across a task boundary. `any Error` is not `Sendable`, and the only
-/// part of it the UI shows is the message.
-struct GitFailure: Error, Sendable {
-    var message: String
-}
 
 /// Live state for one workspace: its sessions, its transcript, what git says changed, and the
 /// pull request if there is one. Created lazily by `AppModel.model(for:)` and kept for the
@@ -1598,7 +1591,7 @@ final class WorkspaceModel {
         // lines. Hopping to the main actor once per line, each time appending to a string that
         // keeps growing, is quadratic work on the main queue and it beachballs the whole window.
         // Lines are collected off-actor and flushed a few times a second.
-        let buffer = LineBuffer()
+        let buffer = SetupOutputBuffer()
         let flusher = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(120))
@@ -2922,41 +2915,4 @@ final class WorkspaceModel {
         isExpectingPullRequest = false
         await refreshPullRequest()
     }
-}
-
-/// A thread-safe hand-off for streamed output.
-///
-/// The producer is a subprocess reader on some background thread and the consumer is the main
-/// actor. Batching between them is what keeps a chatty script from swamping the UI.
-///
-/// A `Mutex` rather than a lock next to an unprotected array: the buffer is then unreachable
-/// except through the lock, so the type is `Sendable` on the compiler's terms rather than on a
-/// promise, and `drain` cannot accidentally read outside it.
-final class LineBuffer: Sendable {
-    private let pending = Mutex<[String]>([])
-
-    func append(_ line: String) {
-        pending.withLock { $0.append(line) }
-    }
-
-    func drain() -> [String] {
-        pending.withLock { lines in
-            defer { lines.removeAll(keepingCapacity: true) }
-            return lines
-        }
-    }
-}
-
-/// A review comment mid-composition: where it will attach and the evidence captured when its
-/// editor opened. See `WorkspaceModel.reviewDrafts` for why it outlives the diff view that is
-/// editing it, and `ReviewTextHost` for why the text it is being given is not in here.
-struct ReviewDraft: Hashable {
-    /// Every line the note will cover, which is one line for a `+` pressed and several for a
-    /// drag down the gutter.
-    var selection: ReviewSelection
-    var anchor: ReviewCommentAnchor
-
-    /// Where the note anchors, which is also the row the editor opens under when the selection is
-    /// a single line.
-    var spot: ReviewSpot { selection.anchor }
 }

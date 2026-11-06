@@ -240,7 +240,9 @@ in `Tools/house-rules.sh` is back to the three helper types it was meant to hold
     Agent/          running one, its events, its quotas, its turns; Codex/ is its own protocol
     Bridge/         the unix socket, the MCP tools an agent calls back in with
     Git/            git itself, and everything read out of a diff
-    GitHub/         gh, pull requests, checks
+    Forge/          shared request, check and merge policy, forge routing
+    GitHub/         gh commands, GitHub payloads and authentication
+    GitLab/         glab commands, GitLab payloads and authentication
     Workspace/      creating, starting, archiving, restoring, and a project's own settings
     Mail/           Mailpit: its API, the app-wide mailbox, and connection state
     Transcript/     what a turn is made of: rows, tools, subagents, attachments, prompts
