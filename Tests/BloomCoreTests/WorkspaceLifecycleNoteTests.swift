@@ -64,6 +64,29 @@ struct WorkspaceLifecycleNoteTests {
         }
     }
 
+    @Test("the project checkout's archive says its folder was left alone, not that a worktree went")
+    func archivedProjectCheckout() {
+        let note = WorkspaceLifecycleNote.archived(WorkspaceLifecycleNote.ArchiveFacts(
+            branch: "main", branchKept: true, ranArchiveScript: false, hasSetupScript: true,
+            keptFolder: "/tmp/limbo", isProjectCheckout: true
+        ))
+        #expect(note.sentence.contains("project\u{2019}s own checkout"))
+        #expect(note.sentence.contains("archive script was skipped"))
+        #expect(!note.sentence.contains("worktree"))
+        #expect(!note.sentence.contains("Git no longer"))
+        #expect(!note.sentence.contains("runs the setup script again"))
+    }
+
+    @Test("the project checkout's restore says nothing was rebuilt")
+    func restoredProjectCheckout() {
+        let checkout = WorkspaceLifecycleNote.restored(setupRuns: false, isProjectCheckout: true)
+        #expect(checkout.sentence.contains("nothing was rebuilt"))
+        #expect(!checkout.sentence.contains("worktree"))
+
+        let worktree = WorkspaceLifecycleNote.restored(setupRuns: false)
+        #expect(worktree.sentence.contains("worktree was rebuilt"))
+    }
+
     @Test("other notice rows are not mistaken for one")
     func otherNotices() {
         #expect(WorkspaceLifecycleNote(payload: ConversationNotResumed.note) == nil)

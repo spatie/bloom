@@ -488,6 +488,38 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         )
         let origin = origin(of: order, project: project, parent: parent)
 
+        guard let spawnID = origin.spawnToolUseID else {
+            return await startOrJoin(request, as: identity, store: store, project: project, order: order, origin: origin)
+        }
+        do {
+            return try await Self.repeats.cut(in: spawnID) {
+                await startOrJoin(request, as: identity, store: store, project: project, order: order, origin: origin)
+            }
+        } catch {
+            return .failure("Bloom could not start this workspace: \(error.readableMessage)")
+        }
+    }
+
+    /// One run of a given spawn id at a time.
+    ///
+    /// Every repeat check below is a read with an await before the write that answers it: the
+    /// workspace a create makes, and the setting a chat added to the project checkout leaves
+    /// behind. Two identical calls on two bridge connections both read nothing, and both went on
+    /// to start the prompt, which in the project checkout is two agents editing the owner's own
+    /// folder at once. Queued on the spawn id, the second call reads what the first one wrote.
+    ///
+    /// **A second `WorktreeCutQueue`, never `.shared`.** That one is keyed on the repository and
+    /// `adoptProjectCheckout` already runs inside it, so queueing this there would wait on itself.
+    /// Serialised rather than coalesced, for the reason that type gives: each call gets its own
+    /// answer, and the second one's is `already_started`. Static, because the app builds the tool
+    /// as a value and a queue that is a copy per caller queues nothing.
+    private static let repeats = WorktreeCutQueue()
+
+    /// Everything after the order is known, run inside `repeats` when the call has a spawn id.
+    private func startOrJoin(
+        _ request: MCPRequest, as identity: BridgeIdentity, store: Store,
+        project: Repo, order: AgentWorkspaceOrder, origin: WorkspaceOrigin
+    ) async -> BridgeToolResult {
         if let spawnID = origin.spawnToolUseID {
             do {
                 if let existing = try await alreadyStarted(spawnID: spawnID, store: store) {
@@ -564,11 +596,19 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             ]))
         } catch {
             // Two calls raced and the other one made the project checkout first. The answer is
-            // the one this call would have had a moment later: a chat in it.
-            if error is ProjectCheckoutTaken, let answer = await chatInLiveProjectCheckout(
-                of: project, order: order, spawnID: origin.spawnToolUseID, store: store
-            ) {
-                return answer
+            // the one this call would have had a moment later: a chat in it. Unless the checkout
+            // was made by this very call, a retry that crossed the first one: then it already has
+            // its chat, and a second would be a second agent in the owner's folder.
+            if let taken = error as? ProjectCheckoutTaken {
+                if let spawnID = origin.spawnToolUseID, taken.existing.origin.spawnToolUseID == spawnID {
+                    return answer(for: taken.existing, state: "already_started", note:
+                        "You already asked for this one and it exists. Nothing new was created.")
+                }
+                if let answer = await chatInLiveProjectCheckout(
+                    of: project, order: order, spawnID: origin.spawnToolUseID, store: store
+                ) {
+                    return answer
+                }
             }
             let trouble = await WorkspaceStartTrouble.diagnose(
                 error,
@@ -793,8 +833,6 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         }
     }
 
-    /// The workspace an earlier run of this same call produced, if there is one and it is still
-    /// here. An archived one does not count: asking again after archiving is asking again.
     /// The answer to a `project_checkout` call when the project already has its project checkout:
     /// a new chat in it with the prompt as its first message. Nil when there is none yet, and the
     /// call goes on to create it.
@@ -802,6 +840,10 @@ public struct WorkspaceStartTool: BridgeToolHandling {
     /// A retry of the same call is answered from a setting keyed by its spawn id rather than with
     /// a second chat. Sessions have no spawn column, and adding one for a single caller would be a
     /// migration for a fact that is only ever read here.
+    ///
+    /// The setting names a chat, and it counts only while that chat is still open in this very
+    /// checkout. Keys are never cleared, so one written for a checkout since archived used to
+    /// answer `already_started` about the next one, whose folder had never seen the prompt.
     private func chatInLiveProjectCheckout(
         of project: Repo, order: AgentWorkspaceOrder, spawnID: String?, store: Store
     ) async -> BridgeToolResult? {
@@ -810,7 +852,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         ) else { return nil }
 
         let repeatKey = spawnID.map { "workspaceStart.projectCheckoutChat.\($0)" }
-        if let repeatKey, (try? await store.setting(repeatKey)) != nil {
+        if let repeatKey, await isLiveChat(named: repeatKey, in: existing, store: store) {
             return answer(for: existing, state: "already_started", note:
                 "You already asked for this one and it started a chat in the project checkout. "
                     + "Nothing new was created.")
@@ -837,6 +879,14 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         }
     }
 
+    /// Whether the chat a repeat key names is still open in `workspace`.
+    private func isLiveChat(named repeatKey: String, in workspace: Workspace, store: Store) async -> Bool {
+        guard let chatID = try? await store.setting(repeatKey),
+              let chat = try? await store.session(id: SessionID(rawValue: chatID))
+        else { return false }
+        return chat.workspaceID == workspace.id && chat.archivedAt == nil
+    }
+
     private func answer(
         for workspace: Workspace, state: String, note: String, chat: JSONValue? = nil
     ) -> BridgeToolResult {
@@ -852,6 +902,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         return .json(.object(fields))
     }
 
+    /// The workspace an earlier run of this same call produced, if there is one and it is still
+    /// here. An archived one does not count: asking again after archiving is asking again.
     private func alreadyStarted(spawnID: String, store: Store) async throws -> Workspace? {
         try await store.workspaces(spawnToolUseID: spawnID).first { $0.state != .archived }
     }

@@ -10,17 +10,21 @@ import BloomCore
 enum FileRevert {
     /// What the user is about to lose, in the same voice as the archive confirmation: what
     /// disappears, not "are you sure?".
-    static func losses(for file: ChangedFile, baseBranch: String, hasDraft: Bool) -> String {
+    ///
+    /// `base` is `Workspace.comparisonBase`, so the project checkout is told about `HEAD`, which
+    /// is what its Discard restores from, rather than about a branch it may have left.
+    static func losses(for file: ChangedFile, base: String, hasDraft: Bool) -> String {
         var text: String
+        let place = base == "HEAD" ? "at HEAD" : "on \(base)"
 
         switch file.change {
         case .untracked:
             text = "\(file.path) is not tracked by git, so git has no copy of it. Discarding "
                 + "moves it to the Trash, and the Trash is the only place it can be recovered from."
         case .added:
-            text = "\(file.path) did not exist on \(baseBranch). Discarding deletes it."
+            text = "\(file.path) did not exist \(place). Discarding deletes it."
         default:
-            text = "Discarding restores \(file.path) to the version on \(baseBranch)."
+            text = "Discarding restores \(file.path) to the version \(place)."
         }
 
         let changed = file.additions + file.deletions
@@ -40,7 +44,10 @@ enum FileRevert {
     /// Untracked files go to the Trash rather than to `unlink`, because git has no copy of them
     /// and the Trash is the only recovery anybody gets. Everything else goes through git, so the
     /// index and the worktree end up agreeing.
-    static func revert(file: ChangedFile, in workspace: Workspace) async -> String? {
+    ///
+    /// `expected` is the commit the list on screen was compared with, and Discard refuses when
+    /// the base is no longer that commit. See `Git.revertTrackedFile`.
+    static func revert(file: ChangedFile, in workspace: Workspace, expected: String?) async -> String? {
         let worktree = workspace.path
         let absolute = (worktree as NSString).appendingPathComponent(file.path)
 
@@ -56,7 +63,9 @@ enum FileRevert {
         }
 
         do {
-            try await Git.revertTrackedFile(file, worktree: worktree, base: workspace.baseBranch)
+            try await Git.revertTrackedFile(
+                file, worktree: worktree, base: workspace.comparisonBase, expected: expected
+            )
             return nil
         } catch let error as ShellError {
             return "Could not discard \(file.filename): \(error.stderr)"
@@ -68,11 +77,12 @@ enum FileRevert {
     /// One hunk rather than the whole file, through `Git.discardHunk`, which reads the patch again
     /// and writes nothing unless the hunk is still there and still applies. Nil on success.
     static func discard(
-        hunk: DiffHunk, of file: ChangedFile, in workspace: Workspace, scope: DiffScope
+        hunk: DiffHunk, of file: ChangedFile, in workspace: Workspace, scope: DiffScope, expected: String?
     ) async -> String? {
         do {
             try await Git.discardHunk(
-                hunk, of: file, worktree: workspace.path, base: workspace.baseBranch, scope: scope
+                hunk, of: file, worktree: workspace.path, base: workspace.comparisonBase, scope: scope,
+                expected: expected
             )
             return nil
         } catch let error as ShellError {

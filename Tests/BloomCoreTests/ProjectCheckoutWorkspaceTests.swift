@@ -221,6 +221,57 @@ struct ProjectCheckoutWorkspaceTests {
         #expect(try await manager.store.workspace(id: workspace.id)?.branch == "main")
     }
 
+    // MARK: - Reviewing against HEAD
+
+    /// Adopted on `main`, then detached at a feature commit ahead of it, which is the case the
+    /// review of #60 reproduced: the row keeps `main` as its base, and `feature.txt` is committed.
+    private func detachedAheadOfMain() async throws -> (repo: TempRepo, row: Workspace) {
+        let (repo, registered, manager) = try await makeProject()
+        let workspace = try await adopt(registered, manager)
+        try await Shell.check("git", ["checkout", "-q", "-b", "feature"], cwd: repo.path)
+        try repo.write("feature.txt", "committed on the feature\n")
+        try await repo.commit("Feature")
+        try await Shell.check("git", ["checkout", "-q", "--detach"], cwd: repo.path)
+        await manager.refreshBranch(workspace: workspace)
+        let row = try #require(try await manager.store.workspace(id: workspace.id))
+        return (repo, row)
+    }
+
+    @Test("a checkout detached ahead of its recorded base shows no committed file as uncommitted")
+    func reviewsAgainstHead() async throws {
+        let (repo, row) = try await detachedAheadOfMain()
+        defer { repo.cleanUp() }
+
+        #expect(row.baseBranch == "main")
+        #expect(row.comparisonBase == "HEAD")
+        #expect(try await Git.changedFiles(worktree: repo.path, base: row.comparisonBase).isEmpty)
+        #expect(try await Git.diffStat(worktree: repo.path, base: row.comparisonBase).files == 0)
+    }
+
+    @Test("Discard there restores the file committed at HEAD rather than deleting it")
+    func discardsAgainstHead() async throws {
+        let (repo, row) = try await detachedAheadOfMain()
+        defer { repo.cleanUp() }
+        try repo.write("feature.txt", "edited, not committed\n")
+        let shown = try await Git.changedFiles(worktree: repo.path, base: row.comparisonBase)
+        let file = try #require(shown.first { $0.path == "feature.txt" })
+        #expect(file.change == .modified)
+
+        try await Git.revertTrackedFile(file, worktree: repo.path, base: row.comparisonBase)
+
+        #expect(repo.read("feature.txt") == "committed on the feature\n")
+        let status = try await Shell.check("git", ["status", "--porcelain"], cwd: repo.path).stdout
+        #expect(status.isEmpty)
+    }
+
+    @Test("a worktree is still reviewed against its base branch")
+    func worktreeKeepsItsBase() {
+        let worktree = Workspace(
+            repoID: RepoID(rawValue: "r"), name: "w", branch: "feature", path: "/tmp/w", baseBranch: "main"
+        )
+        #expect(worktree.comparisonBase == "main")
+    }
+
     // MARK: - Persistence
 
     @Test("the kind survives a read, an update and a whole-row upsert")

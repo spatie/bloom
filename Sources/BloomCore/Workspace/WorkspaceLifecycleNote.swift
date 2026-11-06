@@ -3,7 +3,9 @@ import Foundation
 /// The `.notice` row a chat gets when its workspace is archived or restored.
 ///
 /// The worktree is the only thing archiving removes, so without a row the transcript of an archived
-/// workspace never says that, or that a restore has to run the setup script again.
+/// workspace never says that, or that a restore has to run the setup script again. The project's
+/// own checkout is the exception to both, and is told as one: archiving it removes nothing and
+/// restoring it rebuilds nothing. See `WorkspaceKind.preservesFolderOnArchive`.
 public struct WorkspaceLifecycleNote: Sendable, Equatable {
     public enum Event: String, Sendable, Equatable {
         case archived
@@ -18,16 +20,19 @@ public struct WorkspaceLifecycleNote: Sendable, Equatable {
         public var hasSetupScript: Bool
         /// Set when Git no longer knew the folder, which is then left on disk with its branch.
         public var keptFolder: String?
+        /// The project's own checkout, whose archive only marks the row.
+        public var isProjectCheckout: Bool
 
         public init(
             branch: String, branchKept: Bool, ranArchiveScript: Bool,
-            hasSetupScript: Bool, keptFolder: String? = nil
+            hasSetupScript: Bool, keptFolder: String? = nil, isProjectCheckout: Bool = false
         ) {
             self.branch = branch
             self.branchKept = branchKept
             self.ranArchiveScript = ranArchiveScript
             self.hasSetupScript = hasSetupScript
             self.keptFolder = keptFolder
+            self.isProjectCheckout = isProjectCheckout
         }
     }
 
@@ -35,6 +40,13 @@ public struct WorkspaceLifecycleNote: Sendable, Equatable {
     public let sentence: String
 
     public static func archived(_ facts: ArchiveFacts) -> WorkspaceLifecycleNote {
+        // Before the kept folder, which the project checkout also reports: the sentence for a
+        // folder git stopped recognising would tell the owner his own checkout is broken.
+        if facts.isProjectCheckout {
+            return WorkspaceLifecycleNote(event: .archived, sentence: "Workspace archived. This is the "
+                + "project\u{2019}s own checkout, so its folder, the branch \(facts.branch) and its files "
+                + "were left as they are, and the archive script was skipped. Restoring rebuilds nothing.")
+        }
         if let folder = facts.keptFolder {
             return WorkspaceLifecycleNote(event: .archived, sentence: "Workspace archived. Git no longer "
                 + "recognises its folder as a worktree, so the folder at \(folder) and its branch were "
@@ -53,7 +65,14 @@ public struct WorkspaceLifecycleNote: Sendable, Equatable {
     }
 
     /// `relocatedTo` is where the worktree went when its old place was taken.
-    public static func restored(setupRuns: Bool, relocatedTo: String? = nil) -> WorkspaceLifecycleNote {
+    public static func restored(
+        setupRuns: Bool, relocatedTo: String? = nil, isProjectCheckout: Bool = false
+    ) -> WorkspaceLifecycleNote {
+        if isProjectCheckout {
+            return WorkspaceLifecycleNote(event: .restored, sentence: "Workspace restored. This is the "
+                + "project\u{2019}s own checkout, which archiving never removed, so nothing was rebuilt "
+                + "and no setup script ran.")
+        }
         var sentence = "Workspace restored. The worktree was rebuilt from its branch"
         sentence += relocatedTo.map { " at \($0), because something else was in its old place." } ?? "."
         if setupRuns {

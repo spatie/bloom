@@ -60,10 +60,12 @@ extension WorkspaceModel {
     }
 
     func revert(file: ChangedFile) async -> String? {
-        await FileRevert.revert(file: file, in: workspace)
+        await FileRevert.revert(file: file, in: workspace, expected: changesBaseline)
     }
 
     func discard(hunk: DiffHunk, of file: ChangedFile) async -> String? {
-        await FileRevert.discard(hunk: hunk, of: file, in: workspace, scope: diffScope)
+        await FileRevert.discard(
+            hunk: hunk, of: file, in: workspace, scope: diffScope, expected: changesBaseline
+        )
     }
 }

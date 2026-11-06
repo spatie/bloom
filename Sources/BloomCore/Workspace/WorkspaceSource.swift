@@ -33,6 +33,14 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
     /// Check out a branch somebody has already written on.
     case existingBranch(ExistingBranch)
     case pullRequest(PullRequestOffer)
+    /// Work in the project's own folder, on the branch it is on, rather than in a worktree.
+    ///
+    /// A row of its own, because the branch row it used to ride on is not always there: a branch
+    /// with an open pull request from this repository is offered as that pull request instead
+    /// (`WorkspaceCheckoutPlan.offeredBranches`), and the pull request route cuts a worktree, which
+    /// git refuses for the branch the project folder is standing on. So with the project's feature
+    /// branch under review, the sheet had no way left to make the project checkout at all.
+    case projectCheckout(ExistingBranch)
 
     /// Identity is what the row names, never where it sits. See `WorkspaceSourcePicker`: a
     /// selection pinned to a position in a list that reranks under an open panel selects whatever
@@ -44,6 +52,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
         case .existingBranch(let branch): "branch:\(branch.name)"
         case .pullRequest(.listed(let request)): "pr:\(request.number)"
         case .pullRequest(.typed(let reference, _)): "typed:\(reference.number)"
+        case .projectCheckout: "checkout"
         }
     }
 
@@ -54,6 +63,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
         case .newBranch: "New branch from"
         case .existingBranch: "Open"
         case .pullRequest: "Review"
+        case .projectCheckout: "Work in"
         }
     }
 
@@ -77,6 +87,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
         case .pullRequest(.listed(let request)):
             request.qualifiedHead.isEmpty ? "#\(request.number) \(request.title)" : request.qualifiedHead
         case .pullRequest(.typed(let reference, _)): "#\(reference.number)"
+        case .projectCheckout: WorkspaceKind.projectCheckoutName
         }
     }
 
@@ -84,7 +95,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
     public var tab: WorkspaceSourceTab {
         switch self {
         case .newBranch: .newBranch
-        case .existingBranch, .pullRequest: .existingBranch
+        case .existingBranch, .pullRequest, .projectCheckout: .existingBranch
         }
     }
 
@@ -93,7 +104,9 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
     /// Only a listed pull request has one, and it is what `name` used to be. A branch with no pull
     /// request needs no second line, and drawing an empty one would make the list ragged for the
     /// sake of a shape.
+    /// The project checkout has one as well, because its name says where and not on what.
     public var detail: String? {
+        if case .projectCheckout(let branch) = self { return "On \(branch.name), in the project's own folder" }
         guard case .pullRequest(.listed(let request)) = self else { return nil }
         guard !request.qualifiedHead.isEmpty else { return nil }
         return "#\(request.number) \(request.title)"
@@ -106,7 +119,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
     /// author's login.
     public var note: String? {
         switch self {
-        case .newBranch:
+        case .newBranch, .projectCheckout:
             return nil
         case .existingBranch(let branch):
             if let holder = branch.inUseBy { return holder.note }
@@ -143,7 +156,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
     public var checkout: WorkspaceCheckout? {
         switch self {
         case .newBranch: nil
-        case .existingBranch(let branch): .branch(branch)
+        case .existingBranch(let branch), .projectCheckout(let branch): .branch(branch)
         case .pullRequest(.listed(let request)): .pullRequest(request)
         case .pullRequest(.typed): nil
         }
@@ -160,6 +173,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
         case .pullRequest(.listed(let request)):
             "#\(request.number) \(request.title) \(request.author) \(request.headRefName)"
         case .pullRequest(.typed(let reference, let text)): "#\(reference.number) \(text)"
+        case .projectCheckout(let branch): "\(WorkspaceKind.projectCheckoutName) \(branch.name)"
         }
     }
 }
@@ -193,17 +207,22 @@ public struct WorkspaceSourceOffering: Sendable, Hashable {
     public let baseBranches: [String]
     /// The project's default branch, which a new branch is ordinarily cut from. See `carryOn`.
     public let defaultBranch: String
+    /// The branch the project's own folder is on, offered as the project checkout. See
+    /// `WorkspaceCheckoutOptions.projectCheckout`.
+    public let projectCheckout: ExistingBranch?
 
     public init(
         pullRequests: [PullRequestListing] = [],
         branches: [ExistingBranch] = [],
         baseBranches: [String] = [],
-        defaultBranch: String = ""
+        defaultBranch: String = "",
+        projectCheckout: ExistingBranch? = nil
     ) {
         self.pullRequests = pullRequests
         self.branches = branches
         self.baseBranches = baseBranches
         self.defaultBranch = defaultBranch
+        self.projectCheckout = projectCheckout
     }
 
     /// The "Open, and carry on" section: what somebody else has already written.
@@ -211,8 +230,15 @@ public struct WorkspaceSourceOffering: Sendable, Hashable {
     /// Pull requests first. A repository with anything open has one or two of them and a few
     /// hundred branches, so a list that opened on branch names would need scrolling before the
     /// thing most people came for was on screen.
+    ///
+    /// The project checkout above both, whatever else names its branch. Its branch row is left out,
+    /// because picking that row did exactly the same and two rows for one move is one too many.
     public var openRows: [WorkspaceSource] {
-        pullRequests.map { .pullRequest(.listed($0)) } + branches.map { WorkspaceSource.existingBranch($0) }
+        let checkout = projectCheckout.map { [WorkspaceSource.projectCheckout($0)] } ?? []
+        let branchRows = branches
+            .filter { $0.name != projectCheckout?.name }
+            .map { WorkspaceSource.existingBranch($0) }
+        return checkout + pullRequests.map { .pullRequest(.listed($0)) } + branchRows
     }
 
     /// The "New branch from" section: Bloom's original and still ordinary route.

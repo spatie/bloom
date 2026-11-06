@@ -258,6 +258,11 @@ public enum Git {
     /// `BaselineCache` carries the measurement that forced that and the argument for the key.
     public static func baseline(_ base: String, in worktree: String) async throws -> String {
         try validate(ref: base, label: "base branch")
+        // The project checkout's base (`Workspace.comparisonBase`). Its own commit, resolved now:
+        // a merge base against `HEAD` is `HEAD`, there is no remote copy of it worth comparing,
+        // and naming the commit rather than the symbol is what lets a later write tell whether
+        // the folder has moved since the list was drawn.
+        if base == "HEAD" { return try await headSHA(of: worktree) }
 
         let context = try await repositoryContext(in: worktree, baseBranch: base)
         // No fingerprint means git could not be asked, so there is nothing to remember it under

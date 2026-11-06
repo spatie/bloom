@@ -121,6 +121,18 @@ public enum HunkDiscard {
 }
 
 /// Why a hunk was not discarded. In every case nothing was written.
+/// What a Discard says when the baseline its diff was drawn against has moved, typically because
+/// the project checkout's `HEAD` was switched or committed since the list was read. The write is
+/// refused rather than aimed at the new baseline: see `Git.revertTrackedFile`.
+public struct StaleDiffTarget: Error, Sendable, Equatable, LocalizedError {
+    public init() {}
+
+    public var errorDescription: String? {
+        "What this diff is compared with has moved since it was drawn, so nothing was discarded. "
+            + "Look at the refreshed diff and discard again."
+    }
+}
+
 public enum HunkDiscardRefusal: Error, Sendable, Equatable {
     /// Not a diff a hunk can be discarded from. The control should not have been drawn.
     case notOffered

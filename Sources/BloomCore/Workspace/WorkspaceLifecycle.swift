@@ -19,7 +19,12 @@ import Foundation
 ///
 /// So both changes are one statement each, here, where the columns cannot be separated. The
 /// out-of-process half stays in `WorkspaceManager.archive` and `WorkspaceManager.restore`, which
-/// are the one owner of each and the only callers of these two methods.
+/// are the one owner of each and the only callers of these methods.
+///
+/// The project's own checkout is the one workspace where neither half touches the disk. Archiving
+/// it removes no folder and runs no script, so `archive()` is the whole of it, and restoring it
+/// rebuilds nothing, so it comes back through `reactivate()` rather than `restore(to:)`, with its
+/// setup state untouched. See `WorkspaceKind.preservesFolderOnArchive`.
 public extension Workspace {
     /// The worktree is gone. Say so.
     ///

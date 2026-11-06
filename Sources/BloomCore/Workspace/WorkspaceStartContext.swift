@@ -117,6 +117,17 @@ public struct WorkspaceCheckoutOptions: Sendable {
         self.holders = holders
     }
 
+    /// The branch the project's own folder is standing on, as the source that works there, or nil
+    /// when git listed no folder as the project's. Read from `holders` rather than from
+    /// `branches`, which drops a branch an open pull request already speaks for.
+    public var projectCheckout: ExistingBranch? {
+        guard let (name, holder) = holders.first(where: {
+            if case .projectCheckout = $0.value { return true }
+            return false
+        }) else { return nil }
+        return ExistingBranch(name: name, isLocal: true, inUseBy: holder)
+    }
+
     /// Both branch listings are read here rather than handed in.
     ///
     /// The local half used to arrive from the create window, which loaded it in a task of its own,

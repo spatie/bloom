@@ -17,15 +17,22 @@ extension Git {
     ///
     /// `--whitespace=nowarn` because a repository with `apply.whitespace=error` would otherwise
     /// refuse to put back the trailing space somebody's old line had.
+    ///
+    /// `expected` is the baseline the diff on screen was drawn against, checked like
+    /// `revertTrackedFile` checks it. Only the branch scope resolves one; the uncommitted scope is
+    /// measured from `HEAD` itself and a moved `HEAD` already shows up as a hunk that is not there.
     public static func discardHunk(
         _ hunk: DiffHunk, of file: ChangedFile, worktree: String, base: String, scope: DiffScope,
-        intent: HunkDiscard.Intent = .discard
+        intent: HunkDiscard.Intent = .discard, expected: String? = nil
     ) async throws {
         let availability = HunkDiscard.availability(
             file: file, scope: scope, ignoringWhitespace: false, agentIsRunning: false
         )
         guard availability == .enabled, let targets = HunkDiscard.targets(for: file.layer, intent: intent) else {
             throw HunkDiscardRefusal.notOffered
+        }
+        if let expected, scope == .all, try await baseline(base, in: worktree) != expected {
+            throw StaleDiffTarget()
         }
 
         let current = try await patch(worktree: worktree, base: base, file: file, scope: scope)

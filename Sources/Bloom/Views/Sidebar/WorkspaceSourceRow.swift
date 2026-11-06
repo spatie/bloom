@@ -109,6 +109,7 @@ struct WorkspaceSourceRow: View {
         case .pullRequest: "arrow.triangle.pull"
         case .existingBranch: "arrow.triangle.branch"
         case .newBranch: "plus.circle"
+        case .projectCheckout: "folder"
         }
     }
 

@@ -23,12 +23,16 @@ extension AppModel {
         case .executable, .source: scriptIsRunnable = true
         case .missing, nil: scriptIsRunnable = false
         }
+        // The project checkout skips the archive script whatever is configured, so a runnable one
+        // must not read as having run. See `WorkspaceManager.archive`.
+        let isProjectCheckout = workspace.kind.preservesFolderOnArchive
         return WorkspaceLifecycleNote.ArchiveFacts(
             branch: workspace.branch,
             branchKept: true,
-            ranArchiveScript: !skipArchiveScript && scriptIsRunnable
+            ranArchiveScript: !isProjectCheckout && !skipArchiveScript && scriptIsRunnable
                 && FileManager.default.fileExists(atPath: workspace.path),
-            hasSetupScript: settings.setupScript != nil
+            hasSetupScript: settings.setupScript != nil,
+            isProjectCheckout: isProjectCheckout
         )
     }
 

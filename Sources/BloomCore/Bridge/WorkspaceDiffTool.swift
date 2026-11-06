@@ -112,16 +112,16 @@ public struct WorkspaceDiffTool: BridgeToolHandling {
             let files: [ChangedFile]
             let diff: String
             do {
-                let changed = try await Git.changedFiles(worktree: workspace.path, base: workspace.baseBranch)
+                let changed = try await Git.changedFiles(worktree: workspace.path, base: workspace.comparisonBase)
                 if let path {
                     guard let file = changed.first(where: { $0.path == path || $0.oldPath == path }) else {
                         return .failure(WorkspaceDiffTrouble.noSuchPath(path, workspace: workspace.name).sentence)
                     }
                     files = [file]
-                    diff = try await Git.patch(worktree: workspace.path, base: workspace.baseBranch, file: file)
+                    diff = try await Git.patch(worktree: workspace.path, base: workspace.comparisonBase, file: file)
                 } else {
                     files = changed
-                    diff = try await Git.patch(worktree: workspace.path, base: workspace.baseBranch, files: changed)
+                    diff = try await Git.patch(worktree: workspace.path, base: workspace.comparisonBase, files: changed)
                 }
             } catch {
                 return .failure(WorkspaceDiffTrouble.gitFailed(workspace: workspace.name, error.readableMessage).sentence)

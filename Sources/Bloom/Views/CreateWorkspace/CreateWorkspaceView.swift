@@ -934,7 +934,8 @@ struct CreateWorkspaceView: View {
             pullRequests: checkoutOptions.pullRequests,
             branches: checkoutOptions.branches,
             baseBranches: branchOptions,
-            defaultBranch: repo?.defaultBranch ?? ""
+            defaultBranch: repo?.defaultBranch ?? "",
+            projectCheckout: checkoutOptions.projectCheckout
         )
     }
 
@@ -1101,7 +1102,9 @@ struct CreateWorkspaceView: View {
             checkout = nil
             baseBranch = ref
             focusTheBox()
-        case .existingBranch(let branch):
+        case .existingBranch(let branch), .projectCheckout(let branch):
+            // The project checkout's branch is held by the project folder, which is what `offer`
+            // turns into working in place, or into going to the checkout that is already live.
             offer(.branch(branch))
         case .pullRequest(.listed(let request)):
             offer(.pullRequest(request))

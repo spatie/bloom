@@ -88,6 +88,31 @@ struct HunkDiscardTests {
         #expect(repo.read("file.txt") == moved)
     }
 
+    @Test("a hunk drawn against a base that has since moved refuses and writes nothing")
+    func movedBaseRefuses() async throws {
+        let repo = try await repo()
+        defer { repo.cleanUp() }
+        let file = ChangedFile(path: "file.txt", change: .modified)
+        let shown = try await hunks(repo, file)
+        let drawn = try await Git.baseline("main", in: repo.path)
+        try repo.write("other.txt", "elsewhere\n")
+        try await Shell.check("git", ["add", "other.txt"], cwd: repo.path)
+        try await Shell.check("git", ["commit", "-q", "-m", "Moved"], cwd: repo.path)
+
+        await #expect(throws: StaleDiffTarget()) {
+            try await Git.discardHunk(
+                shown[0], of: file, worktree: repo.path, base: "main", scope: .all, expected: drawn
+            )
+        }
+        #expect(repo.read("file.txt") == Self.after)
+
+        let current = try await Git.baseline("main", in: repo.path)
+        try await Git.discardHunk(
+            shown[0], of: file, worktree: repo.path, base: "main", scope: .all, expected: current
+        )
+        #expect(repo.read("file.txt")?.contains("line 2\n") == true)
+    }
+
     @Test("a renamed file keeps its new name when one hunk of it is discarded")
     func renamedFileStaysRenamed() async throws {
         let repo = try await repo(named: "old name.txt")

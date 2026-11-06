@@ -923,7 +923,7 @@ public struct WorkspaceManager: Sendable {
         // Branch discovery must survive a missing base ref: an agent may rename that ref too,
         // which makes the diff fail but leaves HEAD perfectly readable.
         await refreshBranch(workspace: workspace)
-        guard let stat = try? await Git.diffStat(worktree: workspace.path, base: workspace.baseBranch) else {
+        guard let stat = try? await Git.diffStat(worktree: workspace.path, base: workspace.comparisonBase) else {
             return false
         }
         do {

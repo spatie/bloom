@@ -824,7 +824,8 @@ extension AppModel {
             await record(
                 .restored(
                     setupRuns: setupRuns,
-                    relocatedTo: outcome.relocatedFrom == nil ? nil : outcome.workspace.path
+                    relocatedTo: outcome.relocatedFrom == nil ? nil : outcome.workspace.path,
+                    isProjectCheckout: outcome.workspace.kind == .projectCheckout
                 ),
                 in: workspace.id
             )

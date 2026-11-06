@@ -356,3 +356,64 @@ struct WorkspaceSourceTests {
         )
     }
 }
+
+// MARK: - The project checkout
+
+/// The review of #60: with the project's feature branch under review in a pull request from this
+/// repository, the branch row was gone and the pull request row could not work in place, so the
+/// sheet offered no way at all to make the project checkout.
+extension WorkspaceSourceTests {
+    private var heldByTheProject: [String: BranchHolder] { ["feature": .projectCheckout(path: "/tmp/limbo")] }
+
+    @Test("the project checkout is offered first even when a pull request speaks for its branch")
+    func checkoutOfferedBesideItsPullRequest() throws {
+        let options = WorkspaceCheckoutOptions(
+            pullRequests: [listing(head: "feature")], branches: [], holders: heldByTheProject
+        )
+        let offering = WorkspaceSourceOffering(
+            pullRequests: options.pullRequests, branches: options.branches,
+            defaultBranch: "main", projectCheckout: options.projectCheckout
+        )
+
+        let first = try #require(offering.openRows.first)
+        guard case .projectCheckout(let branch) = first else {
+            Issue.record("expected the project checkout first, got \(first)")
+            return
+        }
+        #expect(branch.name == "feature")
+        #expect(first.tab == .existingBranch)
+        #expect(first.checkout == .branch(branch))
+        #expect(offering.openRows.count == 2)
+    }
+
+    @Test("its branch row is not offered a second time")
+    func checkoutBranchNotDuplicated() {
+        let options = WorkspaceCheckoutOptions(
+            branches: [
+                ExistingBranch(name: "feature", isLocal: true, inUseBy: .projectCheckout(path: "/tmp/limbo")),
+                ExistingBranch(name: "other", isLocal: true),
+            ],
+            holders: heldByTheProject
+        )
+        let offering = WorkspaceSourceOffering(
+            branches: options.branches, defaultBranch: "main", projectCheckout: options.projectCheckout
+        )
+
+        #expect(offering.openRows.map(\.id) == ["checkout", "branch:other"])
+    }
+
+    @Test("no project folder in the worktree list, no project checkout row")
+    func noCheckoutWithoutItsHolder() {
+        let options = WorkspaceCheckoutOptions(
+            pullRequests: [listing(head: "feature")],
+            branches: [ExistingBranch(name: "other", isLocal: true)]
+        )
+        let offering = WorkspaceSourceOffering(
+            pullRequests: options.pullRequests, branches: options.branches,
+            defaultBranch: "main", projectCheckout: options.projectCheckout
+        )
+
+        #expect(options.projectCheckout == nil)
+        #expect(!offering.openRows.contains { $0.id == "checkout" })
+    }
+}

@@ -153,6 +153,9 @@ final class WorkspaceModel {
     /// re-check their anchors against the worktree. Only that re-check reads this, so the tick
     /// invalidates one small view and not the tree.
     private(set) var changesGeneration = 0
+    /// The commit `changedFiles` was compared with, handed to Discard so it can refuse when the
+    /// base has moved since. Not observed: nothing draws it. See `Git.revertTrackedFile`.
+    @ObservationIgnored private(set) var changesBaseline: String?
     /// Patches git has already produced for this worktree, so that returning to the review tab is
     /// not another subprocess. Not observed: nothing draws it, and a write on every file opened
     /// would invalidate every view watching this model. See `PatchCache`.
@@ -1771,7 +1774,9 @@ final class WorkspaceModel {
 
         changesTask?.cancel()
         let path = workspace.path
-        let base = workspace.baseBranch
+        // `HEAD` for the project checkout, so the branch refresh below cannot leave this reading
+        // a base the folder has already left. See `Workspace.comparisonBase`.
+        let base = workspace.comparisonBase
         // Read here rather than inside the task: the failure below names the workspace, because
         // its worktree path is a directory inside Bloom's workspaces root that the reader neither
         // chose nor can act on.
@@ -1804,6 +1809,9 @@ final class WorkspaceModel {
                         if !stillOnBranch { effectiveScope = .all }
                     }
                 }
+                // Before the list rather than after it: a base that moves in between leaves this
+                // the older of the two, and Discard then refuses rather than writing past it.
+                let baseline = try? await Git.baseline(base, in: path)
                 let files = try await Git.changedFiles(worktree: path, base: base, scope: effectiveScope)
                 let (commits, historyError) = await history
                 let local = await localRead
@@ -1812,7 +1820,7 @@ final class WorkspaceModel {
                 )
                 return .success(ChangesAnswer(
                     files: files, local: local, commits: commits, revisions: revisions,
-                    scope: effectiveScope, historyError: historyError
+                    scope: effectiveScope, historyError: historyError, baseline: baseline
                 ))
             } catch {
                 // Diagnosed rather than reported, in the register `WorkspaceStartFailure` set. A
@@ -1868,6 +1876,7 @@ final class WorkspaceModel {
             // which would rerun the inspector's body and rebuild the tree for nothing.
             if changesError != nil { changesError = nil }
             if changedFiles != answer.files { changedFiles = answer.files }
+            changesBaseline = answer.baseline
             if viewedRevisions != answer.revisions { viewedRevisions = answer.revisions }
             // Only when git actually answered. A failed count leaves the last known one standing
             // rather than replacing it with "nothing local", which is a claim.
@@ -1890,6 +1899,8 @@ final class WorkspaceModel {
         var revisions: [String: String] = [:]
         var scope: DiffScope = .all
         var historyError: String?
+        /// Nil when it could not be resolved, which leaves Discard unchecked rather than blocked.
+        var baseline: String?
     }
 
     nonisolated private static func readBranchCommits(
@@ -2322,7 +2333,7 @@ final class WorkspaceModel {
 
     func readPatch(for file: ChangedFile) async throws -> String {
         let path = workspace.path
-        let base = workspace.baseBranch
+        let base = workspace.comparisonBase
         // The same scope the list was built with, or the pane opens a file the list narrowed and
         // shows it in full.
         let scope = diffScope
@@ -2383,7 +2394,7 @@ final class WorkspaceModel {
     ) -> DiffPresentationCache.Key {
         DiffPresentationCache.Key(
             worktree: workspace.path,
-            base: workspace.baseBranch,
+            base: workspace.comparisonBase,
             file: file,
             scope: diffScope,
             ignoresWhitespace: ignoringWhitespace

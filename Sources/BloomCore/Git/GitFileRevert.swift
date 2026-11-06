@@ -9,11 +9,20 @@ extension Git {
 
     /// Reverts a tracked file to the same baseline the review shows. Untracked files belong
     /// to the app's Trash operation, because Git has no recoverable version of them.
-    public static func revertTrackedFile(_ file: ChangedFile, worktree: String, base: String) async throws {
+    ///
+    /// `expected` is the baseline the list on screen was drawn against. The baseline is resolved
+    /// again here, because this is the write, and when it is no longer that commit nothing is
+    /// written: the file on screen was compared with something else, and restoring it to what the
+    /// base is now would delete or reverse work the reader never saw in the diff. Nil skips the
+    /// check, for a caller that resolved nothing beforehand.
+    public static func revertTrackedFile(
+        _ file: ChangedFile, worktree: String, base: String, expected: String? = nil
+    ) async throws {
         guard file.change != .untracked else {
             throw error(["restore"], 1, "Untracked files must be moved to the Trash.", "")
         }
         let revision = try await baseline(base, in: worktree)
+        if let expected, expected != revision { throw StaleDiffTarget() }
         if file.change == .renamed, let oldPath = file.oldPath {
             try await check(literalPaths(["checkout", revision, "--", oldPath]), in: worktree)
             try await check(literalPaths(["rm", "-f", "--", file.path]), in: worktree)

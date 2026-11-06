@@ -175,7 +175,7 @@ extension AppModel {
                 guard let workspace = try await store.workspace(id: WorkspaceID(parts[2])), workspace.state == .active else {
                     return .text(404, "Workspace not found")
                 }
-                let files = try await Git.changedFiles(worktree: workspace.path, base: workspace.baseBranch)
+                let files = try await Git.changedFiles(worktree: workspace.path, base: workspace.comparisonBase)
                 return json(files.map {
                     WebChangedFile(path: $0.path, change: $0.change.rawValue,
                                    additions: $0.additions, deletions: $0.deletions)

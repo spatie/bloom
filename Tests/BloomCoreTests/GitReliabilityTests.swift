@@ -23,6 +23,28 @@ struct GitReliabilityTests {
         #expect(staged.stdout == "after\n")
     }
 
+    @Test("a revert whose base moved after the list was drawn refuses and writes nothing")
+    func staleRevertRefuses() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try repo.write("file.txt", "first\n")
+        try await repo.commit("First")
+        let drawn = try await Git.baseline("HEAD", in: repo.path)
+        try repo.write("file.txt", "second\n")
+        try await repo.commit("Second")
+        try repo.write("file.txt", "edited\n")
+        let file = ChangedFile(path: "file.txt", change: .modified)
+
+        await #expect(throws: StaleDiffTarget()) {
+            try await Git.revertTrackedFile(file, worktree: repo.path, base: "HEAD", expected: drawn)
+        }
+        #expect(repo.read("file.txt") == "edited\n")
+
+        let current = try await Git.baseline("HEAD", in: repo.path)
+        try await Git.revertTrackedFile(file, worktree: repo.path, base: "HEAD", expected: current)
+        #expect(repo.read("file.txt") == "second\n")
+    }
+
     @Test("removing an added glob path does not remove matching files")
     func literalRemoval() async throws {
         let repo = try await TempRepo()

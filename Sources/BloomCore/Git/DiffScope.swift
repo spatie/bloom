@@ -61,9 +61,10 @@ public enum DiffScope: Sendable, Hashable {
 
     /// The scopes a workspace of this kind offers in the Changes tab.
     ///
-    /// One for the project's own checkout. Its base is the branch it is on, so the merge base is
-    /// `HEAD` and "everything on this branch" is exactly the work not committed yet: offering both
-    /// would be two rows drawing the same diff under two names.
+    /// One for the project's own checkout. It is measured from `HEAD` itself
+    /// (`Workspace.comparisonBase`), never from the branch its row last recorded, so "everything
+    /// on this branch" is exactly the work not committed yet: offering both would be two rows
+    /// drawing the same diff under two names.
     public static func offered(for kind: WorkspaceKind) -> [DiffScope] {
         switch kind {
         case .worktree: [.all, .uncommitted]

@@ -86,3 +86,19 @@ public extension WorkspaceKind {
         }
     }
 }
+
+public extension Workspace {
+    /// What the Changes tab, the diff stat, `workspace_diff` and Discard measure this workspace
+    /// against.
+    ///
+    /// A worktree is measured from where it left its base branch. The project checkout is
+    /// measured from `HEAD`, the commit the folder is standing on, and never from `baseBranch`.
+    /// That column follows the folder only while it is on a named branch: a detached head keeps
+    /// the last one (`refreshBranch`), and even an ordinary switch reaches the row a refresh
+    /// later. Reviewed against `main` after detaching at a feature commit, every committed file
+    /// of the feature read as uncommitted, and Discard, which resolved the same stale base when
+    /// it wrote, deleted files committed at `HEAD` and staged the reversal of committed work.
+    var comparisonBase: String {
+        kind.followsHead ? "HEAD" : baseBranch
+    }
+}
