@@ -13,6 +13,7 @@ extension Git {
         guard file.change != .untracked else {
             throw error(["restore"], 1, "Untracked files must be moved to the Trash.", "")
         }
+        try await validateRevertTarget(file, worktree: worktree)
         let revision = try await baseline(base, in: worktree)
         if file.change == .renamed, let oldPath = file.oldPath {
             try await check(literalPaths(["checkout", revision, "--", oldPath]), in: worktree)
@@ -25,6 +26,18 @@ extension Git {
         } else {
             try await check(literalPaths(["rm", "-f", "--", file.path]), in: worktree)
         }
+    }
+
+    /// A retained row may predate a checkout, commit or staging operation. Never use its old
+    /// added/renamed/untracked status to delete a path that now belongs to a different change.
+    public static func validateRevertTarget(_ file: ChangedFile, worktree: String) async throws {
+        guard let revision = file.reviewRevision else { return }
+        guard try await headSHA(of: worktree) == revision else { throw FileRevertRefusal.changed }
+        let current = try await changedFiles(worktree: worktree, base: "HEAD")
+        guard current.contains(where: {
+            $0.path == file.path && $0.oldPath == file.oldPath && $0.change == file.change
+                && $0.reviewRevision == revision
+        }) else { throw FileRevertRefusal.changed }
     }
 
     /// Takes `file` out of the index and leaves the worktree alone: `git restore --staged`.
@@ -50,5 +63,13 @@ extension Git {
     /// Both ends of a rename, or the one path there is.
     private static func paths(of file: ChangedFile) -> [String] {
         file.oldPath.map { [$0, file.path] } ?? [file.path]
+    }
+}
+
+public enum FileRevertRefusal: Error, Sendable, LocalizedError {
+    case changed
+
+    public var errorDescription: String? {
+        "The checkout changed since this file was shown. Refresh Changes before discarding it."
     }
 }

@@ -258,6 +258,7 @@ public enum Git {
     /// `BaselineCache` carries the measurement that forced that and the argument for the key.
     public static func baseline(_ base: String, in worktree: String) async throws -> String {
         try validate(ref: base, label: "base branch")
+        if base == "HEAD" { return try await headSHA(of: worktree) }
 
         let context = try await repositoryContext(in: worktree, baseBranch: base)
         // No fingerprint means git could not be asked, so there is nothing to remember it under

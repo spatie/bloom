@@ -28,6 +28,7 @@ extension Git {
             throw HunkDiscardRefusal.notOffered
         }
 
+        try await validateRevertTarget(file, worktree: worktree)
         let current = try await patch(worktree: worktree, base: base, file: file, scope: scope)
         guard let isolated = HunkPatch.isolate(hunk, from: current) else {
             throw HunkDiscardRefusal.changed

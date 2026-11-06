@@ -318,7 +318,7 @@ struct FileHeaderBar: View {
             title: FileBarControls.discardQuestion(path: file.path),
             // Naming what disappears, rather than asking "are you sure?", the way archiving a
             // workspace does.
-            message: { FileRevert.losses(for: file, baseBranch: model.workspace.baseBranch, hasDraft: isDirty) },
+            message: { FileRevert.losses(for: file, baseBranch: model.workspace.reviewBase, hasDraft: isDirty) },
             onConfirm: onRevert
         )
     }
