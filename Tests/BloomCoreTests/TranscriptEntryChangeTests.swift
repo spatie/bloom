@@ -21,6 +21,17 @@ struct TranscriptEntryChangeTests {
 
     // MARK: - Nothing moved
 
+    @Test("the entries before the first one put in or taken out keep their place")
+    func unmovedPrefix() {
+        let old = [1, 2, 3, 4, 90, 91]
+        let appended = TranscriptEntryChange.between(old, [1, 2, 3, 4, 5, 6, 90, 91])
+        #expect(appended.unmovedPrefix(count: 8) == 4)
+        let removed = TranscriptEntryChange.between(old, [1, 2, 90, 91])
+        #expect(removed.unmovedPrefix(count: 4) == 2)
+        #expect(TranscriptEntryChange.between(old, old).unmovedPrefix(count: 6) == 6)
+        #expect(TranscriptEntryChange.rebuilt.unmovedPrefix(count: 6) == 0)
+    }
+
     @Test("the same entries in the same order")
     func same() {
         #expect(TranscriptEntryChange.between(drawn([1, 2, 3]), drawn([1, 2, 3])) == .same)

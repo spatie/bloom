@@ -19,6 +19,8 @@ extension Store {
             if current.endSeq != nil {
                 merged.after = current.after
                 merged.endSeq = current.endSeq
+                // A summary describes one `after`, so only a write naming that snapshot replaces it.
+                if checkpoint.after != current.after || checkpoint.files == nil { merged.files = current.files }
             }
             records[index] = merged
         } else { records.append(checkpoint) }

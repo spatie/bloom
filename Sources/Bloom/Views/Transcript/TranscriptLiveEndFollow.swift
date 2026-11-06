@@ -66,6 +66,11 @@ final class TranscriptLiveEndFollower {
     /// nudges must not reclaim the bottom until that placement has finished.
     private(set) var isSeekingLiveEnd = false
 
+    /// One token per arrival, set while a conversation arrives in a pane still hidden. The table
+    /// moves under it while it is measured, and the follower read one of those moves to the top as
+    /// a reader scrolling up; the table's own standing end holds the view until the pane is shown.
+    var arriving: UUID? { didSet { refresh() } }
+
     func seekLiveEnd(_ seeking: Bool) {
         isSeekingLiveEnd = seeking
         if seeking {
@@ -196,7 +201,9 @@ final class TranscriptLiveEndFollower {
     // MARK: - The link
 
     private var wants: Bool {
-        guard travels, isFrontmost, !isPaused, !isSeekingLiveEnd, scrollView != nil else { return false }
+        guard travels, isFrontmost, !isPaused, !isSeekingLiveEnd, arriving == nil, scrollView != nil else {
+            return false
+        }
         return isStreaming || CACurrentMediaTime() < deadline
     }
 
@@ -212,7 +219,11 @@ final class TranscriptLiveEndFollower {
         // Before the first frame runs, so the very first take-back is not overwritten by the pin
         // it is trying to take back from. See `onStart`.
         ownsGap = onStart?() ?? false
-        if ownsGap { lastPut = scrollView.contentView.bounds.origin.y }
+        if ownsGap {
+            let clip = scrollView.contentView.bounds
+            lastPut = TranscriptFollow.mark(origin: Double(clip.origin.y), viewportHeight: Double(clip.height))
+                .map { CGFloat($0) }
+        }
         let created = scrollView.contentView.displayLink(target: self, selector: #selector(step))
         created.add(to: .main, forMode: .common)
         link = created
@@ -282,9 +293,14 @@ final class TranscriptLiveEndFollower {
         let end = scrollView.endOffset
         var offset = clip.bounds.origin.y
 
+        // The mark `startLink` could not take in a pane that was not laid out yet.
+        if ownsGap, lastPut == nil { lastPut = offset }
+
         // Whose gap this is, decided before anything is done with it. Upwards only: see
         // `lastPut`.
-        if let lastPut, offset < lastPut - CGFloat(TranscriptFollow.arrived) { ownsGap = false }
+        if ownsGap, let lastPut, TranscriptFollow.readerMovedUp(offset: Double(offset), mark: Double(lastPut)) {
+            ownsGap = false
+        }
 
         if lastHeight > 0, height > lastHeight {
             offset = TranscriptFollow.start(

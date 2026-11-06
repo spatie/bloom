@@ -9,6 +9,18 @@ import Testing
 /// this returns are the difference between a resize at six frames a second and one at sixty.
 @Suite("Transcript window")
 struct TranscriptWindowTests {
+    /// Measured in the lab on 4,063 and 10,407 row chats: handing the table every row on arrival
+    /// drew the first frame as fast as the tail did, and the scroller stopped resizing as history
+    /// arrived in chunks, by up to 6,280 points at a time.
+    @Test("the list hands its table every row, and keeps every row as more arrive")
+    func wholeIsEveryRow() {
+        #expect(TranscriptWindow.whole(rowCount: 4_000) == TranscriptWindow(start: 0, end: 4_000))
+        #expect(TranscriptWindow.whole(rowCount: 0).count == 0)
+        let appended = TranscriptWindow.whole(rowCount: 4_000)
+            .includingAppendedRows(previousCount: 4_000, rowCount: 4_003)
+        #expect(appended == .whole(rowCount: 4_003))
+    }
+
     @Test func savedMessageIsPresentWhenItsEchoIsRemoved() {
         let drawn = TranscriptWindow(start: 20, end: 100)
         let firstPass = drawn.includingAppendedRows(previousCount: 100, rowCount: 101)
@@ -105,91 +117,7 @@ struct TranscriptWindowTests {
 
     // MARK: Growing
 
-    @Test("a growth upward adds a chunk of history above the window")
-    func growthUpAddsAChunk() {
-        let grown = TranscriptWindow(start: 1_000, end: 2_000).grownUp()
-        #expect(grown == TranscriptWindow(start: 1_000 - TranscriptWindow.chunk, end: 2_000))
-    }
-
-    @Test("a growth upward stops at the first row of the session")
-    func growthUpStopsAtTheTop() {
-        #expect(TranscriptWindow(start: 100, end: 900).grownUp().start == 0)
-    }
-
-    @Test("idle preparation adds one bounded chunk after the session has arrived")
-    func idlePreparationAddsAChunk() {
-        let window = TranscriptWindow(start: 1_000, end: 2_000)
-        #expect(
-            window.preparedHistory(afterArrival: true)
-                == TranscriptWindow(start: 1_000 - TranscriptWindow.chunk, end: 2_000)
-        )
-    }
-
-    @Test("idle preparation waits for the session to finish arriving")
-    func idlePreparationWaitsForArrival() {
-        let window = TranscriptWindow(start: 1_000, end: 2_000)
-        #expect(window.preparedHistory(afterArrival: false) == nil)
-    }
-
-    @Test("live-end preparation stops at its row budget")
-    func livePreparationStaysBounded() {
-        let window = TranscriptWindow(start: 4_000, end: 5_000)
-        let prepared = window.preparedHistory(
-            afterArrival: true, maximumRows: TranscriptWindow.livePreparedLimit
-        )
-        #expect(prepared == TranscriptWindow(start: 3_800, end: 5_000))
-        #expect(prepared?.preparedHistory(
-            afterArrival: true, maximumRows: TranscriptWindow.livePreparedLimit
-        ) == nil)
-    }
-
-    @Test("returning to the live end discards only old drawn entries")
-    func liveWindowCanDropOldEntries() {
-        let window = TranscriptWindow(start: 200, end: 5_000)
-        #expect(window.keepingLatest(TranscriptWindow.livePreparedLimit)
-            == TranscriptWindow(start: 3_800, end: 5_000))
-        #expect(TranscriptWindow(start: 4_000, end: 5_000).keepingLatest(1_200)
-            == TranscriptWindow(start: 4_000, end: 5_000))
-    }
-
-    @Test("idle preparation stops once the table knows the whole history")
-    func idlePreparationStopsAtTheTop() {
-        let whole = TranscriptWindow(start: 0, end: 2_000)
-        #expect(whole.preparedHistory(afterArrival: true) == nil)
-    }
-
-    @Test("a growth downward adds a chunk of what came after")
-    func growthDownAddsAChunk() {
-        let grown = TranscriptWindow(start: 0, end: 500).grownDown(rowCount: 4_000)
-        #expect(grown == TranscriptWindow(start: 0, end: 500 + TranscriptWindow.chunk))
-    }
-
-    @Test("a growth downward stops at the live end")
-    func growthDownStopsAtTheEnd() {
-        #expect(TranscriptWindow(start: 0, end: 3_900).grownDown(rowCount: 4_000).end == 4_000)
-    }
-
-    @Test("a window at both ends of the session has nothing left to grow into")
-    func nothingLeftToGrow() {
-        let whole = TranscriptWindow(start: 0, end: 100)
-        #expect(whole.canGrowUp == false)
-        #expect(whole.canGrowDown(rowCount: 100) == false)
-        #expect(TranscriptWindow(start: 1, end: 99).canGrowUp)
-        #expect(TranscriptWindow(start: 1, end: 99).canGrowDown(rowCount: 100))
-    }
-
     // MARK: The live end
-
-    @Test("the live end is the tail rather than everything between here and it")
-    func liveEndIsTheTail() {
-        let window = TranscriptWindow.liveEnd(rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 4_000 - TranscriptWindow.settled, end: 4_000))
-    }
-
-    @Test("the live end of a short session is the whole of it")
-    func liveEndOfAShortSession() {
-        #expect(TranscriptWindow.liveEnd(rowCount: 30) == TranscriptWindow(start: 0, end: 30))
-    }
 
     // MARK: Against a session that has moved
 

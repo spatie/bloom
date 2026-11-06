@@ -18,6 +18,9 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     case setup
     /// A stored row, by its sequence number within the session.
     case row(Int)
+    /// A part after the first of a long answer cut into rows. The first part is the row itself,
+    /// so a place, a search result or an unread mark naming the row lands on its first line.
+    case answerPart(seq: Int, part: Int)
     /// The line over a turn's working, by the sequence number of the FIRST row of it. See
     /// `TranscriptFold`.
     ///
@@ -42,16 +45,21 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// Breathing room after all content, including streaming output and queued messages.
     case bottomSpacing
 
-    /// The sequence number this entry names, or nothing for entries that are not stored rows.
-    ///
-    /// What the pane writes down as the reader's place. Nothing else may guess at it: the whole
-    /// point of the type is that a caller cannot mistake the streaming tail for row zero. A fold
-    /// answers nothing here even though it holds a number, because the number is the identity of
-    /// a run rather than a row the reader can be put back on: the row it names is usually the one
-    /// the fold is hiding.
+    /// The sequence number of a whole stored row. Search and unread targets name that row's first
+    /// line; scroll anchors use `scrollPlace` so a later answer part keeps its own offset.
     public var seq: Int? {
         guard case .row(let seq) = self else { return nil }
         return seq
+    }
+
+    /// A stored row or answer part that can be remembered as a scroll anchor. Unlike selection,
+    /// this excludes live slots whose text has no stable place in the stored conversation.
+    public var scrollPlace: TranscriptSelection.Place? {
+        switch self {
+        case .row(let seq): .init(seq: seq)
+        case .answerPart(let seq, let part): .init(seq: seq, part: part)
+        default: nil
+        }
     }
 
     /// **Whether this entry can change what it draws without its content key moving.**
@@ -72,8 +80,20 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// promise that holds until the key moves.
     public var redrawsItself: Bool {
         switch self {
-        case .row, .fold, .turnFold, .bottomSpacing: false
+        case .row, .answerPart, .fold, .turnFold, .bottomSpacing: false
         case .setup, .sending, .streaming, .pending: true
+        }
+    }
+
+    /// Where an entry holding selectable text sits in reading order. The setup log is before
+    /// every row and a message on its way is after all of them.
+    public var selectionPlace: TranscriptSelection.Place? {
+        switch self {
+        case .row(let seq): .init(seq: seq)
+        case .answerPart(let seq, let part): .init(seq: seq, part: part)
+        case .setup: .init(seq: .min)
+        case .sending, .streaming, .pending: .init(seq: .max)
+        case .fold, .turnFold, .bottomSpacing: nil
         }
     }
 
@@ -81,6 +101,7 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
         switch self {
         case .setup: "setup"
         case .row(let seq): "row.\(seq)"
+        case .answerPart(let seq, let part): "row.\(seq).\(part)"
         case .fold(let seq): "fold.\(seq)"
         case .turnFold(let seq): "turnFold.\(seq)"
         case .sending: "sending"

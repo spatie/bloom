@@ -13,6 +13,7 @@ struct TranscriptResumeTests {
         expanded: Set<Int> = [],
         offset: Double = 1_200,
         anchorSeq: Int? = nil,
+        anchorPart: Int = 0,
         anchorDelta: Double = 0,
         isAtLiveEnd: Bool = false,
         rowCount: Int = 400,
@@ -22,6 +23,7 @@ struct TranscriptResumeTests {
             expanded: expanded,
             offset: offset,
             anchorSeq: anchorSeq,
+            anchorPart: anchorPart,
             anchorDelta: anchorDelta,
             isAtLiveEnd: isAtLiveEnd,
             rowCount: rowCount,
@@ -31,37 +33,10 @@ struct TranscriptResumeTests {
 
     // MARK: What the arrival frame draws
 
-    @Test("a pane that has never held this session draws the tail")
-    func nothingRememberedDrawsTheTail() {
-        let window = TranscriptResume.window(nil, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
-    }
-
-    @Test("a pane coming back to a session goes back to the window it was reading in")
-    func aReturnGoesBackToItsWindow() {
-        let remembered = state(drawn: TranscriptWindow(start: 3_600, end: 4_000))
-        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_600, end: 4_000))
-    }
-
     @Test("a pane with nothing written down is arriving, and one with a memory is coming back")
     func resumingIsHavingBeenHereBefore() {
         #expect(TranscriptResume.isResuming(nil) == false)
         #expect(TranscriptResume.isResuming(state()))
-    }
-
-    @Test("a window with nothing in it is not restored, because it would draw a blank transcript")
-    func anEmptyWindowIsNotAWindow() {
-        let remembered = state(drawn: TranscriptWindow(start: 0, end: 0))
-        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
-    }
-
-    @Test("a window from a session that has since been read again is clamped to it")
-    func aStaleWindowIsClamped() {
-        let remembered = state(drawn: TranscriptWindow(start: 9_000, end: 9_400))
-        let window = TranscriptResume.window(remembered, tailStart: 20, rowCount: 100)
-        #expect(window == TranscriptWindow(start: 100, end: 100))
     }
 
     // MARK: Where it opens
@@ -80,6 +55,18 @@ struct TranscriptResumeTests {
             for: state(anchorSeq: 120, anchorDelta: -1_840), rowCount: 400
         )
         #expect(placement == .row(seq: 120, delta: -1_840))
+    }
+
+    @Test("a return to a split answer remembers its part rather than the heights before it")
+    func answerPartIsRestored() {
+        let remembered = state(offset: 12_000, anchorSeq: 120, anchorPart: 8, anchorDelta: -35)
+        #expect(TranscriptResume.placement(for: remembered, rowCount: 396) == .row(seq: 120, part: 8, delta: -35))
+    }
+
+    @Test("the live end outranks a remembered answer part")
+    func liveEndOutranksThePart() {
+        let remembered = state(anchorSeq: 120, anchorPart: 8, anchorDelta: -35, isAtLiveEnd: true)
+        #expect(TranscriptResume.placement(for: remembered, rowCount: 400) == .liveEnd)
     }
 
     @Test("the row outranks the point, because the point is what answers without one")
@@ -130,6 +117,16 @@ struct TranscriptResumeTests {
             drawnRows: 400,
             paneHeight: 800
         ))
+    }
+
+    /// Measured in the lab: leaving a chat for another tab wrote it as left at its end, because the
+    /// table already measured the short arriving chat when the place was written.
+    @Test("what the table measures for the arriving chat is not the place of the one being left")
+    func measurementsBelongToTheShownChat() {
+        let leaving = SessionID("being-left")
+        #expect(!TranscriptResume.measuresWriteTarget(writingTo: leaving, showing: SessionID("arriving")))
+        #expect(TranscriptResume.measuresWriteTarget(writingTo: leaving, showing: leaving))
+        #expect(TranscriptResume.measuresWriteTarget(writingTo: nil, showing: leaving))
     }
 
     @Test("a pane that has drawn nothing, or has never been laid out, writes nothing")
@@ -202,14 +199,23 @@ struct TranscriptResumeTests {
         #expect(placement == .offset(1_200))
     }
 
-    /// Rows are appended and never removed while a pane is away, so fewer of them means the
-    /// session was read again from the start and nothing measured against the old one carries.
+    /// Fewer rows means the session was read again from the store, and a point measured against
+    /// the old rows does not carry. A row or the end does: see the test below.
     @Test("a session with fewer rows than it had is not the one that offset was measured in")
     func shrunkSessionIsNotResumed() {
         let placement = TranscriptResume.placement(
             for: state(rowCount: 400), rowCount: 12
         )
         #expect(placement == .first)
+    }
+
+    /// Seen in the owner's log: a chat read again from the store had a few rows fewer than when
+    /// its place was written, and opened on its first unread row instead.
+    @Test("a row or the end is restored in a session read again with fewer rows")
+    func shrunkSessionKeepsItsRowAndEnd() {
+        #expect(TranscriptResume.placement(for: state(anchorSeq: 300, anchorDelta: -40, rowCount: 400), rowCount: 396)
+            == .row(seq: 300, delta: -40))
+        #expect(TranscriptResume.placement(for: state(isAtLiveEnd: true, rowCount: 400), rowCount: 396) == .liveEnd)
     }
 
     @Test("the top of a conversation is a place, and is restored")

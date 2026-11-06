@@ -45,6 +45,17 @@ public enum TranscriptEntryChange: Equatable, Sendable {
     /// place moves nothing above it.
     public var movesRows: Bool { self != .same }
 
+    /// How many entries at the head of a list of `count` keep their id and their place, which a
+    /// caller can match by position instead of looking each one up.
+    public func unmovedPrefix(count: Int) -> Int {
+        switch self {
+        case .same: count
+        case .rebuilt: 0
+        case .grew(let head, let tail), .shrank(let head, let tail):
+            min(head.isEmpty ? count : head.lowerBound, tail.isEmpty ? count : tail.lowerBound)
+        }
+    }
+
     public static func between<ID: Equatable>(_ old: [ID], _ new: [ID]) -> Self {
         // The fixed furniture at both ends, eaten before anything is asked about the middle. See
         // the header: this is the whole of what the first spelling got wrong.

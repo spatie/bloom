@@ -321,4 +321,18 @@ struct TranscriptFollowTests {
                 == .rest
         )
     }
+
+    /// Seen in the owner's log: the follower took the end over a pane of no height, kept that
+    /// origin as its mark, and read the first laid out frame as a reader scrolling up.
+    @Test("following started in a pane not laid out yet has no mark to lose the end against")
+    func noMarkBeforeLayout() {
+        #expect(TranscriptFollow.mark(origin: 16_586, viewportHeight: 0) == nil)
+        #expect(TranscriptFollow.mark(origin: 16_586, viewportHeight: 1_238) == 16_586)
+    }
+
+    @Test("a point of rounding is not a reader scrolling up, a wheel notch is")
+    func roundingIsNotAReader() {
+        #expect(!TranscriptFollow.readerMovedUp(offset: 24_142.5, mark: 24_143.5))
+        #expect(TranscriptFollow.readerMovedUp(offset: 24_100, mark: 24_143.5))
+    }
 }

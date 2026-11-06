@@ -20,6 +20,21 @@ struct TranscriptTurnFoldTests {
         )
     }
 
+    @Test("held turns are kept for the session they were scanned from")
+    func heldTurnsKept() {
+        let held = TranscriptTurnFold.folds(in: [fact(0, .user), fact(1, .assistantText), fact(2, .result)])
+        let session = SessionID("shown")
+        #expect(!TranscriptTurnFold.takesFreshTurns(held: held, heldFor: session, showing: session))
+        #expect(TranscriptTurnFold.takesFreshTurns(held: held, heldFor: session, showing: SessionID("other")))
+        #expect(TranscriptTurnFold.takesFreshTurns(held: held, heldFor: nil, showing: session))
+    }
+
+    @Test("turns held from an empty conversation are scanned again at once")
+    func emptyHeldTurnsRescanned() {
+        let session = SessionID("shown")
+        #expect(TranscriptTurnFold.takesFreshTurns(held: .none, heldFor: session, showing: session))
+    }
+
     @Test("a result closes the turn after the agent's response")
     func completedTurn() throws {
         let facts = [
@@ -158,31 +173,46 @@ struct TranscriptTurnFoldTests {
         #expect(clipped[1] == nil)
     }
 
-    @Test("the turn disclosure hides interim prose and actions but keeps the final answer")
+    @Test("the turn disclosure folds interim prose and actions but keeps the final answer")
     func workBeforeAnswer() {
         let turn = TranscriptTurnFold.Turn(
             span: 1..<7, firstSeq: 1, isComplete: true, durationMS: 15_000
         )
         let rows = (0..<7).map { TranscriptTurnFold.Visibility(seq: $0) }
-        #expect(TranscriptTurnFold.hiddenIndices(
+        #expect(TranscriptTurnFold.foldedWork(
             turn: turn, answerIndex: 5, in: rows, revealed: [], drawn: 0..<7
-        ) == [1, 2, 3, 4])
+        ) == 1..<5)
     }
 
-    @Test("content and navigation targets stay visible, and a partial window does not fold")
+    @Test("a revealed row, a partial window or work that is all kept visible folds nothing")
     func protectedWork() {
         let turn = TranscriptTurnFold.Turn(span: 1..<7, firstSeq: 1, isComplete: true)
         var rows = (0..<7).map { TranscriptTurnFold.Visibility(seq: $0) }
         rows[3].keepsVisible = true
-        #expect(TranscriptTurnFold.hiddenIndices(
+        #expect(TranscriptTurnFold.foldedWork(
             turn: turn, answerIndex: 5, in: rows, revealed: [], drawn: 0..<7
-        ) == [1, 2, 4])
-        #expect(TranscriptTurnFold.hiddenIndices(
+        ) == 1..<5)
+        #expect(TranscriptTurnFold.foldedWork(
             turn: turn, answerIndex: 5, in: rows, revealed: [2], drawn: 0..<7
-        ).isEmpty)
-        #expect(TranscriptTurnFold.hiddenIndices(
+        ) == nil)
+        #expect(TranscriptTurnFold.foldedWork(
             turn: turn, answerIndex: 5, in: rows, revealed: [], drawn: 2..<7
-        ).isEmpty)
+        ) == nil)
+        for index in 1..<5 { rows[index].keepsVisible = true }
+        #expect(TranscriptTurnFold.foldedWork(
+            turn: turn, answerIndex: 5, in: rows, revealed: [], drawn: 0..<7
+        ) == nil)
+    }
+
+    @Test("a row is collapsed when it falls in the work of a collapsed turn and nowhere else")
+    func collapsedSpans() {
+        var collapsed = TranscriptTurnFold.Collapsed()
+        collapsed.add(1..<5)
+        collapsed.add(9..<12)
+        collapsed.add(20..<21)
+        let inside = (0..<25).filter { collapsed.contains($0) }
+        #expect(inside == [1, 2, 3, 4, 9, 10, 11, 20])
+        #expect(!TranscriptTurnFold.Collapsed().contains(0))
     }
 
     @Test("an incremental scan keeps completed turns and updates the live tail")
