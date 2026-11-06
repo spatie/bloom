@@ -14,7 +14,8 @@ struct GitLabSafetyTests {
             Issue.record("The project checkout reached glab")
             return ShellResult(status: 0, stdout: "", stderr: "")
         }) {
-            #expect(try await GitLab.pullRequest(for: workspace, maxAge: .zero) == nil)
+            let request = try await GitLab.pullRequest(for: workspace, maxAge: .zero)
+            #expect(request == nil)
             await #expect(throws: GitHubError.self) {
                 try await DirectPullRequestCreation.create(for: workspace, forge: .gitLab)
             }
