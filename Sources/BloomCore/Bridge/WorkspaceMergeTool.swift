@@ -191,7 +191,10 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
         let workspace: Workspace
         let observed: PullRequestObservation
         do {
-            guard let found = try await store.observePullRequest(workspaceID: WorkspaceID(given)) else {
+            guard let row = try await store.workspace(id: WorkspaceID(given)),
+                  let found = try await store.observePullRequest(
+                    workspaceID: row.id, forge: await ForgeResolver.forge(for: row.path)
+                  ) else {
                 return .failure(WorkspaceMergeTrouble.unknownWorkspace(
                     id: given, alias: try await alias(for: given, store: store)
                 ).sentence)
@@ -240,7 +243,7 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
             local = foundLocal
         }
 
-        guard (try? await store.acceptPullRequestRead(nil, observed: observed)) == true else {
+        guard (try? await store.acceptPullRequestRead(pullRequest, observed: observed)) == true else {
             return .failure("The workspace or its forge changed during refresh. Ask again before merging.")
         }
 

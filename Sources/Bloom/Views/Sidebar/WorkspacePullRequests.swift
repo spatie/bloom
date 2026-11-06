@@ -44,9 +44,12 @@ final class WorkspacePullRequests {
         states[workspaceID]?.dismissFailure()
     }
 
-    func record(_ read: PullRequestRead, for workspaceID: WorkspaceID) {
+    func record(_ read: PullRequestRead, for workspaceID: WorkspaceID, forge: Forge? = nil) {
         generations[workspaceID, default: 0] &+= 1
         var state = states[workspaceID] ?? PullRequestRefreshState()
+        if let forge, let previous = state.pullRequest, previous.forge != forge {
+            state = PullRequestRefreshState()
+        }
         state.record(read)
         if states[workspaceID] != state { states[workspaceID] = state }
     }
@@ -139,7 +142,7 @@ final class WorkspacePullRequests {
             guard !Task.isCancelled, self.generations[id, default: 0] == generation else { return }
             guard await observed.accept(in: store) else { return }
             guard !Task.isCancelled, self.generations[id, default: 0] == generation else { return }
-            self.record(observed.read, for: id)
+            self.record(observed.read, for: id, forge: observed.forge)
         }
         queue = lookup
         await withTaskCancellationHandler { await lookup.value } onCancel: { lookup.cancel() }

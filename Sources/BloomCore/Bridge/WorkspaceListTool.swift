@@ -361,8 +361,9 @@ public struct WorkspaceListTool: BridgeToolHandling {
     /// over, so the workspace falls back to what Bloom's own database can say about it.
     private func pullRequest(for workspace: Workspace, store: Store) async -> PullRequest? {
         guard FileManager.default.fileExists(atPath: workspace.path) else { return nil }
-        guard let observed = try? await store.observePullRequest(workspaceID: workspace.id) else { return nil }
-        let forge = await ForgeResolver.client(for: observed.workspace.path)
+        let kind = await ForgeResolver.forge(for: workspace.path)
+        guard let observed = try? await store.observePullRequest(workspaceID: workspace.id, forge: kind) else { return nil }
+        let forge = ForgeResolver.client(of: kind)
         let found = try? await forge.pullRequest(for: observed.workspace, maxAge: .seconds(60))
         // Every lookup writes the number down, this one included. A listing an agent asked for is
         // as good a moment as a poll to learn which pull request a workspace is about, and the

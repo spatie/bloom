@@ -215,6 +215,24 @@ struct MergedPullRequestTests {
         #expect(!lateFailure)
     }
 
+    @Test("a forge changed outside the settings window never reuses the previous forge's number")
+    func observationScopesTheNumberToItsForge() async throws {
+        let store = try makeTestStore("pr-number-forge-scope")
+        let workspace = try await seed(store)
+        try await store.recordPullRequestNumber(222, workspaceID: workspace.id)
+        let github = try #require(try await store.observePullRequest(workspaceID: workspace.id, forge: .gitHub))
+        #expect(github.workspace.pullRequestNumber == 222)
+        let gitlab = try #require(try await store.observePullRequest(workspaceID: workspace.id, forge: .gitLab))
+        #expect(gitlab.workspace.pullRequestNumber == nil)
+        let acceptedOld = try await store.acceptPullRequestRead(pullRequest(number: 222), observed: github)
+        #expect(!acceptedOld)
+        var request = pullRequest(number: 333)
+        request.forge = .gitLab
+        let acceptedNew = try await store.acceptPullRequestRead(request, observed: gitlab)
+        #expect(acceptedNew)
+        #expect(try await store.workspace(id: workspace.id)?.pullRequestNumber == 333)
+    }
+
     @Test("the other writers of a workspace row leave the number alone")
     func writersKeepTheNumber() async throws {
         let store = try makeTestStore("pr-number-writers")

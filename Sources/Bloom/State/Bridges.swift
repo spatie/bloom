@@ -16,6 +16,7 @@ enum GitHubBridge {
     struct ObservedRead: Sendable {
         let read: PullRequestRead
         let observation: PullRequestObservation?
+        let forge: Forge?
 
         func accept(in store: Store?) async -> Bool {
             guard let store, let observation else { return true }
@@ -27,16 +28,21 @@ enum GitHubBridge {
 
     static func observePullRequest(for workspace: Workspace, maxAge: Duration, store: Store?) async -> ObservedRead {
         do {
-            let observed = try await store?.observePullRequest(workspaceID: workspace.id)
-            let read = await readPullRequest(for: observed?.workspace ?? workspace, maxAge: maxAge)
-            return ObservedRead(read: read, observation: observed)
+            let forge = await ForgeResolver.forge(for: workspace.path)
+            let observed = try await store?.observePullRequest(workspaceID: workspace.id, forge: forge)
+            let read = await readFromForge(for: observed?.workspace ?? workspace, maxAge: maxAge, forge: forge)
+            return ObservedRead(read: read, observation: observed, forge: forge)
         } catch {
-            return ObservedRead(read: .unavailable(GitHubReadFailure.classify(error)), observation: nil)
+            return ObservedRead(read: .unavailable(GitHubReadFailure.classify(error)), observation: nil, forge: nil)
         }
     }
 
     static func readPullRequest(for workspace: Workspace, maxAge: Duration = .zero) async -> PullRequestRead {
-        guard await ForgeResolver.forge(for: workspace.path) == .gitHub else {
+        await readFromForge(for: workspace, maxAge: maxAge, forge: await ForgeResolver.forge(for: workspace.path))
+    }
+
+    private static func readFromForge(for workspace: Workspace, maxAge: Duration, forge: Forge) async -> PullRequestRead {
+        guard forge == .gitHub else {
             return await GitLab.readPullRequest(for: workspace, maxAge: maxAge)
         }
         let availability = await GitHubAvailability.shared.check()

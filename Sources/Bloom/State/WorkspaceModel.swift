@@ -2505,7 +2505,8 @@ final class WorkspaceModel {
         hasReadPullRequest = true
         // Failed refreshes retain the last good content. An explicit no-PR answer can now
         // clear it, because the read result distinguishes absence from an unavailable service.
-        WorkspacePullRequests.shared.record(read, for: workspace.id)
+        if let currentForge = observed.forge { forge = currentForge }
+        WorkspacePullRequests.shared.record(read, for: workspace.id, forge: observed.forge)
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
         // After the band has its answer: following a moved target can mean a fetch.
         if case .current(let fresh) = read {

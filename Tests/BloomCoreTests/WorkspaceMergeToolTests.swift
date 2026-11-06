@@ -586,6 +586,8 @@ struct WorkspaceMergeToolTests {
     func theAnswerOnGitLab() async throws {
         let store = try makeTestStore("merge-answer-gitlab")
         let target = try await workspace(in: store)
+        try FileManager.default.createDirectory(atPath: "\(target.path)/.bloom", withIntermediateDirectories: true)
+        try "[git]\nforge = \"gitlab\"\n".write(toFile: "\(target.path)/.bloom/settings.local.toml", atomically: true, encoding: .utf8)
         var mergeRequest = Self.open()
         mergeRequest.forge = .gitLab
 
