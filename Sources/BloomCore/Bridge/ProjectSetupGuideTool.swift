@@ -71,7 +71,17 @@ public struct ProjectSetupGuideTool: BridgeToolHandling {
            Replace the example command with one verified in this repository; do not commit the \
         placeholder. Script paths are relative to the repository root. The setup script runs in each new \
         worktree after creation. Named run scripts are shown in Bloom's Run menu. Bloom supplies \
-        BLOOM_PORT to scripts and expands it in browser.url. The project settings window can \
+        BLOOM_PORT to scripts and expands it in browser.url. When each worktree is served at an \
+        address only its setup can know, such as a hostname of its own, have the setup script \
+        write that address to $BLOOM_URL_FILE, which wins over browser.url, and undo what setup \
+        created in an archive_file script, which runs in the worktree before Bloom removes it. \
+        Laravel Herd 2 is one such case: herd parked --json lists the sites it serves, \
+        herd workspace --database=empty in setup serves the worktree, herd workspaces --json \
+        lists its url by path (herd workspace --json prints progress before its JSON, and \
+        refuses a worktree it already serves), and herd workspace:delete --force --keep-files \
+        in the archive script removes the site again. \
+        Always state --database there, because Herd's default shares the main checkout's \
+        database. The project settings window can \
         edit these values. By default Bloom copies .env* into new worktrees; change that with the \
         top-level file_include_globs list only when needed. Do not invent a mail table in settings.toml.
         3. Mail capture is app-wide, not a repository setting. \(inboxState) Configure this \
