@@ -59,7 +59,8 @@ extension WorkspaceManager {
             hasRemoteCounterpart: await remote,
             hasPullRequest: hasPullRequest,
             hasOperationInProgress: await inProgress,
-            takenBranches: Set(await branches ?? [])
+            takenBranches: Set(await branches ?? []),
+            isProjectCheckout: workspace.kind == .projectCheckout
         )
     }
 

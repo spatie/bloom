@@ -35,6 +35,8 @@ public enum WorkspaceMergeTrouble: Sendable, Equatable {
     case archived(workspace: String)
     /// Active, but the worktree is not on disk any more.
     case worktreeGone(workspace: String)
+    /// The project's own checkout, which has no pull request of its own. See `WorkspaceKind`.
+    case projectCheckout(workspace: String)
     /// gh could not be asked, so nothing is known about the pull request.
     case githubUnavailable(GitHubAccess)
     /// gh could be asked and did not answer. The one refusal here that is worth retrying.
@@ -103,6 +105,14 @@ public enum WorkspaceMergeTrouble: Sendable, Equatable {
                 on disk, although Bloom still has it as an active workspace. Something moved or \
                 deleted it outside Bloom. Retrying will not help. Tell the owner, and leave the \
                 pull request alone until they have looked.
+                """
+
+        case .projectCheckout(let workspace):
+            return """
+                Bloom will not ask for a merge in '\(workspace)' because it is the project's own \
+                checkout rather than a worktree, and Bloom keeps no pull request for it. Retrying \
+                will not help. A pull request for the branch it is on is the owner's to merge from \
+                wherever it was opened.
                 """
 
         case .githubUnavailable(.notInstalled):

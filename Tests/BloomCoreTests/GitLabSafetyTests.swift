@@ -4,6 +4,23 @@ import Testing
 
 @Suite("GitLab request identity", .tags(.git), .scratchDirectory)
 struct GitLabSafetyTests {
+    @Test("the owner's project checkout never reads or directly creates a GitLab request")
+    func projectCheckoutHasNoRequests() async throws {
+        let workspace = Workspace(
+            repoID: RepoID("r"), name: "project", branch: "main", path: "/nowhere", baseBranch: "main",
+            pullRequestNumber: 42, kind: .projectCheckout
+        )
+        try await GitLab.$commandOverride.withValue({ _, _ in
+            Issue.record("The project checkout reached glab")
+            return ShellResult(status: 0, stdout: "", stderr: "")
+        }) {
+            #expect(try await GitLab.pullRequest(for: workspace, maxAge: .zero) == nil)
+            await #expect(throws: GitHubError.self) {
+                try await DirectPullRequestCreation.create(for: workspace, forge: .gitLab)
+            }
+        }
+    }
+
     @Test("the stored fork MR outranks a same-project MR with the same branch, including workspace_merge")
     func forkIdentity() async throws {
         let repo = try await TempRepo()

@@ -31,19 +31,46 @@ import Foundation
 /// ordinary case, which is an agent that has the owner's tools simply because a config file was
 /// read. The owner running their own `claude` inside a worktree is refused too, and the sentence
 /// says why and what to do, because that client is standing in a workspace just as surely.
+///
+/// ## The project's own checkout
+///
+/// A project checkout workspace sits at the project's root, which is also where the owner opens a
+/// terminal and runs their own `claude`, so the directory alone would refuse the owner in their
+/// own project for as long as that workspace is live. The directory alone cannot let them through
+/// either: every agent Bloom starts in that workspace stands in the same folder and runs the
+/// owner's shim too. What tells them apart is who started the process. Bloom's agents are its own
+/// children, or children of its private tmux server for a chat in a terminal; the owner's
+/// Terminal or iTerm is neither. So a caller inside a project checkout is asked about its lineage
+/// and let through only when it does not come from Bloom. A terminal pane inside Bloom comes from
+/// Bloom's tmux server as well and is refused like any other workspace, which is the same answer
+/// it gets in a worktree.
 public enum BridgeOwnerPlacement {
     /// The refusal for an owner's token presented from `workingDirectory`, or nil when that
     /// directory is in no live workspace. Nil as well when the directory could not be read,
     /// because failing to see where a caller is is not evidence that it is somewhere it should not
     /// be, and the owner's own terminal breaking over a syscall would be the worse outcome.
-    public static func refusal(workingDirectory: String?, workspaces: [Workspace]) -> String? {
-        guard let workingDirectory, !workingDirectory.isEmpty else { return nil }
-        let directory = standardised(workingDirectory)
-        guard let workspace = workspaces.first(where: { workspace in
-            guard workspace.state != .archived, !workspace.path.isEmpty else { return false }
-            let root = standardised(workspace.path)
-            return directory == root || directory.hasPrefix(root + "/")
-        }) else { return nil }
+    ///
+    /// - Parameter descendsFromBloom: whether the caller was started by this app, asked only when
+    ///   `needsLineage` says the answer matters. Nil when it was not asked or could not be read,
+    ///   which keeps the refusal: inside a project checkout that is what the answer was before the
+    ///   carve-out, and a `ps` that failed is no evidence that an agent is the owner.
+    public static func refusal(
+        workingDirectory: String?, workspaces: [Workspace], descendsFromBloom: Bool? = nil
+    ) -> String? {
+        guard let workspace = standing(in: workingDirectory, among: workspaces) else { return nil }
+        if workspace.kind == .projectCheckout {
+            // Only a lineage read as "not Bloom's" is let through. True and unread both refuse.
+            if descendsFromBloom != false {
+                return """
+                    This is the owner's own registration of Bloom, and it was started by Bloom \
+                    inside the project checkout '\(workspace.name)' at \(workspace.path). An agent \
+                    working there uses the bridge Bloom gives that workspace, not the owner's, so \
+                    this connection was refused. To use the owner's tools in this folder, run the \
+                    client from a terminal outside Bloom.
+                    """
+            }
+            return nil
+        }
 
         return """
             This is the owner's own registration of Bloom, and it was started inside the Bloom \
@@ -52,6 +79,28 @@ public enum BridgeOwnerPlacement {
             refused. To use the owner's tools, run the client from a directory outside Bloom's \
             workspaces.
             """
+    }
+
+    /// Whether the caller's lineage has to be read before `refusal` can answer, which is only
+    /// when the directory is inside a live project checkout. Asked first so that `ps` runs for
+    /// that one case and never for the owner's terminal anywhere else.
+    public static func needsLineage(workingDirectory: String?, workspaces: [Workspace]) -> Bool {
+        standing(in: workingDirectory, among: workspaces)?.kind == .projectCheckout
+    }
+
+    /// The live workspace `workingDirectory` is inside, if any. The deepest one wins, so a
+    /// worktree kept under the project's own folder is still that worktree rather than the
+    /// project checkout around it.
+    private static func standing(in workingDirectory: String?, among workspaces: [Workspace]) -> Workspace? {
+        guard let workingDirectory, !workingDirectory.isEmpty else { return nil }
+        let directory = standardised(workingDirectory)
+        return workspaces
+            .filter { workspace in
+                guard workspace.state != .archived, !workspace.path.isEmpty else { return false }
+                let root = standardised(workspace.path)
+                return directory == root || directory.hasPrefix(root + "/")
+            }
+            .max { standardised($0.path).count < standardised($1.path).count }
     }
 
     /// Without a trailing slash or `.` components, so `/a/b/` and `/a/b` are one directory and

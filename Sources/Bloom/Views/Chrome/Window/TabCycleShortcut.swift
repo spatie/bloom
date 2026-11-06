@@ -1,7 +1,8 @@
 import AppKit
 import BloomCore
 
-/// Option+Tab and Command+Option+Left or Right step through the strip in front.
+/// Option+Tab and Command+Option+Left or Right step through the strip in front, and Control+Tab
+/// and Shift+Control+Tab walk Forward and Back through the navigation history.
 ///
 /// A local monitor rather than a key on Next Tab, for two reasons. A menu item carries one key, and
 /// Next Tab already carries Shift+Cmd+], which stays. And a menu key equivalent is offered to the
@@ -27,9 +28,14 @@ enum TabCycleShortcut {
         self.model = model
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == tabKeyCode,
-               let offset = TabCycle.offset(forTabWith: modifiers(of: event)) {
-                return MainActor.assumeIsolated { cycle(by: offset) } ? nil : event
+            if event.keyCode == tabKeyCode {
+                let pressed = modifiers(of: event)
+                if let offset = TabCycle.offset(forTabWith: pressed) {
+                    return MainActor.assumeIsolated { cycle(by: offset) } ? nil : event
+                }
+                if let step = NavigationHistory.step(forTabWith: pressed) {
+                    return MainActor.assumeIsolated { navigate(by: step) } ? nil : event
+                }
             }
 
             guard let arrow = arrow(for: event.keyCode) else { return event }
@@ -57,6 +63,14 @@ enum TabCycleShortcut {
     private static func cycle(by offset: Int) -> Bool {
         guard let model, eligibleWindow != nil else { return false }
         model.cycleCentreTab(by: offset)
+        return true
+    }
+
+    /// Spent like `cycle`, even with nowhere to go, so Control+Tab never types into the composer or
+    /// reaches a shell.
+    private static func navigate(by step: Int) -> Bool {
+        guard let model, eligibleWindow != nil else { return false }
+        model.stepNavigation(by: step)
         return true
     }
 

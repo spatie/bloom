@@ -33,7 +33,9 @@ struct ChangesHistoryList: View {
     @State private var armToken = 0
 
     private var scopes: [DiffScope] {
-        model.inspectorTab == .history ? model.branchCommits.commits.map(DiffScope.commit) : [.all, .uncommitted]
+        model.inspectorTab == .history
+            ? model.branchCommits.commits.map(DiffScope.commit)
+            : DiffScope.offered(for: model.workspace.kind)
     }
 
     var body: some View {
@@ -118,14 +120,14 @@ struct ChangesHistoryList: View {
         Menu {
             ForEach(scopes, id: \.self) { scope in
                 // Reselecting the current scope also reopens its review in the centre pane.
-                Toggle(scope.title, isOn: Binding(
+                Toggle(scope.title(for: model.workspace.kind), isOn: Binding(
                     get: { model.diffScope == scope },
                     set: { _ in select(scope) }
                 ))
             }
         } label: {
             Label(
-                model.diffScope.title,
+                model.diffScope.title(for: model.workspace.kind),
                 systemImage: model.diffScope == .uncommitted ? "pencil.line" : "square.stack.3d.up"
             )
             .font(Typo.label)
@@ -138,7 +140,7 @@ struct ChangesHistoryList: View {
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
         .accessibilityLabel("Change scope")
-        .accessibilityValue(model.diffScope.title)
+        .accessibilityValue(model.diffScope.title(for: model.workspace.kind))
     }
 
     private func select(_ scope: DiffScope) {
@@ -151,7 +153,7 @@ struct ChangesHistoryList: View {
     private func handle(_ key: ListKey) -> Bool {
         let available = scopes
         let index = available.firstIndex(of: model.diffScope)
-        switch keyboard.outcome(for: key, titles: available.map(\.title), current: index) {
+        switch keyboard.outcome(for: key, titles: available.map { $0.title(for: model.workspace.kind) }, current: index) {
         case .move(let row): select(available[row]); return true
         case .activate:
             if let index { select(available[index]) }

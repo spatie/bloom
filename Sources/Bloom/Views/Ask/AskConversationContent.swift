@@ -81,6 +81,7 @@ private struct AskConversationView: View {
         }
         .environment(\.composerRoom, room)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay { FileDropChatCue(sessionKey: transcript.session.id.rawValue) }
         .overlay(alignment: .bottom) {
             ComposerDock(
                 showsJumpToNewest: isTranscriptScrolledUp,

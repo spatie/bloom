@@ -4,6 +4,9 @@ import Foundation
 /// Each step is explicit so a failure leaves the completed git work in place and reports it.
 public enum DirectPullRequestCreation {
     public static func create(for workspace: Workspace, forge: Forge = .gitHub) async throws -> PullRequest {
+        guard workspace.kind.hasPullRequests else {
+            throw GitHubError("Create a worktree workspace before opening a pull request.")
+        }
         let client = ForgeResolver.client(of: forge)
         let worktree = workspace.path
         guard try await Git.currentBranch(of: worktree) == workspace.branch else {

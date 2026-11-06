@@ -66,6 +66,10 @@ public struct WorkspaceStartRequest: Sendable {
     /// The app normally streams setup itself. A headless caller can await it here instead,
     /// or the owner can skip it for this workspace without changing the project configuration.
     public var setupPolicy: WorkspaceSetupPolicy
+    /// A worktree, which every route has always made, or the project's own checkout. The second
+    /// ignores `baseBranch`, `branch` and `checkout`, because the folder already has a branch,
+    /// and is never named by `namer` or set up. See `WorkspaceKind`.
+    public var kind: WorkspaceKind
 
     public init(
         id: WorkspaceID = .new(),
@@ -79,7 +83,8 @@ public struct WorkspaceStartRequest: Sendable {
         controls: ComposerControls? = nil,
         opensSession: Bool = true,
         resuming: String? = nil,
-        setupPolicy: WorkspaceSetupPolicy = .deferred
+        setupPolicy: WorkspaceSetupPolicy = .deferred,
+        kind: WorkspaceKind = .worktree
     ) {
         self.id = id
         self.repo = repo
@@ -93,6 +98,7 @@ public struct WorkspaceStartRequest: Sendable {
         self.opensSession = opensSession
         self.resuming = resuming
         self.setupPolicy = setupPolicy
+        self.kind = kind
     }
 }
 
@@ -175,18 +181,25 @@ extension WorkspaceManager {
         // to another in the same breath. A checkout is never named by a model: a pull request and
         // a branch each already have a name somebody chose, and a review workspace called after a
         // sea would be one more thing to translate back.
-        let placeholder = request.name == nil && request.checkout == nil ? await namer() : nil
+        //
+        // The project checkout is never named by a model either, and there it is not taste: a
+        // placeholder is what lets `applyName` rename the branch afterwards, and the branch in
+        // the project's own checkout is `main`. So it always arrives with its supplied name.
+        let name = request.name ?? request.kind.suppliedName
+        let placeholder = name == nil && request.checkout == nil ? await namer() : nil
+        let setupPolicy = request.kind.allowsSetup ? request.setupPolicy : .skip
 
         let workspace = try await createWorkspace(
             id: request.id,
             repo: request.repo,
             prompt: request.prompt,
-            name: request.name ?? placeholder,
+            name: name ?? placeholder,
             branch: request.branch,
             baseBranch: request.baseBranch,
             origin: request.origin,
             checkout: request.checkout,
-            setupPolicy: request.setupPolicy
+            setupPolicy: setupPolicy,
+            kind: request.kind
         )
 
         // Here rather than inside `createWorkspace`, for the reason that method's own comment
@@ -204,8 +217,9 @@ extension WorkspaceManager {
             // A mode the chosen backend has no row for cannot be written to a session: Codex has
             // no Plan and Claude Code has no Approve for me, and the app-wide default in Settings
             // is picked before any backend is. `nearest(on:)` says where each one lands.
-            let mode = (controls?.permissionMode ?? AppDefaults.fallbackPermissionMode)
-                .nearest(on: backend)
+            let mode = request.kind.startingPermission(
+                (controls?.permissionMode ?? AppDefaults.fallbackPermissionMode).nearest(on: backend)
+            )
             let opened = try await store.upsert(Session(
                 workspaceID: workspace.id,
                 // Not the prompt. The WORKSPACE is named after the work, by `namer` above and
@@ -234,7 +248,7 @@ extension WorkspaceManager {
         }
 
         var setupSucceeded: Bool?
-        if request.setupPolicy == .run {
+        if setupPolicy == .run {
             // **`ensurePort`, which is the same door the app's own setup run goes through.**
             //
             // This used to call `PortAllocator.allocate(taken: [])` directly, which is the bug

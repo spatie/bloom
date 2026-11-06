@@ -30,7 +30,17 @@ enum AttachmentDrop {
         onReceive: @escaping @MainActor @Sendable ([AttachmentSource]) -> Bool,
         onFailure: @escaping @MainActor @Sendable (String) -> Void
     ) -> Bool {
-        let pasteboard = sender.draggingPasteboard
+        receive(sender.draggingPasteboard, session: session, onReceive: onReceive, onFailure: onFailure)
+    }
+
+    /// For a SwiftUI `onDrop`, which hands over item providers and no `NSDraggingInfo`: the drag
+    /// pasteboard behind them is the same one, and the one this reads.
+    static func receive(
+        _ pasteboard: NSPasteboard,
+        session: AttachmentDropSession,
+        onReceive: @escaping @MainActor @Sendable ([AttachmentSource]) -> Bool,
+        onFailure: @escaping @MainActor @Sendable (String) -> Void
+    ) -> Bool {
         if let promises = pasteboard.readObjects(
             forClasses: [NSFilePromiseReceiver.self], options: nil
         ) as? [NSFilePromiseReceiver], !promises.isEmpty {
@@ -42,11 +52,12 @@ enum AttachmentDrop {
                     ) { url, error in
                         let failure = error?.localizedDescription
                         Task { @MainActor in
-                            guard session.isActive else { return }
-                            if let failure {
-                                onFailure(failure)
-                            } else {
-                                _ = onReceive([.promisedFile(url, storage)])
+                            session.deliver {
+                                if let failure {
+                                    onFailure(failure)
+                                } else {
+                                    _ = onReceive([.promisedFile(url, storage)])
+                                }
                             }
                         }
                     }
@@ -98,32 +109,6 @@ enum AttachmentDrop {
             }
         }
         return true
-    }
-}
-
-/// Owns asynchronous provider loads for one drop target. Removing the target cancels every load,
-/// and result delivery checks the same lifetime before changing the draft.
-@MainActor
-final class AttachmentDropSession {
-    private var tasks: [UUID: Task<Void, Never>] = [:]
-    private(set) var isActive = true
-
-    func start(_ operation: @escaping @Sendable () async -> Void) {
-        let id = UUID()
-        tasks[id] = Task { [weak self] in
-            await operation()
-            self?.tasks[id] = nil
-        }
-    }
-
-    func cancelAll() {
-        isActive = false
-        for task in tasks.values { task.cancel() }
-        tasks.removeAll()
-    }
-
-    deinit {
-        for task in tasks.values { task.cancel() }
     }
 }
 

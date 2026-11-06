@@ -309,6 +309,7 @@ public enum GitLab: ForgeClient {
     /// the branch being deleted; the row's number is the only way to a fork's merge request, whose
     /// local branch glab names after nothing GitLab knows, and to a branch renamed since.
     static func snapshot(for workspace: Workspace) async throws -> Snapshot? {
+        guard workspace.kind.hasPullRequests else { return nil }
         guard let project = await project(in: workspace.path) else { return nil }
         let head = await GitHub.headBranch(of: workspace)
         if let number = await checkedOutNumber(branch: head, project: project, worktree: workspace.path)
