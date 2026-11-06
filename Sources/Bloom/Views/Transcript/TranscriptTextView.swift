@@ -142,6 +142,9 @@ struct TranscriptTextView: NSViewRepresentable {
     var copyPrefix = ""
     var copySeparatorBefore = "\n\n"
     var actions = TranscriptLinkActions()
+    /// A click that selected nothing and landed on no link, for text drawn inside a control.
+    /// Reported only for text joined to a selection, which is what tracks the press.
+    var onPlainClick: (@MainActor () -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(actions: actions) }
 
@@ -216,6 +219,7 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     private func apply(to view: LinkTextView) {
+        view.onPlainClick = onPlainClick
         view.copyPrefix = copyPrefix
         view.copySeparatorBefore = copySeparatorBefore
         if view.answerSelection !== selection {
@@ -458,12 +462,17 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     var selectionPlace: TranscriptSelection.Place? { entryID?.selectionPlace }
     var copyPrefix = ""
     var copySeparatorBefore = "\n\n"
+    var onPlainClick: (@MainActor () -> Void)?
 
-    /// `sizeThatFits` can leave the container wider than the placed frame, which drew a long
-    /// pasted turn past its bubble. Only an overflowing run is laid out again.
+    /// `sizeThatFits` leaves the container at its last question's width, which can be a probe
+    /// rather than the placed frame. See `TranscriptTextMeasure.needsRelayoutAtFrame`.
     override func viewWillDraw() {
         if let container = textContainer, let measured = lastReportedMeasurement,
-           measured.size.width > bounds.width + Self.overflowTolerance {
+           TranscriptTextMeasure.needsRelayoutAtFrame(
+               containerWidth: Double(container.containerSize.width),
+               frameWidth: Double(bounds.width),
+               reportedWidth: Double(measured.size.width)
+           ) {
             container.containerSize = CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
             lastReportedMeasurement = nil
             if measured.alignsBubbleInk, let layout = layoutManager {
@@ -474,10 +483,6 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         }
         super.viewWillDraw()
     }
-
-    /// Frames land on half points on a Retina display, and a reported width rounded up can sit
-    /// that far over one without a glyph crossing the edge.
-    private static let overflowTolerance: CGFloat = 0.5
 
     /// Whether whoever has the keyboard is selecting this view's text along with its own.
     private var isSelectedWithTheKeyboardOwner: Bool {
@@ -704,8 +709,8 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
                 let point = convert(event.locationInWindow, from: nil)
                 let url = link(at: point)
                 let dragged = trackAnswerSelection(with: event, selection: answerSelection)
-                if !dragged, event.clickCount == 1, !event.modifierFlags.contains(.shift), let url {
-                    actions.open(url, .externalBrowser)
+                if !dragged, event.clickCount == 1, !event.modifierFlags.contains(.shift) {
+                    if let url { actions.open(url, .externalBrowser) } else { onPlainClick?() }
                 }
                 return
             }

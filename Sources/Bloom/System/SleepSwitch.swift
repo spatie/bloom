@@ -15,60 +15,86 @@ import BloomCore
 final class SleepSwitch {
     static let shared = SleepSwitch()
 
-    enum Standing: Equatable {
-        /// Approved, and the switch can be flipped.
-        case ready
-        /// Registered, and waiting for somebody to allow it in System Settings.
-        case needsApproval
-        /// This build cannot register a daemon, which is every ad hoc signed build.
-        case unavailable(String)
-    }
+    typealias Standing = SleepHelperService.Standing
 
     private(set) var standing: Standing = .needsApproval
 
-    @ObservationIgnored private let service = SMAppService.daemon(plistName: "be.spatie.bloom.sleep.plist")
+    @ObservationIgnored private let service = SleepHelperService(
+        readStatus: {
+            switch SMAppService.daemon(plistName: "be.spatie.bloom.sleep.plist").status {
+            case .enabled: .enabled
+            case .requiresApproval: .requiresApproval
+            case .notRegistered: .notRegistered
+            case .notFound: .notFound
+            @unknown default: .requiresApproval
+            }
+        },
+        register: { try SMAppService.daemon(plistName: "be.spatie.bloom.sleep.plist").register() }
+    )
     @ObservationIgnored private var connection: NSXPCConnection?
+    @ObservationIgnored private var updates: Task<Standing, Never>?
+    @ObservationIgnored private var refreshTask: Task<Standing, Never>?
+    @ObservationIgnored private var enableTask: Task<Standing, Never>?
+    @ObservationIgnored private var polling: Task<Void, Never>?
+    @ObservationIgnored private var requestedHold: Bool?
 
     private init() {
-        refreshStanding()
-        // Approving happens in System Settings, so the answer changes while Bloom is in the
-        // background and nothing here would ever hear about it. Without this the pane goes on
-        // saying "Allow Bloom's helper" after somebody already has.
-        // swiftlint:disable:next discarded_notification_center_observer
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { _ in
-            MainActor.assumeIsolated { SleepSwitch.shared.refresh() }
-        }
-    }
-
-    /// Reads the daemon's standing again. Cheap, and the only way to notice an approval.
-    func refresh() {
-        refreshStanding()
-    }
-
-    /// Registers the daemon if it is not registered, and reports where that got to. Called when
-    /// somebody switches the lid option on, which is the only moment it is worth asking for.
-    @discardableResult
-    func enable() -> Standing {
-        switch service.status {
-        case .enabled:
-            standing = .ready
-        case .requiresApproval:
-            standing = .needsApproval
-        case .notRegistered, .notFound:
-            do {
-                try service.register()
-                refreshStanding()
-            } catch {
-                // A helper cannot be registered from a build signed ad hoc, which is what
-                // `Tools/dev-build.sh` produces unless it is handed a real identity.
-                standing = .unavailable(TranscriptStanding.complaint(about: error))
+        // ServiceManagement performs synchronous IPC. Never read its status in an activation
+        // observer, even through a main-actor Task. Approval is noticed by this slow background
+        // refresh and by the shorter watch while a helper settings pane is visible.
+        polling = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refresh()
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
-        @unknown default:
-            standing = .needsApproval
         }
-        return standing
+    }
+
+    @discardableResult
+    func refresh() async -> Standing {
+        if let refreshTask { return await refreshTask.value }
+        let task = updateStanding(register: false)
+        refreshTask = task
+        let result = await task.value
+        refreshTask = nil
+        return result
+    }
+
+    /// Owned by the settings view's task, so the shorter approval watch ends with the pane.
+    func watchStanding() async {
+        while !Task.isCancelled {
+            await refresh()
+            do {
+                try await Task.sleep(for: .seconds(standing == .needsApproval ? 3 : 30))
+            } catch { return }
+        }
+    }
+
+    @discardableResult
+    func enable() async -> Standing {
+        if let enableTask { return await enableTask.value }
+        let task = updateStanding(register: true)
+        enableTask = task
+        let result = await task.value
+        enableTask = nil
+        return result
+    }
+
+    /// Publish in request order as well as performing the IPC in order. Otherwise a refresh
+    /// suspended before registration could overwrite its newer result on the main actor.
+    private func updateStanding(register: Bool) -> Task<Standing, Never> {
+        let previous = updates
+        let task = Task {
+            _ = await previous?.value
+            let result = register ? await service.enable() : await service.refresh()
+            if standing != result {
+                standing = result
+                applyRequestedHold()
+            }
+            return result
+        }
+        updates = task
+        return task
     }
 
     func openApprovalSettings() {
@@ -78,8 +104,12 @@ final class SleepSwitch {
     /// Asks the daemon to hold the lid, or to let go of it. Nothing happens, loudly or quietly,
     /// when there is no approved daemon to ask.
     func setHoldingLidClosed(_ held: Bool) {
-        refreshStanding()
-        guard standing == .ready else { return }
+        requestedHold = held
+        applyRequestedHold()
+    }
+
+    private func applyRequestedHold() {
+        guard let held = requestedHold, standing == .ready else { return }
         // Hopped rather than assumed: NSXPCConnection calls its invalidation handler on its own
         // queue, and `assumeIsolated` there is a trap rather than a check.
         let proxy = proxy { [weak self] in
@@ -95,15 +125,6 @@ final class SleepSwitch {
         proxy(onInvalidation: {})?.setSleepDisabled(
             false, clientPID: ProcessInfo.processInfo.processIdentifier, withReply: Self.ignoreReply
         )
-    }
-
-    private func refreshStanding() {
-        switch service.status {
-        case .enabled: standing = .ready
-        case .requiresApproval: standing = .needsApproval
-        case .notRegistered, .notFound: if case .unavailable = standing {} else { standing = .needsApproval }
-        @unknown default: standing = .needsApproval
-        }
     }
 
     private func proxy(onInvalidation: @escaping @Sendable () -> Void) -> SleepControl? {

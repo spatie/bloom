@@ -146,8 +146,13 @@ public enum TranscriptFold {
     /// An opened live turn becomes a growing log again when another item arrives. At the live end,
     /// fold it back so the newest item remains visible and the completed items return to their
     /// count. Away from the end the reader is inspecting that log, so their disclosure stays open.
-    public static func refoldedAtLiveEnd(_ unfolded: Set<Int>, in folds: Folds) -> Set<Int> {
+    /// A fold the reader opened in this pane is `kept`: clicking it at the live end is inspecting
+    /// it, and refolding it on the next call shut it under the pointer.
+    public static func refoldedAtLiveEnd(
+        _ unfolded: Set<Int>, in folds: Folds, keeping kept: Set<Int>
+    ) -> Set<Int> {
         let live = folds.all.reversed().prefix { !$0.hasAnswer }.map(\.firstSeq)
+            .filter { !kept.contains($0) }
         guard live.contains(where: unfolded.contains) else { return unfolded }
         var result = unfolded
         result.subtract(live)

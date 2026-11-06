@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Match the Linux checks in .github/workflows/test.yml, not the macOS build job.
+# SwiftPM resolution downloads macOS-only dependencies and cannot make Darwin code run here.
+if [[ "$(uname -sm)" != 'Linux x86_64' ]]; then
+  echo 'Bloom orb setup supports Debian 12 Linux x86_64 only.' >&2
+  exit 1
+fi
+
+started=$SECONDS
+privileged=()
+if [[ "$EUID" -ne 0 ]]; then
+  privileged=(sudo -n)
+fi
+
+echo '==> Checking system tools'
+packages=()
+for entry in zsh:zsh shellcheck:shellcheck curl:curl unzip:unzip make:make git:git node:nodejs; do
+  command -v "${entry%%:*}" >/dev/null || packages+=("${entry#*:}")
+done
+if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+  packages+=(ca-certificates)
+fi
+if ((${#packages[@]})); then
+  "${privileged[@]}" apt-get update -qq
+  "${privileged[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${packages[@]}"
+else
+  echo 'System tools already installed; skipping apt.'
+fi
+echo "System tools ready in $((SECONDS - started))s."
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT
+
+ensure_tool() {
+  local name=$1 version=$2 version_flag=$3 url=$4 checksum=$5 member=$6
+  local step_started=$SECONDS installed=''
+  if [[ -x "/usr/local/bin/$name" ]]; then
+    installed=$("/usr/local/bin/$name" "$version_flag" 2>/dev/null) || installed=''
+  fi
+  if [[ "${installed%%$'\n'*}" == "$version" ]]; then
+    echo "==> $name $version already installed (0s)."
+    return
+  fi
+
+  echo "==> Installing $name $version"
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 120 \
+    --output "$temporary/archive" "$url"
+  printf '%s  %s\n' "$checksum" "$temporary/archive" | sha256sum --check --status
+  if [[ "$url" == *.zip ]]; then
+    unzip -p "$temporary/archive" "$member" > "$temporary/$name"
+  else
+    tar -xzf "$temporary/archive" -C "$temporary" "$member"
+  fi
+  chmod +x "$temporary/$name"
+  installed=$("$temporary/$name" "$version_flag")
+  if [[ "${installed%%$'\n'*}" != "$version" ]]; then
+    echo "Unexpected $name version: $installed" >&2
+    exit 1
+  fi
+  "${privileged[@]}" install -m 0755 "$temporary/$name" "/usr/local/bin/$name"
+  echo "$name $version ready in $((SECONDS - step_started))s."
+}
+
+# Checksums cover the release archives, before extracting or executing their contents.
+ensure_tool swiftlint 0.65.1 version \
+  'https://github.com/realm/SwiftLint/releases/download/0.65.1/swiftlint_linux_amd64.zip' \
+  caeed6f4a679c35539ffaf124f6c4ab4a8416917f7d8796279dc52b74026059d swiftlint-static
+ensure_tool actionlint 1.7.7 -version \
+  'https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz' \
+  023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757 actionlint
+ensure_tool gitleaks 8.30.1 version \
+  'https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz' \
+  551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb gitleaks
+
+echo "Bloom Linux tooling ready in $((SECONDS - started))s. See .agents/README.md for checks."
+echo 'Native builds and core tests require macOS 26 and Xcode 26; no Swift toolchain installed.'

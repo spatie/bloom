@@ -64,6 +64,8 @@ struct ComposerTextEditor: NSViewRepresentable {
     /// The way in for the one edit the composer makes that the user did not type: a file arriving
     /// after it has been copied. See `ComposerEditorHandle`.
     var handle: ComposerEditorHandle?
+    /// Whether an input method or dictation holds uncommitted text, which the binding leaves out.
+    var onComposingChange: @MainActor (Bool) -> Void = { _ in }
 
     /// The conversation's text size, so what you type is set at the size you read. Without it the
     /// SwiftUI placeholder behind this view would grow and the typed text would not.
@@ -220,6 +222,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         handle?.coordinator = context.coordinator
 
         let scrollView = NSScrollView()
+        scrollView.contentView = ComposerClipView()
         scrollView.documentView = textView
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -249,9 +252,12 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         // Compared as the draft rather than as the string the view is holding: a chip is one
         // character there and a whole path here, and it is the draft the two have to agree about.
-        let rewritten = refaced || ComposerChipText.draft(of: Self.committed(in: textView)) != text
+        let replaced = ComposerChipText.draft(of: Self.committed(in: textView)) != text
+        let rewritten = refaced || replaced
         if rewritten {
+            if replaced { context.coordinator.endDictation(in: textView) }
             context.coordinator.write(text, into: textView, font: font)
+            context.coordinator.reportComposing(of: textView)
             place(caretAt: caret, in: textView, coordinator: context.coordinator)
         } else if caret != context.coordinator.lastReportedCaret {
             // A caret the view did not report is a caret code moved without touching the text:
@@ -350,6 +356,7 @@ struct ComposerTextEditor: NSViewRepresentable {
             parent.caret = caret
             lastReportedCaret = caret
             reportHeight(of: textView)
+            reportComposing(of: textView)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -357,6 +364,30 @@ struct ComposerTextEditor: NSViewRepresentable {
             let location = draftOffset(textView.selectedRange().location, in: textView)
             lastReportedCaret = location
             if parent.caret != location { parent.caret = location }
+            reportComposing(of: textView)
+        }
+
+        private var isComposing = false
+
+        /// Deferred because `updateNSView` calls it after rewriting the storage.
+        func reportComposing(of textView: NSTextView) {
+            Task { [weak self, weak textView] in
+                guard let self, let textView, textView.hasMarkedText() != self.isComposing else { return }
+                self.isComposing.toggle()
+                self.parent.onComposingChange(self.isComposing)
+            }
+        }
+
+        /// A draft replaced from outside, a sent turn above all, ends the dictation going into it.
+        /// Left running, the next sentence lands in the box that was just emptied.
+        func endDictation(in textView: NSTextView) {
+            guard textView.window?.firstResponder === textView else { return }
+            guard let context = textView.inputContext else { return }
+            context.discardMarkedText()
+            // Private: the public `stopDictation:` toggles the Edit menu item and left the
+            // microphone key's session running.
+            let stop = Selector(("_stopDictation:"))
+            if context.responds(to: stop) { context.perform(stop, with: nil) }
         }
 
         /// Puts a draft into the view: words as words, files as the chips that stand for them.

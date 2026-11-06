@@ -93,10 +93,9 @@ struct WindowTitleControl: View {
     @State private var hasEnded = false
     @FocusState private var fieldFocused: Bool
 
-    /// Past this the name truncates. AppKit gives its own title whatever the bar has left; a
-    /// toolbar item asks for what it wants, and an unbounded one would push the rest of the bar
-    /// around every time a workspace with a sentence for a name was selected.
-    private static let maximumWidth: CGFloat = 360
+    /// Where the name stops shrinking. The name takes the room the bar has left and gives it back
+    /// before any button is dropped. See `ElasticToolbarItem`.
+    private static let minimumWidth: CGFloat = 80
 
     var body: some View {
         Group {
@@ -113,9 +112,9 @@ struct WindowTitleControl: View {
                 // menu and Mission Control. See `WindowTitle`.
                 titleText
                     .accessibilityValue(isBusy ? "Running" : "")
-                    .frame(maxWidth: Self.maximumWidth, alignment: .leading)
             }
         }
+        .background(ElasticToolbarItem(minimumWidth: Self.minimumWidth))
         // Moving the selection closes the field from underneath, which is an ending like any
         // other and the one the sidebar used to throw away. See `InPlaceRename`.
         .onChange(of: app.selectedWorkspace?.id) { _, _ in
@@ -125,9 +124,8 @@ struct WindowTitleControl: View {
 
     // MARK: - Resting
 
-    /// Deliberately carries no frame. The width cap goes on OUTSIDE the gestures below, or the
-    /// hit shape is the cap rather than the text and a short name leaves three hundred points of
-    /// title bar answering to a double click.
+    /// Deliberately carries no frame, or the hit shape below would be the frame rather than the
+    /// text and the bar around a short name would answer to a double click.
     private var titleText: some View {
         // `WindowTitleText` rather than the workspace's name, so a labelled build keeps its mark.
         Text(WindowTitleText.shared.text)
@@ -158,8 +156,6 @@ struct WindowTitleControl: View {
             .help("Double-click to rename")
             .accessibilityLabel("Workspace name")
             .accessibilityValue(isBusy ? "\(workspace.name), running" : workspace.name)
-            // Outside all of the above, so the run past a short name is bar rather than name.
-            .frame(maxWidth: Self.maximumWidth, alignment: .leading)
     }
 
     // MARK: - Renaming
@@ -189,7 +185,7 @@ struct WindowTitleControl: View {
                     end(.focusLost)
                 }
         }
-        .frame(minWidth: 80, maxWidth: Self.maximumWidth, alignment: .leading)
+        .frame(minWidth: Self.minimumWidth, alignment: .leading)
         .task(id: workspace.id) {
             // A beat, so the field exists before focus moves to it.
             try? await Task.sleep(for: .milliseconds(30))

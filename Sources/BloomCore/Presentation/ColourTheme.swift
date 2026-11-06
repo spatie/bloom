@@ -15,7 +15,7 @@ public struct ColourTheme: Codable, Hashable, Sendable, Identifiable, CaseIterab
     public let surfaces: ThemeSurfaces
 
     public static let defaultsKey = "colourTheme"
-    public static let allCases: [ColourTheme] = [.bloom, .charcoalGlass]
+    public static let allCases: [ColourTheme] = [.bloom, .charcoalGlass, .lagoon, .sakura, .matcha, .synthwave, .dune]
 
     public init(
         id: String, title: String, glass: ThemeGlass, surfaces: ThemeSurfaces,

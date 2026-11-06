@@ -19,10 +19,23 @@ struct ProseRowView: View {
     /// Present only on the response that closes a completed turn.
     var copyText: String?
     var smoothMarkdownHandoff = false
+    /// When the answer was stored, shown beside the copy slot on hover. Nil on streaming prose.
+    var sentAt: Date?
     @State private var isHovered = false
     @State private var markdownReady = false
     @State private var markdownSettled = false
+    @State private var rowWidth: CGFloat = 0
+    @State private var timeWidth: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The copy button's column and the gap before it, which the time sits to the left of.
+    private static let copySlot = MessageTimeLabel.height + TranscriptLayout.block
+
+    /// The time is drawn right of the text column and never over it, so a pane too narrow to leave
+    /// it that room shows none. Covering the end of a line was the alternative.
+    private var timeFits: Bool {
+        rowWidth - Self.copySlot - timeWidth >= TranscriptLayout.proseMeasure + TranscriptLayout.block
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: TranscriptLayout.block) {
@@ -53,6 +66,20 @@ struct ProseRowView: View {
                 }
             }
             .frame(width: 18, height: 18)
+        }
+        // Measured only under the pointer, so no other row pays for a geometry read.
+        .background {
+            if isHovered {
+                Color.clear.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if isHovered, let sentAt {
+                MessageTimeLabel(date: sentAt)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { timeWidth = $0 }
+                    .opacity(timeFits ? 1 : 0)
+                    .padding(.trailing, Self.copySlot)
+            }
         }
         .padding(.horizontal, TranscriptLayout.inset)
         // Equal air above and below keeps an activity disclosure centred between paragraphs.

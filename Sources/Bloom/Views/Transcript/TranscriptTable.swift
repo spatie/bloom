@@ -131,6 +131,9 @@ final class TranscriptTableController {
     /// A fold is about to open or close. See `Coordinator.pendingUnfolds`.
     func willUnfold(_ entryID: TranscriptEntryID) { coordinator?.willUnfold(entryID) }
 
+    /// A row is about to change its own height because the reader clicked inside it.
+    func willResize(_ entryID: TranscriptEntryID) { coordinator?.willResize(entryID) }
+
     /// A transcript activity group is about to add or remove its disclosed rows.
     func willChangeFoldRows(_ entryID: TranscriptEntryID) {
         coordinator?.willChangeFoldRows(entryID)
@@ -305,6 +308,7 @@ struct TranscriptTable: NSViewRepresentable {
         coordinator.onContentWillChange = onContentWillChange
         coordinator.includesLiveEnd = includesLiveEnd
         (coordinator.tableView as? TranscriptTableView)?.quoteSelection = quoteSelection
+        (coordinator.tableView as? TranscriptTableView)?.session = session
         (coordinator.tableView as? TranscriptTableView)?.conversation = rowEnvironment.conversation
         // Before the entries, so that a pass carrying another conversation's rows is applied to a
         // pane that has already stopped drawing.
@@ -356,6 +360,9 @@ struct TranscriptTable: NSViewRepresentable {
         private var warmWork: Task<Void, Never>?
         /// A height correction made by the warm pass is not the reader taking the scroll view.
         private var isApplyingWarmHeights = false
+        /// AppKit can move the clip view before its row-height cache has finished updating.
+        private var isNotingHeights = false
+        private var clipMoveIsScheduled = false
         /// A reflow saying its placement a second time. See `rewidth`.
         private var placeWork: Task<Void, Never>?
         /// The last layout of a resize, waiting for the width to be still. See `settleWidth`.
@@ -422,6 +429,8 @@ struct TranscriptTable: NSViewRepresentable {
         /// The disclosure row where the reader clicked, held at the same point in the viewport
         /// while its children enter or leave below it.
         private var pendingFoldAnchor: (id: TranscriptEntryID, delta: CGFloat)?
+        /// The clicked row, held still while its own content changes height. See `willResize`.
+        private var pendingResizeAnchor: (id: TranscriptEntryID, delta: CGFloat)?
 
         /// Where the reader was just before the pane changed size, read before AppKit moves the
         /// clip view. See `viewportWillResize`, which carries why afterwards is too late.
@@ -971,12 +980,13 @@ struct TranscriptTable: NSViewRepresentable {
                 // what a rebuilt list comes to. See `owedHeights`.
                 let rows = IndexSet(owed.compactMap(rowOf))
                 guard !rows.isEmpty else { return }
-                let wasAtEnd = isFollowingAlong
+                let clicked = pendingResizeAnchor.flatMap { owed.contains($0.id) ? $0 : nil }
+                let wasAtEnd = clicked == nil && isFollowingAlong
                 // **The row being corrected is usually above the reader.** Scrolling up brings
                 // rows in at the top, each reports a height that differs from what it was measured
                 // at, and every correction moves everything below it. Without the anchor the text
                 // slides under the eye on the way up.
-                let anchor = centreAnchor()
+                let anchor = clicked ?? centreAnchor()
                 if wasAtEnd || isFollowerDriving { onContentWillChange?() }
                 noteHeights(rows)
                 // **The correction is also what leaves a reader short of the end**, and it is the
@@ -1141,6 +1151,8 @@ struct TranscriptTable: NSViewRepresentable {
         /// change in this file that somebody asked for. See `unfoldSeconds`.
         private func noteHeights(_ rows: IndexSet, over seconds: Double = 0) {
             guard let tableView, !rows.isEmpty else { return }
+            isNotingHeights = true
+            defer { isNotingHeights = false }
             (tableView as? TranscriptTableView)?.deferRowAlignment(for: seconds)
             if seconds > 0 {
                 // Only while the row travels, and only the rows travelling. A cell is exactly its
@@ -1184,6 +1196,15 @@ struct TranscriptTable: NSViewRepresentable {
             pendingUnfolds.insert(entryID)
             pendingUnfoldAnchor = anchorEntry(entryID)
             aimingElsewhere()
+        }
+
+        /// Only a cell knows its height is about to change, so it reports through `drainOwedHeights`
+        /// and not through `update`, where the two fold anchors are consumed. Kept until the reader
+        /// scrolls: a preview settles over several passes, and one dip near the end clamps the clip.
+        func willResize(_ entryID: TranscriptEntryID) {
+            guard pendingResizeAnchor?.id != entryID else { return }
+            aimingElsewhere()
+            pendingResizeAnchor = anchorEntry(entryID)
         }
 
         func willChangeFoldRows(_ entryID: TranscriptEntryID) {
@@ -1312,6 +1333,7 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isLiveScrolling else { return }
             pendingPlacement = nil
             endLanded = false
+            pendingResizeAnchor = nil
             putEnd()
             // **A movement rather than an instruction while the follower is running**, because
             // keeping the view at the end during a turn is precisely the follower's job and it is
@@ -1479,6 +1501,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// it comes down first.
         private func aimingElsewhere() {
             pendingPlacement = nil
+            pendingResizeAnchor = nil
             viewportWork?.cancel()
             viewportWork = nil
             viewportPlace = nil
@@ -1613,6 +1636,20 @@ struct TranscriptTable: NSViewRepresentable {
             // Correcting prepared heights can move the document while the reader's row is held
             // still. It must not release the live end or restart the idle task that made it.
             guard !isApplyingWarmHeights else { return }
+            // A question arriving after streamed prose can resize the document inside
+            // `noteHeightOfRows`. Reporting here asks the pane for `topmostPlace`, which calls
+            // `rect(ofRow:)` and reenters AppKit's half-updated row-height cache. Coalesce those
+            // notifications onto the next turn, when both the heights and placement are final.
+            if isNotingHeights {
+                guard !clipMoveIsScheduled else { return }
+                clipMoveIsScheduled = true
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    clipMoveIsScheduled = false
+                    clipMoved()
+                }
+                return
+            }
             applyPendingPlacement()
             // **However the view got away from the end, the standing instruction goes with it.**
             //

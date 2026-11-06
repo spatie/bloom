@@ -84,6 +84,9 @@ struct TranscriptListView: View {
     /// each. Kept in the pane's memory beside `expanded` and for the same reason: a turn somebody
     /// opened to read must not fold itself away again behind a tab switch.
     @State private var unfolded: Set<Int> = []
+    /// Folds opened by a click in this pane, which stay open at the live end. Not remembered, so a
+    /// live fold restored after a pane change still folds back. See `refoldedAtLiveEnd`.
+    @State private var openedHere: Set<Int> = []
     /// Completed turns whose interim work the reader opened beneath the prompt.
     @State private var unfoldedTurns: Set<Int> = []
     /// Whether the reader has unfolded the setup log at the head of this conversation, and nil
@@ -184,9 +187,6 @@ struct TranscriptListView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Whether this window is the one in front, which is the whole of what the follower needs it
-    /// for: a display link in a backgrounded app is a battery cost with nobody watching it.
-    @Environment(\.controlActiveState) private var activeState
     /// The text scale the rows are drawn at, which is part of what the height cache is keyed on: a
     /// row at a different size is a different height, and an offset written down at one size is a
     /// point into a document laid out at another.
@@ -363,6 +363,7 @@ struct TranscriptListView: View {
             bubbleWidth: bubbleWidth,
             conversation: conversationSelection,
             linkActions: linkActions,
+            table: controller,
             fontScale: fontScale,
             chatFont: chatFont,
             lineHeight: chatLineHeight,
@@ -1172,7 +1173,9 @@ struct TranscriptListView: View {
             // the live end and more work arrives, it is a growing log again: keep the newest item
             // visible and return everything completed above it to the compact count.
             if atLiveEnd.value {
-                let refolded = TranscriptFold.refoldedAtLiveEnd(unfolded, in: rescanned)
+                let refolded = TranscriptFold.refoldedAtLiveEnd(
+                    unfolded, in: rescanned, keeping: openedHere
+                )
                 if refolded != unfolded { unfolded = refolded }
             }
             // A row has landed, so the end of the content has moved. Between rows the tail grows
@@ -1190,8 +1193,8 @@ struct TranscriptListView: View {
         // than read from a body: it writes no state and reads none, so nothing else would tell it.
         // Both of these move when a person changes something about the window, which is not a
         // thing that happens while an answer arrives.
-        .onChange(of: activeState, initial: true) { _, state in
-            follower.isFrontmost = isVisible.value && state != .inactive
+        .background {
+            TranscriptWindowActivitySignal(follower: follower)
         }
         .onChange(of: reduceMotion, initial: true) { _, reduced in
             follower.travels = TranscriptFollow.travels(reduceMotion: reduced)
@@ -1218,6 +1221,7 @@ struct TranscriptListView: View {
             liveEndRequest = TranscriptLiveEndRequest(handled: remembered?.liveEndRequest ?? 0)
             expanded = remembered?.expanded ?? []
             unfolded = remembered?.unfolded ?? []
+            openedHere = []
             unfoldedTurns = remembered?.unfoldedTurns ?? []
             setupLogOpen = nil
             folds = transcript.presentationFolds()
@@ -1342,7 +1346,7 @@ struct TranscriptListView: View {
         let wasActive = isVisible.value
         isVisible.value = active
         controller.setColumnActive(active)
-        follower.isFrontmost = active && activeState != .inactive
+        follower.isColumnActive = active
         guard active else {
             remember()
             follower.stop()
@@ -1668,8 +1672,10 @@ struct TranscriptListView: View {
         controller.willChangeFoldRows(.fold(firstSeq))
         if unfolded.contains(firstSeq) {
             unfolded.remove(firstSeq)
+            openedHere.remove(firstSeq)
         } else {
             unfolded.insert(firstSeq)
+            openedHere.insert(firstSeq)
         }
         // Written down at once, for the reason `toggle` gives: opening a run to read it and
         // switching tab to look at what it did is one gesture.

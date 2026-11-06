@@ -109,7 +109,7 @@ struct MenuBarSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { sleepSwitch.refresh() }
+        .task { await sleepSwitch.watchStanding() }
     }
 
     // MARK: - The live preview

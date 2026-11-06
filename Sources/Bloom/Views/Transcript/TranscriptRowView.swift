@@ -126,7 +126,8 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
-                    home: home
+                    home: home,
+                    sentAt: row.createdAt
                 )
             } else {
                 // Attachments reach the agent as paths in the prompt text, which is the only
@@ -139,7 +140,8 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: turn.body,
                     attachments: turn.paths,
-                    home: home
+                    home: home,
+                    sentAt: row.createdAt
                 )
             }
 
@@ -161,7 +163,7 @@ struct TranscriptRowView: View, Equatable {
                 ProseRowView(
                     text: text, part: answerPart,
                     copyText: answerPart?.isFirst == false ? nil : responseCopyText,
-                    smoothMarkdownHandoff: smoothMarkdownHandoff
+                    smoothMarkdownHandoff: smoothMarkdownHandoff, sentAt: row.createdAt
                 )
             }
 
@@ -240,6 +242,8 @@ struct TranscriptRowView: View, Equatable {
         case .notice:
             if let note = ConversationNotResumed.sentence(fromNote: row.payload) {
                 ConversationNotResumedRowView(sentence: note)
+            } else if let lifecycle = WorkspaceLifecycleNote(payload: row.payload) {
+                WorkspaceLifecycleRowView(note: lifecycle)
             } else {
                 RateLimitRowView(payload: row.payload)
             }

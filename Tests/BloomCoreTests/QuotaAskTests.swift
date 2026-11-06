@@ -82,6 +82,15 @@ struct QuotaMergeTests {
         #expect(QuotaMerge.resolve(silent, against: known).fraction == 0.77)
     }
 
+    /// The same window stated two ways: `get_usage` carries fractional seconds, the notification
+    /// whole ones. That is not a turnover, and reading it as one blanked the session meter.
+    @Test func keepsAFigureAcrossAResetStatedToTheWholeSecond() {
+        let polled = quota(.claudeCode, .named("five_hour"), .fraction(0.04), resetsAt: reset + 0.415)
+        let notified = quota(.claudeCode, .named("five_hour"), .unknown, resetsAt: reset, observedAt: now + 60)
+
+        #expect(QuotaMerge.resolve(notified, against: polled).fraction == 0.04)
+    }
+
     /// And the limit of all three, which is the assertion that keeps this honest. A different
     /// reset time means the window turned over, so a figure measured against the old one is a
     /// measurement of something that no longer exists and none of it carries.

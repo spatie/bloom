@@ -52,8 +52,12 @@ final class TranscriptLiveEndFollower {
     /// so this is what keeps the link up between rows.
     var isStreaming = false { didSet { refresh() } }
 
-    /// Whether this window is the one in front. See the header.
-    var isFrontmost = true { didSet { refresh() } }
+    /// The two lifetimes are independent: a retained column may be hidden in an active window.
+    /// Keeping them here lets the tiny window activity signal change the follower without
+    /// invalidating the transcript list's body on every app switch.
+    var isColumnActive = false { didSet { refresh() } }
+    var isWindowActive = false { didSet { refresh() } }
+    private var isFrontmost: Bool { isColumnActive && isWindowActive }
 
     /// Whether the reader has hold of the view. Anything that is not an idle scroll phase.
     var isPaused = false { didSet { refresh() } }

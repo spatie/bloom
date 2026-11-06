@@ -130,6 +130,19 @@ public enum TranscriptTextMeasure {
         return Size(width: width, height: height)
     }
 
+    /// Frames land on half points on a Retina display, and a reported width rounded up can sit
+    /// that far over one without a glyph crossing the edge.
+    private static let frameTolerance: Double = 0.5
+
+    /// Whether a run must be laid out again at its placed frame before it draws. The container keeps
+    /// the width of SwiftUI's last question, which can be a probe: the ideal size drew a long pasted
+    /// turn past its bubble, the minimum (`floorWidth`) drew one sliver of glyph per line.
+    public static func needsRelayoutAtFrame(containerWidth: Double, frameWidth: Double, reportedWidth: Double) -> Bool {
+        let overflowsFrame = reportedWidth > frameWidth + frameTolerance
+        let narrowerThanFrame = containerWidth < frameWidth - frameTolerance
+        return overflowsFrame || narrowerThanFrame
+    }
+
     /// The room a proposal offered, or a hair's width when it offered none.
     ///
     /// The only thing a run that measured nothing is allowed to report itself as. See the head of

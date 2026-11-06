@@ -223,6 +223,8 @@ final class TranscriptModel {
     /// finished one walked the entire transcript on every pass to return nil. Keeping the answer
     /// removes the walk and the dependency together. See `ContextWindowUsage.updated`.
     private(set) var contextUsage: ContextWindowUsage?
+    /// Either number on its own, until the other arrives in a later batch.
+    @ObservationIgnored private var contextHeard = ContextWindowUsage.unknown
 
     /// Text and thinking arriving live, before the completed block is persisted.
     private(set) var streamingText = ""
@@ -566,7 +568,8 @@ final class TranscriptModel {
         // The one place the whole list is walked, because it is also the one place there is a
         // whole list to walk. Everything after this folds in what arrived. Nothing is held from
         // before: this is a session being read from the start.
-        contextUsage = ContextWindowUsage.latest(in: built.rows)
+        contextHeard = ContextWindowUsage.updated(.unknown, with: built.rows)
+        contextUsage = contextHeard.known
         SwitchTrace.mark("transcript.rows.built", workspace: workspace?.id)
         SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace?.id)
 
@@ -1509,6 +1512,10 @@ final class TranscriptModel {
         }
     }
 
+    func contextBreakdown() async -> ContextBreakdown? {
+        await runner?.contextBreakdown()
+    }
+
     private var isWorkspaceArchiving: Bool {
         workspace.map { app.isArchiving($0.id) } ?? false
     }
@@ -2105,7 +2112,7 @@ final class TranscriptModel {
 
     /// Pulls anything the runner has persisted since the last row we hold. The runner is the
     /// single writer, so reading back from the store keeps one ordering and one source of truth.
-    private func appendLatestMessages() async {
+    func appendLatestMessages() async {
         guard let store else { return }
         // Nothing is appended to a list the first read is still building. A workspace can be handed
         // a prompt the same moment its model is made, which starts the agent while the history is
@@ -2180,7 +2187,8 @@ final class TranscriptModel {
 
     /// Folds what the newest rows say about the context window into the held reading.
     private func noteContextWindow(in appended: ArraySlice<TranscriptRow>) {
-        let usage = ContextWindowUsage.updated(contextUsage, with: appended)
+        contextHeard = ContextWindowUsage.updated(contextHeard, with: appended)
+        let usage = contextHeard.known
         if usage != contextUsage { contextUsage = usage }
     }
 

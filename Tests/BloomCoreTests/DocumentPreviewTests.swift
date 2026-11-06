@@ -23,6 +23,14 @@ struct DocumentPreviewTests {
         #expect(DocumentPreview.kind(path: "public/LOGO.SVG") == .svg)
     }
 
+    @Test("Markdown and HTML fences have a preview, other languages do not")
+    func fenceKinds() {
+        #expect(DocumentPreview.kind(language: .markdown) == .markdown)
+        #expect(DocumentPreview.kind(language: .html) == .html)
+        #expect(DocumentPreview.kind(language: .css) == nil)
+        #expect(DocumentPreview.kind(language: .plainText) == nil)
+    }
+
     @Test("a file's address resolves back to the same file, spaces and hashes included")
     func roundTrip() throws {
         let root = try worktree()

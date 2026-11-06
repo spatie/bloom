@@ -30,7 +30,7 @@ final class KeepAwakeModel {
             UserDefaults.standard.set(newValue, forKey: KeepAwake.lidKey)
             // Asking is what registers the daemon and, the first time, what sends somebody to
             // System Settings to allow it.
-            if newValue { SleepSwitch.shared.enable() }
+            if newValue { Task { await SleepSwitch.shared.enable() } }
             apply()
         }
     }

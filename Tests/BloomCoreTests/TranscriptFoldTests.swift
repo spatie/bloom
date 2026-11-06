@@ -420,12 +420,17 @@ struct TranscriptFoldTests {
 
         #expect(
             TranscriptFold.refoldedAtLiveEnd(
-                [historical.firstSeq, live.firstSeq, laterLive.firstSeq], in: folds
+                [historical.firstSeq, live.firstSeq, laterLive.firstSeq], in: folds, keeping: []
             ) == [historical.firstSeq]
         )
         #expect(
-            TranscriptFold.refoldedAtLiveEnd([historical.firstSeq], in: folds)
+            TranscriptFold.refoldedAtLiveEnd([historical.firstSeq], in: folds, keeping: [])
                 == [historical.firstSeq]
+        )
+        #expect(
+            TranscriptFold.refoldedAtLiveEnd(
+                [live.firstSeq, laterLive.firstSeq], in: folds, keeping: [laterLive.firstSeq]
+            ) == [laterLive.firstSeq]
         )
     }
 
