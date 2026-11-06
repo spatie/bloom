@@ -570,8 +570,7 @@ struct WorkspaceMergeToolTests {
         let store = try makeTestStore("merge-forge-changed")
         let target = try await workspace(in: store)
         let tool = WorkspaceMergeTool(read: { _ in
-            do { try await store.clearPullRequestNumbers(repoID: target.repoID) }
-            catch { Issue.record("Could not change the forge generation: \(error)") }
+            do { try await store.clearPullRequestNumbers(repoID: target.repoID) } catch { Issue.record("Could not change the forge generation: \(error)") }
             return .found(Self.open(), local: nil)
         }) { _, _, _ in
             Issue.record("A stale request was sent to the agent")

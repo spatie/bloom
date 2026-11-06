@@ -2647,8 +2647,7 @@ final class WorkspaceModel {
         squashMessage: SquashCommitMessage? = nil,
         overrides: PromptOverrides = PromptOverrides()
     ) async -> String? {
-        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
-        catch { return error.readableMessage }
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) } catch { return error.readableMessage }
         if let problem = pullRequest.mergeMethodProblem(method) { return problem }
         guard let session = await sessionForPullRequest(titledIfNew: "Merge") else {
             return "Could not open a session in \(workspace.name) to send the request to."
@@ -2674,8 +2673,7 @@ final class WorkspaceModel {
         let text = await turn(
             [render.text, location, asked].compactMap { $0 }.joined(separator: "\n\n"), for: .merge, forge: pullRequest.forge
         )
-        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
-        catch { return error.readableMessage }
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) } catch { return error.readableMessage }
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil
@@ -2762,8 +2760,7 @@ final class WorkspaceModel {
             ConflictInstructions.asking(rendered, in: path, contents: contents)
         }.value
         let text = await turn(asked, for: .fixConflicts, forge: forge)
-        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
-        catch { return error.readableMessage }
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) } catch { return error.readableMessage }
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil
@@ -2779,8 +2776,7 @@ final class WorkspaceModel {
         guard let session = await sessionForPullRequest(titledIfNew: "Rebase") else {
             return "Could not open a session in \(workspace.name) to send the request to."
         }
-        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) }
-        catch { return error.readableMessage }
+        do { try await GitHubBridge.validateForge(pullRequest, worktree: workspace.path) } catch { return error.readableMessage }
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil
