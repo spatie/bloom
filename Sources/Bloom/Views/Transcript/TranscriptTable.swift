@@ -1994,6 +1994,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// notifications. Reading it afterwards mistakes a shorter viewport for scrolling up.
         private func viewportWillResize() {
             guard !isLiveScrolling, viewportPlace == nil, heights.isReady else { return }
+            // A pane with no height has no reader in it yet: its place is the top row, and replayed
+            // after the first layout it threw a conversation just opened at its end back to the top.
+            guard TranscriptAnchor.canPlace(viewportHeight: Double(currentGeometry.viewportHeight)) else { return }
             // The middle row, as every correction after the resize holds: anchored on the top row
             // instead, an inspector opened and closed again left the reader tens of points away.
             viewportPlace = PlaceBeforeResize(
