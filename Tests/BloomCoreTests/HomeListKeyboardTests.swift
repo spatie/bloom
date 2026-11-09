@@ -12,22 +12,22 @@ import Testing
 struct HomeListKeyboardTests {
     @Test("arriving at Home with nothing focused hands the list the keyboard")
     func arrivalClaims() {
-        #expect(HomeListKeyboard.claims(searchFieldHasKeyboard: false, hasClaimed: false))
+        #expect(HomeListKeyboard.claims(isPresented: true, searchFieldHasKeyboard: false, hasClaimed: false))
     }
 
     /// The reported bug. The user is mid word in the toolbar's search field when the results
     /// arrive and rebuild the table under him.
     @Test("a list built while the search field is being typed into does not claim")
     func searchFieldKeepsTheKeyboard() {
-        #expect(!HomeListKeyboard.claims(searchFieldHasKeyboard: true, hasClaimed: false))
+        #expect(!HomeListKeyboard.claims(isPresented: true, searchFieldHasKeyboard: true, hasClaimed: false))
     }
 
     /// The other half of it: even with the field let go of, a table rebuilt by a filter moving is
     /// not somebody arriving at Home, so it gets no second offer.
     @Test("a rebuilt list does not claim again on the same visit")
     func rebuildDoesNotClaimAgain() {
-        #expect(!HomeListKeyboard.claims(searchFieldHasKeyboard: false, hasClaimed: true))
-        #expect(!HomeListKeyboard.claims(searchFieldHasKeyboard: true, hasClaimed: true))
+        #expect(!HomeListKeyboard.claims(isPresented: true, searchFieldHasKeyboard: false, hasClaimed: true))
+        #expect(!HomeListKeyboard.claims(isPresented: true, searchFieldHasKeyboard: true, hasClaimed: true))
     }
 
     /// The whole of a search, run through the rule in the order the events actually happen. The
@@ -38,7 +38,7 @@ struct HomeListKeyboardTests {
 
         func listAppeared(searchFieldHasKeyboard: Bool) -> Bool {
             let claims = HomeListKeyboard.claims(
-                searchFieldHasKeyboard: searchFieldHasKeyboard, hasClaimed: hasClaimed
+                isPresented: true, searchFieldHasKeyboard: searchFieldHasKeyboard, hasClaimed: hasClaimed
             )
             if claims { hasClaimed = true }
             return claims
@@ -56,5 +56,13 @@ struct HomeListKeyboardTests {
         #expect(!listAppeared(searchFieldHasKeyboard: true))
         // The user clicks a result, comes back, and clears the field. Still one visit.
         #expect(!listAppeared(searchFieldHasKeyboard: false))
+    }
+
+    /// Home stays mounted behind a workspace once it has been visited, so its list exists while
+    /// the reader is elsewhere. A hidden list holding the keyboard would archive an unseen row on
+    /// Delete. See `HomePresence`.
+    @Test("a list that is not on screen never claims")
+    func hiddenListDoesNotClaim() {
+        #expect(!HomeListKeyboard.claims(isPresented: false, searchFieldHasKeyboard: false, hasClaimed: false))
     }
 }

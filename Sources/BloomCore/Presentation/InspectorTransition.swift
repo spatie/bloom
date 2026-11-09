@@ -25,9 +25,13 @@ import Foundation
 /// second one is why this is not constant. It only runs on a narrow window, which is what the
 /// owner's was.
 ///
-/// The same method assigns the panes' new content immediately above those animations, so selecting
-/// a workspace from Home hands SwiftUI a tree with Home's list removed from it and then starts a
-/// quarter-second live resize for it to be removed during.
+/// When this was written, the same method assigned the panes' new content immediately above those
+/// animations, so selecting a workspace from Home handed SwiftUI a tree with Home's list removed
+/// from it and then started a quarter-second live resize for it to be removed during. The panes'
+/// roots are no longer reassigned there, and this guard alone did not stop the crash: it came back
+/// twice on 1.39.6, from live resizes this method does not start. `HomePresence` is the fix that
+/// holds, by never removing Home's list at all. This rule stays because an animated collapse over
+/// a pane that is being swapped is still layout churn for nothing.
 ///
 /// **So the animation is dropped for exactly the case that crashes.** A transition where the
 /// content is also changing is a full pane swap, where a sliding inspector is dressing on top of

@@ -9,6 +9,7 @@ import BloomCore
 /// the centre pane to be rebuilt from scratch because an alert was dismissed.
 struct DetailColumn: View {
     @Environment(AppModel.self) private var app
+    @State private var home = HomePresence()
 
     var body: some View {
         if !app.isLoaded {
@@ -18,8 +19,36 @@ struct DetailColumn: View {
         } else {
             ZStack {
                 retainedWorkspaces
+                retainedHome
                 otherSelection
             }
+            .onChange(of: app.selection, initial: true) { _, selection in
+                home.select(selection)
+            }
+        }
+    }
+
+    /// Home, kept behind the other panes once it has been visited, because removing its `List`
+    /// while the window is in live resize aborts the app. See `HomePresence`, which carries the
+    /// crash and the measurement, and `HomeView.isPresented` for what Home stops doing while it
+    /// is out of sight.
+    @ViewBuilder
+    private var retainedHome: some View {
+        if home.isMounted(for: app.selection) {
+            let isPresented = HomePresence.isPresented(app.selection)
+            HomeView(isPresented: isPresented)
+                .modifier(HeldWidth(isActive: isPresented))
+                // Out of sight, the list is folded to no height rather than held at its size: a
+                // table with no visible rows has nothing for a resize to lay out. Measured with
+                // `ResizeProbe --resize-visit-home` against a run that never visits Home, three
+                // runs each, alternated: held at full size a window resize step cost 9 to 18 per
+                // cent more main thread time, folded 3 to 9 per cent.
+                .frame(maxHeight: isPresented ? .infinity : 0, alignment: .top)
+                .clipped()
+                .allowsHitTesting(isPresented)
+                .accessibilityHidden(!isPresented)
+                .opacity(isPresented ? 1 : 0)
+                .zIndex(isPresented ? 1 : 0)
         }
     }
 
@@ -60,12 +89,12 @@ struct DetailColumn: View {
     @ViewBuilder
     private var otherSelection: some View {
         switch app.selection {
-        case .home:
-            HomeView()
+        case .home, .workspace:
+            // Both are drawn above, kept rather than rebuilt: `retainedHome` and
+            // `retainedWorkspaces`.
+            EmptyView()
         case .mail:
             MailView()
-        case .workspace:
-            EmptyView()
         case .conversation(let id):
             ConversationColumnView(sessionID: id)
         case .archivedConversation(let id):

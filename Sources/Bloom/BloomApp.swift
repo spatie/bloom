@@ -113,6 +113,9 @@ struct BloomApp: App {
         #if DEBUG
         if MenuProbe.isRequested { MenuProbe.schedule() }
         if MenuActionProbe.isRequested { MenuActionProbe.schedule() }
+        // `Bloom --teardown-probe <out.json>` leaves Home while the window is in live resize,
+        // which is the AttributeGraph abort `HomePresence` exists to stop. See `TeardownProbe`.
+        if TeardownProbe.isRequested { TeardownProbe.schedule() }
         #endif
         Log.launchStep("app initialised")
     }
