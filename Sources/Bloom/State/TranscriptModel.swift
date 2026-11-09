@@ -1684,6 +1684,7 @@ final class TranscriptModel {
                         let latest = feed.snapshot()
                         guard latest.revision == cursor else { continue }
                         if let event = latest.recovery?.stateEvent, case .error = event { pendingResult = nil }
+                        await reportPendingPermissionAsk()
                         if AgentPresentationReconciliation.permitsAutomaticDrain(
                             isCatchingUp: isReconcilingPresentation, isTurnRunning: isRunning || feed.isTurnRunning
                         ), let result = pendingResult {
@@ -1761,6 +1762,12 @@ final class TranscriptModel {
                 WorkspaceTurnEnding.ofResult(result, stoppedByOwner: wasStoppedByHand), in: session
             )
         }
+    }
+
+    private func reportPendingPermissionAsk() async {
+        guard isAwaitingPermission, let store,
+              let ending = try? await store.pendingPermissionEnding(sessionID: session.id) else { return }
+        await app.noteWorkspaceTurnEnded(ending, in: session)
     }
 
     private func recoverPresentation(_ recovery: AgentPresentationRecovery, after cursor: UInt64) async {
@@ -1995,11 +2002,10 @@ final class TranscriptModel {
             if let workspaceNow {
                 NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
             }
-            // A turn stuck on the owner looks, from another workspace, exactly like one still
-            // working. Not while replaying: an ask read back after a relaunch may have been
-            // answered long ago, and the watch is spent by whatever it says.
-            if !isReconcilingPresentation, !isReplayingPastTurn, let ask = pendingPermissionAsks.last {
-                await app.noteWorkspaceTurnEnded(WorkspaceTurnEnding.ofAsk(ask), in: session)
+            // Feed runners report after reconciliation, once decisions and recovered rows have
+            // caught up. Otherwise an automatically answered ask can spend the watch mid-replay.
+            if !isReconcilingPresentation, !isReplayingPastTurn {
+                await reportPendingPermissionAsk()
             }
 
         case .permissionDecided(let resolution):

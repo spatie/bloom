@@ -103,6 +103,14 @@ extension Store {
         ).compactMap(Self.pendingPermissionAsk(from:))
     }
 
+    /// A watcher must hear only about a question still blocking this turn. Reading the state and
+    /// pending asks together excludes automatic approvals and completed turns during feed replay.
+    public func pendingPermissionEnding(sessionID: SessionID) throws -> WorkspaceTurnEnding? {
+        guard try session(id: sessionID)?.state == .waiting,
+              let pending = try pendingPermissionAsks(sessionID: sessionID).last else { return nil }
+        return WorkspaceTurnEnding.ofAsk(pending.ask)
+    }
+
     /// Every unanswered question in the database, oldest first.
     ///
     /// This is what makes a blocked workspace visible from somewhere other than its own transcript,

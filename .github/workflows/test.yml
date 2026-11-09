@@ -65,11 +65,14 @@ jobs:
       # which place. Pinned, because this is a binary from the internet.
       - name: Lint the workflows
         env:
+          GH_TOKEN: ${{ github.token }}
           ACTIONLINT_VERSION: 1.7.7
         run: |
           set -euo pipefail
-          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
-          curl -sSfL "$url/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" | tar xz actionlint
+          # The release API still serves assets when GitHub's download URLs return 504.
+          gh release download "v${ACTIONLINT_VERSION}" --repo rhysd/actionlint \
+            --pattern "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" --output actionlint.tar.gz
+          tar xzf actionlint.tar.gz actionlint
           # SC2153 is ignored, and only SC2153. actionlint hands every `run:`
           # block to shellcheck, which cannot see the step's `env:` block, so
           # every value passed in the safe way, through the environment rather
@@ -129,12 +132,13 @@ jobs:
       # rather than two commands that have to be kept in step by hand.
       - name: Lint the Swift
         env:
+          GH_TOKEN: ${{ github.token }}
           SWIFTLINT_VERSION: 0.65.1
         run: |
           set -euo pipefail
           command -v zsh >/dev/null || sudo apt-get install -y -qq zsh
-          url="https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}"
-          curl -sSfL -o swiftlint.zip "$url/swiftlint_linux_amd64.zip"
+          gh release download "$SWIFTLINT_VERSION" --repo realm/SwiftLint \
+            --pattern swiftlint_linux_amd64.zip --output swiftlint.zip
           mkdir -p swiftlint-bin
           unzip -q -j swiftlint.zip swiftlint-static -d swiftlint-bin
           mv swiftlint-bin/swiftlint-static swiftlint-bin/swiftlint
@@ -162,12 +166,13 @@ jobs:
 
       - name: Scan the history for secrets
         env:
+          GH_TOKEN: ${{ github.token }}
           GITLEAKS_VERSION: 8.30.1
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
         run: |
           set -euo pipefail
-          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" "$url/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          gh release download "v${GITLEAKS_VERSION}" --repo gitleaks/gitleaks \
+            --pattern "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" --output "$RUNNER_TEMP/gitleaks.tar.gz"
           echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git . --config .gitleaks.toml --log-opts=HEAD --redact --no-banner --exit-code 1
