@@ -1,6 +1,7 @@
 import SwiftUI
 import Observation
 import BloomCore
+import Darwin
 
 /// The one place that owns live shells.
 ///
@@ -256,6 +257,30 @@ final class TerminalSessionStore {
               !view.hasExited else { return false }
         recall.remember(trimmed, sentTo: pane)
         type(trimmed, into: view, pane: pane)
+        return true
+    }
+
+    /// A finished chat run is no proof that the user has left its terminal idle. Never hand the
+    /// next launcher to an editor or a password prompt they started there afterwards.
+    func retypeIfIdle(_ command: String, inPane pane: String) async -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let view = terminals[pane], let process = view.process,
+              process.running, !view.hasExited, startingPanes.insert(pane).inserted else { return false }
+        defer { startingPanes.remove(pane) }
+
+        if let session = paneSession[pane] {
+            guard let persistence, let pids = await persistence.panePIDSnapshot(),
+                  let shell = pids[session], let table = await ProcessTable.current(),
+                  table.isBusy(shell: shell) == false,
+                  paneSession[pane] == session else { return false }
+        } else {
+            guard process.shellPid > 0, tcgetpgrp(process.childfd) == process.shellPid else { return false }
+        }
+        guard terminals[pane] === view, process.running, !view.hasExited else { return false }
+        recall.remember(trimmed, sentTo: pane)
+        // Discard an unfinished shell input line so it cannot become a prefix of the launcher.
+        view.send(txt: "\u{15}" + trimmed + "\n")
+        activity.typed(inPane: pane)
         return true
     }
 

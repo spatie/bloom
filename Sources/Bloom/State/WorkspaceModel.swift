@@ -58,6 +58,8 @@ final class WorkspaceModel {
     /// One transcript per session, built on demand.
     private var transcripts: [SessionID: TranscriptModel] = [:]
 
+    @ObservationIgnored var lastTerminalRun: (pane: String, run: TerminalCommandRun)?
+
     // Inspector.
     private var lastChangesScope: DiffScope = .all
     private var lastHistoryCommit: BranchCommit?
