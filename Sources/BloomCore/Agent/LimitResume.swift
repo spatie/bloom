@@ -72,7 +72,11 @@ public struct LimitResume: Sendable, Hashable {
     ///
     /// Mutating, so it cannot be called inside `#expect`: lift it into a `let` first.
     public mutating func step(quotas: [AgentQuota], at now: Date) -> Step {
-        let live = quotas.filter { $0.provider == provider && !$0.hasExpired(at: now) }
+        // A spent credit balance never resets and stops being reported once the org disables it,
+        // so counting it kept the resume checking forever. The plan windows alone decide.
+        let live = quotas.filter {
+            $0.provider == provider && !$0.window.isCreditBalance && !$0.hasExpired(at: now)
+        }
         let spent = live.filter { QuotaSeverity.of($0.fraction) == .spent }
 
         if let wall = spent.compactMap(\.resetsAt).max() {

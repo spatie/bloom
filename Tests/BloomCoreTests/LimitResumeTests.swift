@@ -127,6 +127,25 @@ struct LimitResumeTests {
         #expect(step == .waitUntil(weeklyReset))
     }
 
+    /// A spent credit balance has no reset and is no longer restated once the org disables it. It
+    /// must not hold the resume after the session window turns over, nor release it before.
+    @Test func ignoresASpentCreditBalance() {
+        var resume = LimitResume(provider: .claudeCode, hitAt: hit)
+        let credits = AgentQuota(
+            provider: .claudeCode, window: .extraUsage,
+            measure: .counted(used: 500, limit: 500, unit: "EUR"),
+            resetsAt: nil, observedAt: hit.addingTimeInterval(-86_400)
+        )
+        let session = quota(fraction: 1, observedAt: hit)
+        let before = resume.step(quotas: [credits, session], at: hit.addingTimeInterval(60))
+        #expect(before == .waitUntil(reset))
+
+        let weekly = quota("seven_day", fraction: 0.4, resetsAt: reset.addingTimeInterval(86_400 * 3),
+                           observedAt: reset.addingTimeInterval(30))
+        let after = resume.step(quotas: [credits, session, weekly], at: reset.addingTimeInterval(40))
+        #expect(after == .go)
+    }
+
     /// With no reset stated anywhere, it needs a reading from after the hit showing room.
     @Test func withNoResetKnownItWaitsForAReadingAfterTheHit() {
         var resume = LimitResume(provider: .claudeCode, hitAt: hit)
