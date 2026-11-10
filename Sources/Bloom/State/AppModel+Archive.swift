@@ -737,16 +737,52 @@ extension AppModel {
     ///
     /// The one entry point for "show me this workspace" from outside the window: the menu bar
     /// item, the Services item, a deep link and the capture harness all arrive here through
-    /// `OpenWorkspaceNotification`. It used to set `.workspace(id)` whatever the id was, and an
-    /// id that had since been archived resolved to no workspace at all, so the window quietly fell
+    /// `OpenWorkspaceNotification` or the URL handler. It used to set `.workspace(id)` whatever
+    /// the id was, and an id that had since been archived resolved to no workspace, so the window fell
     /// back to Home. Now an archived id opens the reader instead of nothing.
-    func open(workspaceID id: WorkspaceID) async {
-        if workspaces.contains(where: { $0.id == id }) {
-            selection = .workspace(id)
+    func open(workspaceID id: WorkspaceID, chatID: SessionID? = nil) async {
+        let workspace: Workspace
+        if let live = workspaces.first(where: { $0.id == id }) {
+            workspace = live
+        } else if let archived = await archivedWorkspaces().first(where: { $0.id == id }) {
+            workspace = archived
+        } else {
+            alert = BloomAlert(
+                title: "Workspace not found",
+                message: "No workspace with that ID: \(id). It may have been deleted or belong to another copy of Bloom."
+            )
             return
         }
-        guard let archived = await archivedWorkspaces().first(where: { $0.id == id }) else { return }
-        openArchived(archived)
+
+        let model = model(for: workspace)
+        if let chatID {
+            // Read only this workspace's open chats. A global session lookup could select a chat
+            // from another worktree, and setting activeSessionID alone misses chats in split tabs.
+            await model.reloadSessions()
+            if TabSet.tabbable(model.sessions).contains(chatID) {
+                if workspace.state == .active {
+                    let tabs = WorkspaceTabsStore.shared
+                    tabs.reveal(.chat(chatID), in: model, focusing: true)
+                    // The chat can also be the root of a split whose other pane held focus.
+                    if let tab = tabs.selectedTab(in: model),
+                       let pane = tabs.layout(of: tab).panes.first(where: { tabs.content(of: $0, in: tab) == .chat(chatID) }) {
+                        tabs.focus(pane, in: tab, of: model)
+                    }
+                } else {
+                    model.activeSessionID = chatID
+                }
+            } else {
+                alert = BloomAlert(
+                    title: "Chat not found",
+                    message: "No open chat with ID \(chatID) in \(workspace.name). The workspace has been opened instead."
+                )
+            }
+        }
+        if workspace.state == .active {
+            selection = .workspace(id)
+        } else {
+            openArchived(workspace)
+        }
     }
 
     /// Where this workspace's branch still is. See `RestoreSource`.

@@ -26,46 +26,28 @@ enum BloomDeepLink {
         return registered.isEmpty ? ["bloom"] : Set(registered)
     }()
 
-    static func open(_ url: URL, in app: AppModel) {
-        guard let scheme = url.scheme?.lowercased(), Self.schemes.contains(scheme),
-              let values = values(from: url),
-              let prompt = values["prompt"]?.removingPercentEncoding,
-              let path = values["path"]?.removingPercentEncoding,
-              !prompt.isEmpty,
-              !path.isEmpty else {
-            app.alert = BloomAlert(
-                title: "Could not open the Bloom link",
-                message: "The link must include a prompt and project path."
-            )
+    static func open(_ url: URL, in app: AppModel) async {
+        let request: BloomLinkRequest
+        do {
+            request = try BloomLinkRequest(url: url, schemes: schemes)
+        } catch {
+            app.alert = BloomAlert(title: "Could not open the Bloom link", message: error.localizedDescription)
             return
         }
+        switch request {
+        case .workspace(let id, let chatID):
+            await app.open(workspaceID: id, chatID: chatID)
 
-        // The same answer `workspace_start` gives to "which project is this path", rather than a
-        // second canonicaliser beside it. See `BridgeProjectLookup.project(atPath:in:)`.
-        guard let repo = BridgeProjectLookup.project(atPath: path, in: app.repos) else {
-            app.alert = BloomAlert(
-                title: "Project not found",
-                message: "The path in this link is not one of Bloom's projects: \(path)"
-            )
-            return
+        case .prompt(let prompt, let path):
+            // The same answer workspace_start gives to "which project is this path".
+            guard let repo = BridgeProjectLookup.project(atPath: path, in: app.repos) else {
+                app.alert = BloomAlert(
+                    title: "Project not found",
+                    message: "The path in this link is not one of Bloom's projects: \(path)"
+                )
+                return
+            }
+            await app.createWorkspace(in: repo, prompt: prompt)
         }
-
-        Task { await app.createWorkspace(in: repo, prompt: prompt) }
     }
-
-    private static func values(from url: URL) -> [String: String]? {
-        let absolute = url.absoluteString
-        guard let separator = absolute.range(of: "://") else { return nil }
-        var payload = String(absolute[separator.upperBound...])
-        if payload.hasPrefix("?") { payload.removeFirst() }
-
-        var values: [String: String] = [:]
-        for pair in payload.split(separator: "&", omittingEmptySubsequences: true) {
-            let pieces = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-            guard pieces.count == 2 else { continue }
-            values[String(pieces[0])] = String(pieces[1]).replacing("+", with: " ")
-        }
-        return values
-    }
-
 }

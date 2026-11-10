@@ -32,6 +32,12 @@ struct WorkspaceEntityQuery: EntityStringQuery {
         guard !needle.isEmpty else { return try await suggestedEntities() }
 
         let store = try await IntentDatabase.store()
+        // An explicit ID can open an archive just as entities(for:) can. Fuzzy picker searches
+        // still offer live workspaces only.
+        let id = WorkspaceID(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        if let exact = try await store.workspace(id: id) {
+            return try await WorkspaceLookup.entities(for: [exact], store: store, includePullRequests: false)
+        }
         var reposByID: [RepoID: Repo] = [:]
         for repo in try await store.repos() { reposByID[repo.id] = repo }
         let workspaces = try await store.workspaces().filter {

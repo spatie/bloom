@@ -31,8 +31,11 @@ final class BloomOpenCoordinator {
             MainWindow.raise()
             switch target {
             case .deepLink(let url):
-                BloomDeepLink.open(url, in: app)
-                inbox.finish(target)
+                Task { @MainActor [weak self, weak app] in
+                    guard let self, let app else { return }
+                    await BloomDeepLink.open(url, in: app)
+                    self.inbox.finish(target)
+                }
 
             case .projectDirectory(let path):
                 Task { @MainActor [weak self, weak app] in
