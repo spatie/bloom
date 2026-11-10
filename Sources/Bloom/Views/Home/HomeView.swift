@@ -31,6 +31,16 @@ import BloomCore
 struct HomeView: View {
     @Environment(AppModel.self) private var app
 
+    /// Whether Home is the pane the window is showing.
+    ///
+    /// `DetailColumn` keeps Home mounted behind the other panes once it has been visited, because
+    /// tearing its `List` down during a live resize aborts the app (see `HomePresence`). So this
+    /// view is no longer thrown away when the selection leaves, and everything that used to happen
+    /// once per visit because the view was new happens on this turning true instead: see `arrive`.
+    /// While it is false Home rebuilds nothing, offers nothing to the menu bar and takes no
+    /// keyboard.
+    var isPresented = true
+
     /// Archived workspaces, which `AppModel` deliberately does not hold: it lists active ones so
     /// the sidebar cannot show a worktree that no longer exists. Home is the one screen that has
     /// to be able to look at them, so it asks `AppModel` for them, once, rather than per row.
@@ -57,11 +67,9 @@ struct HomeView: View {
     /// Whether the list has already been handed the keyboard on this visit to Home.
     ///
     /// Held out here rather than beside the `.task` that reads it, because that task belongs to
-    /// the table and the table is not what a visit to Home is: the pane draws either the empty
-    /// state or the list, so a search whose results arrive after its names have stopped matching
-    /// destroys the table and builds another one. This state sits above that swap and is reset
-    /// only when `HomeView` itself is rebuilt, which is when the selection leaves Home and comes
-    /// back. See `HomeListKeyboard`.
+    /// the table and the table is not what a visit to Home is. This state is reset only when a
+    /// visit starts, which is when the selection comes back to Home. See `HomeListKeyboard` and
+    /// `arrive`.
     @State private var hasClaimedKeyboard = false
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open. The same arrangement the sidebar's rows use.
@@ -87,14 +95,14 @@ struct HomeView: View {
     /// same tracker and the same rules as the sidebar's, which is what stops one workspace
     /// arriving two different ways in two lists on the same screen.
     ///
-    /// Reset with the view, which is exactly what is wanted. `HomeView` is rebuilt every time the
-    /// selection leaves Home and comes back, and `RowArrival` says nothing arrives into a list it
-    /// has never seen anything in, so coming back to Home lands its forty rows in silence.
+    /// Reset at the start of every visit, which is exactly what is wanted: `RowArrival` says
+    /// nothing arrives into a list it has never seen anything in, so coming back to Home lands its
+    /// forty rows in silence. See `arrive`.
     @State private var arrival = RowArrival<WorkspaceID>()
 
-    /// Held by `AppModel` rather than by this view, which is thrown away and rebuilt every time
-    /// the selection leaves Home and comes back. A filter in `@State` would be cleared by opening
-    /// any workspace at all.
+    /// Held by `AppModel` rather than by this view, so the filter is the app's and not this tree's:
+    /// the same filter holds whether Home was kept behind a workspace or built fresh in a new
+    /// window.
     private var filter: HomeFilter { app.homeFilter }
 
     var body: some View {
@@ -131,11 +139,12 @@ struct HomeView: View {
         // greyed out on the screen that lists every workspace on the Mac. On the whole pane rather
         // than on the list, so the row still answers while the keyboard is in the search field, as
         // it does in Mail. See `FocusedMenuValues`.
-        .focusedValue(\.focusedWorkspaceRow, focusedRow)
+        .focusedValue(\.focusedWorkspaceRow, isPresented ? focusedRow : nil)
         // Rename from the menu bar. Ignored for a workspace this list is not drawing, so the
         // sidebar and Home can both listen to one post.
         .onReceive(NotificationCenter.default.publisher(for: .bloomRenameWorkspace)) { note in
-            guard let raw = note.userInfo?[Notification.bloomWorkspaceIDKey] as? String,
+            guard isPresented,
+                  let raw = note.userInfo?[Notification.bloomWorkspaceIDKey] as? String,
                   let row = row(for: WorkspaceID(raw)), !row.isArchived else { return }
             renaming = row.id
         }
@@ -229,19 +238,55 @@ struct HomeView: View {
             if old.query != new.query { app.searchTranscripts(new.query) }
         }
         .onChange(of: app.transcriptResults) { _, _ in rebuild(rescoped: true) }
-        .onAppear { app.searchTranscripts(app.homeFilter.query) }
+        .task(id: isPresented) { await arrive() }
+    }
+
+    /// What a visit to Home starts with, run whenever `isPresented` turns true.
+    ///
+    /// These used to happen because the view was new: the selection leaving Home threw the whole
+    /// tree away, so every visit built the list, its arrivals and its keyboard offer from nothing.
+    /// Home is kept now (see `HomePresence`), so the visit is started here instead, and the work it
+    /// skipped while out of sight is caught up in one rebuild.
+    private func arrive() async {
+        guard isPresented else {
+            // A list that is not on screen must not keep the keyboard it had: Return and Delete
+            // would still reach it. See `HomeListKeyboard`.
+            isListFocused = false
+            return
+        }
+        hasClaimedKeyboard = false
+        arrival = RowArrival()
+        rebuild()
+        app.searchTranscripts(app.homeFilter.query)
+        // A beat, so the table has laid out before the focus is aimed at it.
+        try? await Task.sleep(for: .milliseconds(50))
+        // And then only if there is still nobody the keyboard would be taken from. See
+        // `HomeListKeyboard`, which carries the whole sequence.
+        guard !Task.isCancelled, HomeListKeyboard.claims(
+            isPresented: isPresented,
+            searchFieldHasKeyboard: app.isSearchFieldFocused,
+            hasClaimed: hasClaimedKeyboard
+        ) else { return }
+        hasClaimedKeyboard = true
+        isListFocused = true
     }
 
     // MARK: - Body
 
-    @ViewBuilder
+    /// The list is always there, and the empty state is laid over it rather than swapped in for
+    /// it. Swapping destroyed the table every time a search emptied the pane, and destroying a
+    /// table while the window is in live resize is the crash on `HomePresence`.
     private var content: some View {
-        if let empty = emptyState, mixedGroups.isEmpty {
-            empty
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            list
-        }
+        let showsEmptyState = emptyState != nil && mixedGroups.isEmpty
+        return list
+            .opacity(showsEmptyState ? 0 : 1)
+            .accessibilityHidden(showsEmptyState)
+            .overlay {
+                if showsEmptyState, let empty = emptyState {
+                    empty
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
     }
 
     /// A real `List`, so the rows come with the things a hand-built stack never gets right: arrow
@@ -279,19 +324,6 @@ struct HomeView: View {
         .settlesArrivals($arrival)
         .scrollContentBackground(.hidden)
         .focused($isListFocused)
-        .task {
-            // A beat, so the table exists before the focus is aimed at it.
-            try? await Task.sleep(for: .milliseconds(50))
-            // And then only if there is still nobody the keyboard would be taken from. This task
-            // runs whenever the TABLE is built, which a search does twice per character, so
-            // without the guard typing "df" ended with the caret in the results. See
-            // `HomeListKeyboard`, which carries the whole sequence.
-            guard HomeListKeyboard.claims(
-                searchFieldHasKeyboard: app.isSearchFieldFocused, hasClaimed: hasClaimedKeyboard
-            ) else { return }
-            hasClaimedKeyboard = true
-            isListFocused = true
-        }
         // Return opens whatever the arrow keys landed on. The list has the keyboard whenever the
         // arrow keys are doing anything, so this is where the key press arrives.
         .onKeyPress(.return) {
@@ -548,6 +580,9 @@ struct HomeView: View {
     /// - Parameter rescoped: whether the list is being rebuilt because a filter moved, in which
     ///   case nothing in it counts as having arrived.
     private func rebuild(rescoped: Bool = false) {
+        // Out of sight, nothing is drawn from this, and the pass walks every workspace on the
+        // machine. `arrive` rebuilds once when Home comes back.
+        guard isPresented else { return }
         let stamp = Date()
         now = stamp
         listing = HomeList.build(
