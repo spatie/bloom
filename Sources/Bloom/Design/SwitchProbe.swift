@@ -18,6 +18,7 @@ import BloomCore
 ///
 ///     Bloom --switch-probe /tmp/switch.json --switch-order id1,id2 [--switch-cycles 3]
 ///           [--switch-driver click|programmatic] [--switch-settle 4000] [--window-size 1440x900]
+///           [--switch-panes https://example.test] [-workspace.columnCache 2]
 ///
 /// Everything that is not the selection itself is `ProbeHarness`: the flags, the window, the
 /// model, the failure, the report.
@@ -67,6 +68,7 @@ enum SwitchProbe {
         let (window, contentView) = await harness.window()
 
         guard !order.isEmpty else { harness.fail("--switch-order named no workspaces") }
+        await preparePanes()
 
         // Everything a fresh launch kicks off settles before the first measurement, so the first
         // switch is not paying for the sidebar's own arrival.
@@ -156,6 +158,42 @@ enum SwitchProbe {
         ]
         harness.write(.object(own.merging(harness.conditions(window: window)) { mine, _ in mine }))
         exit(0)
+    }
+
+    /// Copied databases carry chats but no pane layouts. Use the same creation and splitting
+    /// routes as the menus so a mixed-pane run measures real browsers and terminals.
+    private static func preparePanes() async {
+        guard let url = ProbeHarness.value(for: "--switch-panes") else { return }
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        guard bundleID == "be.spatie.bloom.dev" || bundleID.hasPrefix("be.spatie.bloom.typography-"),
+              ProcessInfo.processInfo.environment["BLOOM_DB_PATH"] != nil else {
+            harness.fail("--switch-panes requires an isolated probe or dev app and BLOOM_DB_PATH")
+        }
+        guard let address = URL(string: url),
+              ["http", "https"].contains(address.scheme?.lowercased() ?? ""),
+              address.host != nil else {
+            harness.fail("--switch-panes requires an HTTP or HTTPS URL")
+        }
+        guard let app = ProbeHarness.appModel else { harness.fail("no app model") }
+        let tabs = WorkspaceTabsStore.shared
+        for id in order {
+            guard let workspace = app.workspaces.first(where: { $0.id == id }) else {
+                harness.fail("--switch-order names an unknown workspace: \(id)")
+            }
+            let model = app.model(for: workspace)
+            await model.reloadSessions()
+            guard let session = model.activeSession else {
+                harness.fail("--switch-panes found no chat in workspace: \(id)")
+            }
+            let chat = PaneContent.chat(session.id)
+            NewPane.open(.browser, in: model, url: url) { content in
+                tabs.split(tab: chat, pane: chat.id, axis: .horizontal, showing: content)
+            }
+            NewPane.open(.terminal, in: model) { content in
+                tabs.split(tab: chat, pane: chat.id, axis: .vertical, showing: content)
+            }
+            tabs.select(chat, in: model, recordingNavigation: false)
+        }
     }
 
     /// One switch, from the selection to everything the timeline caught.
