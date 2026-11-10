@@ -911,6 +911,11 @@ enum Snapshot {
         let output = directory
         try? FileManager.default.createDirectory(atPath: output, withIntermediateDirectories: true)
 
+        if CommandLine.arguments.contains("--usage-accounts-only") {
+            ProfileUsageGallery.render(to: output)
+            return
+        }
+
         let model = await seededModel()
 
         // The limits panel is drawn from a real ask rather than from made up rows. It is the one

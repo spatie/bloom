@@ -304,6 +304,13 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         if let limits = limitsItem() {
             menu.addItem(.separator())
             menu.addItem(limits)
+            for group in usageGroups() where group.hasOnDemand {
+                menu.addItem(ClosureMenuItem(group.expansionTitle(
+                    isExpanded: model.layout.expandedProviders.contains(group.provider)
+                )) { [weak self] in
+                    self?.model.update { $0.toggleExpanded(group.provider) }
+                })
+            }
         }
 
         menu.addItem(.separator())
@@ -448,24 +455,36 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// The view is measured with `fittingSize` and pinned: an `NSHostingView` inside a menu item is
     /// given no layout pass by the menu, so a view left to size itself lands with a zero height
     /// frame and the row collapses to nothing.
+    private func usageGroups() -> [UsageProviderGroup] {
+        guard let app else { return [] }
+        return UsageProviderGroup.make(
+            metrics: UsageCatalogue.metrics(quotas: app.quotas, accounts: app.accounts),
+            profiles: app.profileUsage, layout: model.layout, at: Date()
+        )
+    }
+
     private func limitsItem() -> NSMenuItem? {
         guard model.showsUsage, let app else { return nil }
         let metrics = model.metrics(quotas: app.quotas, accounts: app.accounts)
-        let sections = model.layout.sections(for: metrics)
-        guard !sections.isEmpty else { return nil }
+        let now = Date()
+        let groups = UsageProviderGroup.make(
+            metrics: metrics, profiles: app.profileUsage, layout: model.layout, at: now
+        )
+        guard !groups.isEmpty else { return nil }
 
         let host = NSHostingView(rootView: UsageMenuBlock(
             model: model,
             metrics: metrics,
             accounts: app.accounts,
-            now: Date()
+            now: now,
+            profiles: app.profileUsage
         ))
         host.frame = CGRect(origin: .zero, size: host.fittingSize)
 
         let item = NSMenuItem()
         item.view = host
         item.isEnabled = false
-        item.setAccessibilityLabel(MenuBarSummary.limitSentence(for: QuotaBoard.make(from: app.quotas)))
+        item.setAccessibilityLabel(groups.map { $0.spoken(at: now, options: model.options) }.joined(separator: ". "))
         return item
     }
 
