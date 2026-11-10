@@ -51,7 +51,7 @@ struct TranscriptAnswerPartsTests {
         let text = answer(sections: 30)
         let parts = TranscriptAnswerParts.split(text)
         #expect(parts.count > 1)
-        #expect(parts.flatMap(MarkdownParser.parse) == MarkdownParser.parse(text))
+        #expect(parts.flatMap { MarkdownParser.parse($0) } == MarkdownParser.parse(text))
     }
 
     @Test("a part opening on indented code keeps it code")
@@ -61,7 +61,7 @@ struct TranscriptAnswerPartsTests {
         let text = (1...8).map { _ in paragraph + "\n\n" + code }.joined(separator: "\n\n")
         let parts = TranscriptAnswerParts.split(text)
         #expect(parts.contains { $0.hasPrefix("    let value1 ") })
-        #expect(parts.flatMap(MarkdownParser.parse) == MarkdownParser.parse(text))
+        #expect(parts.flatMap { MarkdownParser.parse($0) } == MarkdownParser.parse(text))
     }
 
     @Test("carriage returns cut the same way")
@@ -77,7 +77,7 @@ struct TranscriptAnswerPartsTests {
         let text = answer(sections: 4) + "\n\n```swift\n\(code)\n```\n\n" + answer(sections: 4)
         let parts = TranscriptAnswerParts.split(text)
         #expect(parts.count > 2)
-        #expect(parts.flatMap(MarkdownParser.parse) == MarkdownParser.parse(text))
+        #expect(parts.flatMap { MarkdownParser.parse($0) } == MarkdownParser.parse(text))
         for part in parts {
             let fences = part.split(separator: "\n").filter { $0.hasPrefix("```") }
             #expect(fences.count.isMultiple(of: 2))

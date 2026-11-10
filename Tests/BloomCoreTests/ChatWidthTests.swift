@@ -95,7 +95,7 @@ struct ChatWidthTests {
     func nestedContent() {
         let prose = MarkdownParser.parse("A paragraph with `inline code`.")
         let code = MarkdownParser.parse("- Example:\n\n  ```swift\n  print(1)\n  ```")
-        #expect(!prose.contains(where: \.needsFullChatColumn))
-        #expect(code.contains(where: \.needsFullChatColumn))
+        #expect(!prose.contains { $0.needsFullChatColumn })
+        #expect(code.contains { $0.needsFullChatColumn })
     }
 }
