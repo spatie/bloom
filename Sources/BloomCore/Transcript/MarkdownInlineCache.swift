@@ -4,9 +4,15 @@ import Synchronization
 /// avoids rescanning completed lines on every streaming prefix. Both source bytes and entry count
 /// are capped; a single very long line is parsed without being retained.
 final class MarkdownInlineCache: Sendable {
+    private struct Key: Hashable {
+        let source: [UInt8]
+        let allowedSchemes: Set<String>
+        var bytes: Int { source.count + allowedSchemes.reduce(0) { $0 + $1.utf8.count } }
+    }
+
     private struct State {
-        var values: [[UInt8]: [MarkdownInline]] = [:]
-        var order: [[UInt8]] = []
+        var values: [Key: [MarkdownInline]] = [:]
+        var order: [Key] = []
         var bytes = 0
     }
 
@@ -19,14 +25,14 @@ final class MarkdownInlineCache: Sendable {
         self.maximumBytes = max(0, maximumBytes)
     }
 
-    func value(for source: String, build: () -> [MarkdownInline]) -> [MarkdownInline] {
+    func value(for source: String, allowedSchemes: Set<String> = [], build: () -> [MarkdownInline]) -> [MarkdownInline] {
         // String equality normalises Unicode. Code examples must retain the exact source bytes.
-        let key = Array(source.utf8)
+        let key = Key(source: Array(source.utf8), allowedSchemes: allowedSchemes)
         if let cached = state.withLock({ $0.values[key] }) { return cached }
         // Parsing can recursively parse emphasis and links through this same cache. It must
         // happen outside the lock, and duplicate work from concurrent misses is harmless.
         let result = build()
-        let bytes = key.count
+        let bytes = key.bytes
         guard maximumEntries > 0, bytes <= maximumBytes else { return result }
         state.withLock { storage in
             guard storage.values[key] == nil else { return }
@@ -34,7 +40,7 @@ final class MarkdownInlineCache: Sendable {
                   storage.order.count >= maximumEntries || storage.bytes + bytes > maximumBytes {
                 let oldest = storage.order.removeFirst()
                 storage.values[oldest] = nil
-                storage.bytes -= oldest.count
+                storage.bytes -= oldest.bytes
             }
             storage.values[key] = result
             storage.order.append(key)

@@ -123,6 +123,40 @@ struct LinkScanTests {
         #expect(written("ftp://example.com/file").isEmpty)
     }
 
+    @Test("App schemes are opt-in", arguments: [
+        "linear://team/issue/T-123", "slack://channel?team=T1&id=C1", "figma://file/abc",
+        "notion://page/abc", "zoommtg://zoom.us/join?confno=123", "custom-app:open/123",
+    ])
+    func appSchemeAllowlist(address: String) throws {
+        let scheme = try #require(address.split(separator: ":").first).description
+        #expect(LinkScan.links(in: address).isEmpty)
+        #expect(LinkScan.links(in: address, allowedSchemes: ["unrelated"]).isEmpty)
+        let found = LinkScan.links(in: "See \(address).", allowedSchemes: [scheme])
+        let link = try #require(found.first)
+        #expect(found.count == 1)
+        #expect(link.text == address)
+        #expect(link.url == address)
+    }
+
+    @Test("Reserved schemes stay blocked even when explicitly allowed", arguments: [
+        "file:///Applications/Bloom.app", "FILE:///tmp/private", "javascript:alert(1)",
+        "JaVaScRiPt:alert(1)", "bloom://workspace/123", "bloomdev://workspace/123",
+        "bloom-source://file?path=/tmp/private", "bloom-future://internal",
+    ])
+    func reservedAppSchemes(address: String) throws {
+        let scheme = try #require(address.split(separator: ":").first).description
+        #expect(LinkScan.links(in: address, allowedSchemes: [scheme]).isEmpty)
+    }
+
+    @Test("App schemes retain token boundaries and code exclusions")
+    func appSchemeBoundaries() {
+        let text = "LINEAR://team/T-1, `linear://team/T-2` ./linear://team/T-3 linear://team/T-4"
+        #expect(LinkScan.links(in: text, allowedSchemes: ["LINEAR"]).map(\.url)
+            == ["LINEAR://team/T-1", "linear://team/T-4"])
+        #expect(LinkScan.links(in: "```\nlinear://team/T-1\n```", allowedSchemes: ["linear"]).isEmpty)
+        #expect(LinkScan.links(in: "linear: linear://", allowedSchemes: ["linear"]).isEmpty)
+    }
+
     // MARK: Code
 
     @Test("an address inside a code span is being quoted, not offered")

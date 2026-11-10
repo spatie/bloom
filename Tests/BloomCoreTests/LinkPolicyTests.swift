@@ -37,6 +37,68 @@ struct LinkPolicyTests {
         #expect(!LinkPolicy.opens(url))
     }
 
+    @Test("Opening rechecks the current allowlist")
+    func revokedSchemeDoesNotOpen() throws {
+        let url = try #require(URL(string: "linear://team/issue/T-123"))
+        #expect(LinkPolicy.opens(url, allowedSchemes: ["linear"]))
+        #expect(!LinkPolicy.opens(url))
+        #expect(!LinkPolicy.opens(url, allowedSchemes: ["slack"]))
+        #expect(LinkPolicy.opens(url, allowedSchemes: ["LINEAR"]))
+    }
+
+    @Test("Reserved schemes cannot be enabled", arguments: [
+        "file:///tmp/private", "javascript:alert(1)", "bloom://workspace/123",
+        "bloomdev://workspace/123", "bloom-source://file?path=/tmp/private", "BLOOM-FUTURE://internal",
+    ])
+    func reservedSchemesCannotOpen(address: String) throws {
+        let url = try #require(URL(string: address))
+        let scheme = try #require(url.scheme)
+        #expect(!LinkPolicy.opens(url, allowedSchemes: [scheme]))
+    }
+
+    @Test("Scheme names are normalised, with invalid and reserved entries ignored")
+    func settingsSchemes() {
+        #expect(TranscriptLinkPreferences.schemes(in: "").isEmpty)
+        #expect(TranscriptLinkPreferences.schemes(in: " LINEAR, slack; linear\nfigma notion zoommtg ")
+            == ["linear", "slack", "figma", "notion", "zoommtg"])
+        #expect(TranscriptLinkPreferences.schemes(in: "bloomberg") == ["bloomberg"])
+        #expect(TranscriptLinkPreferences.schemes(in: "file, JAVASCRIPT, bloom, bloomdev, bloom-source, 1app, app://, üapp").isEmpty)
+    }
+
+    @Test("Markdown parsing caches include the app scheme policy")
+    func markdownSchemeChanges() {
+        let source = "Open linear://team/T-123 and [the channel](slack://channel?id=C1)."
+        let enabled = MarkdownParser.parse(source, allowedSchemes: ["linear", "slack"])
+        #expect(LinkPolicy.addresses(in: enabled, allowedSchemes: ["linear", "slack"])
+            == ["linear://team/T-123", "slack://channel?id=C1"])
+        let disabled = MarkdownParser.parse(source)
+        #expect(LinkPolicy.addresses(in: disabled).isEmpty)
+        #expect(LinkPolicy.addresses(in: disabled, allowedSchemes: ["linear"]).isEmpty)
+        #expect(MarkdownParser.parse(source, allowedSchemes: ["linear", "slack"]) == enabled)
+    }
+
+    @Test("Autolinks retain normalised local server targets")
+    func localAutolinkTargets() {
+        let blocks = MarkdownParser.parse("<localhost:3000> and <127.0.0.1:8080>")
+        #expect(LinkPolicy.addresses(in: blocks) == ["http://localhost:3000", "http://127.0.0.1:8080"])
+    }
+
+    @Test("App schemes reach nested markdown and autolinks")
+    func nestedAppLinks() {
+        let source = """
+        > **linear://team/T-1**
+
+        - [ ] <linear://team/T-2>
+
+        | Link |
+        | --- |
+        | linear://team/T-3 |
+        """
+        let blocks = MarkdownParser.parse(source, allowedSchemes: ["linear"])
+        #expect(LinkPolicy.addresses(in: blocks, allowedSchemes: ["linear"])
+            == ["linear://team/T-1", "linear://team/T-2", "linear://team/T-3"])
+    }
+
     // MARK: - Menu titles
 
     @Test("A short address loses only its scheme")

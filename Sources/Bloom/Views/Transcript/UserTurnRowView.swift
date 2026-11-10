@@ -30,6 +30,7 @@ import BloomCore
 /// the two answered the pointer. See `SentTurn` for the cut and `InlineChip` for the chip that
 /// takes either a file or a body.
 struct UserTurnRowView: View {
+    @AppStorage(TranscriptLinkPreferences.key) private var allowedLinkSchemes = ""
     var text: String
     /// The files this turn carried, worktree relative, in the order they were attached.
     var attachments: [String] = []
@@ -256,6 +257,7 @@ struct UserTurnRowView: View {
                         previewing: { PromptAttachment.sent(path: $0).url(in: home.worktree) }
                     )
                 )
+                .id(allowedLinkSchemes)
                 .background { chipProbe }
             }
 

@@ -5,6 +5,7 @@ import BloomCore
 /// markdown blocks and native text views underneath SwiftUI's layout engine.
 struct StreamingMarkdownView: View {
     let text: String
+    @AppStorage(TranscriptLinkPreferences.key) private var allowedLinkSchemes = ""
 
     @Environment(\.fontScale) private var fontScale
     @Environment(\.chatFont) private var chatFont
@@ -12,7 +13,7 @@ struct StreamingMarkdownView: View {
     init(_ text: String) { self.text = text }
 
     var body: some View {
-        Text(StreamingMarkdownText.render(text, scale: fontScale, face: chatFont))
+        Text(StreamingMarkdownText.render(text, scale: fontScale, face: chatFont, allowedSchemes: TranscriptLinkPreferences.schemes(in: allowedLinkSchemes)))
             .opensTranscriptLinks()
     }
 }
@@ -21,14 +22,14 @@ struct StreamingMarkdownView: View {
 private enum StreamingMarkdownText {
     /// SwiftUI can ask for the same body more than once between deltas. Keep only the current
     /// prefix so a live answer cannot evict the cached attributed text of settled rows.
-    private static var cached: (text: String, scale: CGFloat, face: ChatFont, rendered: AttributedString)?
+    private static var cached: (text: String, scale: CGFloat, face: ChatFont, allowedSchemes: Set<String>, rendered: AttributedString)?
 
-    static func render(_ text: String, scale: CGFloat, face: ChatFont) -> AttributedString {
-        if let cached, cached.text == text, cached.scale == scale, cached.face == face {
+    static func render(_ text: String, scale: CGFloat, face: ChatFont, allowedSchemes: Set<String>) -> AttributedString {
+        if let cached, cached.text == text, cached.scale == scale, cached.face == face, cached.allowedSchemes == allowedSchemes {
             return cached.rendered
         }
-        let rendered = blocks(MarkdownParser.parse(text), scale: scale, face: face)
-        cached = (text, scale, face, rendered)
+        let rendered = blocks(MarkdownParser.parse(text, allowedSchemes: allowedSchemes), scale: scale, face: face)
+        cached = (text, scale, face, allowedSchemes, rendered)
         return rendered
     }
 

@@ -12,8 +12,8 @@ private final class MarkdownBlockBox: NSObject {
     /// Found once, here, because `LinkPolicy.addresses(in:)` walks the whole block tree and every
     /// inline run inside it, and `MarkdownView.body` asked for it in front of blocks that were
     /// already cached: the parse was kept and the walk over its result was not, so a settled row
-    /// paid for it on every pass of the transcript's list. It is a pure function of the blocks, and
-    /// the blocks are what this box exists to hold.
+    /// paid for it on every pass of the transcript's list. It depends on the blocks and the scheme
+    /// allowlist, both included in the parse cache key.
     let addresses: [String]
 
     init(_ blocks: [MarkdownBlock], addresses: [String]) {
@@ -21,8 +21,8 @@ private final class MarkdownBlockBox: NSObject {
         self.addresses = addresses
     }
 
-    convenience init(_ blocks: [MarkdownBlock]) {
-        self.init(blocks, addresses: LinkPolicy.addresses(in: blocks))
+    convenience init(_ blocks: [MarkdownBlock], allowedSchemes: Set<String>) {
+        self.init(blocks, addresses: LinkPolicy.addresses(in: blocks, allowedSchemes: allowedSchemes))
     }
 }
 
@@ -47,9 +47,10 @@ private enum MarkdownParseCache {
     /// A settled answer, parsed once. Nonisolated so a preparation pass can fill this before the
     /// table asks: see `MarkdownPrime`, and `TranscriptPrime` for why the values are safe to share.
     static func parsed(for text: String) -> MarkdownBlockBox {
-        let key = text as NSString
+        let allowedSchemes = TranscriptLink.allowedSchemes
+        let key = (allowedSchemes.sorted().joined(separator: ",") + "\0" + text) as NSString
         if let cached = values.object(forKey: key) { return cached }
-        let box = MarkdownBlockBox(MarkdownParser.parse(text))
+        let box = MarkdownBlockBox(MarkdownParser.parse(text, allowedSchemes: allowedSchemes), allowedSchemes: allowedSchemes)
         values.setObject(box, forKey: key, cost: text.utf8.count)
         return box
     }
@@ -69,12 +70,13 @@ private enum MarkdownParseCache {
     /// The addresses in this one are always empty, and that is not an omission: a run that is
     /// still arriving offers none, so there is nothing for the walk to find and nothing yet worth
     /// finding. See `MarkdownView.body`.
-    @MainActor private static var streamed: (text: String, box: MarkdownBlockBox)?
+    @MainActor private static var streamed: (text: String, allowedSchemes: Set<String>, box: MarkdownBlockBox)?
 
     @MainActor static func streamingParsed(for text: String) -> MarkdownBlockBox {
-        if let streamed, streamed.text == text { return streamed.box }
-        let box = MarkdownBlockBox(MarkdownParser.parse(text), addresses: [])
-        streamed = (text, box)
+        let allowedSchemes = TranscriptLink.allowedSchemes
+        if let streamed, streamed.text == text, streamed.allowedSchemes == allowedSchemes { return streamed.box }
+        let box = MarkdownBlockBox(MarkdownParser.parse(text, allowedSchemes: allowedSchemes), addresses: [])
+        streamed = (text, allowedSchemes, box)
         return box
     }
 }
@@ -97,6 +99,7 @@ public struct MarkdownView: View {
     /// A later part of a long answer cut into rows: its first block is not the answer's first.
     private let continuesAnswer: Bool
     @State private var selection = TranscriptTextSelection()
+    @AppStorage(TranscriptLinkPreferences.key) private var allowedLinkSchemes = ""
 
     /// - Parameter isStreaming: whether this text is still being written. It changes nothing about
     ///   what is drawn, only which cache the parse goes through. See
@@ -120,6 +123,7 @@ public struct MarkdownView: View {
             ? MarkdownParseCache.streamingParsed(for: text)
             : MarkdownParseCache.parsed(for: text)
         MarkdownBlocksView(blocks: parsed.blocks, continuesAnswer: continuesAnswer)
+            .id(allowedLinkSchemes)
             .environment(\.transcriptTextSelection, selection)
             .onAppear { selection.source = text }
             .onChange(of: text) { _, value in selection.source = value }
@@ -475,7 +479,7 @@ enum InlineNSAttributes {
                 let start = output.length
                 render(text, font: font, code: code, color: color, traits: traits, into: output)
                 if let target = SourceReference.url(url) ?? URL(string: url),
-                   LinkPolicy.opens(target) || SourceReference.location(target) != nil {
+                   TranscriptLink.opens(target) || SourceReference.url(url) != nil {
                     output.addAttribute(
                         .link, value: target,
                         range: NSRange(location: start, length: output.length - start)
@@ -519,6 +523,7 @@ enum InlineNSAttributes {
 
 private final class InlineAttributesKey: NSObject {
     let inline: [MarkdownInline]
+    let allowedSchemes = TranscriptLink.allowedSchemes
     let font: Font
     let code: Font
     let color: Color
@@ -600,6 +605,7 @@ private final class InlineAttributesKey: NSObject {
         guard let other = object as? InlineAttributesKey else { return false }
         return cachedHash == other.cachedHash
             && inline == other.inline
+            && allowedSchemes == other.allowedSchemes
             && font == other.font
             && code == other.code
             && color == other.color
@@ -676,7 +682,7 @@ enum InlineAttributes {
                 // nothing when clicked, then flipped to plain text as the row settled, which is
                 // the settle-jump this renderer pair exists to prevent.
                 if let target = SourceReference.url(url) ?? URL(string: url),
-                   LinkPolicy.opens(target) || SourceReference.location(target) != nil {
+                   TranscriptLink.opens(target) || SourceReference.url(url) != nil {
                     var child = render(text, font: font, code: code, color: Palette.link, intents: intents)
                     child.foregroundColor = Palette.link
                     child.underlineStyle = .single
