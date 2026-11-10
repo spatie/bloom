@@ -12,6 +12,7 @@ struct UsageMenuBlock: View {
     let metrics: [AgentKind: [UsageMetric]]
     let accounts: [AgentKind: AgentAccount]
     let now: Date
+    var profiles: [ProfileUsage] = []
     /// Off in the gallery, where nothing can be clicked anyway.
     var canReorder = true
 
@@ -19,16 +20,29 @@ struct UsageMenuBlock: View {
     static let width: CGFloat = 320
 
     var body: some View {
-        let sections = model.layout.sections(for: metrics)
+        let groups = UsageProviderGroup.make(metrics: metrics, profiles: profiles, layout: model.layout, at: now)
         VStack(alignment: .leading, spacing: UsageScale.section) {
-            ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                provider(
-                    section,
-                    canMoveUp: canReorder && index > 0,
-                    canMoveDown: canReorder && index < sections.count - 1,
-                    neighbourAbove: index > 0 ? sections[index - 1].provider : nil,
-                    neighbourBelow: index < sections.count - 1 ? sections[index + 1].provider : nil
-                )
+            ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                if let section = group.defaultSection {
+                    provider(
+                        section,
+                        title: group.provider.label,
+                        plan: accounts[group.provider]?.plan,
+                        neighbourAbove: canReorder && index > 0 ? groups[index - 1].provider : nil,
+                        neighbourBelow: canReorder && index < groups.count - 1 ? groups[index + 1].provider : nil
+                    )
+                }
+                ForEach(group.profiles) { profile in
+                    provider(
+                        profile.section,
+                        title: profile.usage.profile.name,
+                        plan: profile.usage.account?.plan,
+                        neighbourAbove: group.defaultSection == nil && profile.id == group.profiles.first?.id && canReorder && index > 0
+                            ? groups[index - 1].provider : nil,
+                        neighbourBelow: group.defaultSection == nil && profile.id == group.profiles.first?.id && canReorder && index < groups.count - 1
+                            ? groups[index + 1].provider : nil
+                    )
+                }
             }
         }
         .frame(width: Self.width, alignment: .leading)
@@ -39,8 +53,8 @@ struct UsageMenuBlock: View {
 
     private func provider(
         _ section: UsageLayout.Section,
-        canMoveUp: Bool,
-        canMoveDown: Bool,
+        title: String,
+        plan: String?,
         neighbourAbove: AgentKind?,
         neighbourBelow: AgentKind?
     ) -> some View {
@@ -49,39 +63,45 @@ struct UsageMenuBlock: View {
                 ProviderMarkView(provider: section.provider)
                     .foregroundStyle(MenuInk.secondary)
                     .frame(width: 15, height: 15)
-                Text(section.provider.label)
+                Text(title)
                     .font(UsageScale.header)
                     .foregroundStyle(MenuInk.primary)
-                if let plan = accounts[section.provider]?.plan {
+                if let plan {
                     Text(plan)
                         .font(UsageScale.plan)
                         .foregroundStyle(MenuInk.secondary)
                 }
                 Spacer(minLength: 8)
-                if canMoveUp || canMoveDown {
-                    moveButtons(section.provider, above: canMoveUp ? neighbourAbove : nil, below: canMoveDown ? neighbourBelow : nil)
+                if neighbourAbove != nil || neighbourBelow != nil {
+                    moveButtons(section.provider, above: neighbourAbove, below: neighbourBelow)
                 }
             }
             .padding(.leading, 2)
 
-            VStack(spacing: 0) {
-                ForEach(Array(section.visible.enumerated()), id: \.element.id) { index, metric in
-                    UsageMenuRow(
-                        metric: metric,
-                        now: now,
-                        options: model.options,
-                        isCondensed: index > 0 && section.visible[index - 1].isText && metric.isText
-                    )
-                }
-            }
-            .padding(.vertical, 5)
-            .background {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(MenuInk.card)
+            if !section.visible.isEmpty {
+                rows(section)
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(section.provider.label)
+        .accessibilityLabel("\(section.provider.label), \(title)")
+    }
+
+    private func rows(_ section: UsageLayout.Section) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(section.visible.enumerated()), id: \.element.id) { index, metric in
+                UsageMenuRow(
+                    metric: metric,
+                    now: now,
+                    options: model.options,
+                    isCondensed: index > 0 && section.visible[index - 1].isText && metric.isText
+                )
+            }
+        }
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(MenuInk.card)
+        }
     }
 
     /// Click to move, because a menu cannot be dragged in: an open `NSMenu` runs its own tracking

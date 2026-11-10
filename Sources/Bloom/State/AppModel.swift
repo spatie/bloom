@@ -78,6 +78,8 @@ final class AppModel {
     /// What each provider said about the account on the last ask: its plan and, for Codex, its
     /// balances. In memory rather than in the store, for the reason `AgentAccount` gives.
     private(set) var accounts: [AgentKind: AgentAccount] = [:]
+    /// Display-only readings for the separate homes configured in Settings > Agents.
+    private(set) var profileUsage: [ProfileUsage] = []
 
     /// Selecting a workspace is the moment its live model should come into existence, rather than
     /// the moment some view body happens to ask for it. Doing it here keeps model creation out of
@@ -525,6 +527,8 @@ final class AppModel {
     /// `WorkspaceMessageSentRowView`.
     private(set) var workspaceMessagesRevision = 0
     private var quotaPollTask: Task<Void, Never>?
+    private var profileQuotaTask: Task<Void, Never>?
+    private var lastProfileQuotaAskAt: Date?
     /// When the one asker last went out, and whether it is still out. Together they are what
     /// makes it one asker: every route into `askForQuotas` reads both, so a background poll, a
     /// menu opening and ten workspaces all collapse into a single question per interval.
@@ -772,6 +776,8 @@ final class AppModel {
         workspaceMessageObservationTask = nil
         quotaPollTask?.cancel()
         quotaPollTask = nil
+        profileQuotaTask?.cancel()
+        profileQuotaTask = nil
         identityTask?.cancel()
         identityTask = nil
         iconSearchTask?.cancel()
@@ -958,8 +964,9 @@ final class AppModel {
     /// what a panel opened in the first second of a launch, or on a database that would not open,
     /// used to show.
     func refreshQuotas(after gap: TimeInterval = QuotaPollSchedule.interval) async {
-        guard store != nil,
-              !isAskingForQuotas,
+        guard let store else { return }
+        refreshProfileQuotas(store: store, after: gap)
+        guard !isAskingForQuotas,
               QuotaPollSchedule.isDue(lastAskedAt: lastQuotaAskAt, at: Date(), after: gap)
         else { return }
         isAskingForQuotas = true
@@ -970,6 +977,31 @@ final class AppModel {
             accounts[account.provider] = account
         }
         await recordQuotas(report.quotas)
+    }
+
+    /// This task has its own schedule and lifetime so a slow profile cannot hold the default
+    /// poll open, postpone its next ask or delay applying its figures.
+    private func refreshProfileQuotas(store: Store, after gap: TimeInterval) {
+        guard profileQuotaTask == nil,
+              QuotaPollSchedule.isDue(lastAskedAt: lastProfileQuotaAskAt, at: Date(), after: gap)
+        else { return }
+        lastProfileQuotaAskAt = Date()
+        let known = profileUsage
+        profileQuotaTask = Task { [weak self] in
+            defer { self?.profileQuotaTask = nil }
+            guard let profiles = try? await store.agentAccountProfiles(), !Task.isCancelled else { return }
+            let readings = await AgentQuotaSources.report(
+                profiles: profiles, known: known, home: { store.agentAccountHome($0) }
+            )
+            guard !Task.isCancelled,
+                  let current = try? await store.agentAccountProfiles() else { return }
+            let byID = Dictionary(uniqueKeysWithValues: readings.map { ($0.id, $0) })
+            self?.profileUsage = current.compactMap { profile in
+                guard var reading = byID[profile.id] else { return nil }
+                reading.profile = profile
+                return reading
+            }
+        }
     }
 
     /// The background poll, which is what keeps the menu bar's own severity honest for somebody
