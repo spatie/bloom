@@ -52,6 +52,8 @@ struct RetryRowView: View {
         [retry.note, retry.waitPhrase].compactMap { $0 }.joined(separator: " ")
     }
 
+    @Environment(\.chatMeasures) private var chatMeasures
+
     var body: some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
             header
@@ -60,7 +62,7 @@ struct RetryRowView: View {
                 .foregroundStyle(Palette.textTertiary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+                .frame(maxWidth: chatMeasures.prose, alignment: .leading)
                 // Under the headline rather than under the glyph, so the two lines read as one
                 // block instead of as a row with a caption parked beside it.
                 .padding(.leading, TranscriptLayout.glyphWidth + TranscriptLayout.glyphGap)
@@ -152,6 +154,6 @@ struct RetryRowView: View {
             }
         }
         .frame(height: Metrics.hairline * 2)
-        .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+        .frame(maxWidth: chatMeasures.prose, alignment: .leading)
     }
 }

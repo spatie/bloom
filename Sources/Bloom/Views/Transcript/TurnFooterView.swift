@@ -54,6 +54,8 @@ struct TurnFooterView: View {
         return transcript?.turnScans[row.id]
     }
 
+    @Environment(\.chatMeasures) private var chatMeasures
+
     var body: some View {
         // Read once for the pass, and handed down.
         //
@@ -154,7 +156,7 @@ struct TurnFooterView: View {
                 }
                 .font(Typo.caption)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+                .frame(maxWidth: chatMeasures.prose, alignment: .leading)
                 .padding(.horizontal, TranscriptLayout.inset)
                 .padding(.bottom, TranscriptLayout.inset)
             }
@@ -198,7 +200,7 @@ struct TurnFooterView: View {
                         }
                     }
                 }
-                .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+                .frame(maxWidth: chatMeasures.prose, alignment: .leading)
                 .padding(Metrics.inset)
                 .background(
                     RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)

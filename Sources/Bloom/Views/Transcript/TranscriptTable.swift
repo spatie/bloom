@@ -542,6 +542,14 @@ struct TranscriptTable: NSViewRepresentable {
             // rebuilt an `NSHostingView` for every row in the window. What a link does when it is
             // pressed cannot change how tall a paragraph is. See `wraps(differentlyFrom:)`.
             let previous = rowEnvironment
+            // Capture against the old document. Reloading after cold estimates replaced every
+            // height clamped Response 5 to Response 12 before its anchor could be restored.
+            // Settings hold the top row: the centre can cross into the next response when a
+            // wider measure shortens the first, shifting the original row on the way back.
+            let measureSettingMoved = heights.measure.map { $0.chatMeasures != environment.chatMeasures } ?? false
+            let settingPlace = measureSettingMoved
+                ? PlaceBeforeResize(wasAtEnd: isFollowingAlong, anchor: anchorEntry()) : nil
+            let settingRows = measureSettingMoved ? visibleRows : (0..<0)
             rowEnvironment = environment
             let environmentMoved = previous != nil && previous != environment
             let fontMoved = heightMemory.chatFont.map { $0 != environment.chatFont } ?? false
@@ -562,10 +570,11 @@ struct TranscriptTable: NSViewRepresentable {
             // Width changes belong to rewidth, which keeps offscreen heights as estimates.
             // An update can arrive before that reflow, especially during a slow drag. Resetting
             // to columnWidth here discarded those heights and retiled the whole conversation.
+            let reflowed = heights.reflow(to: environment.chatMeasures)
             let remeasured = heights.reset(
                 width: heights.measure?.width ?? Double(columnWidth),
-                scale: scale, leading: environment.lineHeight.ratio
-            ) || wrapsDifferently
+                scale: scale, leading: environment.lineHeight.ratio, chatMeasures: environment.chatMeasures
+            ) || wrapsDifferently || reflowed
 
             let newIDs = newEntries.map(\.id)
             let change = TranscriptEntryChange.between(ids, newIDs)
@@ -621,8 +630,10 @@ struct TranscriptTable: NSViewRepresentable {
             // A disclosure click is navigation, even when the clicked row happens to be on the
             // last screen. Keep that row where it was instead of treating the new children as
             // live transcript activity and following them to the end.
-            let wasAtEnd = changesFoldRows || !unfolding.isEmpty ? false : isFollowingAlong
-            let anchor = foldAnchor ?? unfoldAnchor ?? (change.movesRows ? centreAnchor() : nil)
+            let wasAtEnd = changesFoldRows || !unfolding.isEmpty
+                ? false : (settingPlace?.wasAtEnd ?? isFollowingAlong)
+            let anchor = foldAnchor ?? unfoldAnchor ?? settingPlace?.anchor
+                ?? (change.movesRows || remeasured ? centreAnchor() : nil)
 
             if !changesFoldRows, !remeasured, !environmentMoved, holdView?.isHolding != true,
                wasAtEnd || isFollowerDriving {
@@ -683,7 +694,7 @@ struct TranscriptTable: NSViewRepresentable {
                 // already drawn, and a cell holding the content it already holds never reports its
                 // height again, so those rows would be answered from the mean for ever. One screen,
                 // and none at all on the first pass of a pane, which has nothing laid out yet.
-                measureExactly(visibleRows)
+                measureExactly(measureSettingMoved ? settingRows : visibleRows)
                 noteHeights(IndexSet(integersIn: entries.indices))
             } else if !changed.isEmpty {
                 // The cells first, so that a row whose height is about to travel already holds
@@ -718,7 +729,21 @@ struct TranscriptTable: NSViewRepresentable {
                 noteHeights(unfolding, over: unfoldSeconds)
             }
 
+            if measureSettingMoved, wasAtEnd, !isFollowerDriving, !isLiveScrolling {
+                holdsEnd = true
+            }
             keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
+            if measureSettingMoved {
+                placeWork?.cancel()
+                placeWork = Task { @MainActor [weak self] in
+                    await Task.yield()
+                    guard !Task.isCancelled, let self, !isLiveScrolling else { return }
+                    placeWork = nil
+                    keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
+                    reportGeometry()
+                    scheduleSettle()
+                }
+            }
             // Off this pass, because this one runs inside `updateNSView` and what it calls writes
             // SwiftUI state. Reporting from here is "Modifying state during view update".
             Task { @MainActor [weak self] in self?.reportGeometry() }
@@ -2374,6 +2399,7 @@ private struct HostedRow: View {
     /// measurement taken through a different set of modifiers from the one that draws is a
     /// measurement that can disagree with what is on screen.
     var fills = true
+    @Environment(\.chatMeasures) private var chatMeasures
 
     var body: some View {
         // **The stack is what makes an empty row report.** Sixty per cent of a real session is
@@ -2386,7 +2412,7 @@ private struct HostedRow: View {
             // One centred reading column for every row kind. The content inside can still align
             // leading or trailing, but it does so inside the same measure as the rest of the
             // conversation. On a narrow pane this frame naturally shrinks to the available width.
-            .frame(maxWidth: TranscriptLayout.conversationMeasure, alignment: .leading)
+            .frame(maxWidth: chatMeasures.conversation, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
             .fixedSize(horizontal: false, vertical: true)
             .background(

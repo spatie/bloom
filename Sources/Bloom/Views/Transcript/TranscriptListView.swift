@@ -367,6 +367,7 @@ struct TranscriptListView: View {
             fontScale: fontScale,
             chatFont: chatFont,
             lineHeight: chatLineHeight,
+            chatMeasures: ChatWidthPreference.shared.measures,
             reduceMotion: reduceMotion
         )
     }

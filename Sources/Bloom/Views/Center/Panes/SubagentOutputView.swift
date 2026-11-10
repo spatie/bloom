@@ -162,6 +162,7 @@ struct SubagentOutputView: View {
         .environment(\.fontScale, textSize.scale)
         .environment(\.chatFont, ChatFont(rawValue: chatFontID))
         .environment(\.chatLineHeight, lineHeight)
+        .environment(\.chatMeasures, ChatWidthPreference.shared.measures)
         // What a link in a subagent's answer does when it is pressed, which is what it does in the
         // transcript: one rule for every address the window draws. See `TranscriptLink.actions`.
         .markdownLinkActions(TranscriptLink.actions(for: model))

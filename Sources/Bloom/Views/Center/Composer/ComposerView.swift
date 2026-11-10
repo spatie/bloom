@@ -113,7 +113,7 @@ struct ComposerView: View {
             let clearance = ceil(total) + ComposerLayout.bottomInset + ComposerLayout.textClearance
             if room.clearance != clearance { room.clearance = clearance }
         }
-        .frame(maxWidth: TranscriptLayout.conversationMeasure)
+        .chatReadingColumn()
         .padding(.horizontal, ComposerLayout.horizontalInset)
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.bottom, ComposerLayout.bottomInset)

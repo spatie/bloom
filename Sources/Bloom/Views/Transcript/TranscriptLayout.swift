@@ -100,20 +100,8 @@ enum TranscriptLayout {
     // than a constant, so both have to ask a font how tall its line box is before they can answer:
     // see `TranscriptProseLeading` beside this file, and `TextLeading` in the core for the ratios.
 
-    /// How wide a paragraph is allowed to get.
-    ///
-    /// Nothing else in the window is read a line at a time, so nothing else needs a measure. With
-    /// the inspector closed on a large display the transcript pane is well over a thousand points
-    /// and a paragraph ran to nearly two hundred characters, which is the width at which the eye
-    /// loses the start of the next line. Generous on purpose: at the sizes the window is usually
-    /// dragged to this never bites, and it only ever stops prose running away.
+    /// Comfortable defaults for standalone previews and notes. Open transcripts use the chosen
+    /// `ChatWidth.Measures`, carried through `TranscriptRowEnvironment` into every hosted row.
     static let proseMeasure: CGFloat = 680
-
-    /// The shared reading column for a conversation in a wide pane.
-    ///
-    /// Individual paragraphs still use `proseMeasure`, but every transcript row now belongs to
-    /// this wider column. That keeps user bubbles, working rows, answers and turn footers on one
-    /// axis instead of leaving an answer at the far left while its question sits at the far right
-    /// of a large window. Below this width the column simply takes all available room.
     static let conversationMeasure: CGFloat = 760
 }

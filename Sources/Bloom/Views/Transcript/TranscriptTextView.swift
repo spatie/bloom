@@ -126,6 +126,9 @@ struct FileChipHover: Equatable, Sendable {
 /// laying out an attributed string that someone else composed.
 struct TranscriptTextView: NSViewRepresentable {
     var text: NSAttributedString
+    /// Streaming uses one native text view, with paragraph indents computed at the offered width
+    /// so prose keeps its measure while a fence in the same string uses the whole column.
+    var textAtWidth: (@MainActor (CGFloat) -> NSAttributedString)?
     @Environment(\.transcriptTextSelection) private var selection
     @Environment(\.transcriptConversationSelection) private var conversation
     @Environment(\.transcriptEntryID) private var entryID
@@ -219,6 +222,7 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     private func apply(to view: LinkTextView) {
+        view.textAtWidth = textAtWidth
         view.onPlainClick = onPlainClick
         view.copyPrefix = copyPrefix
         view.copySeparatorBefore = copySeparatorBefore
@@ -233,12 +237,7 @@ struct TranscriptTextView: NSViewRepresentable {
             view.conversationSelection = conversation
             conversation?.register(view)
         }
-        if view.textStorage?.isEqual(to: text) != true {
-            view.textStorage?.setAttributedString(text)
-            view.bubbleAlignmentWidth = nil
-            view.measurements.removeAll()
-            view.lastReportedMeasurement = nil
-        }
+        view.applyMeasuredText(textAtWidth?(view.textContainer?.containerSize.width ?? 0) ?? text)
         conversation?.adopt(view)
         view.linkColor = linkColor
         view.overlaysScroller = overlaysScroller
@@ -284,6 +283,7 @@ struct TranscriptTextView: NSViewRepresentable {
         // exact proposal promises. Repeated proposals are still answered from `measurements`,
         // and the pane itself reflows in steps during a drag, which is where the saving is.
         let width = TranscriptTextMeasure.layoutWidth(proposed: proposed)
+        if let textAtWidth { nsView.applyMeasuredText(textAtWidth(width)) }
         // Only when it has actually moved. Whether TextKit throws its layout away on being handed
         // the size it already has is not documented either way, and this is the resize path: every
         // frame of a divider drag asks every realised row for its size, several times, and the
@@ -454,6 +454,16 @@ private final class TranscriptLayoutManager: NSLayoutManager {
 
 /// The text view itself: hover, and the menu over a link.
 final class LinkTextView: NSTextView, HoverQuickLookSource {
+    var textAtWidth: (@MainActor (CGFloat) -> NSAttributedString)?
+
+    func applyMeasuredText(_ text: NSAttributedString) {
+        guard textStorage?.isEqual(to: text) != true else { return }
+        textStorage?.setAttributedString(text)
+        bubbleAlignmentWidth = nil
+        measurements.removeAll()
+        lastReportedMeasurement = nil
+    }
+
     weak var answerSelection: TranscriptTextSelection?
     var overlaysScroller = false
     weak var conversationSelection: TranscriptConversationSelection?
@@ -473,6 +483,7 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
                frameWidth: Double(bounds.width),
                reportedWidth: Double(measured.size.width)
            ) {
+            if let textAtWidth { applyMeasuredText(textAtWidth(bounds.width)) }
             container.containerSize = CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
             lastReportedMeasurement = nil
             if measured.alignsBubbleInk, let layout = layoutManager {

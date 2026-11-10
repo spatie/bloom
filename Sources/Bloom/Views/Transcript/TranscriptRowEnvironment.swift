@@ -57,6 +57,9 @@ struct TranscriptRowEnvironment: Equatable {
     let fontScale: CGFloat
     let chatFont: ChatFont
     let lineHeight: ChatLineHeight
+    /// Also part of the height cache measure, since the pane can stay the same width while
+    /// paragraphs and the centred conversation column change width independently.
+    var chatMeasures: ChatWidth.Measures = ChatWidth.comfortable.measures()
     let reduceMotion: Bool
 
     /// Identity for the three objects and value for the rest.
@@ -75,6 +78,7 @@ struct TranscriptRowEnvironment: Equatable {
             && lhs.fontScale == rhs.fontScale
             && lhs.chatFont == rhs.chatFont
             && lhs.lineHeight == rhs.lineHeight
+            && lhs.chatMeasures == rhs.chatMeasures
             && lhs.reduceMotion == rhs.reduceMotion
     }
 
@@ -122,5 +126,6 @@ extension View {
             .environment(\.fontScale, values.fontScale)
             .environment(\.chatFont, values.chatFont)
             .environment(\.chatLineHeight, values.lineHeight)
+            .environment(\.chatMeasures, values.chatMeasures)
     }
 }

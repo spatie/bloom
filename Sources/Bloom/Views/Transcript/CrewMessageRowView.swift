@@ -41,6 +41,8 @@ struct CrewMessageRowView: View {
     /// an envelope nobody asked for.
     @State private var showsEnvelope = false
 
+    @Environment(\.chatMeasures) private var chatMeasures
+
     var body: some View {
         content.opacity(isWaiting ? TranscriptLayout.waitingOpacity : 1)
     }
@@ -62,10 +64,7 @@ struct CrewMessageRowView: View {
                 .font(Typo.body)
                 .proseLeading()
                 .textSelection(.enabled)
-                // Capped and then left aligned in what is left, exactly as `ProseRowView` does it:
-                // one frame would centre the paragraph in a wide pane and take it off the line the
-                // rest of the transcript starts on.
-                .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+                .environment(\.markdownProseMeasure, chatMeasures.prose)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if hasEnvelope { envelope }
@@ -174,7 +173,7 @@ struct CrewMessageRowView: View {
             .foregroundStyle(Palette.textSecondary)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+            .frame(maxWidth: chatMeasures.prose, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, TranscriptLayout.inset)
             .padding(.vertical, TranscriptLayout.tight)

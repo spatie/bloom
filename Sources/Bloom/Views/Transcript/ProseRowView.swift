@@ -1,3 +1,4 @@
+import BloomCore
 import SwiftUI
 
 /// One part of a long answer cut into rows. See `TranscriptAnswerParts`.
@@ -21,6 +22,8 @@ struct ProseRowView: View {
     var smoothMarkdownHandoff = false
     /// When the answer was stored, shown beside the copy slot on hover. Nil on streaming prose.
     var sentAt: Date?
+    /// A gallery can show the hover state without sending pointer events.
+    var previewsHover = false
     @State private var isHovered = false
     @State private var markdownReady = false
     @State private var markdownSettled = false
@@ -34,8 +37,15 @@ struct ProseRowView: View {
     /// The time is drawn right of the text column and never over it, so a pane too narrow to leave
     /// it that room shows none. Covering the end of a line was the alternative.
     private var timeFits: Bool {
-        rowWidth - Self.copySlot - timeWidth >= TranscriptLayout.proseMeasure + TranscriptLayout.block
+        reservesTimeRow || rowWidth - Self.copySlot - timeWidth >= chatMeasures.prose + TranscriptLayout.block
     }
+
+    private var reservesTimeRow: Bool {
+        sentAt != nil && (MarkdownPrime.blocks(of: text).first?.needsFullChatColumn == true || !chatMeasures.prose.isFinite)
+    }
+    private var hovered: Bool { isHovered || previewsHover }
+
+    @Environment(\.chatMeasures) private var chatMeasures
 
     var body: some View {
         HStack(alignment: .top, spacing: TranscriptLayout.block) {
@@ -43,9 +53,10 @@ struct ProseRowView: View {
                 .font(Typo.body)
                 .proseLeading()
                 .textSelection(.enabled)
-                // Capped, then left aligned in whatever is left. One frame would centre the column
-                // in a wide pane and take the paragraph off the line every other row starts on.
-                .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+                .environment(\.markdownProseMeasure, chatMeasures.prose)
+                // Metadata keeps a separate line above a leading fence/table, since those
+                // blocks can use the space the timestamp used to borrow beside prose.
+                .padding(.top, reservesTimeRow ? MessageTimeLabel.height + TranscriptLayout.block : 0)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // The slot stays present while streaming and on intermediate prose, so completion
@@ -55,7 +66,7 @@ struct ProseRowView: View {
                     CopyButton(
                         text: copyText,
                         title: "Copy this answer",
-                        isVisible: isHovered,
+                        isVisible: hovered,
                         size: 18,
                         imageScale: .small
                     )
@@ -69,12 +80,12 @@ struct ProseRowView: View {
         }
         // Measured only under the pointer, so no other row pays for a geometry read.
         .background {
-            if isHovered {
+            if hovered {
                 Color.clear.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
             }
         }
         .overlay(alignment: .topTrailing) {
-            if isHovered, let sentAt {
+            if hovered, let sentAt {
                 MessageTimeLabel(date: sentAt)
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { timeWidth = $0 }
                     .opacity(timeFits ? 1 : 0)

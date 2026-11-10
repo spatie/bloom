@@ -5,6 +5,7 @@ import BloomCore
 struct AppearanceSettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
     @Bindable private var colourTheme = ColourThemePreference.shared
+    @Bindable private var chatWidth = ChatWidthPreference.shared
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -71,6 +72,8 @@ struct AppearanceSettingsView: View {
             FileIconsSettingsSection()
 
             Section {
+                ChatWidthControls(choice: $chatWidth.choice, limitsProse: $chatWidth.limitsProse)
+
                 Picker("Font", selection: $colourTheme.chatFont) {
                     Section {
                         ForEach(ChatFontCatalogue.curated) { face in
