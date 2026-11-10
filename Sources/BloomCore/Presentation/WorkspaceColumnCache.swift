@@ -3,17 +3,26 @@
 /// A workspace switch used to hand one transcript table a different conversation. Even when both
 /// conversations were already in memory, the table had to hide itself, replace its rows, restore
 /// the reader's place and reveal again. Keeping the workspace being left beside the one being
-/// entered gives the common back-and-forth switch two stable view identities instead.
+/// entered gives returning workspaces stable view identities instead.
 ///
-/// Two is deliberate. It covers the comparison Seb reported without leaving every terminal,
-/// browser and transcript visited during a day alive in the window.
+/// Ten covers working across several task workspaces without retaining every column visited in
+/// a day. Bart measured roughly half the switching time across eight mixed-pane workspaces,
+/// at about 20 MB per extra retained column. The default can be lowered on memory-limited Macs.
 public enum WorkspaceColumnCache {
-    public static let capacity = 2
+    public static let capacity = 10
+    public static let capacityKey = "workspace.columnCache"
+    public static let maximumCapacity = 32
+
+    public static func capacity(stated: Int) -> Int {
+        stated <= 0 ? capacity : min(max(stated, 1), maximumCapacity)
+    }
 
     /// Most recently visited first, with each workspace present at most once.
-    public static func visiting(_ id: WorkspaceID, in current: [WorkspaceID]) -> [WorkspaceID] {
+    public static func visiting(
+        _ id: WorkspaceID, in current: [WorkspaceID], capacity: Int = WorkspaceColumnCache.capacity
+    ) -> [WorkspaceID] {
         var next = [id]
-        next.append(contentsOf: current.lazy.filter { $0 != id }.prefix(capacity - 1))
+        next.append(contentsOf: current.lazy.filter { $0 != id }.prefix(max(capacity, 1) - 1))
         return next
     }
 

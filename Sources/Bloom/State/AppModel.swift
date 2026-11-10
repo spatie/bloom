@@ -158,10 +158,10 @@ final class AppModel {
         return workspaceModels[id]
     }
 
-    /// The current workspace column and the one immediately before it, in stable structural order.
+    /// Recently visited workspace columns, in stable structural order.
     ///
     /// Unlike `workspaceModels`, this is observed because `DetailColumn` uses membership to keep
-    /// two distinct SwiftUI and AppKit view trees alive. The models themselves remain outside
+    /// distinct SwiftUI and AppKit view trees alive. The models themselves remain outside
     /// observation, so a transcript update in one workspace still invalidates only its own tree.
     private(set) var retainedWorkspaceIDs: [WorkspaceID] = []
     @ObservationIgnored private var workspaceColumnRecency: [WorkspaceID] = []
@@ -172,7 +172,12 @@ final class AppModel {
     /// property, not every row in the transcript beneath an environment value.
     private func updateRetainedWorkspaces(for selection: SidebarSelection) {
         if let id = selection.workspaceID {
-            workspaceColumnRecency = WorkspaceColumnCache.visiting(id, in: workspaceColumnRecency)
+            workspaceColumnRecency = WorkspaceColumnCache.visiting(
+                id, in: workspaceColumnRecency,
+                capacity: WorkspaceColumnCache.capacity(
+                    stated: UserDefaults.standard.integer(forKey: WorkspaceColumnCache.capacityKey)
+                )
+            )
             let retained = WorkspaceColumnCache.stableMembers(
                 retainedWorkspaceIDs, from: workspaceColumnRecency
             )

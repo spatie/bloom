@@ -47,6 +47,11 @@ Useful shortcuts include Cmd+N for a new workspace, Cmd+J for a project-free con
 Cmd+P to search files in the current project workspace. See [the menu reference](docs/MENUS.md)
 for the full list.
 
+Bloom keeps the ten most recently visited workspace columns ready for faster switching. To keep
+fewer columns on a Mac short on memory, set the `workspace.columnCache` integer default. Positive
+values are clamped to 1 through 32; an unset, zero or negative value uses ten. The launch argument
+`-workspace.columnCache 2` overrides it for one launch.
+
 ### Incoming mails
 
 The built-in inbox is enabled by default. Point your local app's SMTP host to
