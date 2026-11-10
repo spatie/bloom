@@ -16,17 +16,20 @@ import BloomCore
 struct PlanRowView: View {
     var markdown: String
 
+    @Environment(\.chatMeasures) private var chatMeasures
+
     var body: some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.cardInset) {
             header
 
             MarkdownView(markdown)
+                .environment(\.markdownProseMeasure, chatMeasures.prose)
                 .font(Typo.body)
                 .proseLeading()
                 .textSelection(.enabled)
         }
         .padding(TranscriptLayout.cardInset)
-        .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .fill(Palette.questionWashSettled)

@@ -131,11 +131,17 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         /// It is the ratio rather than the step, so nothing in the core has to know that a step is
         /// what a person picks.
         public var leading: Double
+        /// A settings change can rewrap content without changing the table width.
+        public var chatMeasures: ChatWidth.Measures
 
-        public init(width: Double, scale: Double, leading: Double) {
+        public init(
+            width: Double, scale: Double, leading: Double,
+            chatMeasures: ChatWidth.Measures = ChatWidth.comfortable.measures()
+        ) {
             self.width = width
             self.scale = scale
             self.leading = leading
+            self.chatMeasures = chatMeasures
         }
 
         /// Whether two measures are the same one.
@@ -143,6 +149,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
             TranscriptRowHeights.isSameWidth(width, other.width)
                 && scale == other.scale
                 && leading == other.leading
+                && chatMeasures == other.chatMeasures
         }
     }
 
@@ -494,9 +501,12 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// A width narrower than `narrowest` is not an answer and is refused: it leaves the cache
     /// exactly as it was rather than emptying it against a number no row will be drawn at.
     @discardableResult
-    public mutating func reset(width: Double, scale: Double, leading: Double) -> Bool {
+    public mutating func reset(
+        width: Double, scale: Double, leading: Double,
+        chatMeasures: ChatWidth.Measures = ChatWidth.comfortable.measures()
+    ) -> Bool {
         guard width > Self.narrowest else { return false }
-        let wanted = Measure(width: width, scale: scale, leading: leading)
+        let wanted = Measure(width: width, scale: scale, leading: leading, chatMeasures: chatMeasures)
         if let measure, measure.matches(wanted) { return false }
         measure = wanted
         heights.removeAll()
@@ -546,7 +556,21 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     public mutating func rewidth(to width: Double) -> Bool {
         guard let current = measure, width > Self.narrowest else { return false }
         guard !Self.isSameWidth(current.width, width) else { return false }
-        measure = Measure(width: width, scale: current.scale, leading: current.leading)
+        measure = Measure(
+            width: width, scale: current.scale, leading: current.leading, chatMeasures: current.chatMeasures
+        )
+        stale = Set(heights.keys)
+        return true
+    }
+
+    /// A chosen reading measure changes wrapping while the table itself keeps its width. Keep
+    /// old heights as estimates just as a pane resize does: clearing them before `reloadData`
+    /// collapses a long document to cold guesses and AppKit clamps the reader to its new end.
+    @discardableResult
+    public mutating func reflow(to chatMeasures: ChatWidth.Measures) -> Bool {
+        guard var current = measure, current.chatMeasures != chatMeasures else { return false }
+        current.chatMeasures = chatMeasures
+        measure = current
         stale = Set(heights.keys)
         return true
     }

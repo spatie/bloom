@@ -152,7 +152,7 @@ extension View {
     /// of a wide pane, which is what the owner's screenshot showed.
     func subagentReadingColumn() -> some View {
         padding(.horizontal, TranscriptLayout.inset)
-            .frame(maxWidth: TranscriptLayout.conversationMeasure, alignment: .leading)
+            .chatReadingColumn()
             .frame(maxWidth: .infinity, alignment: .center)
     }
 }

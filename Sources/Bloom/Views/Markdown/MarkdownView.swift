@@ -147,6 +147,7 @@ extension View {
 }
 
 extension EnvironmentValues {
+    @Entry var markdownProseMeasure: CGFloat = .infinity
     @Entry var markdownIsStreaming: Bool = false
     @Entry var markdownLinkActions = TranscriptLinkActions()
     @Entry var markdownLineSpacingOverride: CGFloat?
@@ -189,6 +190,7 @@ private struct MarkdownBlockView: View {
     /// And its line height, which the `Text` branch below inherits through the environment but
     /// the `NSTextView` one has to be handed as a number.
     @Environment(\.chatLineHeight) private var chatLineHeight
+    @Environment(\.markdownProseMeasure) private var proseMeasure
     @Environment(\.markdownIsStreaming) private var isStreaming
     @Environment(\.markdownLinkActions) private var linkActions
     @Environment(\.markdownLineSpacingOverride) private var lineSpacingOverride
@@ -221,11 +223,13 @@ private struct MarkdownBlockView: View {
         switch block {
         case let .paragraph(inline):
             inlineText(inline, rung: Typo.body, color: foreground)
+                .frame(maxWidth: proseMeasure, alignment: .leading)
         case let .heading(level, inline):
             // Three real steps rather than one. Every level used to land on reading size and
             // differ only in weight, so an agent that structured its answer with headings got a
             // wall of bold sentences and no structure at all.
             inlineText(inline, rung: Self.headingFont(level), color: foreground)
+                .frame(maxWidth: proseMeasure, alignment: .leading)
                 .padding(.top, isFirst ? 0 : MarkdownMetrics.headingLead)
         case let .codeBlock(code, language, info):
             CodeBlockView(code: code, language: language, info: info)
@@ -235,6 +239,7 @@ private struct MarkdownBlockView: View {
             list(items: items, start: start, tight: tight)
         case let .taskList(items):
             taskList(items)
+                .frame(maxWidth: proseMeasure, alignment: .leading)
         case let .blockQuote(blocks):
             HStack(alignment: .top, spacing: TranscriptLayout.block) {
                 Rectangle()

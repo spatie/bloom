@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import BloomCore
 
@@ -11,112 +12,162 @@ struct StreamingMarkdownView: View {
 
     init(_ text: String) { self.text = text }
 
+    @Environment(\.markdownProseMeasure) private var proseMeasure
+    @Environment(\.chatLineHeight) private var lineHeight
+    @Environment(\.markdownLinkActions) private var linkActions
+
     var body: some View {
-        Text(StreamingMarkdownText.render(text, scale: fontScale, face: chatFont))
-            .opensTranscriptLinks()
+        TranscriptTextView(
+            text: NSAttributedString(string: ""),
+            textAtWidth: { width in
+                StreamingMarkdownText.native(
+                    text, width: width, proseMeasure: proseMeasure, scale: fontScale,
+                    face: chatFont, lineHeight: lineHeight
+                )
+            },
+            linkColor: Palette.linkNSColor, actions: linkActions
+        )
+        // During handoff this prefix coexists with the saved answer's selectable blocks. The
+        // transient copy must not register a second copy of the same answer for cross-row drags.
+        .environment(\.transcriptConversationSelection, nil)
+        .environment(\.transcriptTextSelection, nil)
     }
 }
 
 @MainActor
 private enum StreamingMarkdownText {
-    /// SwiftUI can ask for the same body more than once between deltas. Keep only the current
-    /// prefix so a live answer cannot evict the cached attributed text of settled rows.
-    private static var cached: (text: String, scale: CGFloat, face: ChatFont, rendered: AttributedString)?
+    /// Only the current prefix is kept, so live deltas cannot evict settled Markdown caches.
+    private static var nativeCache: (
+        text: String, width: CGFloat, prose: CGFloat, scale: CGFloat, face: ChatFont,
+        lineHeight: ChatLineHeight, rendered: NSAttributedString
+    )?
 
-    static func render(_ text: String, scale: CGFloat, face: ChatFont) -> AttributedString {
-        if let cached, cached.text == text, cached.scale == scale, cached.face == face {
-            return cached.rendered
+    static func native(
+        _ text: String, width: CGFloat, proseMeasure: CGFloat, scale: CGFloat,
+        face: ChatFont, lineHeight: ChatLineHeight
+    ) -> NSAttributedString {
+        if let value = nativeCache, value.text == text, value.width == width,
+           value.prose == proseMeasure, value.scale == scale, value.face == face, value.lineHeight == lineHeight {
+            return value.rendered
         }
-        let rendered = blocks(MarkdownParser.parse(text), scale: scale, face: face)
-        cached = (text, scale, face, rendered)
+        let rendered = nativeBlocks(
+            MarkdownParser.parse(text), width: width, proseMeasure: proseMeasure,
+            scale: scale, face: face, lineHeight: lineHeight
+        )
+        nativeCache = (text, width, proseMeasure, scale, face, lineHeight, rendered)
         return rendered
     }
 
-    private static func blocks(
-        _ values: [MarkdownBlock], scale: CGFloat, face: ChatFont,
-        separator: String = "\n\n"
-    ) -> AttributedString {
-        var result = AttributedString()
+    private static func nativeBlocks(
+        _ values: [MarkdownBlock], width: CGFloat, proseMeasure: CGFloat, scale: CGFloat,
+        face: ChatFont, lineHeight: ChatLineHeight, separator: String = "\n\n"
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: "")
         for (index, value) in values.enumerated() {
-            if index > 0 { result += AttributedString(separator) }
-            result += block(value, scale: scale, face: face)
+            if index > 0 { result.append(NSAttributedString(string: separator)) }
+            switch value {
+            case .bulletList(let items, _), .numberedList(_, let items, _):
+                let start: Int? = if case .numberedList(let start, _, _) = value { start } else { nil }
+                for (offset, item) in items.enumerated() {
+                    if offset > 0 { result.append(NSAttributedString(string: "\n")) }
+                    let body = nativeBlocks(item, width: width, proseMeasure: proseMeasure,
+                        scale: scale, face: face, lineHeight: lineHeight, separator: "\n")
+                    result.append(NSAttributedString(
+                        string: start.map { "\($0 + offset).  " } ?? "•  ",
+                        attributes: body.length > 0 ? body.attributes(at: 0, effectiveRange: nil) : nil
+                    ))
+                    result.append(body)
+                }
+            case .blockQuote(let quoted):
+                let body = nativeBlocks(quoted, width: width, proseMeasure: proseMeasure,
+                    scale: scale, face: face, lineHeight: lineHeight)
+                result.append(NSAttributedString(string: "│  ",
+                    attributes: body.length > 0 ? body.attributes(at: 0, effectiveRange: nil) : nil))
+                result.append(body)
+            default:
+                let run = NSMutableAttributedString(attributedString: leaf(value, scale: scale, face: face))
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.lineSpacing = TranscriptLayout.proseLeading(
+                    Typo.body, scale: scale, face: face, lineHeight: lineHeight
+                )
+                // A positive tail indent is measured from the leading edge. TextKit therefore
+                // gives paragraphs their own measure without splitting a live answer's view tree.
+                if !value.needsFullChatColumn, proseMeasure.isFinite {
+                    paragraph.tailIndent = min(max(1, width), proseMeasure)
+                }
+                run.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: run.length))
+                result.append(run)
+            }
+        }
+        let full = NSRange(location: 0, length: result.length)
+        var missingFonts: [NSRange] = []
+        result.enumerateAttribute(.font, in: full) { font, range, _ in
+            if font == nil { missingFonts.append(range) }
+        }
+        for range in missingFonts {
+            result.addAttribute(.font, value: Typo.body.resolvedNSFont(scale: scale, face: face), range: range)
+            result.addAttribute(.foregroundColor, value: NSColor(Palette.textPrimary), range: range)
         }
         return result
     }
 
-    private static func block(_ value: MarkdownBlock, scale: CGFloat, face: ChatFont) -> AttributedString {
+    private static func leaf(_ value: MarkdownBlock, scale: CGFloat, face: ChatFont) -> NSAttributedString {
         switch value {
-        case let .paragraph(inline):
+        case .paragraph(let inline):
             return styled(inline, rung: Typo.body, scale: scale, face: face)
-        case let .heading(level, inline):
+        case .heading(let level, let inline):
             let rung: ScaledFont = switch level {
             case 1: Typo.heading
             case 2: Typo.title
             default: Typo.bodyEmphasis
             }
             return styled(inline, rung: rung, scale: scale, face: face)
-        case let .codeBlock(code, _, _):
-            var result = AttributedString(code)
-            result.font = Typo.code.resolved(scale: scale)
-            result.foregroundColor = Palette.textPrimary
-            result.backgroundColor = Palette.codeBackground
-            return result
-        case let .bulletList(items, _):
-            return list(items, start: nil, scale: scale, face: face)
-        case let .numberedList(start, items, _):
-            return list(items, start: start, scale: scale, face: face)
-        case let .taskList(items):
-            var result = AttributedString()
+        case .codeBlock(let code, _, _):
+            return NSAttributedString(string: code, attributes: [
+                .font: Typo.code.resolvedNSFont(scale: scale),
+                .foregroundColor: NSColor(Palette.textPrimary),
+                .backgroundColor: NSColor(Palette.codeBackground),
+            ])
+        case .taskList(let items):
+            let result = NSMutableAttributedString(string: "")
             for (index, item) in items.enumerated() {
-                if index > 0 { result += AttributedString("\n") }
-                result += AttributedString(item.checked ? "☑  " : "☐  ")
-                result += styled(item.inline, rung: Typo.body, scale: scale, face: face)
+                if index > 0 { result.append(NSAttributedString(string: "\n")) }
+                result.append(NSAttributedString(string: item.checked ? "☑  " : "☐  "))
+                result.append(styled(item.inline, rung: Typo.body, scale: scale, face: face))
             }
             return result
-        case let .blockQuote(quoted):
-            return AttributedString("│  ") + blocks(quoted, scale: scale, face: face)
-        case let .table(headers, rows, _):
-            var result = tableRow(headers, scale: scale, face: face)
+        case .table(let headers, let rows, _):
+            let result = NSMutableAttributedString(attributedString: tableRow(headers, scale: scale, face: face))
             for row in rows {
-                result += AttributedString("\n")
-                result += tableRow(row, scale: scale, face: face)
+                result.append(NSAttributedString(string: "\n"))
+                result.append(tableRow(row, scale: scale, face: face))
             }
             return result
         case .thematicBreak:
-            return AttributedString("────────")
+            return NSAttributedString(string: "────────")
+        case .bulletList, .numberedList, .blockQuote:
+            preconditionFailure("Nested blocks are rendered recursively before leaves")
         }
-    }
-
-    private static func list(
-        _ items: [[MarkdownBlock]], start: Int?, scale: CGFloat, face: ChatFont
-    ) -> AttributedString {
-        var result = AttributedString()
-        for (index, item) in items.enumerated() {
-            if index > 0 { result += AttributedString("\n") }
-            result += AttributedString(start.map { "\($0 + index).  " } ?? "•  ")
-            result += blocks(item, scale: scale, face: face, separator: "\n")
-        }
-        return result
     }
 
     private static func tableRow(
         _ cells: [[MarkdownInline]], scale: CGFloat, face: ChatFont
-    ) -> AttributedString {
-        var result = AttributedString()
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: "")
         for (index, cell) in cells.enumerated() {
-            if index > 0 { result += AttributedString("  │  ") }
-            result += styled(cell, rung: Typo.body, scale: scale, face: face)
+            if index > 0 { result.append(NSAttributedString(string: "  │  ")) }
+            result.append(styled(cell, rung: Typo.body, scale: scale, face: face))
         }
         return result
     }
 
     private static func styled(
         _ inline: [MarkdownInline], rung: ScaledFont, scale: CGFloat, face: ChatFont
-    ) -> AttributedString {
-        InlineAttributes.render(
-            inline, font: rung.resolved(scale: scale, face: face),
-            code: rung.monospacedCompanion(scale: scale, face: face),
-            color: Palette.textPrimary, intents: []
+    ) -> NSAttributedString {
+        InlineNSAttributes.make(
+            inline, font: rung.resolvedNSFont(scale: scale, face: face),
+            code: rung.monospacedCompanionNSFont(scale: scale, face: face),
+            color: NSColor(Palette.textPrimary), lineSpacing: 0
         )
     }
 }

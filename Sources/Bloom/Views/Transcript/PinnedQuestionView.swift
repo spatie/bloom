@@ -110,7 +110,7 @@ struct PinnedQuestionView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: TranscriptLayout.conversationMeasure)
+        .chatReadingColumn()
         .glassEffect(.regular.interactive(), in: Capsule())
         .pointerStyle(.link)
         .help("Show the full question")

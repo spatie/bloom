@@ -916,6 +916,11 @@ enum Snapshot {
             return
         }
 
+        if CommandLine.arguments.contains("--chat-width") {
+            await ChatWidthSnapshots.render(to: output)
+            return
+        }
+
         let model = await seededModel()
 
         // The limits panel is drawn from a real ask rather than from made up rows. It is the one
