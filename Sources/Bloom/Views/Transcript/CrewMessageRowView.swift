@@ -50,7 +50,7 @@ struct CrewMessageRowView: View {
     @ViewBuilder private var content: some View {
         switch message.event {
         case .said, .brief, .opening, .relayed: spoken
-        case .stopped, .failed, .cancelled, .workspaceDone: fact
+        case .stopped, .failed, .cancelled, .workspaceDone, .terminalRun: fact
         }
     }
 
@@ -109,7 +109,7 @@ struct CrewMessageRowView: View {
         case .relayed: "said"
         // Never drawn: a fact is its own line. Answered rather than defaulted so that a fifth
         // event has to be argued about here instead of arriving as the word "said".
-        case .stopped, .failed, .cancelled, .workspaceDone: ""
+        case .stopped, .failed, .cancelled, .workspaceDone, .terminalRun: ""
         }
     }
 
@@ -168,15 +168,18 @@ struct CrewMessageRowView: View {
     /// their own window wants to know that an agent finished rather than to read the instruction
     /// that went with it.
     private var fact: some View {
-        Text(message.text)
-            .font(Typo.label)
-            .foregroundStyle(Palette.textSecondary)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: chatMeasures.prose, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, TranscriptLayout.inset)
-            .padding(.vertical, TranscriptLayout.tight)
+        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
+            Text(message.text)
+                .font(Typo.label)
+                .foregroundStyle(Palette.textSecondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: chatMeasures.prose, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if message.event == .terminalRun, hasEnvelope { envelope }
+        }
+        .padding(.horizontal, TranscriptLayout.inset)
+        .padding(.vertical, TranscriptLayout.tight)
     }
 
     // MARK: The rule

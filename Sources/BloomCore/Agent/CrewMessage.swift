@@ -36,6 +36,8 @@ public struct CrewMessage: Sendable, Equatable, Codable {
         /// about has come to rest in the other workspace: finished, failed, stuck on the owner,
         /// or archived. A fact, like `.stopped`. See `WorkspaceDoneNotice`.
         case workspaceDone = "workspace_done"
+        /// The owner ran a chat code block in a terminal, and its output is ready.
+        case terminalRun = "terminal_run"
     }
 
     /// Who is speaking, which is what the rule down the left is coloured by. A fact is Bloom's own

@@ -72,6 +72,8 @@ struct TranscriptLinkActions: Sendable, Equatable {
     /// attach to, and the fence then offers no edit button at all.
     var attachEditedCode: (@MainActor @Sendable (_ code: String, _ filename: String) async -> Bool)?
 
+    var runInTerminal: (@MainActor @Sendable (_ code: String) async -> Void)?
+
     /// The conversation these actions belong to, which keys a code block's draft.
     var session: SessionID? {
         switch identity {

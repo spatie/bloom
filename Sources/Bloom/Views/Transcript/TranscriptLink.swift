@@ -321,6 +321,13 @@ enum TranscriptLink {
                         await attachEdited(code, named: filename, to: model, session: session)
                     }
                 }
+            },
+            runInTerminal: model.flatMap { model in
+                session.map { session in
+                    { @MainActor @Sendable code in
+                        await model.runInTerminal(code, sessionID: session, pane: pane)
+                    }
+                }
             }
         )
     }
