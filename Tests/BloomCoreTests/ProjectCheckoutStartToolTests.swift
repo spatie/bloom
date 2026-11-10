@@ -97,6 +97,39 @@ struct ProjectCheckoutStartToolTests {
         #expect(recorder.chats.count == 1)
     }
 
+    @Test("terminal choice is preserved when reusing the owner's project checkout",
+          arguments: [true, false, nil] as [Bool?])
+    func reusedCheckoutTerminalChoice(terminal: Bool?) async throws {
+        let (store, _, _) = try await store(withCheckout: true)
+        let recorder = Recorder()
+        var arguments = asking
+        arguments["agent"] = .string("codex")
+        arguments["terminal_chat"] = terminal.map(JSONValue.bool)
+
+        let result = await recorder.tool().call(request(arguments), as: .owner, store: store)
+
+        #expect(!result.isError)
+        #expect(recorder.starts.isEmpty)
+        let order = try #require(recorder.chats.first?.order)
+        #expect(order.terminalChat == terminal)
+        #expect(order.message == "Tidy the invoice export")
+        #expect(order.agent == .codex)
+    }
+
+    @Test("changing terminal choice adds another chat rather than deduplicating the old choice")
+    func differentTerminalChoiceIsAnotherChat() async throws {
+        let (store, _, _) = try await store(withCheckout: true)
+        let recorder = Recorder()
+        let tool = recorder.tool()
+        for terminal in [true, false] {
+            var arguments = asking
+            arguments["terminal_chat"] = .bool(terminal)
+            let result = await tool.call(request(arguments), as: .owner, store: store)
+            #expect(!result.isError)
+        }
+        #expect(recorder.chats.count == 2)
+    }
+
     @Test("a workspace agent is refused before anything is started or added")
     func workspaceAgentRefused() async throws {
         let (store, repo, _) = try await store(withCheckout: true)
