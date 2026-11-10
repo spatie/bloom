@@ -207,9 +207,24 @@ struct BundledMailServerTests {
         guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
         let accepted = Darwin.accept(listener.descriptor, nil, nil)
         guard accepted >= 0 else { throw POSIXError(.EIO) }
-        // Close this end first so the old listener's port enters TIME_WAIT.
-        Darwin.close(accepted)
+        defer { Darwin.close(accepted) }
+        // Both FINs must arrive before checking TIME_WAIT. Closing the descriptors alone races
+        // the TCP shutdown and can leave the port looking occupied under CI load.
+        guard Darwin.shutdown(accepted, SHUT_WR) == 0 else { throw POSIXError(.EIO) }
+        try receiveEOF(client)
+        guard Darwin.shutdown(client, SHUT_WR) == 0 else { throw POSIXError(.EIO) }
+        try receiveEOF(accepted)
         return listener.port
+    }
+
+    private func receiveEOF(_ descriptor: Int32) throws {
+        // A ceiling on a broken handshake, not a timing assertion.
+        var timeout = timeval(tv_sec: 30, tv_usec: 0)
+        guard Darwin.setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            throw POSIXError(.EIO)
+        }
+        var byte: UInt8 = 0
+        guard Darwin.recv(descriptor, &byte, 1, 0) == 0 else { throw POSIXError(.EIO) }
     }
 
     private func isPortFree(_ port: Int) -> Bool {
