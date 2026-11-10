@@ -6,6 +6,7 @@ import BloomCore
 /// markdown blocks and native text views underneath SwiftUI's layout engine.
 struct StreamingMarkdownView: View {
     let text: String
+    @AppStorage(TranscriptLinkPreferences.key) private var allowedLinkSchemes = ""
 
     @Environment(\.fontScale) private var fontScale
     @Environment(\.chatFont) private var chatFont
@@ -22,7 +23,8 @@ struct StreamingMarkdownView: View {
             textAtWidth: { width in
                 StreamingMarkdownText.native(
                     text, width: width, proseMeasure: proseMeasure, scale: fontScale,
-                    face: chatFont, lineHeight: lineHeight
+                    face: chatFont, lineHeight: lineHeight,
+                    allowedSchemes: TranscriptLinkPreferences.schemes(in: allowedLinkSchemes)
                 )
             },
             linkColor: Palette.linkNSColor, actions: linkActions
@@ -39,22 +41,23 @@ private enum StreamingMarkdownText {
     /// Only the current prefix is kept, so live deltas cannot evict settled Markdown caches.
     private static var nativeCache: (
         text: String, width: CGFloat, prose: CGFloat, scale: CGFloat, face: ChatFont,
-        lineHeight: ChatLineHeight, rendered: NSAttributedString
+        lineHeight: ChatLineHeight, allowedSchemes: Set<String>, rendered: NSAttributedString
     )?
 
     static func native(
         _ text: String, width: CGFloat, proseMeasure: CGFloat, scale: CGFloat,
-        face: ChatFont, lineHeight: ChatLineHeight
+        face: ChatFont, lineHeight: ChatLineHeight, allowedSchemes: Set<String>
     ) -> NSAttributedString {
         if let value = nativeCache, value.text == text, value.width == width,
-           value.prose == proseMeasure, value.scale == scale, value.face == face, value.lineHeight == lineHeight {
+           value.prose == proseMeasure, value.scale == scale, value.face == face,
+           value.lineHeight == lineHeight, value.allowedSchemes == allowedSchemes {
             return value.rendered
         }
         let rendered = nativeBlocks(
-            MarkdownParser.parse(text), width: width, proseMeasure: proseMeasure,
+            MarkdownParser.parse(text, allowedSchemes: allowedSchemes), width: width, proseMeasure: proseMeasure,
             scale: scale, face: face, lineHeight: lineHeight
         )
-        nativeCache = (text, width, proseMeasure, scale, face, lineHeight, rendered)
+        nativeCache = (text, width, proseMeasure, scale, face, lineHeight, allowedSchemes, rendered)
         return rendered
     }
 

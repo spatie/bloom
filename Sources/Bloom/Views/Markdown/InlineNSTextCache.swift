@@ -7,6 +7,7 @@ import BloomCore
 @MainActor
 enum InlineNSTextCache {
     private final class Key: NSObject {
+        let allowedSchemes = TranscriptLink.allowedSchemes
         let inline: [MarkdownInline]
         let font: NSFont
         let code: NSFont
@@ -26,7 +27,7 @@ enum InlineNSTextCache {
         override func isEqual(_ object: Any?) -> Bool {
             guard let other = object as? Key else { return false }
             return inline == other.inline && font == other.font && code == other.code
-                && color == other.color && spacing == other.spacing
+                && color == other.color && spacing == other.spacing && allowedSchemes == other.allowedSchemes
         }
     }
 

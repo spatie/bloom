@@ -90,8 +90,8 @@ public indirect enum MarkdownBlock: Identifiable, Sendable, Hashable {
 
 /// A bounded hand-written parser keeps partial, rapidly changing transcript text cheap and deterministic.
 public enum MarkdownParser: Sendable {
-    public static func parse(_ text: String) -> [MarkdownBlock] {
-        var parser = BlockParser(lines: lines(of: text), allowIndentedCode: true)
+    public static func parse(_ text: String, allowedSchemes: Set<String> = []) -> [MarkdownBlock] {
+        var parser = BlockParser(lines: lines(of: text), allowIndentedCode: true, allowedSchemes: allowedSchemes)
         return parser.parse()
     }
 
@@ -122,6 +122,7 @@ private struct ListMarker {
 private struct BlockParser {
     let lines: [String]
     let allowIndentedCode: Bool
+    var allowedSchemes: Set<String> = []
     var index = 0
 
     mutating func parse() -> [MarkdownBlock] {
@@ -186,7 +187,7 @@ private struct BlockParser {
         while content.last == "#" { content.removeLast() }
         content = content.trimmingCharacters(in: .whitespaces)
         index += 1
-        return .heading(level: count, inline: InlineParser.parse(content))
+        return .heading(level: count, inline: InlineParser.parse(content, allowedSchemes: allowedSchemes))
     }
 
     private mutating func parseQuote() -> MarkdownBlock? {
@@ -203,7 +204,7 @@ private struct BlockParser {
                 break
             }
         }
-        var nested = BlockParser(lines: quoted, allowIndentedCode: true)
+        var nested = BlockParser(lines: quoted, allowIndentedCode: true, allowedSchemes: allowedSchemes)
         return .blockQuote(blocks: nested.parse())
     }
 
@@ -256,9 +257,9 @@ private struct BlockParser {
 
             while itemLines.last.map(isBlank) == true { itemLines.removeLast() }
             tight = tight && !separated
-            let task = taskContent(itemLines)
+            let task = taskContent(itemLines, allowedSchemes: allowedSchemes)
             tasks.append(task)
-            var nested = BlockParser(lines: itemLines, allowIndentedCode: false)
+            var nested = BlockParser(lines: itemLines, allowIndentedCode: false, allowedSchemes: allowedSchemes)
             items.append(nested.parse())
         }
 
@@ -297,17 +298,17 @@ private struct BlockParser {
         while index < lines.count, lines[index].contains("|"), !isBlank(lines[index]) {
             var cells = tableCells(lines[index])
             if cells.count < alignments.count { cells += Array(repeating: "", count: alignments.count - cells.count) }
-            rows.append(cells.prefix(alignments.count).map(InlineParser.parse))
+            rows.append(cells.prefix(alignments.count).map { InlineParser.parse($0, allowedSchemes: allowedSchemes) })
             index += 1
         }
-        return .table(headers: headerCells.map(InlineParser.parse), rows: rows, alignments: alignments)
+        return .table(headers: headerCells.map { InlineParser.parse($0, allowedSchemes: allowedSchemes) }, rows: rows, alignments: alignments)
     }
 
     private mutating func parseParagraphOrSetext() -> MarkdownBlock {
         if index + 1 < lines.count, let level = setextLevel(lines[index + 1]), !isBlank(lines[index]) {
             let content = lines[index].trimmingCharacters(in: .whitespaces)
             index += 2
-            return .heading(level: level, inline: InlineParser.parse(content))
+            return .heading(level: level, inline: InlineParser.parse(content, allowedSchemes: allowedSchemes))
         }
 
         var paragraph: [String] = []
@@ -317,7 +318,7 @@ private struct BlockParser {
             paragraph.append(lines[index])
             index += 1
         }
-        return .paragraph(inline: InlineParser.parseLines(paragraph))
+        return .paragraph(inline: InlineParser.parseLines(paragraph, allowedSchemes: allowedSchemes))
     }
 
     private func startsBlock(_ line: String, at position: Int) -> Bool {
@@ -408,14 +409,14 @@ private func listMarker(_ source: String) -> ListMarker? {
     return ListMarker(ordered: true, number: Int(digits) ?? 1, indent: indent, contentOffset: indent + digits.count + 1 + max(1, spaces), content: String(remainder.dropFirst(spaces)))
 }
 
-private func taskContent(_ lines: [String]) -> (checked: Bool, inline: [MarkdownInline])? {
+private func taskContent(_ lines: [String], allowedSchemes: Set<String>) -> (checked: Bool, inline: [MarkdownInline])? {
     guard let first = lines.first, first.count >= 3, first.first == "[" else { return nil }
     let chars = Array(first.prefix(3))
     guard chars[2] == "]", chars[1] == " " || chars[1] == "x" || chars[1] == "X" else { return nil }
     var content = String(first.dropFirst(3))
     if content.first == " " { content.removeFirst() }
     if lines.count > 1 { content += "\n" + lines.dropFirst().joined(separator: "\n") }
-    return (chars[1] != " ", InlineParser.parse(content))
+    return (chars[1] != " ", InlineParser.parse(content, allowedSchemes: allowedSchemes))
 }
 
 private func tableAlignments(_ source: String) -> [TableAlignment]? {
@@ -467,7 +468,7 @@ private func tableCells(_ source: String) -> [String] {
 private enum InlineParser {
     private static let cache = MarkdownInlineCache()
 
-    static func parseLines(_ lines: [String]) -> [MarkdownInline] {
+    static func parseLines(_ lines: [String], allowedSchemes: Set<String>) -> [MarkdownInline] {
         var output: [MarkdownInline] = []
         for (offset, raw) in lines.enumerated() {
             var line = raw
@@ -479,15 +480,15 @@ private enum InlineParser {
                 while line.last == " " { line.removeLast() }
                 hardBreak = true
             }
-            output += parse(line)
+            output += parse(line, allowedSchemes: allowedSchemes)
             if offset < lines.count - 1 { output.append(hardBreak ? .lineBreak : .text(" ")) }
         }
         return coalesced(output)
     }
 
-    static func parse(_ source: String) -> [MarkdownInline] {
-        cache.value(for: source) {
-            var scanner = Scanner(source)
+    static func parse(_ source: String, allowedSchemes: Set<String>) -> [MarkdownInline] {
+        cache.value(for: source, allowedSchemes: allowedSchemes) {
+            var scanner = Scanner(source, allowedSchemes: allowedSchemes)
             return coalesced(scanner.run())
         }
     }
@@ -506,9 +507,11 @@ private enum InlineParser {
 
     private struct Scanner {
         let source: String
+        let allowedSchemes: Set<String>
         var cursor: String.Index
 
-        init(_ source: String) {
+        init(_ source: String, allowedSchemes: Set<String>) {
+            self.allowedSchemes = allowedSchemes
             self.source = source
             cursor = source.startIndex
         }
@@ -568,7 +571,7 @@ private enum InlineParser {
             let text = String(source[source.index(after: cursor)..<closeText])
             let url = String(source[source.index(after: openURL)..<closeURL]).trimmingCharacters(in: .whitespaces)
             guard !url.isEmpty else { return false }
-            result.append(.link(text: InlineParser.parse(text), url: url))
+            result.append(.link(text: InlineParser.parse(text, allowedSchemes: allowedSchemes), url: url))
             cursor = source.index(after: closeURL)
             return true
         }
@@ -596,8 +599,9 @@ private enum InlineParser {
             guard source[cursor] == "<", let close = source[cursor...].firstIndex(of: ">") else { return false }
             let start = source.index(after: cursor)
             let value = String(source[start..<close])
-            guard value.hasPrefix("https://") || value.hasPrefix("http://") else { return false }
-            result.append(.link(text: [.text(value)], url: value))
+            guard let link = LinkScan.links(in: value, allowedSchemes: allowedSchemes).first,
+                  link.text == value else { return false }
+            result.append(.link(text: [.text(value)], url: link.url))
             cursor = source.index(after: close)
             return true
         }
@@ -606,7 +610,7 @@ private enum InlineParser {
             guard source[cursor...].hasPrefix(marker) else { return false }
             let contentStart = source.index(cursor, offsetBy: marker.count)
             guard contentStart < source.endIndex, let close = source.range(of: marker, range: contentStart..<source.endIndex)?.lowerBound, close > contentStart else { return false }
-            result.append(make(InlineParser.parse(String(source[contentStart..<close]))))
+            result.append(make(InlineParser.parse(String(source[contentStart..<close]), allowedSchemes: allowedSchemes)))
             cursor = source.index(close, offsetBy: marker.count)
             return true
         }
@@ -618,7 +622,7 @@ private enum InlineParser {
         /// never comes through here. This runs last in the chain, after the code span, so a
         /// backticked address has already been taken out of the line before it is asked about.
         mutating func consumeBareURL(into result: inout [MarkdownInline]) -> Bool {
-            guard let link = LinkScan.link(in: source, at: cursor) else { return false }
+            guard let link = LinkScan.link(in: source, at: cursor, allowedSchemes: allowedSchemes) else { return false }
             result.append(.link(text: [.text(link.text)], url: link.url))
             cursor = link.range.upperBound
             return true

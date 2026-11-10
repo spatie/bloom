@@ -23,7 +23,7 @@ public struct DetectedLink: Sendable, Hashable {
 
 /// Finds the addresses in a run of text, and refuses everything else that looks a bit like one.
 ///
-/// **What it detects.** Two shapes, and only two.
+/// **What it detects.** Web addresses, local servers, and explicitly allowed app schemes.
 ///
 /// 1. An explicit `http://` or `https://`, followed by something that could be a host. The scheme
 ///    is the whole test: the address is trusted because the writer said what it was, not because a
@@ -35,6 +35,7 @@ public struct DetectedLink: Sendable, Hashable {
 ///    the one shape without a scheme worth the risk. `http://` is assumed, because a dev server on
 ///    a port is almost never speaking TLS and `https://localhost:3000` fails in a way that looks
 ///    like Bloom's fault.
+/// 3. An explicitly allowed app scheme followed by a nonempty address.
 ///
 /// **What it deliberately refuses.**
 ///
@@ -43,12 +44,11 @@ public struct DetectedLink: Sendable, Hashable {
 ///   full of `Package.swift`, `README.md` and `Views/Transcript/TranscriptView.swift`.
 /// - `localhost` on its own. In this app's transcripts it is a word in a sentence at least as
 ///   often as it is somewhere to go.
-/// - Mail addresses, bare or `mailto:`. Detecting `name@host` would also detect
+/// - Mail addresses, bare or unconfigured `mailto:`. Detecting `name@host` would also detect
 ///   `git@github.com:spatie/bloom.git`, and turning a git remote into a link in a tool row is a
 ///   worse bug than the one this fixes.
-/// - Any other scheme. `file://`, `x-apple-something://` and whatever else an agent decided to
-///   write are text. Only http and https are ever handed to the browser, and the view layer checks
-///   again before it opens anything.
+/// - Other schemes unless the user has explicitly allowed them. File, JavaScript and Bloom's
+///   own schemes are always refused, including when configured.
 /// - Anything glued to the character before it. A match has to start a token: preceded by a
 ///   letter, a digit, or one of `@ / . _ - + ~ %`, it is part of something longer and is left
 ///   alone. That is what keeps `user@localhost:2222`, `./localhost:3000` and paths out.
@@ -63,7 +63,7 @@ public enum LinkScan: Sendable {
     /// Code spans and fenced blocks are stepped over. This is for text that is shown as it was
     /// typed, which is what a user turn is; agent prose reaches the same detection through
     /// `MarkdownParser`, where the fence and the backtick have already been taken out of the line.
-    public static func links(in text: String) -> [DetectedLink] {
+    public static func links(in text: String, allowedSchemes: Set<String> = []) -> [DetectedLink] {
         var found: [DetectedLink] = []
         var isFenced = false
 
@@ -74,7 +74,7 @@ public enum LinkScan: Sendable {
                 continue
             }
             guard !isFenced else { continue }
-            scan(line, of: text, into: &found)
+            scan(line, of: text, allowedSchemes: allowedSchemes, into: &found)
         }
 
         return found
@@ -84,12 +84,15 @@ public enum LinkScan: Sendable {
     ///
     /// This is the shape a scanner that is already walking the string wants, and it is how
     /// `MarkdownParser` reaches the same rules from inside its own inline parse.
-    public static func link(in text: String, at index: String.Index) -> DetectedLink? {
-        guard index < text.endIndex, Self.starters.contains(text[index]) else { return nil }
+    public static func link(in text: String, at index: String.Index, allowedSchemes: Set<String> = []) -> DetectedLink? {
+        guard index < text.endIndex else { return nil }
+        let character = text[index]
+        guard Self.starters.contains(character)
+            || allowedSchemes.contains(where: { $0.first?.lowercased() == character.lowercased() }) else { return nil }
         guard startsToken(text, at: index) else { return nil }
 
         let remainder = text[index...]
-        guard let opening = opening(remainder) else { return nil }
+        guard let opening = opening(remainder, allowedSchemes: allowedSchemes) else { return nil }
 
         var end = index
         while end < text.endIndex, isAddressCharacter(text[end]) {
@@ -99,7 +102,7 @@ public enum LinkScan: Sendable {
 
         guard text.distance(from: index, to: end) >= opening.required else { return nil }
         let written = String(text[index..<end])
-        guard let url = absolute(opening.prefix + written) else { return nil }
+        guard let url = absolute(opening.prefix + written, allowedSchemes: allowedSchemes) else { return nil }
         return DetectedLink(range: index..<end, text: written, url: url)
     }
 
@@ -109,14 +112,14 @@ public enum LinkScan: Sendable {
     /// rest of these rules about every letter in it.
     private static let starters: Set<Character> = ["h", "H", "l", "L", "1"]
 
-    private static func scan(_ line: Substring, of text: String, into found: inout [DetectedLink]) {
+    private static func scan(_ line: Substring, of text: String, allowedSchemes: Set<String>, into found: inout [DetectedLink]) {
         var index = line.startIndex
         while index < line.endIndex {
             if line[index] == "`" {
                 index = skippingCodeSpan(line, from: index)
                 continue
             }
-            if let link = link(in: text, at: index) {
+            if let link = link(in: text, at: index, allowedSchemes: allowedSchemes) {
                 found.append(link)
                 index = link.range.upperBound
                 continue
@@ -150,13 +153,21 @@ public enum LinkScan: Sendable {
 
     /// What has to be put in front of the written text to address it, and how many characters the
     /// match has to reach before it is one at all.
-    private static func opening(_ remainder: Substring) -> (prefix: String, required: Int)? {
+    private static func opening(_ remainder: Substring, allowedSchemes: Set<String>) -> (prefix: String, required: Int)? {
         for scheme in ["https://", "http://"] where matches(remainder, scheme) {
             // A scheme with nothing behind it is not an address.
             guard let host = remainder.dropFirst(scheme.count).first, host.isLetter || host.isNumber else {
                 return nil
             }
             return (prefix: "", required: scheme.count + 1)
+        }
+
+        for configured in allowedSchemes {
+            guard let scheme = TranscriptLinkPreferences.additionalScheme(configured),
+                  matches(remainder, scheme + ":") else { continue }
+            let rest = remainder.dropFirst(scheme.count + 1)
+            guard let first = rest.first, isAddressCharacter(first), first != ")", first != "]" else { return nil }
+            return (prefix: "", required: scheme.count + 2)
         }
 
         for host in ["localhost", "127.0.0.1"] where matches(remainder, host) {
@@ -226,17 +237,21 @@ public enum LinkScan: Sendable {
     /// Foundation's parser is strict about what may appear unescaped, so a path with a space
     /// already escaped passes straight through while one carrying an accented letter is escaped
     /// here first. A candidate that survives neither is left as text: it was never a link.
-    private static func absolute(_ raw: String) -> String? {
-        if isAddressable(raw) { return raw }
+    private static func absolute(_ raw: String, allowedSchemes: Set<String>) -> String? {
+        if isAddressable(raw, allowedSchemes: allowedSchemes) { return raw }
         guard let escaped = raw.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed),
-              isAddressable(escaped) else { return nil }
+              isAddressable(escaped, allowedSchemes: allowedSchemes) else { return nil }
         return escaped
     }
 
-    private static func isAddressable(_ value: String) -> Bool {
+    private static func isAddressable(_ value: String, allowedSchemes: Set<String>) -> Bool {
         guard let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return false }
-        guard scheme == "http" || scheme == "https" else { return false }
-        guard let host = url.host(), !host.isEmpty else { return false }
+        guard LinkPolicy.opens(url, allowedSchemes: allowedSchemes) else { return false }
+        if scheme == "http" || scheme == "https" {
+            guard let host = url.host(), !host.isEmpty else { return false }
+        } else {
+            guard value.dropFirst(scheme.count + 1).contains(where: { $0 != "/" }) else { return false }
+        }
         return true
     }
 }

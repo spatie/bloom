@@ -148,6 +148,8 @@ struct GeneralSettingsView: View {
                 Toggle("Confirm before archiving", isOn: $confirmBeforeArchiving)
             }
 
+            ChatLinkSettingsSection()
+
             Section("Sidebar") {
                 Toggle("Show addition and deletion counts", isOn: $showsSidebarDiffStats)
             }

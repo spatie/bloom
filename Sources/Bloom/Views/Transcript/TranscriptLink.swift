@@ -9,6 +9,14 @@ import BloomCore
 /// share it so that one line of text reads the same way whoever wrote it, and so that the rule
 /// about what may be opened is written down once.
 enum TranscriptLink {
+    static var allowedSchemes: Set<String> {
+        TranscriptLinkPreferences.schemes(in: UserDefaults.standard.string(forKey: TranscriptLinkPreferences.key) ?? "")
+    }
+
+    static func opens(_ url: URL) -> Bool {
+        LinkPolicy.opens(url, allowedSchemes: allowedSchemes)
+    }
+
     // MARK: Drawing
 
     /// Plain text with every address in it underlined, tinted and pressable.
@@ -23,7 +31,7 @@ enum TranscriptLink {
     /// whatever `foregroundStyle` the caller set, which inside the bubble is white and outside it
     /// is the page's ink.
     static func attributed(_ text: String, tint: Color) -> AttributedString {
-        attributed(text, links: LinkScan.links(in: text), tint: tint)
+        attributed(text, links: LinkScan.links(in: text, allowedSchemes: allowedSchemes), tint: tint)
     }
 
     /// The same, for a caller that has already scanned the text and wants the addresses as well.
@@ -33,7 +41,7 @@ enum TranscriptLink {
         var cursor = text.startIndex
 
         for found in links {
-            guard let url = URL(string: found.url), LinkPolicy.opens(url) else { continue }
+            guard let url = URL(string: found.url), TranscriptLink.opens(url) else { continue }
             if cursor < found.range.lowerBound {
                 output += AttributedString(String(text[cursor..<found.range.lowerBound]))
             }
@@ -180,8 +188,8 @@ enum TranscriptLink {
         let run = NSMutableAttributedString(
             string: text, attributes: [.font: font, .foregroundColor: color]
         )
-        for found in LinkScan.links(in: text) {
-            guard let url = URL(string: found.url), LinkPolicy.opens(url) else { continue }
+        for found in LinkScan.links(in: text, allowedSchemes: allowedSchemes) {
+            guard let url = URL(string: found.url), TranscriptLink.opens(url) else { continue }
             run.addAttribute(.link, value: url, range: NSRange(found.range, in: text))
         }
         for (range, url) in SourceReference.links(in: text)
@@ -282,9 +290,9 @@ enum TranscriptLink {
                     FileReview.open(location: location, in: model)
                     return
                 }
+                guard TranscriptLink.opens(url) else { return }
                 switch target {
                 case .externalBrowser:
-                    guard LinkPolicy.opens(url) else { return }
                     NSWorkspace.shared.open(url)
                 case .browserTab:
                     guard let model else { return }
@@ -357,7 +365,7 @@ extension View {
     /// is not a click.
     func opensTranscriptLinks() -> some View {
         environment(\.openURL, OpenURLAction { url in
-            guard LinkPolicy.opens(url) else { return .discarded }
+            guard TranscriptLink.opens(url) else { return .discarded }
             NSWorkspace.shared.open(url)
             return .handled
         })
@@ -402,7 +410,7 @@ extension View {
                 ForEach(addresses.indices, id: \.self) { index in
                     let address = addresses[index]
                     Button(addresses.count == 1 ? "Open Link" : "Open \(LinkPolicy.shortened(address))") {
-                        guard let url = URL(string: address), LinkPolicy.opens(url) else { return }
+                        guard let url = URL(string: address), TranscriptLink.opens(url) else { return }
                         NSWorkspace.shared.open(url)
                     }
                 }
@@ -415,6 +423,7 @@ extension View {
 /// implementation detail of `TranscriptLink.attributedString(sent:...)` and lives with it.
 private final class SentTurnKey: NSObject {
     let text: String
+    let allowedSchemes = TranscriptLink.allowedSchemes
     let font: NSFont
     let color: NSColor
     let lineSpacing: CGFloat
@@ -429,6 +438,7 @@ private final class SentTurnKey: NSObject {
         self.ground = ground
         var hasher = Hasher()
         hasher.combine(text)
+        hasher.combine(allowedSchemes)
         hasher.combine(font)
         hasher.combine(color)
         hasher.combine(lineSpacing)
@@ -444,6 +454,7 @@ private final class SentTurnKey: NSObject {
         guard let other = object as? SentTurnKey else { return false }
         return cachedHash == other.cachedHash
             && text == other.text
+            && allowedSchemes == other.allowedSchemes
             && font == other.font
             && color == other.color
             && lineSpacing == other.lineSpacing

@@ -15,15 +15,13 @@ public enum LinkPolicy {
     /// repository. So an address is a thing that can be *pressed*, never a thing that happens.
     /// Nothing opens on hover, on render, or on selection.
     ///
-    /// The scheme is checked even though `LinkScan` only ever produces http and https, because
-    /// the markdown parser also produces `[text](anything-at-all)` and that target is whatever
-    /// the agent typed. `file:///Applications/Something.app` and a private scheme registered by
-    /// some other app both go through this door otherwise. `mailto:` is allowed because a
-    /// written `[write to me](mailto:...)` is a reasonable thing for an answer to contain and
-    /// opening a compose window is not an action with consequences.
-    public static func opens(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased() else { return false }
+    /// Rendering and opening both check this policy. The opening check must use the current
+    /// allowlist, because settings may have changed since a cached transcript was drawn.
+    public static func opens(_ url: URL, allowedSchemes: Set<String> = []) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              TranscriptLinkPreferences.additionalScheme(scheme) != nil else { return false }
         return scheme == "https" || scheme == "http" || scheme == "mailto"
+            || allowedSchemes.contains { TranscriptLinkPreferences.additionalScheme($0) == scheme }
     }
 
     /// An address short enough to be a menu item's title, when there is more than one of them and
@@ -38,8 +36,8 @@ public enum LinkPolicy {
     }
 
     /// Every address in a run of plain text, in order and without repeats.
-    public static func addresses(in text: String) -> [String] {
-        addresses(of: LinkScan.links(in: text))
+    public static func addresses(in text: String, allowedSchemes: Set<String> = []) -> [String] {
+        addresses(of: LinkScan.links(in: text, allowedSchemes: allowedSchemes))
     }
 
     public static func addresses(of links: [DetectedLink]) -> [String] {
@@ -49,41 +47,41 @@ public enum LinkPolicy {
     /// The same, for prose that has already been parsed. A markdown answer's addresses are not
     /// only the bare ones: `[the settings page](https://...)` never appears as an address in the
     /// text at all, and it is the one a reader is most likely to want to copy.
-    public static func addresses(in blocks: [MarkdownBlock]) -> [String] {
+    public static func addresses(in blocks: [MarkdownBlock], allowedSchemes: Set<String> = []) -> [String] {
         var found: [String] = []
-        for block in blocks { collect(block, into: &found) }
+        for block in blocks { collect(block, allowedSchemes: allowedSchemes, into: &found) }
         return deduplicated(found)
     }
 
-    private static func collect(_ block: MarkdownBlock, into found: inout [String]) {
+    private static func collect(_ block: MarkdownBlock, allowedSchemes: Set<String>, into found: inout [String]) {
         switch block {
         case let .paragraph(inline):
-            collect(inline, into: &found)
+            collect(inline, allowedSchemes: allowedSchemes, into: &found)
         case let .heading(_, inline):
-            collect(inline, into: &found)
+            collect(inline, allowedSchemes: allowedSchemes, into: &found)
         case let .bulletList(items, _), let .numberedList(_, items, _):
-            for item in items { for child in item { collect(child, into: &found) } }
+            for item in items { for child in item { collect(child, allowedSchemes: allowedSchemes, into: &found) } }
         case let .taskList(items):
-            for item in items { collect(item.inline, into: &found) }
+            for item in items { collect(item.inline, allowedSchemes: allowedSchemes, into: &found) }
         case let .blockQuote(blocks):
-            for child in blocks { collect(child, into: &found) }
+            for child in blocks { collect(child, allowedSchemes: allowedSchemes, into: &found) }
         case let .table(headers, rows, _):
-            for header in headers { collect(header, into: &found) }
-            for row in rows { for cell in row { collect(cell, into: &found) } }
+            for header in headers { collect(header, allowedSchemes: allowedSchemes, into: &found) }
+            for row in rows { for cell in row { collect(cell, allowedSchemes: allowedSchemes, into: &found) } }
         // A fenced block is quoted text, and a rule has nothing in it.
         case .codeBlock, .thematicBreak:
             break
         }
     }
 
-    private static func collect(_ inline: [MarkdownInline], into found: inout [String]) {
+    private static func collect(_ inline: [MarkdownInline], allowedSchemes: Set<String>, into found: inout [String]) {
         for value in inline {
             switch value {
             case let .link(text, url):
-                if let parsed = URL(string: url), opens(parsed) { found.append(url) }
-                collect(text, into: &found)
+                if let parsed = URL(string: url), opens(parsed, allowedSchemes: allowedSchemes) { found.append(url) }
+                collect(text, allowedSchemes: allowedSchemes, into: &found)
             case let .emphasis(children), let .strong(children), let .strikethrough(children):
-                collect(children, into: &found)
+                collect(children, allowedSchemes: allowedSchemes, into: &found)
             // A span of code is being quoted, and neither of the others can hold an address.
             case .text, .code, .lineBreak, .image:
                 break

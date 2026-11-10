@@ -22,6 +22,7 @@ import BloomCore
 /// moves, and it is the runner that writes the row. Nothing an agent reads can contain a sentence
 /// nobody has sent it. See `Delivery`.
 struct PendingTurnRowView: View {
+    @AppStorage(TranscriptLinkPreferences.key) private var allowedLinkSchemes = ""
     var delivery: Delivery
     /// Where attachment paths resolve and which workspace opens when a pill is clicked.
     var home: TranscriptHome = .init()
@@ -158,6 +159,7 @@ struct PendingTurnRowView: View {
                             previewing: { PromptAttachment.sent(path: $0).url(in: home.worktree) }
                         )
                     )
+                    .id(allowedLinkSchemes)
                     .background { chipProbe }
                 }
 
