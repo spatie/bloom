@@ -19,6 +19,7 @@ struct WorkspaceStartToolTests {
         var projects: [Repo] = []
         var origins: [WorkspaceOrigin] = []
         var failure: (any Error)?
+        var terminalChat = false
 
         /// The spawn keys the tool actually decided, read back off the origins it handed over. The
         /// tool used to be given one whoever called it; now only a caller that is itself a
@@ -46,7 +47,8 @@ struct WorkspaceStartToolTests {
                 workspaceID: WorkspaceID(rawValue: "w-new"),
                 name: order.name ?? "Named by Bloom",
                 branch: "claude/named-by-bloom",
-                path: "/tmp/worktrees/w-new"
+                path: "/tmp/worktrees/w-new",
+                terminalChat: terminalChat
             )
         }
     }
@@ -86,6 +88,93 @@ struct WorkspaceStartToolTests {
     }
 
     // MARK: Who may call it
+
+    @Test("terminal_chat reaches both workspace and owner starts", arguments: [true, false])
+    func terminalChoice(terminal: Bool) async throws {
+        let fixture = try await fixture()
+        for identity in [fixture.identity, .owner] {
+            let recorder = Recorder()
+            let result = await recorder.tool().call(request([
+                "project": .string("flare"), "prompt": .string("Inspect this project"),
+                "terminal_chat": .bool(terminal),
+            ]), as: identity, store: fixture.store)
+
+            #expect(!result.isError)
+            #expect(recorder.orders.first?.terminalChat == terminal)
+        }
+    }
+
+    @Test("omitting terminal_chat or passing null defers to the app preference")
+    func defaultTerminalChoice() async throws {
+        let fixture = try await fixture()
+        let recorder = Recorder()
+        for value in [nil, JSONValue.null] {
+            var arguments: [String: JSONValue] = ["prompt": .string("Inspect this project")]
+            arguments["terminal_chat"] = value
+            let result = await recorder.tool().call(request(arguments), as: fixture.identity, store: fixture.store)
+            #expect(!result.isError)
+            #expect(recorder.orders.last?.terminalChat == nil)
+        }
+    }
+
+    @Test("terminal_chat refuses non-boolean values", arguments: [JSONValue.string("true"), .number(1), .object([:])])
+    func invalidTerminalChoice(value: JSONValue) async throws {
+        let fixture = try await fixture()
+        let recorder = Recorder()
+        let result = await recorder.tool().call(request([
+            "prompt": .string("Inspect this project"), "terminal_chat": value,
+        ]), as: fixture.identity, store: fixture.store)
+
+        #expect(result.isError)
+        #expect(result.text.contains("'terminal_chat' must be true or false"))
+        #expect(recorder.orders.isEmpty)
+    }
+
+    @Test("CLI starts do not register an unreachable completion watch")
+    func cliDoesNotWatch() async throws {
+        let fixture = try await fixture()
+        let recorder = Recorder()
+        recorder.terminalChat = true
+        let result = await recorder.tool().call(request([
+            "prompt": .string("Inspect this project"), "notify_when_done": .bool(true),
+        ]), as: fixture.identity, store: fixture.store)
+
+        #expect(!result.isError)
+        let answer = try #require(JSONValue.parse(result.text))
+        #expect(answer["notify_when_done"]?.boolValue == false)
+        #expect(result.text.contains("cannot report completion of a CLI chat"))
+        let fields = try #require(answer.objectValue)
+        #expect(Set(fields.keys) == [
+            "workspace_id", "name", "branch", "path", "state", "notify_when_done", "note",
+        ])
+        let watches = try await fixture.store.unspentWorkspaceDoneWatches(targetWorkspaceID: WorkspaceID("w-new"))
+        #expect(watches.isEmpty)
+    }
+
+    @Test("workspace starts resolve the app preference and explicit choices for each agent",
+          arguments: AgentKind.allCases, [true, false])
+    func terminalStartMode(agent: AgentKind, appDefault: Bool) {
+        let expected = WorkspaceStartMode.chat(usesCLI: true, agent: agent)
+        #expect(AgentWorkspaceOrder(prompt: "Task").startMode(defaultTerminalChat: appDefault, agent: agent)
+            == (appDefault ? expected : .chat))
+        #expect(AgentWorkspaceOrder(prompt: "Task", terminalChat: true)
+            .startMode(defaultTerminalChat: appDefault, agent: agent) == expected)
+        #expect(AgentWorkspaceOrder(prompt: "Task", terminalChat: false)
+            .startMode(defaultTerminalChat: appDefault, agent: agent) == .chat)
+    }
+
+    @Test("CLI workspace tasks are opening arguments, including quotes and newlines",
+          arguments: [AgentKind.claudeCode, .codex])
+    func cliOpeningArgument(agent: AgentKind) throws {
+        let prompt = "Inspect 'quoted' input\nDo not expand $(anything) or `commands`."
+        let order = AgentWorkspaceOrder(prompt: prompt, agent: agent, terminalChat: true)
+        let mode = order.startMode(defaultTerminalChat: false, agent: agent)
+        let cli = try #require(mode.cliAgentKind)
+        let arguments = try #require(cli.interactiveArguments(
+            prompt: order.prompt, sessionID: SessionID("capture"), model: "", effort: ""
+        ))
+        #expect(Array(arguments.suffix(2)) == ["--", prompt])
+    }
 
     @Test("every workspace agent and the owner see it")
     func roleGate() {
@@ -812,6 +901,10 @@ struct WorkspaceStartToolTests {
         #expect(description.contains("existing_branch"))
         #expect(description.contains("real money"))
         #expect(tool.inputSchema["properties"]?["effort"] != nil)
+        #expect(tool.inputSchema["properties"]?["terminal_chat"]?["type"]?.stringValue == "boolean")
+        #expect(description.contains("Open new chats in"))
+        #expect(description.contains("workspace_say cannot deliver"))
+        #expect(description.contains("notify_when_done does not report"))
         #expect(!description.lowercased().contains("subagent"))
     }
 }
@@ -839,6 +932,18 @@ struct WorkspaceStartDedupTests {
     @Test("the same call names itself the same way twice")
     func stableAcrossCalls() {
         #expect(order().spawnID(parentWorkspaceID: parent) == order().spawnID(parentWorkspaceID: parent))
+    }
+
+    @Test("terminal choices distinguish starts and leave the omitted choice's key stable")
+    func terminalChoiceInDigest() {
+        let implicit = order().spawnID(parentWorkspaceID: parent)
+        let terminal = AgentWorkspaceOrder(prompt: "Import the webhooks", terminalChat: true)
+        let chat = AgentWorkspaceOrder(prompt: "Import the webhooks", terminalChat: false)
+
+        #expect(terminal.spawnID(parentWorkspaceID: parent) != implicit)
+        #expect(chat.spawnID(parentWorkspaceID: parent) != implicit)
+        #expect(terminal.spawnID(parentWorkspaceID: parent) != chat.spawnID(parentWorkspaceID: parent))
+        #expect(terminal.spawnID(ownerProject: RepoID("r")) != chat.spawnID(ownerProject: RepoID("r")))
     }
 
     @Test("a different call, or a different parent, is a different spawn")

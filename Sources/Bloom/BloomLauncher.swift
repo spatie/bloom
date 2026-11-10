@@ -11,6 +11,7 @@ enum BloomLauncher {
         // Release builds too: it measures how scrolling feels, and only a release build says that.
         if ScrollLab.isRequested { ScrollLab.runAndExit() }
         #if DEBUG
+        if WorkspaceStartSnapshots.isRequested { WorkspaceStartSnapshots.runAndExit() }
         if FlareProbe.isRequested { await FlareProbe.runAndExit() }
         if WelcomeLayoutProbe.isRequested { WelcomeLayoutProbe.runAndExit() }
         if ReviewRunProbe.isRequested { ReviewRunProbe.runAndExit() }

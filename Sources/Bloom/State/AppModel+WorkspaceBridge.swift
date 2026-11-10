@@ -70,7 +70,7 @@ extension AppModel {
                 // the same door as `chat_create`.
                 addChat: { [weak self] workspaceID, order in
                     guard let self else { return .refused("Bloom is still starting up.") }
-                    return await self.createChatForBridge(order, in: workspaceID)
+                    return await self.createChatForBridge(order, in: workspaceID, allowsCLIMessage: true)
                 }
             ),
             ChatCreateTool { [weak self] workspaceID, order in
@@ -311,6 +311,10 @@ extension AppModel {
             )
         }
         controls = try await workspaceControls(for: order, inheriting: controls)
+        let defaultTerminalChat = try await store.setting(AppDefaults.Key.terminalChat) == "1"
+        let opensWith = order.startMode(
+            defaultTerminalChat: defaultTerminalChat, agent: controls.agentKind
+        )
 
         // Both halves of the order's source, handed to the same two arguments the create window's
         // two tabs fill in. Nothing is decided here: `AgentStartSource` has already found the
@@ -320,6 +324,7 @@ extension AppModel {
             in: repo,
             prompt: order.prompt,
             baseBranch: order.source.baseBranch,
+            opensWith: opensWith,
             branch: nil,
             controls: controls,
             select: false,
@@ -333,7 +338,8 @@ extension AppModel {
             workspaceID: workspace.id,
             name: workspace.name,
             branch: workspace.branch,
-            path: workspace.path
+            path: workspace.path,
+            terminalChat: opensWith.cliAgentKind != nil
         )
     }
 
@@ -559,7 +565,9 @@ extension AppModel {
     /// Adds a chat through the same lifecycle as the `+` menu, without selecting another
     /// workspace in the owner's window. `createChat` also settles the project's current defaults
     /// and any terminal-backed chat before the result is exposed.
-    func createChatForBridge(_ order: ChatCreateOrder, in workspaceID: WorkspaceID) async -> ChatCreateOutcome {
+    func createChatForBridge(
+        _ order: ChatCreateOrder, in workspaceID: WorkspaceID, allowsCLIMessage: Bool = false
+    ) async -> ChatCreateOutcome {
         guard let model = paneTarget(workspaceID) else {
             return .refused("That workspace is not open in Bloom any more, so a chat was not created.")
         }
@@ -580,7 +588,8 @@ extension AppModel {
             controls: controls,
             usesCLI: order.terminalChat,
             message: order.message,
-            messageSender: order.messageSender
+            messageSender: order.messageSender,
+            allowsCLIMessage: allowsCLIMessage
         ),
               case .chat(let sessionID) = content,
               let session = model.sessions.first(where: { $0.id == sessionID }) else {

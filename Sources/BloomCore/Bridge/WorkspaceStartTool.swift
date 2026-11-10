@@ -37,6 +37,8 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
     public let model: String?
     /// An exact reasoning effort id, or nil to inherit the calling session or Bloom's default.
     public let effort: String?
+    /// Nil uses the app's preference for where new chats open.
+    public let terminalChat: Bool?
 
     /// What the worktree is cut from, or nil for the project's default. Nil for a checkout too,
     /// which brings its own base.
@@ -48,7 +50,8 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
         source: AgentStartSource = .newBranch(from: nil),
         agent: AgentKind? = nil,
         model: String? = nil,
-        effort: String? = nil
+        effort: String? = nil,
+        terminalChat: Bool? = nil
     ) {
         self.prompt = prompt
         self.name = name
@@ -56,6 +59,11 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
         self.agent = agent
         self.model = model
         self.effort = effort
+        self.terminalChat = terminalChat
+    }
+
+    public func startMode(defaultTerminalChat: Bool, agent: AgentKind) -> WorkspaceStartMode {
+        .chat(usesCLI: terminalChat ?? defaultTerminalChat, agent: agent)
     }
 }
 
@@ -69,12 +77,14 @@ public struct StartedWorkspaceSummary: Sendable, Hashable {
     public let name: String
     public let branch: String
     public let path: String
+    public let terminalChat: Bool
 
-    public init(workspaceID: WorkspaceID, name: String, branch: String, path: String) {
+    public init(workspaceID: WorkspaceID, name: String, branch: String, path: String, terminalChat: Bool = false) {
         self.workspaceID = workspaceID
         self.name = name
         self.branch = branch
         self.path = path
+        self.terminalChat = terminalChat
     }
 }
 
@@ -129,6 +139,7 @@ extension AgentWorkspaceOrder {
         ]
         if let model { parts.append(model) }
         if let effort { parts.append(effort) }
+        if let terminalChat { parts += ["terminal_chat", terminalChat ? "true" : "false"] }
         let material = parts.joined(separator: "\u{0}")
 
         let digest = SHA256.hash(data: Data(material.utf8))
@@ -283,6 +294,12 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             setting, or Bloom's default when the caller has no chat. An explicit effort must be \
             one the selected model supports.
 
+            'terminal_chat' is optional and defaults to the app's "Open new chats in" setting. \
+            When true, Claude Code and Codex open in a visible CLI terminal with the task as \
+            their opening prompt. Other agents open in Bloom chat. workspace_say cannot deliver \
+            messages to a CLI chat, and notify_when_done does not report its completion. Use \
+            terminal_chat: false when you need either.
+
             It returns as soon as the workspace exists, not when its work is done. The new agent \
             starts on its own and keeps running while you carry on. There is no way to wait for \
             it from here, so do not ask for one and then sit idle: say what you started and get on \
@@ -384,11 +401,20 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                             + "caller has no chat."
                     ),
                 ]),
+                "terminal_chat": .object([
+                    "type": .string("boolean"),
+                    "description": .string(
+                        "Open Claude Code or Codex in a CLI terminal with the task as its opening "
+                            + "prompt. Omit it to use the app's Open new chats in setting. "
+                            + "workspace_say and notify_when_done do not reach CLI chats."
+                    ),
+                ]),
                 WorkspaceDoneWatch.argument: .object([
                     "type": .string("boolean"),
                     "description": .string(
                         "Have Bloom tell this chat once when the new agent's first turn comes to "
-                            + "rest: finished, failed, or waiting on the owner. Defaults to false."
+                            + "rest: finished, failed, or waiting on the owner. Defaults to false. "
+                            + "Does not report completion of a CLI chat."
                     ),
                 ]),
             ]),
@@ -416,6 +442,13 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                     + AgentKind.runnable.map(\.rawValue).joined(separator: " and ")
                     + ". Leave the argument out to use the same agent you are running on."
             )
+        }
+
+        let terminalChat: Bool?
+        switch request.param("terminal_chat") {
+        case nil, .null: terminalChat = nil
+        case .bool(let value): terminalChat = value
+        default: return .failure("'terminal_chat' must be true or false.")
         }
 
         // The project is resolved here rather than only on the happy path, because it is what
@@ -484,7 +517,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             source: source,
             agent: agent,
             model: filled(request.param("model")),
-            effort: filled(request.param("effort"))
+            effort: filled(request.param("effort")),
+            terminalChat: terminalChat
         )
         let origin = origin(of: order, project: project, parent: parent)
 
@@ -540,16 +574,20 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             var note = startedNote(for: identity.role, notifying: false)
             var notifying = false
             if wantsNotice {
-                switch await watch(started, from: identity, store: store) {
-                case .watching:
-                    notifying = true
-                    note = startedNote(for: identity.role, notifying: true)
-                case .noChat:
-                    note += " notify_when_done was ignored: this connection is not a chat in a "
-                        + "Bloom workspace, so there is nowhere to deliver the notice."
-                case .failed(let reason):
-                    note += " Bloom could not record notify_when_done, so it will not tell you when "
-                        + "the new agent is done: \(reason)"
+                if started.terminalChat {
+                    note += " notify_when_done was ignored: Bloom cannot report completion of a CLI chat."
+                } else {
+                    switch await watch(started, from: identity, store: store) {
+                    case .watching:
+                        notifying = true
+                        note = startedNote(for: identity.role, notifying: true)
+                    case .noChat:
+                        note += " notify_when_done was ignored: this connection is not a chat in a "
+                            + "Bloom workspace, so there is nowhere to deliver the notice."
+                    case .failed(let reason):
+                        note += " Bloom could not record notify_when_done, so it will not tell you when "
+                            + "the new agent is done: \(reason)"
+                    }
                 }
             }
 
@@ -823,7 +861,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             )
         }
         let outcome = await addChat(existing.id, ChatCreateOrder(
-            agent: order.agent, model: order.model, effort: order.effort, message: order.prompt
+            agent: order.agent, model: order.model, effort: order.effort,
+            terminalChat: order.terminalChat, message: order.prompt
         ))
         switch outcome {
         case .refused(let sentence):
