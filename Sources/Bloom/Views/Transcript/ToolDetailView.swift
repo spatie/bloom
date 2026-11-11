@@ -15,6 +15,8 @@ struct ToolDetailView: View {
     var refusal: ToolRefusal?
     var refusalReason: String = ""
     var hasImages: Bool = false
+    /// What the header said while the row was closed, for a tool whose detail repeats none of it.
+    var summary = ""
 
     init(
         name: String,
@@ -34,7 +36,13 @@ struct ToolDetailView: View {
         self.hasImages = hasImages
     }
 
-    init(use: AgentToolUse, result: AgentToolResult?, refusal: ToolRefusal? = nil, refusalReason: String = "") {
+    init(
+        use: AgentToolUse,
+        result: AgentToolResult?,
+        refusal: ToolRefusal? = nil,
+        refusalReason: String = "",
+        summary: String = ""
+    ) {
         // The row carries the refusal because it is folded in as the result arrives and is
         // available while the row is closed; the decoded result carries its own copy for the
         // callers that have no row. Either one is enough for the row to be right.
@@ -47,14 +55,25 @@ struct ToolDetailView: View {
             refusalReason: refusalReason,
             hasImages: result?.hasImages ?? false
         )
+        self.summary = summary
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.block) {
+            if !summary.isEmpty {
+                DetailCaption(text: summary)
+            }
             ToolInputView(name: name, input: input)
 
             if let refusal {
                 ToolRefusalView(refusal: refusal, reason: refusalReason.isEmpty ? (result ?? "") : refusalReason)
+            } else if let result, !result.isEmpty, name == AdvisorConsultation.toolName, !isError {
+                if result == AdvisorConsultation.encryptedNotice {
+                    // A note about the advice, not the advice, so it must not sit on its plate.
+                    DetailCaption(text: result)
+                } else {
+                    DetailProseBlock(text: result, copyTitle: "Copy the advice")
+                }
             } else if let result, !result.isEmpty {
                 ToolResultView(text: result, isError: isError)
             } else if hasImages {

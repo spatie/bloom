@@ -367,6 +367,39 @@ struct AgentRunnerArgvTests {
         #expect(argv.filter { $0 == "--settings" }.count == 1)
     }
 
+    @Test("the advisor reaches the CLI as a setting, never as a flag")
+    func passesTheAdvisor() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, advisor: .opus
+        )
+
+        #expect(value(of: "--settings", in: argv) == #"{"advisorModel":"opus"}"#)
+        #expect(!argv.contains("--advisor"))
+    }
+
+    @Test("the advisor and the output style share the one settings object")
+    func advisorSharesTheSettingsObject() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: WorkspaceID("w")),
+            resume: nil,
+            outputStyle: "Concise",
+            advisor: .fable
+        )
+
+        #expect(argv.filter { $0 == "--settings" }.count == 1)
+        #expect(value(of: "--settings", in: argv) == #"{"advisorModel":"fable","outputStyle":"Concise"}"#)
+    }
+
+    /// Stating nothing is what leaves an `advisorModel` in the user's own Claude settings alone.
+    @Test("an advisor nobody chose sends no settings at all")
+    func unsetAdvisorSendsNothing() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, advisor: .inherit
+        )
+
+        #expect(!argv.contains("--settings"))
+    }
+
     /// The same, for the same reason. Both keys are in the user's database already.
     @Test("the output style key is the one already in the database")
     func outputStyleKeyIsStable() {
@@ -786,6 +819,24 @@ struct AgentRunnerProcessTests {
         let process = try #require(recorder.last)
         let index = try #require(process.launch.arguments.firstIndex(of: "--settings"))
         #expect(process.launch.arguments[index + 1] == #"{"outputStyle":"Concise"}"#)
+    }
+
+    @Test("the stored advisor reaches the process the runner spawns")
+    func spawnsWithTheStoredAdvisor() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        try await store.setSetting(AppDefaults.Key.advisor, ClaudeAdvisor.opus.rawValue)
+
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+
+        let process = try #require(recorder.last)
+        let index = try #require(process.launch.arguments.firstIndex(of: "--settings"))
+        #expect(process.launch.arguments[index + 1] == #"{"advisorModel":"opus"}"#)
     }
 
     @Test("the stored executable reaches the process the runner spawns")

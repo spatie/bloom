@@ -59,6 +59,8 @@ public actor AgentRunner {
     /// `session.<id>.outputStyle`. Nil rather than the word `default`, so "nothing chosen" and
     /// "chosen and then cleared" cannot drift apart on the way to argv.
     private var outputStyle: String?
+    /// The app-wide advisor, re-read at the top of every turn like the two above.
+    private var advisor = ClaudeAdvisor.inherit
     private var awaitingSideContextAcknowledgement = false
     /// Questions this process is currently blocked on, newest last.
     ///
@@ -204,7 +206,8 @@ public actor AgentRunner {
         resume: String?,
         isFastMode: Bool = false,
         outputStyle: String? = nil,
-        mcpConfigPath: String? = nil
+        mcpConfigPath: String? = nil,
+        advisor: ClaudeAdvisor = .inherit
     ) -> [String] {
         var arguments = [
             "-p",
@@ -252,7 +255,7 @@ public actor AgentRunner {
         // word "default": sending it would state a setting, and a stated setting outranks one the
         // repository put in its own `.claude/settings.json`. Leaving the picker alone must not
         // quietly switch off a style the project set for itself.
-        if let settings = settingsJSON(outputStyle: outputStyle) {
+        if let settings = settingsJSON(outputStyle: outputStyle, advisor: advisor) {
             arguments += ["--settings", settings]
         }
         if let mcpConfigPath, !mcpConfigPath.isEmpty {
@@ -270,10 +273,19 @@ public actor AgentRunner {
     /// created and a name holding a quote would otherwise produce a string the CLI reads as a
     /// path. Serialisation cannot fail for a dictionary of two strings, but the failure is handled
     /// as "send nothing" anyway: a turn that runs unstyled is better than one that does not run.
-    public static func settingsJSON(outputStyle: String?) -> String? {
-        guard let outputStyle, !OutputStyle.isDefault(outputStyle) else { return nil }
-        let object = ["outputStyle": outputStyle.trimmingCharacters(in: .whitespacesAndNewlines)]
-        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+    ///
+    /// The advisor rides in the same object, for the reason `argv` gives: one `--settings` only.
+    public static func settingsJSON(outputStyle: String?, advisor: ClaudeAdvisor = .inherit) -> String? {
+        var object: [String: String] = [:]
+        if let outputStyle, !OutputStyle.isDefault(outputStyle) {
+            object["outputStyle"] = outputStyle.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let advisorModel = advisor.settingValue {
+            object["advisorModel"] = advisorModel
+        }
+        guard !object.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        else { return nil }
         return String(decoding: data, as: UTF8.self)
     }
 
@@ -287,7 +299,8 @@ public actor AgentRunner {
                 resume: session.agentSessionID,
                 isFastMode: isFastMode,
                 outputStyle: outputStyle,
-                mcpConfigPath: mcpConfigPath
+                mcpConfigPath: mcpConfigPath,
+                advisor: advisor
             ),
             cwd: workspacePath,
             environment: AgentAccountEnvironment.applying(
@@ -408,6 +421,7 @@ public actor AgentRunner {
         awaitingSideContextAcknowledgement = prompt != text
         await refreshFastMode()
         await refreshOutputStyle()
+        await refreshAdvisor()
         await refreshExecutable()
         try await waitForCancelledRunToExit()
         start()
@@ -453,6 +467,10 @@ public actor AgentRunner {
     private func refreshOutputStyle() async {
         let stored = try? await store.setting(ComposerControls.outputStyleKey(sessionID: session.id))
         outputStyle = OutputStyle.isDefault(stored) ? nil : stored
+    }
+
+    private func refreshAdvisor() async {
+        advisor = ClaudeAdvisor(stored: try? await store.setting(AppDefaults.Key.advisor))
     }
 
     private func refreshExecutable() async {

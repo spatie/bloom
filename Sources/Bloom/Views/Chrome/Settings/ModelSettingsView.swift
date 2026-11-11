@@ -56,6 +56,13 @@ struct ModelSettingsView: View {
                     Text("Output style")
                     Text(outputStyles.detail(of: defaults.outputStyle) ?? "How new Claude Code sessions write.")
                 }
+                Picker("Advisor", selection: $defaults.advisor) {
+                    ForEach(ClaudeAdvisor.allCases) { advisor in
+                        Text(advisor.label).tag(advisor)
+                    }
+                }
+                Text("A stronger model Claude Code can consult during a turn, which uses more tokens. It is consulted only when it is at least as capable as the chat's own model. Not set leaves it to Claude Code's own settings.")
+                    .settingsFootnote()
             }
 
             Section {

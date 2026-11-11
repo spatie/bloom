@@ -430,6 +430,7 @@ public struct AppDefaults: Sendable, Hashable {
         public static let fastMode = "defaults.fastMode"
         public static let outputStyle = "defaults.outputStyle"
         public static let codexContextWindow = "defaults.codex.contextWindow"
+        public static let advisor = "defaults.advisor"
     }
 
     /// The built-in fallbacks, which `Session`'s own initialiser now reads rather than restates.
@@ -477,6 +478,9 @@ public struct AppDefaults: Sendable, Hashable {
     /// unlike every other value here it means nothing on the other one: Claude Code's long window
     /// is a model variant and is picked in the model menu. See `CodexContextWindow`.
     public var codexContextWindow: Int
+    /// App-wide rather than per chat: the CLI itself drops an advisor weaker than the chat's
+    /// model, so one choice is already right for every chat. See `ClaudeAdvisor`.
+    public var advisor: ClaudeAdvisor = .inherit
 
     /// Nil when the user has never chosen one in Settings. `model` always holds a usable value,
     /// so it cannot answer "did they pick this, or is it just the fallback?", and that question is
@@ -540,6 +544,7 @@ public struct AppDefaults: Sendable, Hashable {
         defaults.fastMode = await value(Key.fastMode) == "1"
         defaults.outputStyle = await value(Key.outputStyle) ?? OutputStyle.defaultName
         defaults.codexContextWindow = CodexContextWindow.normalised(await value(Key.codexContextWindow))
+        defaults.advisor = ClaudeAdvisor(stored: await value(Key.advisor))
         return defaults
     }
 
@@ -578,6 +583,7 @@ public struct AppDefaults: Sendable, Hashable {
             Key.fastMode: fastMode ? "1" : "0",
             Key.outputStyle: OutputStyle.isDefault(outputStyle) ? nil : outputStyle,
             Key.codexContextWindow: CodexContextWindow.stored(codexContextWindow),
+            Key.advisor: advisor.settingValue,
         ]
     }
 
@@ -604,5 +610,6 @@ public struct AppDefaults: Sendable, Hashable {
         try? await store.setSetting(
             Key.codexContextWindow, CodexContextWindow.stored(codexContextWindow)
         )
+        try? await store.setSetting(Key.advisor, advisor.settingValue)
     }
 }

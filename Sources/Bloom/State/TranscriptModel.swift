@@ -29,6 +29,9 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
     var parentToolUseID: String?
     /// Empty assistant blocks draw no prose and must not split adjacent activity summaries.
     var isEmptyAssistantText = false
+    /// For a consultation of the advisor: who advised and how much it read, once the message
+    /// that consulted has closed and said so.
+    var advisorUsage: AdvisorUsage?
 
     /// For a `permissionAsk` row: how the question was settled, or nil while it is still open.
     ///
@@ -106,12 +109,17 @@ final class TranscriptModel {
         var effort: String
         var permissionMode: String
         var agentKind: String
+        /// A launch setting of a process that outlives every turn, so a change in Settings
+        /// reaches an open chat only by starting that process again.
+        var advisor: ClaudeAdvisor
 
-        init(session: Session) {
+        init(session: Session, advisor: ClaudeAdvisor) {
             model = session.model
             effort = session.effort
             permissionMode = session.permissionMode.rawValue
             agentKind = session.agentKind.rawValue
+            // Only Claude Code has one, and another backend must not restart over it.
+            self.advisor = session.agentKind == .claudeCode ? advisor : .inherit
         }
     }
 
@@ -611,6 +619,11 @@ final class TranscriptModel {
             return
         }
 
+        // The stream line that closes a message is stored as a `system` row.
+        if message.kind == .system {
+            assignAdvisorUsage(from: message.payload, to: &rows)
+        }
+
         var row = TranscriptRow(message: message)
         row.parentToolUseID = ParentProbe.parentToolUseID(message.payload)
         if message.kind == .permissionAsk,
@@ -621,6 +634,27 @@ final class TranscriptModel {
         rows.append(row)
         if message.kind == .toolUse, let refID = message.refID {
             indexByRefID[refID] = rows.count - 1
+        }
+    }
+
+    /// Hands the advisor's figures back to the consultations of the message this line closes.
+    ///
+    /// Matched by message id and then from the last one backwards, so a line naming fewer
+    /// consultations than the message drew is taken to be about the most recent ones.
+    nonisolated private static func assignAdvisorUsage(from payload: Data, to rows: inout [TranscriptRow]) {
+        guard let report = AdvisorConsultation.usageReport(in: payload) else { return }
+
+        var newestFirst: [Int] = []
+        for index in rows.indices.reversed() {
+            let row = rows[index]
+            if row.kind == .result { break }
+            if row.kind == .toolUse,
+               AdvisorConsultation.callMessageID(payload: row.payload) == report.messageID {
+                newestFirst.append(index)
+            }
+        }
+        for (index, usage) in zip(newestFirst, report.usages.reversed()) {
+            rows[index].advisorUsage = usage
         }
     }
 
@@ -1540,7 +1574,8 @@ final class TranscriptModel {
         guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
-        let preferences = RunnerPreferences(session: session)
+        let advisor = ClaudeAdvisor(stored: try? await store.setting(AppDefaults.Key.advisor))
+        let preferences = RunnerPreferences(session: session, advisor: advisor)
         if runner != nil, runnerPreferences != preferences {
             runner?.terminateNow()
             pumpTask?.cancel()

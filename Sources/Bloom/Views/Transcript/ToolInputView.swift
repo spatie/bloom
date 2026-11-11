@@ -75,6 +75,10 @@ struct ToolInputView: View {
                 input["output_mode"]?.stringValue,
             ])
 
+        // The advisor is handed the conversation, not arguments, so its input is always empty.
+        case AdvisorConsultation.toolName:
+            EmptyView()
+
         default:
             DetailCodeBlock(text: input.prettyPrinted)
         }
