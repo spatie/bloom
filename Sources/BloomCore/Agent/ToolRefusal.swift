@@ -126,6 +126,13 @@ public struct ToolResultSummary: Sendable, Hashable {
             return ToolResultSummary()
         }
 
+        // Not a `tool_result` and never a refusal: the failure is in the block's own content.
+        let advisorFailed = content.contains {
+            ($0["type"] as? String) == AdvisorConsultation.resultType
+                && (($0["content"] as? [String: Any])?["type"] as? String) == AdvisorConsultation.errorType
+        }
+        if advisorFailed { return ToolResultSummary(isError: true) }
+
         let results = content.filter { (($0["type"] as? String) ?? "tool_result") == "tool_result" }
         guard results.contains(where: { ($0["is_error"] as? Bool) == true }) else {
             return ToolResultSummary()

@@ -52,7 +52,13 @@ struct ToolRowView: View {
             }
 
             if isExpanded {
-                ToolDetailView(use: use, result: result, refusal: refusal, refusalReason: refusalReason)
+                ToolDetailView(
+                    use: use,
+                    result: result,
+                    refusal: refusal,
+                    refusalReason: refusalReason,
+                    summary: advisorSummary
+                )
                     .padding(.leading, TranscriptLayout.detailIndent)
                     .padding(.trailing, TranscriptLayout.inset)
                     .padding(.bottom, TranscriptLayout.block)
@@ -66,6 +72,12 @@ struct ToolRowView: View {
         }
         .modifier(ExpandableRow(isHovered: isHovered))
         .onHover { isHovered = $0 }
+    }
+
+    /// The header drops its detail once the row is open, because the body normally shows the
+    /// input in full. The advisor has no input, so its figures would vanish on opening.
+    private var advisorSummary: String {
+        use.name == AdvisorConsultation.toolName ? presentation.detail : ""
     }
 
     private func header(onOpenRun: (() -> Void)?) -> ToolRowHeader {

@@ -15,7 +15,9 @@ public struct RunningTool: Equatable, Sendable {
 
     /// The provisional line shown while only the streamed name is known.
     public init(name: String) {
-        label = "Running \(MCPToolName.readable(name))"
+        label = name == AdvisorConsultation.toolName
+            ? AdvisorConsultation.runningLabel
+            : "Running \(MCPToolName.readable(name))"
         startedAt = nil
     }
 
@@ -25,7 +27,11 @@ public struct RunningTool: Equatable, Sendable {
         let presented = ToolPresenter.present(use).label
         // A presentation that adds no information keeps the running verb the old line carried.
         // A Bash description, a task type or another useful label replaces it.
-        label = presented == name ? "Running \(name)" : presented
+        if use.name == AdvisorConsultation.toolName {
+            label = AdvisorConsultation.runningLabel
+        } else {
+            label = presented == name ? "Running \(name)" : presented
+        }
         self.startedAt = startedAt
     }
 

@@ -795,7 +795,32 @@ public enum AgentEvent: Sendable {
         let model = message["model"]?.stringValue ?? ""
         let usage = AgentUsage.decode(message["usage"])
 
+        if AdvisorConsultation.isCall(block) {
+            return .toolUse(AgentToolUse(
+                id: block["id"]?.stringValue ?? "",
+                name: AdvisorConsultation.toolName,
+                input: block["input"] ?? .object([:]),
+                parentToolUseID: parentToolUseID,
+                raw: raw,
+                messageID: messageID,
+                uuid: uuid,
+                sessionID: sessionID
+            ))
+        }
+
         switch block["type"]?.stringValue {
+        case AdvisorConsultation.resultType:
+            let outcome = AdvisorConsultation.outcome(of: block)
+            return .toolResult(AgentToolResult(
+                toolUseID: block["tool_use_id"]?.stringValue ?? "",
+                text: outcome.text,
+                isError: outcome.isError,
+                raw: raw,
+                parentToolUseID: parentToolUseID,
+                uuid: uuid,
+                sessionID: sessionID
+            ))
+
         case "text":
             return .assistantText(AgentTextBlock(
                 text: block["text"]?.stringValue ?? "",
@@ -917,13 +942,26 @@ public enum AgentEvent: Sendable {
         }
     }
 
+    /// The largest window among the models that ran the turn, leaving out one that only advised.
+    ///
+    /// The advisor is listed in `modelUsage` beside the chat's model, and its window is not the
+    /// one the conversation fills. Known ceiling: it is named by `usage.iterations`, which
+    /// covers the turn's last message only, so an advisor consulted earlier in the turn still
+    /// counts. Left in when it is the only model, which is a model advising itself.
+    private static func contextWindow(in json: JSONValue) -> Int {
+        let windows = (json["modelUsage"]?.objectValue ?? [:])
+            .compactMapValues { $0["contextWindow"]?.intValue }
+        let advisors = Set((json["usage"]?["iterations"]?.arrayValue ?? [])
+            .filter { $0["type"]?.stringValue == AdvisorConsultation.usageType }
+            .compactMap { $0["model"]?.stringValue })
+        let ownWindows = windows.filter { !advisors.contains($0.key) }
+        return (ownWindows.isEmpty ? windows : ownWindows).values.max() ?? 0
+    }
+
     private static func decodeResult(_ json: JSONValue, raw: Data) -> AgentEvent {
         var usage = AgentUsage.decode(json["usage"])
         usage.costUSD = json["total_cost_usd"]?.doubleValue ?? 0
-        usage.contextTokens = (json["modelUsage"]?.objectValue ?? [:])
-            .values
-            .compactMap { $0["contextWindow"]?.intValue }
-            .max() ?? 0
+        usage.contextTokens = contextWindow(in: json)
 
         return .result(AgentResult(
             usage: usage,

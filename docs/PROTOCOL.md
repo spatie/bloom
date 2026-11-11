@@ -19,7 +19,8 @@ claude
   --model <opus|sonnet|haiku|...>
   [--effort <level>]                 only when the session has one
   [--thinking disabled]              fast mode, and only when it is on
-  [--settings '{"outputStyle":"…"}'] only when a style was chosen
+  [--settings '{"advisorModel":"…","outputStyle":"…"}']
+                                     one object, holding only the keys that were chosen
   [--mcp-config <path>]              the workspace bridge, a file and never inline JSON
   [--resume <agent session id>]
 ```
@@ -108,6 +109,18 @@ show text arriving live.
 | `text` | `text` |
 | `thinking` | `thinking`, `signature` |
 | `tool_use` | `id` (`toolu_...`), `name`, `input` (arbitrary JSON object) |
+| `server_tool_use` | `id` (`srvtoolu_...`), `name` (`advisor`), `input` (always `{}`) |
+| `advisor_tool_result` | `tool_use_id`, `content` (see below) |
+
+The last two are a consultation of the advisor, on when the `advisorModel` setting names a model
+at least as capable as the chat's own. Measured on 2.1.322, Sonnet consulting Opus
+(`Tests/fixtures/claude-advisor.ndjson`): the call and its result each get their own `assistant`
+line, both under the same `message.id`, and **the result never arrives on a `user` line**. Bloom
+files them as a tool call and its result, so they pair by id like any other.
+
+`content.type` is `advisor_result` with the advice in `text`, `advisor_redacted_result` with only
+`encrypted_content` (what Opus 5.5 returned, so there is nothing to show), or
+`advisor_tool_result_error` with an `error_code`. An error does not fail the turn.
 
 `parent_tool_use_id` is non-null when the event comes from inside a subagent (the Agent tool).
 Nest or indent those rows rather than mixing them into the main flow.
@@ -178,6 +191,16 @@ Last line of a turn.
 `subtype` is `success`, or `error_max_turns` / `error_during_execution` on failure.
 `modelUsage.<model>.contextWindow` is where the context-window size comes from, so a
 "how full is the context" gauge can be drawn.
+
+`modelUsage` holds one entry per model that ran, and an advisor is one of them. Its window is not
+the chat's, so it is left out of the gauge: `usage.iterations` names it, as an entry of type
+`advisor_message` with a `model`. The top level `usage` counts the chat's own model only, while
+`total_cost_usd` includes the advisor.
+
+**`usage.iterations` here covers the last message of the turn and no other.** A turn that ran
+more tools after the advice closes on a result that does not mention the advisor at all. What a
+consultation read and wrote is on the `message_delta` stream event of the message that made it,
+which carries the same `iterations` and an `api_message_id` equal to that message's `id`.
 
 **It is the last line of a turn, and not always of the turn you sent.** The CLI starts turns of
 its own, and when it does the result carries an `origin` object naming why:

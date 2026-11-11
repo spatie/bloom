@@ -94,4 +94,22 @@ struct SettingsPanePersistenceTests {
         #expect(try await store.setting(AppDefaults.Key.outputStyle) == nil)
         #expect(try await store.setting(AppDefaults.Key.codexContextWindow) == nil)
     }
+
+    @Test("the advisor is stored when chosen and removed when unset")
+    func advisorRoundTrips() async throws {
+        let store = try makeTestStore("settings-advisor")
+        let unset = await AppDefaults.load(from: store)
+        var chosen = unset
+        chosen.advisor = .opus
+
+        try await chosen.saveChanges(from: unset, to: store)
+
+        #expect(try await store.setting(AppDefaults.Key.advisor) == "opus")
+        #expect(await AppDefaults.load(from: store).advisor == .opus)
+
+        try await unset.saveChanges(from: chosen, to: store)
+
+        #expect(try await store.setting(AppDefaults.Key.advisor) == nil)
+        #expect(await AppDefaults.load(from: store).advisor == .inherit)
+    }
 }
