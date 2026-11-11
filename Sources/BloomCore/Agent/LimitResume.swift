@@ -117,13 +117,22 @@ extension LimitResume {
 
 extension LimitResume.Step {
     /// The line under a failed turn while the resume is waiting.
-    public func sentence(timeZone: TimeZone = .current, locale: Locale = .current) -> String {
+    public func sentence(now: Date = Date(), timeZone: TimeZone = .current, locale: Locale = .current) -> String {
         switch self {
         case .waitUntil(let reset):
-            var style = Date.FormatStyle(date: .omitted, time: .shortened)
-            style.timeZone = timeZone
-            style.locale = locale
-            return "Continues after the limit resets at \(reset.formatted(style))."
+            var time = Date.FormatStyle(date: .omitted, time: .shortened)
+            time.timeZone = timeZone
+            time.locale = locale
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = timeZone
+            if calendar.isDate(reset, inSameDayAs: now) {
+                return "Continues after the limit resets at \(reset.formatted(time))."
+            }
+            // A weekly reset days away read as an hour already passed when only the time was shown.
+            var day = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
+            day.timeZone = timeZone
+            day.locale = locale
+            return "Continues after the limit resets on \(reset.formatted(day)) at \(reset.formatted(time))."
         case .checking:
             return "Continues as soon as a usage reading shows the limit has reset."
         case .go:

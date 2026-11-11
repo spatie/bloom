@@ -170,7 +170,19 @@ struct LimitResumeTests {
         let utc = TimeZone(identifier: "UTC")!
         let locale = Locale(identifier: "en_GB")
         let at = Date(timeIntervalSince1970: 1_789_767_600)
-        #expect(LimitResume.Step.waitUntil(at).sentence(timeZone: utc, locale: locale)
+        let sameDay = at.addingTimeInterval(-3600)
+        #expect(LimitResume.Step.waitUntil(at).sentence(now: sameDay, timeZone: utc, locale: locale)
             == "Continues after the limit resets at 21:40.")
+    }
+
+    /// A weekly reset days away names its day, so the time cannot pass for one already gone.
+    @Test func namesTheDayOfAResetOnAnotherDay() {
+        let utc = TimeZone(identifier: "UTC")!
+        let locale = Locale(identifier: "en_GB")
+        let at = Date(timeIntervalSince1970: 1_789_767_600)
+        let daysBefore = at.addingTimeInterval(-3 * 86_400)
+        let sentence = LimitResume.Step.waitUntil(at).sentence(now: daysBefore, timeZone: utc, locale: locale)
+        #expect(sentence.hasPrefix("Continues after the limit resets on "))
+        #expect(sentence.hasSuffix(" at 21:40."))
     }
 }
