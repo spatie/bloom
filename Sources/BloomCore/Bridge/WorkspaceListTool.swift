@@ -255,6 +255,7 @@ public struct WorkspaceListTool: BridgeToolHandling {
 
         var answer: [String: JSONValue] = [
             "id": .string(workspace.id.rawValue),
+            "link": .string(WorkspaceLink.address(workspace: workspace.id)),
             "name": .string(workspace.name),
             "branch": .string(workspace.branch),
             "base_branch": .string(workspace.baseBranch),

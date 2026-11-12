@@ -46,9 +46,10 @@ extension TranscriptModel {
             if plan.resumeAt == nil {
                 try await store.update(sessionID: session.id) { $0.agentSessionID = nil }
             }
-            try await store.removeMessages(sessionID: session.id, fromSeq: plan.removeFromSeq)
+            let dropped = try await store.removeMessages(sessionID: session.id, fromSeq: plan.removeFromSeq)
+            await deleteSnapshots(of: dropped)
 
-            await reloadAfterRewind(agentSessionID: agentSessionID)
+            await reloadAfterRewind(agentSessionID: agentSessionID, removedFromSeq: plan.removeFromSeq)
             draft = plan.prompt
             await saveDraft()
         } catch {

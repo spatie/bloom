@@ -36,6 +36,8 @@ public struct DetectedLink: Sendable, Hashable {
 ///    a port is almost never speaking TLS and `https://localhost:3000` fails in a way that looks
 ///    like Bloom's fault.
 /// 3. An explicitly allowed app scheme followed by a nonempty address.
+/// 4. A link to a workspace or chat in this copy of Bloom, `bloom://workspace/<id>?chat=<id>`,
+///    which navigates and does nothing else. See `WorkspaceLink`.
 ///
 /// **What it deliberately refuses.**
 ///
@@ -48,7 +50,8 @@ public struct DetectedLink: Sendable, Hashable {
 ///   `git@github.com:spatie/bloom.git`, and turning a git remote into a link in a tool row is a
 ///   worse bug than the one this fixes.
 /// - Other schemes unless the user has explicitly allowed them. File, JavaScript and Bloom's
-///   own schemes are always refused, including when configured.
+///   own schemes are always refused, including when configured, apart from the workspace links
+///   above.
 /// - Anything glued to the character before it. A match has to start a token: preceded by a
 ///   letter, a digit, or one of `@ / . _ - + ~ %`, it is part of something longer and is left
 ///   alone. That is what keeps `user@localhost:2222`, `./localhost:3000` and paths out.
@@ -88,7 +91,8 @@ public enum LinkScan: Sendable {
         guard index < text.endIndex else { return nil }
         let character = text[index]
         guard Self.starters.contains(character)
-            || allowedSchemes.contains(where: { $0.first?.lowercased() == character.lowercased() }) else { return nil }
+            || allowedSchemes.contains(where: { $0.first?.lowercased() == character.lowercased() })
+            || Self.ownStarters.contains(character) else { return nil }
         guard startsToken(text, at: index) else { return nil }
 
         let remainder = text[index...]
@@ -111,6 +115,12 @@ public enum LinkScan: Sendable {
     /// The only characters a match can begin with, so a line of prose is walked without asking the
     /// rest of these rules about every letter in it.
     private static let starters: Set<Character> = ["h", "H", "l", "L", "1"]
+
+    /// The same for this copy's own scheme, worked out once: this is asked of every character of
+    /// every answer, and lower casing two strings to answer it would be two allocations a letter.
+    private static let ownStarters: Set<Character> = Set(
+        BloomURLScheme.own.compactMap(\.first).flatMap { [Character($0.lowercased()), Character($0.uppercased())] }
+    )
 
     private static func scan(_ line: Substring, of text: String, allowedSchemes: Set<String>, into found: inout [DetectedLink]) {
         var index = line.startIndex
@@ -168,6 +178,15 @@ public enum LinkScan: Sendable {
             let rest = remainder.dropFirst(scheme.count + 1)
             guard let first = rest.first, isAddressCharacter(first), first != ")", first != "]" else { return nil }
             return (prefix: "", required: scheme.count + 2)
+        }
+
+        // This copy's own workspace links, which navigate and do nothing else. `isAddressable`
+        // holds the rest of the address to `WorkspaceLink` through `LinkPolicy.opens`, so a
+        // prompt link in the same scheme is still text.
+        for scheme in BloomURLScheme.own {
+            let opener = scheme + "://workspace/"
+            guard matches(remainder, opener) else { continue }
+            return (prefix: "", required: opener.count + 1)
         }
 
         for host in ["localhost", "127.0.0.1"] where matches(remainder, host) {

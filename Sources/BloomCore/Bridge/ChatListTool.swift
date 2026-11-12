@@ -51,6 +51,7 @@ public struct ChatListTool: BridgeToolHandling {
                 let count = try await store.messageCount(sessionID: session.id)
                 chats.append(.object([
                     "id": .string(session.id.rawValue),
+                    "link": .string(WorkspaceLink.address(workspace: workspaceID, chat: session.id)),
                     "title": .string(Self.title(of: session)),
                     "agent": .string(session.agentKind.rawValue),
                     "state": .string(session.state.rawValue),

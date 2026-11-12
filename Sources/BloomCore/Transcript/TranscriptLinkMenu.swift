@@ -14,6 +14,9 @@ public enum TranscriptLinkTarget: Sendable, Hashable {
     /// for `.vertical`. The pane divided is the one the transcript is drawn in, not the column,
     /// because the point of the item is to read the page next to the conversation that named it.
     case split(SplitAxis)
+    /// Bloom's own window, for a `WorkspaceLink`: the workspace or chat it names, as a click in
+    /// the sidebar would show it.
+    case bloom
 }
 
 /// One item of the menu a right click on a link raises.
@@ -68,13 +71,20 @@ public enum TranscriptLinkPlacement: Sendable, Hashable, CaseIterable {
 public enum TranscriptLinkMenu {
     /// The openings a link offers, top to bottom.
     ///
-    /// The external browser is always first and always there. It is the only destination needing
+    /// The external browser is always first and always there, for every address but a workspace
+    /// link, which is Bloom's own and opens in Bloom. It is the only destination needing
     /// nothing of Bloom's own, it is what a plain click already does, and an address refused
     /// everything else (a `mailto:`, most of all) is still a perfectly good thing to hand to the
     /// system.
     public static func items(
         for url: URL, placement: TranscriptLinkPlacement
     ) -> [TranscriptLinkItem] {
+        // A browser has nothing to show for a workspace link, and the default one would only hand
+        // it back to Bloom through LaunchServices. It opens here, and that is the only item.
+        if let link = WorkspaceLink(url) {
+            return [TranscriptLinkItem(title: link.openTitle, target: .bloom)]
+        }
+
         var items = [TranscriptLinkItem(title: "Open in Default Browser", target: .externalBrowser)]
 
         // Everything below opens a browser of Bloom's own, so everything below needs an address

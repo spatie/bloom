@@ -1546,14 +1546,24 @@ final class TranscriptModel {
         runnerPreferences = nil
     }
 
+    /// The hidden refs of the turn checkpoints a rewind dropped with their rows. A ref that will not
+    /// go is left behind rather than failing the rewind, because by then the rows are already gone
+    /// and an orphaned ref costs a few objects in the repository and nothing on screen.
+    func deleteSnapshots(of checkpoints: [TurnCheckpoint]) async {
+        for snapshot in checkpoints.flatMap({ [$0.before, $0.after].compactMap { $0 } }) {
+            try? await Git.deleteSnapshot(snapshot, in: cwd)
+        }
+    }
+
     /// Says why a rewind did not happen, in the window's own alert.
     func showRewindAlert(_ message: String) {
         app.alert = BloomAlert(title: "Could not rewind", message: message)
     }
 
     /// Reads the rows again from the store, after the rewind removed some.
-    func reloadAfterRewind(agentSessionID: String?) async {
+    func reloadAfterRewind(agentSessionID: String?, removedFromSeq seq: Int) async {
         session.agentSessionID = agentSessionID
+        session.lastReadSeq = min(session.lastReadSeq, seq - 1)
         isLoaded = false
         await load()
     }

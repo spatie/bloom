@@ -113,7 +113,35 @@ struct ClaudeRewindTests {
         #expect(ClaudeRewind.text(of: claimed.payload) == "queued words")
 
         _ = try await store.appendNext(sessionID: chat.id, kind: .assistantText, payload: Data("{}".utf8))
-        #expect(try await store.removeMessages(sessionID: chat.id, fromSeq: claimed.seq + 1) == 1)
+        _ = try await store.removeMessages(sessionID: chat.id, fromSeq: claimed.seq + 1)
         #expect(try await store.messages(sessionID: chat.id).map(\.seq) == [claimed.seq])
+    }
+
+    @Test("a rewind takes the checkpoints and the read marker past the cut with the rows, because the next row reuses the seq")
+    func storeForgetsWhatWasKeyedOnRemovedRows() async throws {
+        let store = try makeTestStore("claude-rewind-seq")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        var chat = Session(workspaceID: workspace.id, title: "c", model: "sonnet")
+        chat.lastReadSeq = 5
+        chat = try await store.upsert(chat)
+        for _ in 0..<6 {
+            _ = try await store.appendNext(sessionID: chat.id, kind: .assistantText, payload: Data("{}".utf8))
+        }
+        func snapshot(_ name: String) -> GitSnapshot {
+            GitSnapshot(id: GitSnapshotID(name), sessionID: chat.id)
+        }
+        try await store.saveTurnCheckpoint(TurnCheckpoint(sessionID: chat.id, startSeq: 0, before: snapshot("kept")))
+        try await store.saveTurnCheckpoint(TurnCheckpoint(sessionID: chat.id, startSeq: 3, before: snapshot("gone")))
+
+        let dropped = try await store.removeMessages(sessionID: chat.id, fromSeq: 3)
+
+        #expect(dropped.map(\.id) == [GitSnapshotID("gone")])
+        #expect(try await store.turnCheckpoints(sessionID: chat.id).map(\.id) == [GitSnapshotID("kept")])
+        #expect(try await store.messages(sessionID: chat.id).map(\.seq) == [0, 1, 2])
+        let reread = try #require(try await store.sessions(workspaceID: workspace.id).first { $0.id == chat.id })
+        #expect(reread.lastReadSeq == 2)
     }
 }

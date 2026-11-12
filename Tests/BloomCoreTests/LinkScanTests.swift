@@ -140,7 +140,7 @@ struct LinkScanTests {
 
     @Test("Reserved schemes stay blocked even when explicitly allowed", arguments: [
         "file:///Applications/Bloom.app", "FILE:///tmp/private", "javascript:alert(1)",
-        "JaVaScRiPt:alert(1)", "bloom://workspace/123", "bloomdev://workspace/123",
+        "JaVaScRiPt:alert(1)", "bloom://?prompt=fix&path=/tmp", "bloomdev://workspace/123",
         "bloom-source://file?path=/tmp/private", "bloom-future://internal",
     ])
     func reservedAppSchemes(address: String) throws {
