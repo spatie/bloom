@@ -180,7 +180,9 @@ private struct ComposerSettingsPanel: View {
     @State private var presetName: String?
     @FocusState private var isNamingFocused: Bool
     /// Read each time the popover opens, so the switch in Settings is honoured without observing it.
-    @State private var isAdvisorEnabled = false
+    /// Starts from the last answer so the row does not pop in after the panel is drawn.
+    @State private var isAdvisorEnabled = Self.lastKnownAdvisorEnabled
+    private static var lastKnownAdvisorEnabled = true
     @Environment(AppModel.self) private var app
 
     private static let width: CGFloat = 300
@@ -276,6 +278,7 @@ private struct ComposerSettingsPanel: View {
         .task {
             guard let store = app.store else { return }
             isAdvisorEnabled = await ChatAdvisor.isEnabledAppWide(in: store)
+            Self.lastKnownAdvisorEnabled = isAdvisorEnabled
         }
     }
 

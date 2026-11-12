@@ -686,6 +686,7 @@ struct TranscriptListView: View {
                 $0.combine(row.isError)
                 $0.combine(row.durationMS)
                 $0.combine(row.resultPayload?.count)
+                $0.combine(row.advisorUsage)
                 $0.combine(row.permissionDecision)
                 $0.combine(row.permissionNote)
                 $0.combine(isExpanded)

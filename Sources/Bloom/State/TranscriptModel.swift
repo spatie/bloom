@@ -121,6 +121,14 @@ final class TranscriptModel {
             // Only Claude Code has one, and another backend must not restart over it.
             self.advisor = session.agentKind == .claudeCode ? advisor : .consult(.inherit)
         }
+
+        /// An advisor change, often made in Settings for every chat, waits for the turn to end
+        /// rather than killing a process somebody is steering.
+        func restarts(for next: Self, midTurn: Bool) -> Bool {
+            var sameAdvisor = next
+            sameAdvisor.advisor = advisor
+            return midTurn ? self != sameAdvisor : self != next
+        }
     }
 
     var session: Session
@@ -638,22 +646,9 @@ final class TranscriptModel {
     }
 
     /// Hands the advisor's figures back to the consultations of the message this line closes.
-    ///
-    /// Matched by message id and then from the last one backwards, so a line naming fewer
-    /// consultations than the message drew is taken to be about the most recent ones.
     nonisolated private static func assignAdvisorUsage(from payload: Data, to rows: inout [TranscriptRow]) {
         guard let report = AdvisorConsultation.usageReport(in: payload) else { return }
-
-        var newestFirst: [Int] = []
-        for index in rows.indices.reversed() {
-            let row = rows[index]
-            if row.kind == .result { break }
-            if row.kind == .toolUse,
-               AdvisorConsultation.callMessageID(payload: row.payload) == report.messageID {
-                newestFirst.append(index)
-            }
-        }
-        for (index, usage) in zip(newestFirst, report.usages.reversed()) {
+        for (index, usage) in report.assignments(in: rows, kind: \.kind, payload: \.payload) {
             rows[index].advisorUsage = usage
         }
     }
@@ -1574,9 +1569,10 @@ final class TranscriptModel {
         guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
-        let advisor = await ChatAdvisor.launch(sessionID: session.id, in: store)
+        let advisor = session.agentKind == .claudeCode
+            ? await ChatAdvisor.launch(sessionID: session.id, in: store) : .consult(.inherit)
         let preferences = RunnerPreferences(session: session, advisor: advisor)
-        if runner != nil, runnerPreferences != preferences {
+        if runner != nil, runnerPreferences?.restarts(for: preferences, midTurn: isRunning) ?? true {
             runner?.terminateNow()
             pumpTask?.cancel()
             pumpTask = nil
