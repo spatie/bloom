@@ -41,7 +41,8 @@ extension Store {
             for keys in [
                 (ComposerControls.fastModeKey(sessionID: parentID), ComposerControls.fastModeKey(sessionID: next.id)),
                 (ComposerControls.outputStyleKey(sessionID: parentID), ComposerControls.outputStyleKey(sessionID: next.id)),
-                (ComposerControls.contextWindowKey(sessionID: parentID), ComposerControls.contextWindowKey(sessionID: next.id))
+                (ComposerControls.contextWindowKey(sessionID: parentID), ComposerControls.contextWindowKey(sessionID: next.id)),
+                (ChatAdvisor.key(sessionID: parentID), ChatAdvisor.key(sessionID: next.id))
             ] { try setSetting(keys.1, setting(keys.0)) }
             try setSetting(
                 PlanApproval.modeKey(sessionID: next.id),

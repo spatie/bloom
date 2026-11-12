@@ -24,6 +24,7 @@ struct ComposerSettingsPicker: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onContextWindow: @MainActor (Int) -> Void
     var onInteractionMode: @MainActor (InteractionMode) -> Void = { _ in }
+    var onAdvisor: @MainActor (ChatAdvisor) -> Void = { _ in }
 
     @Environment(AppModel.self) private var app
     @Environment(\.openSettings) private var openSettings
@@ -67,6 +68,7 @@ struct ComposerSettingsPicker: View {
                 onPermissionMode: onPermissionMode,
                 onContextWindow: onContextWindow,
                 onInteractionMode: onInteractionMode,
+                onAdvisor: onAdvisor,
                 onSavePreset: savePreset
             )
             .environment(\.fontScale, 1)
@@ -171,11 +173,17 @@ private struct ComposerSettingsPanel: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onContextWindow: @MainActor (Int) -> Void
     var onInteractionMode: @MainActor (InteractionMode) -> Void = { _ in }
+    var onAdvisor: @MainActor (ChatAdvisor) -> Void = { _ in }
     var onSavePreset: @MainActor (String) -> Void
 
     /// The name being typed for a new preset, or nil while the row shows its button.
     @State private var presetName: String?
     @FocusState private var isNamingFocused: Bool
+    /// Read each time the popover opens, so the switch in Settings is honoured without observing it.
+    /// Starts from the last answer so the row does not pop in after the panel is drawn.
+    @State private var isAdvisorEnabled = Self.lastKnownAdvisorEnabled
+    private static var lastKnownAdvisorEnabled = true
+    @Environment(AppModel.self) private var app
 
     private static let width: CGFloat = 300
 
@@ -196,6 +204,18 @@ private struct ComposerSettingsPanel: View {
                             onSelect: onOutputStyle
                         )
                     }
+                }
+
+                if controls.offersAdvisor, isAdvisorEnabled {
+                    settingRow("Advisor") {
+                        optionPicker(
+                            "Advisor",
+                            selection: controls.advisor.rawValue,
+                            options: ChatAdvisor.allCases.map { ComposerOption(id: $0.rawValue, label: $0.label) },
+                            onSelect: { id in onAdvisor(ChatAdvisor(stored: id)) }
+                        )
+                    }
+                    .help("A stronger model consulted mid-turn. Each consultation rereads the whole conversation at its rate.")
                 }
 
                 if controls.offersInteractionMode {
@@ -255,6 +275,11 @@ private struct ComposerSettingsPanel: View {
                 .padding(.vertical, Metrics.inset)
         }
         .frame(width: Self.width)
+        .task {
+            guard let store = app.store else { return }
+            isAdvisorEnabled = await ChatAdvisor.isEnabledAppWide(in: store)
+            Self.lastKnownAdvisorEnabled = isAdvisorEnabled
+        }
     }
 
     private func settingRow<Content: View>(

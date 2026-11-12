@@ -29,6 +29,9 @@ struct TranscriptRow: Identifiable, Hashable, Sendable {
     var parentToolUseID: String?
     /// Empty assistant blocks draw no prose and must not split adjacent activity summaries.
     var isEmptyAssistantText = false
+    /// For a consultation of the advisor: who advised and how much it read, once the message
+    /// that consulted has closed and said so.
+    var advisorUsage: AdvisorUsage?
 
     /// For a `permissionAsk` row: how the question was settled, or nil while it is still open.
     ///
@@ -106,12 +109,25 @@ final class TranscriptModel {
         var effort: String
         var permissionMode: String
         var agentKind: String
+        /// A launch setting of a process that outlives every turn, so a change in Settings or in
+        /// the chat's own picker reaches an open chat only by starting that process again.
+        var advisor: AdvisorLaunch
 
-        init(session: Session) {
+        init(session: Session, advisor: AdvisorLaunch) {
             model = session.model
             effort = session.effort
             permissionMode = session.permissionMode.rawValue
             agentKind = session.agentKind.rawValue
+            // Only Claude Code has one, and another backend must not restart over it.
+            self.advisor = session.agentKind == .claudeCode ? advisor : .consult(.inherit)
+        }
+
+        /// An advisor change, often made in Settings for every chat, waits for the turn to end
+        /// rather than killing a process somebody is steering.
+        func restarts(for next: Self, midTurn: Bool) -> Bool {
+            var sameAdvisor = next
+            sameAdvisor.advisor = advisor
+            return midTurn ? self != sameAdvisor : self != next
         }
     }
 
@@ -611,6 +627,11 @@ final class TranscriptModel {
             return
         }
 
+        // The stream line that closes a message is stored as a `system` row.
+        if message.kind == .system {
+            assignAdvisorUsage(from: message.payload, to: &rows)
+        }
+
         var row = TranscriptRow(message: message)
         row.parentToolUseID = ParentProbe.parentToolUseID(message.payload)
         if message.kind == .permissionAsk,
@@ -621,6 +642,14 @@ final class TranscriptModel {
         rows.append(row)
         if message.kind == .toolUse, let refID = message.refID {
             indexByRefID[refID] = rows.count - 1
+        }
+    }
+
+    /// Hands the advisor's figures back to the consultations of the message this line closes.
+    nonisolated private static func assignAdvisorUsage(from payload: Data, to rows: inout [TranscriptRow]) {
+        guard let report = AdvisorConsultation.usageReport(in: payload) else { return }
+        for (index, usage) in report.assignments(in: rows, kind: \.kind, payload: \.payload) {
+            rows[index].advisorUsage = usage
         }
     }
 
@@ -1540,8 +1569,10 @@ final class TranscriptModel {
         guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
-        let preferences = RunnerPreferences(session: session)
-        if runner != nil, runnerPreferences != preferences {
+        let advisor = session.agentKind == .claudeCode
+            ? await ChatAdvisor.launch(sessionID: session.id, in: store) : .consult(.inherit)
+        let preferences = RunnerPreferences(session: session, advisor: advisor)
+        if runner != nil, runnerPreferences?.restarts(for: preferences, midTurn: isRunning) ?? true {
             runner?.terminateNow()
             pumpTask?.cancel()
             pumpTask = nil

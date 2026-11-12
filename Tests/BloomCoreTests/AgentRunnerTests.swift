@@ -367,6 +367,49 @@ struct AgentRunnerArgvTests {
         #expect(argv.filter { $0 == "--settings" }.count == 1)
     }
 
+    @Test("the advisor reaches the CLI as a setting, never as a flag")
+    func passesTheAdvisor() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, advisor: .consult(.opus)
+        )
+
+        #expect(value(of: "--settings", in: argv) == #"{"advisorModel":"opus"}"#)
+        #expect(!argv.contains("--advisor"))
+    }
+
+    @Test("the advisor and the output style share the one settings object")
+    func advisorSharesTheSettingsObject() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: WorkspaceID("w")),
+            resume: nil,
+            outputStyle: "Concise",
+            advisor: .consult(.fable)
+        )
+
+        #expect(argv.filter { $0 == "--settings" }.count == 1)
+        #expect(value(of: "--settings", in: argv) == #"{"advisorModel":"fable","outputStyle":"Concise"}"#)
+    }
+
+    /// Stating nothing is what leaves an `advisorModel` in the user's own Claude settings alone.
+    @Test("an advisor nobody chose sends no settings at all")
+    func unsetAdvisorSendsNothing() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, advisor: .consult(.inherit)
+        )
+
+        #expect(!argv.contains("--settings"))
+    }
+
+    /// Off goes through the environment, so argv must not also name a model.
+    @Test("an advisor switched off sends no advisor model")
+    func offAdvisorSendsNoModel() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, outputStyle: "Concise", advisor: .off
+        )
+
+        #expect(value(of: "--settings", in: argv) == #"{"outputStyle":"Concise"}"#)
+    }
+
     /// The same, for the same reason. Both keys are in the user's database already.
     @Test("the output style key is the one already in the database")
     func outputStyleKeyIsStable() {
@@ -786,6 +829,63 @@ struct AgentRunnerProcessTests {
         let process = try #require(recorder.last)
         let index = try #require(process.launch.arguments.firstIndex(of: "--settings"))
         #expect(process.launch.arguments[index + 1] == #"{"outputStyle":"Concise"}"#)
+    }
+
+    @Test("the stored advisor reaches the process the runner spawns")
+    func spawnsWithTheStoredAdvisor() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        try await store.setSetting(AppDefaults.Key.advisor, ClaudeAdvisor.opus.rawValue)
+
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+
+        let process = try #require(recorder.last)
+        let index = try #require(process.launch.arguments.firstIndex(of: "--settings"))
+        #expect(process.launch.arguments[index + 1] == #"{"advisorModel":"opus"}"#)
+        #expect(process.launch.environment[AdvisorLaunch.disableVariable] == nil)
+    }
+
+    @Test("a chat's own advisor wins over the one in Settings")
+    func chatAdvisorWinsOverSettings() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        try await store.setSetting(AppDefaults.Key.advisor, ClaudeAdvisor.opus.rawValue)
+        try await store.setSetting(ChatAdvisor.key(sessionID: session.id), ChatAdvisor.sonnet.rawValue)
+
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+
+        let process = try #require(recorder.last)
+        let index = try #require(process.launch.arguments.firstIndex(of: "--settings"))
+        #expect(process.launch.arguments[index + 1] == #"{"advisorModel":"sonnet"}"#)
+    }
+
+    @Test("a chat switched off disables the advisor tool and names no model")
+    func chatAdvisorOffDisablesTheTool() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        try await store.setSetting(AppDefaults.Key.advisor, ClaudeAdvisor.opus.rawValue)
+        try await store.setSetting(ChatAdvisor.key(sessionID: session.id), ChatAdvisor.off.rawValue)
+
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+
+        let process = try #require(recorder.last)
+        #expect(!process.launch.arguments.contains("--settings"))
+        #expect(process.launch.environment[AdvisorLaunch.disableVariable] == "1")
     }
 
     @Test("the stored executable reaches the process the runner spawns")

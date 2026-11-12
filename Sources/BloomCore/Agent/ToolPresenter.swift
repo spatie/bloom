@@ -73,6 +73,12 @@ public enum ToolPresenter {
             detail: "",
             tint: .neutral
         )
+        case AdvisorConsultation.toolName: return ToolPresentation(
+            glyph: "graduationcap",
+            label: "Advisor",
+            detail: "",
+            tint: .accent
+        )
         default: return fallback(name: name, input: input)
         }
     }

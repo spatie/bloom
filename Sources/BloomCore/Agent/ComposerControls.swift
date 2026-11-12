@@ -52,6 +52,8 @@ public struct ComposerControls: Equatable, Sendable {
     /// How the agent is asked to write, by name. `OutputStyle.defaultName` for "leave it alone",
     /// which is what a session is until somebody picks something else.
     public var outputStyle: String
+    /// Claude Code only, and `.appDefault` until somebody picks something else. See `ChatAdvisor`.
+    public var advisor: ChatAdvisor
     /// How large a Codex chat tells its server the model's context window is, in tokens, or
     /// `CodexContextWindow.modelDefault` for whatever Codex's own catalogue says. Ignored on
     /// every other backend, which is why the picker is not drawn there. See `CodexContextWindow`.
@@ -71,7 +73,8 @@ public struct ComposerControls: Equatable, Sendable {
         codexContextWindow: Int = CodexContextWindow.modelDefault,
         hasWorktree: Bool = true,
         codexFastMode: Bool? = nil,
-        interactionMode: InteractionMode = .build
+        interactionMode: InteractionMode = .build,
+        advisor: ChatAdvisor = .appDefault
     ) {
         self.model = model
         self.effort = effort
@@ -86,6 +89,7 @@ public struct ComposerControls: Equatable, Sendable {
         self.codexContextWindow = codexContextWindow
         self.hasWorktree = hasWorktree
         self.interactionMode = interactionMode.nearest(on: agentKind)
+        self.advisor = advisor
     }
 
     public init(
@@ -93,7 +97,8 @@ public struct ComposerControls: Equatable, Sendable {
         isFastMode: Bool,
         outputStyle: String,
         codexContextWindow: Int = CodexContextWindow.modelDefault,
-        codexFastMode: Bool? = nil
+        codexFastMode: Bool? = nil,
+        advisor: ChatAdvisor = .appDefault
     ) {
         self.init(
             model: session.model,
@@ -107,7 +112,8 @@ public struct ComposerControls: Equatable, Sendable {
             // worktree cannot forget to say so.
             hasWorktree: session.workspaceID != nil,
             codexFastMode: codexFastMode,
-            interactionMode: session.interactionMode
+            interactionMode: session.interactionMode,
+            advisor: advisor
         )
     }
 
@@ -168,6 +174,11 @@ public struct ComposerControls: Equatable, Sendable {
         agentKind == .claudeCode
     }
 
+    /// The advisor is a Claude Code setting too, so the same answer.
+    public var offersAdvisor: Bool {
+        agentKind == .claudeCode
+    }
+
     /// Whether this backend can be told how big its context window is.
     ///
     /// Only Codex, and for the same reason the output style is only Claude Code's: the two config
@@ -203,7 +214,7 @@ public struct ComposerControls: Equatable, Sendable {
         )
     }
 
-    // MARK: - The three that are not columns
+    // MARK: - The ones that are not columns
 
     /// Fast mode has no column on `Session`, so it lives in the store's key value table. Per
     /// session, and it survives a relaunch, which is all it promises.
@@ -248,6 +259,7 @@ public struct ComposerControls: Equatable, Sendable {
             (CodexSpeed.key(sessionID: sessionID), codexFastMode.map { $0 ? "1" : "0" }),
             (Self.outputStyleKey(sessionID: sessionID), OutputStyle.isDefault(outputStyle) ? nil : outputStyle),
             (Self.contextWindowKey(sessionID: sessionID), CodexContextWindow.stored(codexContextWindow)),
+            (ChatAdvisor.key(sessionID: sessionID), advisor.storedValue),
             (Self.defaultsAppliedKey(sessionID: sessionID), "1"),
         ]
     }
