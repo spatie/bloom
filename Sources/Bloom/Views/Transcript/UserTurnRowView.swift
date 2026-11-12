@@ -93,6 +93,19 @@ struct UserTurnRowView: View {
     /// pointer crossing from one chip to the next raises the second before the first is told it
     /// was left.
     @State private var published: TranscriptHoverCard?
+    /// False where the caller folds the text itself, as the subagent pane does with its brief.
+    var foldsLongText = true
+    /// The `SentTurnPreview` stage drawn, past the last one for the whole message. Kept by the
+    /// caller, which outlives this view. Without `onReveal`, as for a message still being sent, the
+    /// head shows with no controls until the stored row takes over.
+    var stage = 0
+    var onReveal: ((Int) -> Void)?
+    @State private var copyFlash = CopyFlash()
+
+    /// The head drawn in place of a pasted page, or nil when the whole message is drawn. Read once
+    /// per pass and handed down, since each cut looks for Bloom's blocks across the whole paste;
+    /// only the fold controls cut once more, to name their button.
+    private var head: String? { foldsLongText ? SentTurnPreview.cut(text, stage: stage) : nil }
 
     /// How much of the pane a user turn always leaves empty on its left, so it reads as one side of
     /// a conversation even when it is short.
@@ -131,6 +144,8 @@ struct UserTurnRowView: View {
                         .padding(.trailing, TranscriptLayout.tight)
                         .padding(.top, Self.padding.top)
                 }
+                let copyText = copyText
+                let head = head
                 if !copyText.isEmpty {
                     CopyButton(
                         text: copyText,
@@ -145,7 +160,7 @@ struct UserTurnRowView: View {
 
                 VStack(alignment: side == .leading ? .leading : .trailing, spacing: TranscriptLayout.tight) {
                     CappedWidth(width: maxWidth) {
-                        bubble.padding(Self.padding)
+                        bubble(head: head).padding(Self.padding)
                     }
                     .padding(.bottom, OutgoingBubbleShape.tailDrop)
                     .background(
@@ -174,6 +189,11 @@ struct UserTurnRowView: View {
                     // surface whatever the page around it is doing. AppKit cannot read it, which is why
                     // the text view below is handed `Palette.bubbleTextSelection` as well.
                     .environment(\.colorScheme, .dark)
+
+                    // A stage past the first is only ever reached from a message too long for it.
+                    if foldsLongText, let onReveal, head != nil || stage > 0 {
+                        foldControls(head: head, reveal: onReveal)
+                    }
                 }
             }
             // Placed with an offset by its own measured width: an `alignmentGuide` here was ignored
@@ -196,6 +216,7 @@ struct UserTurnRowView: View {
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
+        .onDisappear { copyFlash.cancel() }
         .onChange(of: hovered) { _, chip in
             hoverTask?.cancel()
             guard let chip else {
@@ -219,11 +240,29 @@ struct UserTurnRowView: View {
 
     private var copyText: String { SentTurn.withoutInstructions(text) }
 
+    private func foldControls(head: String?, reveal: @escaping (Int) -> Void) -> some View {
+        HStack(spacing: Metrics.gutter) {
+            if head != nil {
+                let whole = SentTurnPreview.cut(text, stage: stage + 1) == nil
+                Button(whole ? "Show all" : "Show more") { reveal(stage + 1) }
+                    .accessibilityLabel(whole ? "Show all of the message" : "Show more of the message")
+            }
+            if stage > 0 {
+                Button("Show less") { reveal(0) }
+                    .accessibilityLabel("Show less of the message")
+            }
+            Button(copyFlash.isShowing ? "Copied" : "Copy") { copyFlash.copy(copyText) }
+                .accessibilityLabel("Copy the whole message")
+        }
+        .linkButton()
+        .font(Typo.caption)
+    }
+
     /// The words and then the files, which is the order they were written in and the order the
     /// composer showed them in, except that up there the chips sat above the text because that is
     /// where the row of them lives. Here the sentence comes first: it is what the turn is about.
     @ViewBuilder
-    private var bubble: some View {
+    private func bubble(head: String?) -> some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.block) {
             // A prompt of nothing but attachments is a turn in its own right, and an empty `Text`
             // above the chips would put a blank line inside the bubble.
@@ -241,7 +280,7 @@ struct UserTurnRowView: View {
                 // nothing at all. See the note on that type.
                 TranscriptTextView(
                     text: TranscriptLink.attributedString(
-                        sent: text,
+                        sent: head ?? text,
                         font: font,
                         // White, the same ink a selected row uses on the same fill. Measured 5.2
                         // to 1 on Spatie Blue, which passes AA for body text in both appearances.
