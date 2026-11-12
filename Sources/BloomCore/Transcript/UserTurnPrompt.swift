@@ -46,10 +46,33 @@ public enum UserTurnPrompt {
             }
         }
 
-        let oneLine = visible.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
-        guard !oneLine.isEmpty else { return nil }
         let cap = max(1, limit)
+        let oneLine = collapsed(visible, upTo: cap + 1)
+        guard !oneLine.isEmpty else { return nil }
         guard oneLine.count > cap else { return oneLine }
         return String(oneLine.prefix(cap)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// The words on one line, single spaced, stopping at `limit` characters: splitting a pasted
+    /// page of 240 kB into words held the main thread on every pass that asked for its summary.
+    static func collapsed(_ text: String, upTo limit: Int) -> String {
+        var line = ""
+        var count = 0
+        var pendingSpace = false
+        for character in text {
+            if character.isWhitespace {
+                pendingSpace = count > 0
+                continue
+            }
+            if pendingSpace {
+                line.append(" ")
+                count += 1
+            }
+            pendingSpace = false
+            line.append(character)
+            count += 1
+            if count >= limit { break }
+        }
+        return line
     }
 }
