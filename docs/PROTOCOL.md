@@ -123,8 +123,8 @@ files them as a tool call and its result, so they pair by id like any other.
 `advisor_tool_result_error` with an `error_code`. An error does not fail the turn.
 
 The model comes from the chat's own choice, stored under `session.<id>.advisor`, or from
-`defaults.advisor` when the chat is left on Default (`ChatAdvisor.resolved(over:)`). A chat set to
-Off sends no `advisorModel` and launches with `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`, because leaving
+`defaults.advisor` when the chat is left on Default (`ChatAdvisor.resolved(over:isEnabled:)`).
+`defaults.advisorEnabled` set to `0` in Settings turns every chat Off. A chat set to Off sends no `advisorModel` and launches with `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`, because leaving
 the key out would still let the user's own Claude settings attach one. That variable comes from the
 CLI's documentation and has not been measured here yet.
 

@@ -112,4 +112,22 @@ struct SettingsPanePersistenceTests {
         #expect(try await store.setting(AppDefaults.Key.advisor) == nil)
         #expect(await AppDefaults.load(from: store).advisor == .inherit)
     }
+
+    @Test("the advisor switch is on by default and stored only when off")
+    func advisorSwitchRoundTrips() async throws {
+        let store = try makeTestStore("settings-advisor-switch")
+        let enabled = await AppDefaults.load(from: store)
+        #expect(enabled.advisorEnabled)
+        var disabled = enabled
+        disabled.advisorEnabled = false
+
+        try await disabled.saveChanges(from: enabled, to: store)
+
+        #expect(try await store.setting(AppDefaults.Key.advisorEnabled) == "0")
+        #expect(await AppDefaults.load(from: store).advisorEnabled == false)
+
+        try await enabled.saveChanges(from: disabled, to: store)
+
+        #expect(try await store.setting(AppDefaults.Key.advisorEnabled) == nil)
+    }
 }

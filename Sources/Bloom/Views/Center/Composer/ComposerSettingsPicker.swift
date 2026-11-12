@@ -179,6 +179,9 @@ private struct ComposerSettingsPanel: View {
     /// The name being typed for a new preset, or nil while the row shows its button.
     @State private var presetName: String?
     @FocusState private var isNamingFocused: Bool
+    /// Read each time the popover opens, so the switch in Settings is honoured without observing it.
+    @State private var isAdvisorEnabled = false
+    @Environment(AppModel.self) private var app
 
     private static let width: CGFloat = 300
 
@@ -201,7 +204,7 @@ private struct ComposerSettingsPanel: View {
                     }
                 }
 
-                if controls.offersAdvisor {
+                if controls.offersAdvisor, isAdvisorEnabled {
                     settingRow("Advisor") {
                         optionPicker(
                             "Advisor",
@@ -270,6 +273,10 @@ private struct ComposerSettingsPanel: View {
                 .padding(.vertical, Metrics.inset)
         }
         .frame(width: Self.width)
+        .task {
+            guard let store = app.store else { return }
+            isAdvisorEnabled = await ChatAdvisor.isEnabledAppWide(in: store)
+        }
     }
 
     private func settingRow<Content: View>(

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The advisor one Claude Code chat asks for, over the app-wide one in Settings.
+/// The advisor picked in one Claude Code chat's composer, over the app-wide one in Settings.
 ///
 /// Per chat because a consultation rereads the whole conversation at the advisor's rate, so a
 /// cheap task needs a way to switch it off.
@@ -34,8 +34,9 @@ public enum ChatAdvisor: String, CaseIterable, Identifiable, Sendable {
 
     /// The one place the chat's choice meets the app-wide one, read by the runner for argv and by
     /// the transcript to decide whether a live process has to start again.
-    public func resolved(over appWide: ClaudeAdvisor) -> AdvisorLaunch {
-        switch self {
+    public func resolved(over appWide: ClaudeAdvisor, isEnabled: Bool) -> AdvisorLaunch {
+        guard isEnabled else { return .off }
+        return switch self {
         case .appDefault: .consult(appWide)
         case .off: .off
         case .sonnet: .consult(.sonnet)
@@ -49,11 +50,24 @@ public enum ChatAdvisor: String, CaseIterable, Identifiable, Sendable {
         "session.\(sessionID).advisor"
     }
 
+    /// Enabled is stored as no row, so a copy of Bloom that never saw the switch keeps the advisor.
+    public static func isEnabled(stored: String?) -> Bool {
+        stored != "0"
+    }
+
+    public static func storedEnabled(_ isEnabled: Bool) -> String? {
+        isEnabled ? nil : "0"
+    }
+
+    public static func isEnabledAppWide(in store: Store) async -> Bool {
+        isEnabled(stored: try? await store.setting(AppDefaults.Key.advisorEnabled))
+    }
+
     /// A setting that cannot be read falls back to Settings, then to stating nothing.
     public static func launch(sessionID: SessionID, in store: Store) async -> AdvisorLaunch {
         let chat = ChatAdvisor(stored: try? await store.setting(key(sessionID: sessionID)))
         let appWide = ClaudeAdvisor(stored: try? await store.setting(AppDefaults.Key.advisor))
-        return chat.resolved(over: appWide)
+        return chat.resolved(over: appWide, isEnabled: await isEnabledAppWide(in: store))
     }
 }
 
