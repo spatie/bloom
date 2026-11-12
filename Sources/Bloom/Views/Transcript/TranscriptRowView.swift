@@ -127,7 +127,8 @@ struct TranscriptRowView: View, Equatable {
                     text: review.message,
                     reviewChips: review.chips,
                     home: home,
-                    sentAt: row.createdAt
+                    sentAt: row.createdAt,
+                    rewindSeq: row.seq
                 )
             } else {
                 // Attachments reach the agent as paths in the prompt text, which is the only
@@ -141,7 +142,8 @@ struct TranscriptRowView: View, Equatable {
                     text: turn.body,
                     attachments: turn.paths,
                     home: home,
-                    sentAt: row.createdAt
+                    sentAt: row.createdAt,
+                    rewindSeq: row.seq
                 )
             }
 

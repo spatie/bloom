@@ -328,8 +328,22 @@ enum TranscriptLink {
                         await model.runInTerminal(code, sessionID: session, pane: pane)
                     }
                 }
-            }
+            },
+            rewind: rewindAction(model: model, session: session)
         )
+    }
+
+    /// Offered only on a Claude chat, the one backend `ClaudeRewind` speaks for.
+    @MainActor
+    private static func rewindAction(
+        model: WorkspaceModel?, session: SessionID?
+    ) -> (@MainActor @Sendable (Int, Bool) -> Void)? {
+        guard let model, let session,
+              let chat = model.sessions.first(where: { $0.id == session }),
+              chat.agentKind == .claudeCode else { return nil }
+        return { @MainActor @Sendable seq, files in
+            Task { await model.transcript(for: chat).rewind(toBefore: seq, scope: files ? .conversationAndFiles : .conversation) }
+        }
     }
 
     /// Through `ComposerHandoff`, the door a CI log and a browser screenshot already use, so the

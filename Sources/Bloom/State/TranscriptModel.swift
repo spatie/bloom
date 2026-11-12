@@ -1516,6 +1516,48 @@ final class TranscriptModel {
         await runner?.contextBreakdown()
     }
 
+    // MARK: Rewind hooks
+
+    /// What `TranscriptModel+Rewind.swift` needs from this file's private state, and no more.
+
+    /// The store, for the rewind's reads and writes.
+    var rewindStore: Store? { store }
+
+    /// Whether nothing is going on that a rewind would cut across: no turn, no message on its
+    /// way, none queued, no question waiting for an answer.
+    var isIdleForRewind: Bool {
+        !isRunning && sending == nil && pendingDeliveries.isEmpty && !isAwaitingPermission
+    }
+
+    /// The chat's Claude runner, made if there is none yet. Nil for any other agent and for a chat
+    /// that runs in a terminal, which has Claude Code's own `/rewind`.
+    func claudeRunnerForRewind() async -> AgentRunner? {
+        guard session.agentKind == .claudeCode, !usesInteractiveTerminal else { return nil }
+        return await ensureRunner() as? AgentRunner
+    }
+
+    /// Stops the process and forgets the runner, so the next send builds one that launches at the
+    /// rewind's resume point.
+    func dropRunnerForRewind() async {
+        await shutdown()
+        pumpTask?.cancel()
+        pumpTask = nil
+        runner = nil
+        runnerPreferences = nil
+    }
+
+    /// Says why a rewind did not happen, in the window's own alert.
+    func showRewindAlert(_ message: String) {
+        app.alert = BloomAlert(title: "Could not rewind", message: message)
+    }
+
+    /// Reads the rows again from the store, after the rewind removed some.
+    func reloadAfterRewind(agentSessionID: String?) async {
+        session.agentSessionID = agentSessionID
+        isLoaded = false
+        await load()
+    }
+
     private var isWorkspaceArchiving: Bool {
         workspace.map { app.isArchiving($0.id) } ?? false
     }
