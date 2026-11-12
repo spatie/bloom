@@ -305,6 +305,10 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             it from here, so do not ask for one and then sit idle: say what you started and get on \
             with your own work.
 
+            The answer's 'link' opens the new workspace in Bloom. Put it in your reply, as a \
+            markdown link such as [the new workspace](link), and the owner can click straight to \
+            it. chat_create, chat_list and workspace_list answer with the same kind of link.
+
             Pass notify_when_done: true to have Bloom tell this chat once, by itself, when the new \
             agent's first turn comes to rest: finished (with its last message), failed (with the \
             reason), or blocked waiting on the owner for a permission prompt or a question. With \
@@ -527,6 +531,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 if let existing = try await alreadyStarted(spawnID: spawnID, store: store) {
                     return .json(.object([
                         "workspace_id": .string(existing.id.rawValue),
+                        "link": .string(WorkspaceLink.address(workspace: existing.id)),
                         "name": .string(existing.name),
                         "branch": .string(existing.branch),
                         "path": .string(existing.path),
@@ -593,6 +598,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
 
             return .json(.object([
                 "workspace_id": .string(started.workspaceID.rawValue),
+                "link": .string(WorkspaceLink.address(workspace: started.workspaceID)),
                 "name": .string(started.name),
                 "branch": .string(started.branch),
                 "path": .string(started.path),
@@ -881,6 +887,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
     ) -> BridgeToolResult {
         var fields: [String: JSONValue] = [
             "workspace_id": .string(workspace.id.rawValue),
+            "link": .string(WorkspaceLink.address(workspace: workspace.id)),
             "name": .string(workspace.name),
             "branch": .string(workspace.branch),
             "path": .string(workspace.path),

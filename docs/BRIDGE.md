@@ -341,6 +341,14 @@ menu makes, unchanged and not copied. It adds them **to** `.standard` rather tha
 handlers again, because a copy of that list is a copy that drifts: a tool added to the core toolbox
 and not to the app's would pass every test in the suite and never reach the running app.
 
+`workspace_start`, `chat_create`, `chat_list` and `workspace_list` answer with a `link` beside each
+id: `bloom://workspace/<id>`, with `?chat=<id>` for a chat, in this copy's own scheme (`bloomdev`
+for the dev build). An agent that writes one into its reply has written something the owner can
+click, and the transcript opens it the way the sidebar would (`WorkspaceLink`, `LinkPolicy.opens`).
+That is the only kind of Bloom link a chat draws as a link. The prompt form of the same scheme
+starts an agent, and an agent's text is downstream of whatever it read, so it stays plain text in
+a chat however it is written.
+
 ## 4. What an agent cannot reach through it
 
 Nothing here writes a file directly or changes Git state. `workspace_diff` reads a worktree

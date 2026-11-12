@@ -145,8 +145,9 @@ struct WorkspaceStartToolTests {
         #expect(result.text.contains("cannot report completion of a CLI chat"))
         let fields = try #require(answer.objectValue)
         #expect(Set(fields.keys) == [
-            "workspace_id", "name", "branch", "path", "state", "notify_when_done", "note",
+            "workspace_id", "link", "name", "branch", "path", "state", "notify_when_done", "note",
         ])
+        #expect(answer["link"]?.stringValue == "bloom://workspace/w-new")
         let watches = try await fixture.store.unspentWorkspaceDoneWatches(targetWorkspaceID: WorkspaceID("w-new"))
         #expect(watches.isEmpty)
     }

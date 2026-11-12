@@ -17,7 +17,13 @@ public enum LinkPolicy {
     ///
     /// Rendering and opening both check this policy. The opening check must use the current
     /// allowlist, because settings may have changed since a cached transcript was drawn.
-    public static func opens(_ url: URL, allowedSchemes: Set<String> = []) -> Bool {
+    ///
+    /// Bloom's own schemes are refused with one exception: a link to a workspace or a chat in this
+    /// copy, which only navigates. See `WorkspaceLink` for why that one and no other.
+    public static func opens(
+        _ url: URL, allowedSchemes: Set<String> = [], ownSchemes: Set<String> = BloomURLScheme.own
+    ) -> Bool {
+        if WorkspaceLink(url, schemes: ownSchemes) != nil { return true }
         guard let scheme = url.scheme?.lowercased(),
               TranscriptLinkPreferences.additionalScheme(scheme) != nil else { return false }
         return scheme == "https" || scheme == "http" || scheme == "mailto"

@@ -13,7 +13,9 @@ struct AppLinksGallery: View {
 
     [Zoom meeting](zoommtg://zoom.us/join?confno=123) stays plain unless allowed.
 
-    Always blocked: [File](file:///tmp/private), [JavaScript](javascript:alert), [Bloom](bloom://workspace/123), [Bloom Dev](bloomdev://workspace/123), [Bloom source](bloom-source://file?path=/tmp/private).
+    Opens in this copy of Bloom: [a workspace](bloomdev://workspace/123), bloomdev://workspace/123?chat=456.
+
+    Always blocked: [File](file:///tmp/private), [JavaScript](javascript:alert), [Bloom prompt](bloom://?prompt=x&path=/tmp), [another copy's workspace](bloom://workspace/123), [Bloom source](bloom-source://file?path=/tmp/private).
 
     [Web link](https://example.com) keeps working.
     """
@@ -33,7 +35,7 @@ struct AppLinksGallery: View {
                 Divider()
                 Text("User transcript").font(Typo.title)
                 UserTurnRowView(
-                    text: "Open linear://team/issue/T-123 or zoommtg://zoom.us/join?confno=123. Never bloom://workspace/123 or file:///tmp/private.",
+                    text: "Open linear://team/issue/T-123 or zoommtg://zoom.us/join?confno=123. Opens bloomdev://workspace/123. Never bloom://?prompt=x&path=/tmp or file:///tmp/private.",
                     home: TranscriptHome()
                 )
                 Divider()
@@ -41,7 +43,7 @@ struct AppLinksGallery: View {
                 PendingTurnRowView(
                     delivery: Delivery(
                         targetSessionID: SessionID("app-links-gallery"),
-                        body: "Follow up on linear://team/issue/T-123. Blocked: bloom://workspace/123."
+                        body: "Follow up on linear://team/issue/T-123. Opens bloomdev://workspace/123. Blocked: file:///tmp/private."
                     ),
                     holdSentence: nil, onEdit: {}, onDelete: {}
                 )

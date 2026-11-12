@@ -74,6 +74,10 @@ struct TranscriptLinkActions: Sendable, Equatable {
 
     var runInTerminal: (@MainActor @Sendable (_ code: String) async -> Void)?
 
+    /// Rewinds the conversation, and the files when `files`, to before the owner's message
+    /// at `seq`. Nil where the chat is not one Bloom can rewind. See `TranscriptModel.rewind`.
+    var rewind: (@MainActor @Sendable (_ seq: Int, _ files: Bool) -> Void)?
+
     /// The conversation these actions belong to, which keys a code block's draft.
     var session: SessionID? {
         switch identity {

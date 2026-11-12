@@ -43,6 +43,8 @@ struct UserTurnRowView: View {
     /// When the turn was stored, shown beside the bubble on hover. Nil where there is no stored
     /// turn to date, such as a subagent's prompt.
     var sentAt: Date?
+    /// This message's place in the chat, for the Rewind menu. Nil draws no menu.
+    var rewindSeq: Int?
     private var background: Color { Palette.accentFill }
 
     @Environment(AppModel.self) private var app
@@ -124,6 +126,11 @@ struct UserTurnRowView: View {
             if side == .trailing { Spacer(minLength: Self.inset) }
 
             HStack(alignment: .top, spacing: 0) {
+                if let rewindSeq, let rewind = linkActions.rewind {
+                    RewindMenu(seq: rewindSeq, rewind: rewind, isVisible: isBubbleHovered)
+                        .padding(.trailing, TranscriptLayout.tight)
+                        .padding(.top, Self.padding.top)
+                }
                 if !copyText.isEmpty {
                     CopyButton(
                         text: copyText,

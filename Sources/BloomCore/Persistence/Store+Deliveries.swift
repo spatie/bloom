@@ -80,11 +80,14 @@ extension Store {
             let delivery = Self.delivery(from: row)
             var seq = delivery.deliveredSeq
             if seq == nil {
+                // `uuid` is the id the runner sends this message under, so a rewind can name
+                // it. See `ClaudeRewind.turnUUID(for:)`.
                 let payload = delivery.crewPayload ?? Data(JSONValue.object([
                     "type": .string("user"),
                     "message": .object(["role": .string("user"), "content": .array([
                         .object(["type": .string("text"), "text": .string(delivery.body)]),
                     ])]),
+                    "uuid": .string(ClaudeRewind.turnUUID(for: delivery.id)),
                 ]).compactJSON.utf8)
                 let next = try nextSeqLocked(sessionID: delivery.targetSessionID)
                 _ = try insert(Message(sessionID: delivery.targetSessionID, seq: next,

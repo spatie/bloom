@@ -204,7 +204,8 @@ public actor AgentRunner {
         resume: String?,
         isFastMode: Bool = false,
         outputStyle: String? = nil,
-        mcpConfigPath: String? = nil
+        mcpConfigPath: String? = nil,
+        resumeAt: String? = nil
     ) -> [String] {
         var arguments = [
             "-p",
@@ -260,6 +261,11 @@ public actor AgentRunner {
         }
         if let resume, !resume.isEmpty {
             arguments += ["--resume", resume]
+            // A rewind's resume point, as a fork so the conversation that was rewound
+            // stays whole on disk. See `ClaudeRewind`.
+            if let resumeAt, !resumeAt.isEmpty {
+                arguments += ["--resume-session-at", resumeAt, "--fork-session"]
+            }
         }
         return arguments
     }
@@ -287,13 +293,44 @@ public actor AgentRunner {
                 resume: session.agentSessionID,
                 isFastMode: isFastMode,
                 outputStyle: outputStyle,
-                mcpConfigPath: mcpConfigPath
+                mcpConfigPath: mcpConfigPath,
+                resumeAt: rewindResumeAt
             ),
             cwd: workspacePath,
             environment: AgentAccountEnvironment.applying(
                 kind: .claudeCode, home: accountHome, to: Shell.environment()
-            )
+            ).merging([ClaudeRewind.checkpointingVariable: "1"]) { _, rewind in rewind }
         )
+    }
+
+    // MARK: Rewind
+
+    /// A rewind's resume point, read before each start from the setting `ClaudeRewind.settingKey`
+    /// names, and cleared once the forked conversation has announced its new id.
+    private var rewindResumeAt: String?
+
+    private func refreshRewindPoint() async {
+        rewindResumeAt = try? await store.setting(ClaudeRewind.settingKey(session.id))
+    }
+
+    /// Puts back the files Claude's tools changed since the message `uuid` was sent. A one-off
+    /// call on the same executable, account and environment the chat runs with, so it reads the
+    /// same session store. Throws with what the CLI said when it did not restore anything.
+    public func rewindFiles(to uuid: String) async throws {
+        guard let agentSessionID = session.agentSessionID else { throw ClaudeRewindError.noConversation }
+        await refreshExecutable()
+        let launch = launch()
+        let result = try await Shell.run(
+            launch.executable,
+            ClaudeRewind.fileRewindArguments(session: agentSessionID, to: uuid),
+            cwd: launch.cwd,
+            environment: launch.environment,
+            timeout: .seconds(60)
+        )
+        let output = result.stdout + result.stderr
+        guard result.status == 0, ClaudeRewind.fileRewindSucceeded(output) else {
+            throw ClaudeRewindError.filesNotRewound(output.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
     }
 
     // MARK: State
@@ -409,11 +446,15 @@ public actor AgentRunner {
         await refreshFastMode()
         await refreshOutputStyle()
         await refreshExecutable()
+        await refreshRewindPoint()
         try await waitForCancelledRunToExit()
         start()
 
-        let line = try Self.encodeTurn(text)
-        let outgoing = try Self.encodeTurn(prompt)
+        // The id Claude Code keeps this message under, which is what a later file rewind
+        // names. A delivery's own id, so the row the queue wrote carries the same one.
+        let uuid = ClaudeRewind.turnUUID(for: deliveryID)
+        let line = try Self.encodeTurn(text, uuid: uuid)
+        let outgoing = try Self.encodeTurn(prompt, uuid: uuid)
         let generation = handle.generation
         guard let process = handle.current else { throw DeliveryDispatchError.processUnavailable }
         if let deliveryID { try await store.beginDeliveryDispatch(id: deliveryID) }
@@ -460,10 +501,10 @@ public actor AgentRunner {
         configuredExecutable = AgentCatalog.executable(for: .claudeCode, override: stored)
     }
 
-    static func encodeTurn(_ text: String) throws -> String {
+    static func encodeTurn(_ text: String, uuid: String? = nil) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
-        return String(decoding: try encoder.encode(UserTurn(text: text)), as: UTF8.self)
+        return String(decoding: try encoder.encode(UserTurn(text: text, uuid: uuid)), as: UTF8.self)
     }
 
     /// A cancelled process is still dying for up to three seconds, because SIGTERM comes first and
@@ -638,6 +679,12 @@ public actor AgentRunner {
                     $0.updatedAt = Date()
                 }
                 moved = true
+                // The fork a rewind asked for has started, so later launches resume it
+                // whole. See `ClaudeRewind`.
+                if rewindResumeAt != nil {
+                    rewindResumeAt = nil
+                    try? await store.setSetting(ClaudeRewind.settingKey(session.id), nil)
+                }
             }
             if moved { await save(session) }
 
@@ -1147,15 +1194,32 @@ public actor AgentRunner {
 
         let type = "user"
         let message: Body
+        /// Omitted when nil, so a line without one is byte for byte what it always was.
+        let uuid: String?
 
-        init(text: String) {
+        init(text: String, uuid: String? = nil) {
             message = Body(content: [Block(text: text)])
+            self.uuid = uuid
         }
     }
 
 }
 
 // MARK: - Errors
+
+/// Why a Claude rewind could not restore files. See `ClaudeRewind`.
+public enum ClaudeRewindError: Error, LocalizedError, Equatable, Sendable {
+    case noConversation
+    case filesNotRewound(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .noConversation: "This chat has no Claude conversation to rewind yet."
+        case .filesNotRewound(let said):
+            said.isEmpty ? "Claude Code did not restore the files." : "Claude Code did not restore the files: \(said)"
+        }
+    }
+}
 
 public enum AgentRunnerError: Error, Equatable, CustomStringConvertible, Sendable {
     /// A turn was sent while the previous, cancelled process was still shutting down.

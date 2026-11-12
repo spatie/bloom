@@ -47,8 +47,9 @@ struct LinkPolicyTests {
     }
 
     @Test("Reserved schemes cannot be enabled", arguments: [
-        "file:///tmp/private", "javascript:alert(1)", "bloom://workspace/123",
-        "bloomdev://workspace/123", "bloom-source://file?path=/tmp/private", "BLOOM-FUTURE://internal",
+        "file:///tmp/private", "javascript:alert(1)", "bloom://?prompt=fix&path=/tmp",
+        "bloom://prompt=fix&path=/tmp", "bloomdev://workspace/123", "bloom-source://file?path=/tmp/private",
+        "BLOOM-FUTURE://internal",
     ])
     func reservedSchemesCannotOpen(address: String) throws {
         let url = try #require(URL(string: address))

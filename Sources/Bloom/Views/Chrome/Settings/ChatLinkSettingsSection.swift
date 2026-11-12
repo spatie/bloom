@@ -42,13 +42,13 @@ struct ChatLinkSettingsContent: View {
                 }
             }
             if !ignored.isEmpty {
-                Text("Ignored schemes: \(ignored.joined(separator: ", ")).")
+                Text(TranscriptLinkPreferences.ignoredNote(ignored))
                     .settingsFootnote()
             }
         } header: {
             Text("App links in chat")
         } footer: {
-            Text("Allow chat links to open these apps when clicked. Separate scheme names with commas. Empty by default. Web and email links keep working. file, javascript and Bloom's own schemes are always blocked.")
+            Text("Allow chat links to open these apps when clicked. Separate scheme names with commas. Empty by default. Web and email links keep working, and links to Bloom workspaces and chats always open in Bloom. Other file, javascript and Bloom links are always blocked.")
                 .settingsFootnote()
         }
     }

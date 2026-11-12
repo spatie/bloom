@@ -37,6 +37,7 @@ public struct BridgeChatSummary: Sendable, Equatable {
     var json: JSONValue {
         .object([
             "chat_id": .string(chatID.rawValue),
+            "link": .string(WorkspaceLink.address(workspace: workspaceID, chat: chatID)),
             "title": .string(title),
             "agent": .string(agent.rawValue),
             "model": .string(model),

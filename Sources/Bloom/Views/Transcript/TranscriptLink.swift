@@ -290,8 +290,12 @@ enum TranscriptLink {
                     FileReview.open(location: location, in: model)
                     return
                 }
+                if follow(url, in: model?.app) { return }
                 guard TranscriptLink.opens(url) else { return }
                 switch target {
+                case .bloom:
+                    // Only a workspace link offers it, and that was followed above.
+                    break
                 case .externalBrowser:
                     NSWorkspace.shared.open(url)
                 case .browserTab:
@@ -328,8 +332,22 @@ enum TranscriptLink {
                         await model.runInTerminal(code, sessionID: session, pane: pane)
                     }
                 }
-            }
+            },
+            rewind: rewindAction(model: model, session: session)
         )
+    }
+
+    /// Offered only on a Claude chat, the one backend `ClaudeRewind` speaks for.
+    @MainActor
+    private static func rewindAction(
+        model: WorkspaceModel?, session: SessionID?
+    ) -> (@MainActor @Sendable (Int, Bool) -> Void)? {
+        guard let model, let session,
+              let chat = model.sessions.first(where: { $0.id == session }),
+              chat.agentKind == .claudeCode else { return nil }
+        return { @MainActor @Sendable seq, files in
+            Task { await model.transcript(for: chat).rewind(toBefore: seq, scope: files ? .conversationAndFiles : .conversation) }
+        }
     }
 
     /// Through `ComposerHandoff`, the door a CI log and a browser screenshot already use, so the
@@ -355,6 +373,32 @@ enum TranscriptLink {
     // tested: an agent's markdown can name any scheme it likes, and the gate on that is not a
     // drawing decision.
 
+    /// Shows the workspace or chat a `WorkspaceLink` names, in this window, and answers whether
+    /// `url` was one. Everything else is left to the caller's browser.
+    ///
+    /// In process rather than through `NSWorkspace`, although LaunchServices would hand our own
+    /// scheme straight back. It would hand it to whichever copy registered the scheme last, which
+    /// on a Mac with a second build of Bloom on it is not necessarily the one clicked in, and it
+    /// would go through `BloomDeepLink.open`, which also starts agents from prompt links.
+    /// `AppModel.open(workspaceID:chatID:)` is the sidebar's own door and does nothing but show.
+    @MainActor
+    static func follow(_ url: URL, in app: AppModel?) -> Bool {
+        guard let link = WorkspaceLink(url) else { return false }
+        guard let app else { return true }
+        Task { await app.open(workspaceID: link.workspaceID, chatID: link.chatID) }
+        return true
+    }
+
+    /// The one thing a click on an address does when nothing has asked for a destination: a
+    /// workspace link opens in Bloom, and anything `opens` allows goes to the default browser.
+    @MainActor
+    static func press(_ url: URL, in app: AppModel?) -> Bool {
+        if follow(url, in: app) { return true }
+        guard opens(url) else { return false }
+        NSWorkspace.shared.open(url)
+        return true
+    }
+
     // MARK: Copying
 
     static func copy(_ url: String) {
@@ -371,11 +415,7 @@ extension View {
     /// the selection away from it. Dragging across a link still selects the words, because a drag
     /// is not a click.
     func opensTranscriptLinks() -> some View {
-        environment(\.openURL, OpenURLAction { url in
-            guard TranscriptLink.opens(url) else { return .discarded }
-            NSWorkspace.shared.open(url)
-            return .handled
-        })
+        modifier(TranscriptLinkOpening())
     }
 
     /// A right click on prose that has addresses in it offers to copy them.
@@ -413,13 +453,37 @@ extension View {
         if addresses.isEmpty {
             self
         } else {
-            accessibilityActions {
-                ForEach(addresses.indices, id: \.self) { index in
-                    let address = addresses[index]
-                    Button(addresses.count == 1 ? "Open Link" : "Open \(LinkPolicy.shortened(address))") {
-                        guard let url = URL(string: address), TranscriptLink.opens(url) else { return }
-                        NSWorkspace.shared.open(url)
-                    }
+            modifier(TranscriptLinkAccessibilityActions(addresses: addresses))
+        }
+    }
+}
+
+/// `opensTranscriptLinks`, as a modifier because the window is read from the environment: a
+/// workspace link opens in it. Optional, because the appearance sample in settings and the
+/// capture galleries draw transcripts outside any window's model, and there a workspace link
+/// does nothing rather than reaching for an app that is not there.
+private struct TranscriptLinkOpening: ViewModifier {
+    @Environment(AppModel.self) private var app: AppModel?
+
+    func body(content: Content) -> some View {
+        content.environment(\.openURL, OpenURLAction { url in
+            TranscriptLink.press(url, in: app) ? .handled : .discarded
+        })
+    }
+}
+
+/// `transcriptLinkActions`, a modifier for the same reason as `TranscriptLinkOpening`.
+private struct TranscriptLinkAccessibilityActions: ViewModifier {
+    let addresses: [String]
+    @Environment(AppModel.self) private var app: AppModel?
+
+    func body(content: Content) -> some View {
+        content.accessibilityActions {
+            ForEach(addresses.indices, id: \.self) { index in
+                let address = addresses[index]
+                Button(addresses.count == 1 ? "Open Link" : "Open \(LinkPolicy.shortened(address))") {
+                    guard let url = URL(string: address) else { return }
+                    _ = TranscriptLink.press(url, in: app)
                 }
             }
         }
