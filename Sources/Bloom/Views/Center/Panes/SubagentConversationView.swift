@@ -120,7 +120,9 @@ struct SubagentConversationView: View {
     private var promptBubble: some View {
         let preview = SubagentPane.briefPreview(prompt)
         VStack(alignment: .trailing, spacing: 0) {
-            UserTurnRowView(text: isPromptExpanded ? prompt : (preview ?? prompt), home: home)
+            UserTurnRowView(
+                text: isPromptExpanded ? prompt : (preview ?? prompt), home: home, foldsLongText: false
+            )
 
             if preview != nil {
                 Button(TextFold.title(isExpanded: isPromptExpanded)) {

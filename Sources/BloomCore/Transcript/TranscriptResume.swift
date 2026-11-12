@@ -60,6 +60,10 @@ public struct TranscriptPaneState: Equatable, Sendable {
     /// same one: this view is destroyed by every tab switch, so a run somebody opened to read
     /// would fold itself away again the moment they looked at the changes and came back.
     public var unfolded: Set<Int>
+    /// How far each long sent message was revealed, by sequence number. See `SentTurnPreview`. Kept
+    /// here rather than in the bubble, which the table rebuilds: refolded off screen, the row came
+    /// back shorter than the height the table held for it and moved the view.
+    public var revealedStages: [Int: Int]
     /// The completed turns whose activity groups the reader opened together.
     public var unfoldedTurns: Set<Int>
     /// Where the view was, in points from the top of the content.
@@ -114,6 +118,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
     public init(
         expanded: Set<Int>,
         unfolded: Set<Int> = [],
+        revealedStages: [Int: Int] = [:],
         unfoldedTurns: Set<Int> = [],
         offset: Double,
         anchorSeq: Int? = nil,
@@ -126,6 +131,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
     ) {
         self.expanded = expanded
         self.unfolded = unfolded
+        self.revealedStages = revealedStages
         self.unfoldedTurns = unfoldedTurns
         self.offset = offset
         self.anchorSeq = anchorSeq
