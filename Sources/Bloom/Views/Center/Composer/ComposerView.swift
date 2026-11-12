@@ -58,6 +58,7 @@ struct ComposerView: View {
     /// The style name this session is on, mirrored out of the store the way fast mode is. Neither
     /// has a column on `Session`, so neither can be read off the row the footer is drawn from.
     @State private var outputStyle = OutputStyle.defaultName
+    @State private var advisor = ChatAdvisor.appDefault
     /// Codex's context window for this chat, in tokens, or `CodexContextWindow.modelDefault`.
     /// Held here beside fast mode and the output style for the reason those two are: it is not a
     /// column on `Session`, so the composer is where the chat's copy of it lives.
@@ -228,7 +229,8 @@ struct ComposerView: View {
             isFastMode: isFastMode,
             outputStyle: outputStyle,
             codexContextWindow: codexContextWindow,
-            codexFastMode: codexFastMode
+            codexFastMode: codexFastMode,
+            advisor: advisor
         )
     }
 
@@ -337,6 +339,16 @@ struct ComposerView: View {
                 // The default is stored as no row at all, so a session that was set back to it
                 // reads the same as one that was never asked. See `AgentRunner.refreshOutputStyle`.
                 let value = OutputStyle.isDefault(new.outputStyle) ? nil : new.outputStyle
+                Task { try? await store.setSetting(key, value) }
+            }
+        }
+
+        if new.advisor != advisor {
+            advisor = new.advisor
+            if let store = app.store {
+                // Stored as no row for Default, so a later change in Settings reaches this chat.
+                let key = ChatAdvisor.key(sessionID: transcript.session.id)
+                let value = new.advisor.storedValue
                 Task { try? await store.setSetting(key, value) }
             }
         }
@@ -767,6 +779,7 @@ struct ComposerView: View {
         let storedContextWindow = CodexContextWindow.normalised(try? await store.setting(
             ComposerControls.contextWindowKey(sessionID: sessionID)
         ))
+        let storedAdvisor = ChatAdvisor(stored: try? await store.setting(ChatAdvisor.key(sessionID: sessionID)))
         // Checked before every write of the pane's state from here down. The pane is reused
         // across sessions, and an actor call does not stop for cancellation, so a switch made
         // while this task was reading used to let the OLD session's answers resume and land on
@@ -776,6 +789,7 @@ struct ComposerView: View {
         codexFastMode = storedCodexSpeed
         outputStyle = storedStyle
         codexContextWindow = storedContextWindow
+        advisor = storedAdvisor
 
         // The marker is what separates "never opened" from "opened and left alone", which the
         // column values cannot express: a session created with the built-in defaults looks exactly

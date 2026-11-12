@@ -57,8 +57,10 @@ extension AppModel {
         let window = CodexContextWindow.normalised(try await store.setting(
             ComposerControls.contextWindowKey(sessionID: id)
         ))
+        // Read even though this page has no advisor picker: a change saves every key.
+        let advisor = ChatAdvisor(stored: try await store.setting(ChatAdvisor.key(sessionID: id)))
         return ComposerControls(session: context.session, isFastMode: fast, outputStyle: style,
-                                codexContextWindow: window, codexFastMode: codexFast)
+                                codexContextWindow: window, codexFastMode: codexFast, advisor: advisor)
     }
 
     private func webComposerSnapshot(_ context: WebComposerContext, store: Store) async -> WebComposerSnapshot {

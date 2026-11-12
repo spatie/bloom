@@ -39,6 +39,7 @@ struct SideConversationTests {
     func openingInheritsControlsButNeverTheProviderSession(agent: AgentKind) async throws {
         let (store, parent) = try await fixture(agent: agent)
         try await store.setSetting(ComposerControls.fastModeKey(sessionID: parent.id), "1")
+        try await store.setSetting(ChatAdvisor.key(sessionID: parent.id), ChatAdvisor.off.rawValue)
         try await store.append(user("Keep the ordering", sessionID: parent.id))
         let child = try await store.openSideConversation(parentID: parent.id, streamingText: "I am checking the filter")
         let reopened = try await store.openSideConversation(parentID: parent.id, streamingText: "Later text")
@@ -53,6 +54,7 @@ struct SideConversationTests {
         #expect(child.sideConversationParentID == parent.id)
         #expect(try await store.session(id: parent.id) == parent)
         #expect(try await store.setting(ComposerControls.fastModeKey(sessionID: child.id)) == "1")
+        #expect(try await store.setting(ChatAdvisor.key(sessionID: child.id)) == "off")
         #expect(TabSet.tabbable([parent, child]) == [parent.id])
         let snapshot = try #require(try await store.sideConversationSnapshot(sessionID: child.id))
         #expect(snapshot.context.contains("Keep the ordering"))

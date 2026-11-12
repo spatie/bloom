@@ -478,8 +478,7 @@ public struct AppDefaults: Sendable, Hashable {
     /// unlike every other value here it means nothing on the other one: Claude Code's long window
     /// is a model variant and is picked in the model menu. See `CodexContextWindow`.
     public var codexContextWindow: Int
-    /// App-wide rather than per chat: the CLI itself drops an advisor weaker than the chat's
-    /// model, so one choice is already right for every chat. See `ClaudeAdvisor`.
+    /// What a chat left on Default consults. A chat can override it, see `ChatAdvisor`.
     public var advisor: ClaudeAdvisor = .inherit
 
     /// Nil when the user has never chosen one in Settings. `model` always holds a usable value,
