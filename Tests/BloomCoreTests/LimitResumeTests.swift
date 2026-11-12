@@ -127,6 +127,25 @@ struct LimitResumeTests {
         #expect(step == .waitUntil(weeklyReset))
     }
 
+    /// A spent credit balance has no reset and is no longer restated once the org disables it. It
+    /// must not hold the resume after the session window turns over, nor release it before.
+    @Test func ignoresASpentCreditBalance() {
+        var resume = LimitResume(provider: .claudeCode, hitAt: hit)
+        let credits = AgentQuota(
+            provider: .claudeCode, window: .extraUsage,
+            measure: .counted(used: 500, limit: 500, unit: "EUR"),
+            resetsAt: nil, observedAt: hit.addingTimeInterval(-86_400)
+        )
+        let session = quota(fraction: 1, observedAt: hit)
+        let before = resume.step(quotas: [credits, session], at: hit.addingTimeInterval(60))
+        #expect(before == .waitUntil(reset))
+
+        let weekly = quota("seven_day", fraction: 0.4, resetsAt: reset.addingTimeInterval(86_400 * 3),
+                           observedAt: reset.addingTimeInterval(30))
+        let after = resume.step(quotas: [credits, session, weekly], at: reset.addingTimeInterval(40))
+        #expect(after == .go)
+    }
+
     /// With no reset stated anywhere, it needs a reading from after the hit showing room.
     @Test func withNoResetKnownItWaitsForAReadingAfterTheHit() {
         var resume = LimitResume(provider: .claudeCode, hitAt: hit)
@@ -151,7 +170,21 @@ struct LimitResumeTests {
         let utc = TimeZone(identifier: "UTC")!
         let locale = Locale(identifier: "en_GB")
         let at = Date(timeIntervalSince1970: 1_789_767_600)
-        #expect(LimitResume.Step.waitUntil(at).sentence(timeZone: utc, locale: locale)
+        let sameDay = at.addingTimeInterval(-3600)
+        #expect(LimitResume.Step.waitUntil(at).sentence(clock: ResetClock(now: sameDay, timeZone: utc, locale: locale))
             == "Continues after the limit resets at 21:40.")
+    }
+
+    /// A weekly reset days away names its day, so the time cannot pass for one already gone.
+    @Test func namesTheDayOfAResetOnAnotherDay() {
+        let utc = TimeZone(identifier: "UTC")!
+        let locale = Locale(identifier: "en_GB")
+        let at = Date(timeIntervalSince1970: 1_789_767_600)
+        let daysBefore = at.addingTimeInterval(-3 * 86_400)
+        let sentence = LimitResume.Step.waitUntil(at).sentence(
+            clock: ResetClock(now: daysBefore, timeZone: utc, locale: locale)
+        )
+        #expect(sentence.hasPrefix("Continues after the limit resets on "))
+        #expect(sentence.hasSuffix(" at 21:40."))
     }
 }
