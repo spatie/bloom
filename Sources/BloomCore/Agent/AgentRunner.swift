@@ -59,8 +59,8 @@ public actor AgentRunner {
     /// `session.<id>.outputStyle`. Nil rather than the word `default`, so "nothing chosen" and
     /// "chosen and then cleared" cannot drift apart on the way to argv.
     private var outputStyle: String?
-    /// The app-wide advisor, re-read at the top of every turn like the two above.
-    private var advisor = ClaudeAdvisor.inherit
+    /// The chat's advisor over the app-wide one, re-read at the top of every turn like the two above.
+    private var advisor = AdvisorLaunch.consult(.inherit)
     private var awaitingSideContextAcknowledgement = false
     /// Questions this process is currently blocked on, newest last.
     ///
@@ -207,7 +207,7 @@ public actor AgentRunner {
         isFastMode: Bool = false,
         outputStyle: String? = nil,
         mcpConfigPath: String? = nil,
-        advisor: ClaudeAdvisor = .inherit
+        advisor: AdvisorLaunch = .consult(.inherit)
     ) -> [String] {
         var arguments = [
             "-p",
@@ -275,7 +275,7 @@ public actor AgentRunner {
     /// as "send nothing" anyway: a turn that runs unstyled is better than one that does not run.
     ///
     /// The advisor rides in the same object, for the reason `argv` gives: one `--settings` only.
-    public static func settingsJSON(outputStyle: String?, advisor: ClaudeAdvisor = .inherit) -> String? {
+    public static func settingsJSON(outputStyle: String?, advisor: AdvisorLaunch = .consult(.inherit)) -> String? {
         var object: [String: String] = [:]
         if let outputStyle, !OutputStyle.isDefault(outputStyle) {
             object["outputStyle"] = outputStyle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -303,9 +303,9 @@ public actor AgentRunner {
                 advisor: advisor
             ),
             cwd: workspacePath,
-            environment: AgentAccountEnvironment.applying(
+            environment: advisor.applying(to: AgentAccountEnvironment.applying(
                 kind: .claudeCode, home: accountHome, to: Shell.environment()
-            )
+            ))
         )
     }
 
@@ -470,7 +470,7 @@ public actor AgentRunner {
     }
 
     private func refreshAdvisor() async {
-        advisor = ClaudeAdvisor(stored: try? await store.setting(AppDefaults.Key.advisor))
+        advisor = await ChatAdvisor.launch(sessionID: session.id, in: store)
     }
 
     private func refreshExecutable() async {

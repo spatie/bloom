@@ -113,7 +113,8 @@ struct WorkspaceStartTests {
             repo: registered, prompt: "Do the thing", origin: .user,
             controls: ComposerControls(
                 model: "gpt-5-codex", effort: "high", agentKind: .codex,
-                permissionMode: .acceptEdits, isFastMode: true, outputStyle: "Concise", codexFastMode: false
+                permissionMode: .acceptEdits, isFastMode: true, outputStyle: "Concise", codexFastMode: false,
+                advisor: .off
             )
         ))
 
@@ -132,6 +133,7 @@ struct WorkspaceStartTests {
         #expect(
             try await store.setting(ComposerControls.outputStyleKey(sessionID: session.id)) == "Concise"
         )
+        #expect(try await store.setting(ChatAdvisor.key(sessionID: session.id)) == "off")
         #expect(
             try await store.setting(ComposerControls.defaultsAppliedKey(sessionID: session.id)) == "1"
         )

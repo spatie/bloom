@@ -109,17 +109,17 @@ final class TranscriptModel {
         var effort: String
         var permissionMode: String
         var agentKind: String
-        /// A launch setting of a process that outlives every turn, so a change in Settings
-        /// reaches an open chat only by starting that process again.
-        var advisor: ClaudeAdvisor
+        /// A launch setting of a process that outlives every turn, so a change in Settings or in
+        /// the chat's own picker reaches an open chat only by starting that process again.
+        var advisor: AdvisorLaunch
 
-        init(session: Session, advisor: ClaudeAdvisor) {
+        init(session: Session, advisor: AdvisorLaunch) {
             model = session.model
             effort = session.effort
             permissionMode = session.permissionMode.rawValue
             agentKind = session.agentKind.rawValue
             // Only Claude Code has one, and another backend must not restart over it.
-            self.advisor = session.agentKind == .claudeCode ? advisor : .inherit
+            self.advisor = session.agentKind == .claudeCode ? advisor : .consult(.inherit)
         }
     }
 
@@ -1574,7 +1574,7 @@ final class TranscriptModel {
         guard !usesInteractiveTerminal else { return nil }
         guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
-        let advisor = ClaudeAdvisor(stored: try? await store.setting(AppDefaults.Key.advisor))
+        let advisor = await ChatAdvisor.launch(sessionID: session.id, in: store)
         let preferences = RunnerPreferences(session: session, advisor: advisor)
         if runner != nil, runnerPreferences != preferences {
             runner?.terminateNow()
