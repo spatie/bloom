@@ -920,7 +920,8 @@ public enum AgentEvent: Sendable {
 
         switch event["type"]?.stringValue {
         case "content_block_start":
-            guard let block = event["content_block"], block["type"]?.stringValue == "tool_use" else {
+            guard let block = event["content_block"],
+                  block["type"]?.stringValue == "tool_use" || AdvisorConsultation.isCall(block) else {
                 return .unknown(raw)
             }
             return .streamDelta(.toolName(block["name"]?.stringValue ?? ""))

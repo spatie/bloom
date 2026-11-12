@@ -199,6 +199,59 @@ struct AdvisorConsultationTests {
         #expect(AdvisorConsultation.callMessageID(payload: Data(line.utf8)) == nil)
     }
 
+    @Test("the stream names a consultation as it starts, so the live tail can say so")
+    func streamsTheConsultationName() throws {
+        let start = try #require(try bloomFixtureLines("claude-advisor.ndjson").first)
+        guard case .streamDelta(.toolName(let name))? = AgentEvent.decode(line: start) else {
+            Issue.record("expected a streamed tool name")
+            return
+        }
+
+        #expect(name == AdvisorConsultation.toolName)
+    }
+
+    @Test("a subagent files only the advisor's server calls as tool calls")
+    func subagentSkipsOtherServerTools() throws {
+        let call = try #require(try bloomFixtureLines("claude-advisor.ndjson").dropFirst().first)
+        let search = """
+        {"type":"assistant","uuid":"u2","session_id":"s1",\
+        "message":{"id":"msg_2","role":"assistant","content":[{"type":"server_tool_use",\
+        "id":"srvtoolu_2","name":"web_search","input":{}}]}}
+        """
+
+        let transcript = SubagentTranscript.parse(call + "\n" + search, sessionID: SessionID("s"))
+
+        #expect(transcript.messages.map(\.kind) == [.toolUse])
+    }
+
+    private struct Row {
+        let kind: MessageKind
+        let payload: Data
+    }
+
+    @Test("figures go to the message's latest consultations, and never past the last result")
+    func assignsUsageNewestFirst() throws {
+        let call = Data(try #require(try bloomFixtureLines("claude-advisor.ndjson").dropFirst().first).utf8)
+        let messageID = try #require(AdvisorConsultation.callMessageID(payload: call))
+        let usage = AdvisorUsage(model: "claude-opus-5-5", readTokens: 10, writtenTokens: 1)
+        let rows = [
+            Row(kind: .toolUse, payload: call),
+            Row(kind: .result, payload: Data()),
+            Row(kind: .toolUse, payload: call),
+            Row(kind: .assistantText, payload: Data()),
+            Row(kind: .toolUse, payload: call),
+        ]
+
+        let assigned = AdvisorUsageReport(messageID: messageID, usages: [usage])
+            .assignments(in: rows, kind: \.kind, payload: \.payload)
+        let other = AdvisorUsageReport(messageID: "msg_other", usages: [usage])
+            .assignments(in: rows, kind: \.kind, payload: \.payload)
+
+        #expect(assigned.map(\.index) == [4])
+        #expect(assigned.map(\.usage) == [usage])
+        #expect(other.isEmpty)
+    }
+
     @Test("the live tail does not repeat the row's own word")
     func namesTheWaitDifferently() {
         let use = AgentToolUse(id: "srvtoolu_1", name: AdvisorConsultation.toolName, input: .object([:]))

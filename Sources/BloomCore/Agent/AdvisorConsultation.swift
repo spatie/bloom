@@ -77,6 +77,22 @@ public enum AdvisorConsultation {
 public struct AdvisorUsageReport: Hashable, Sendable {
     public let messageID: String
     public let usages: [AdvisorUsage]
+
+    /// Which consultation rows of the current turn get which figures. Matched by message id, then
+    /// newest first, so a report naming fewer consultations than the message drew covers the latest.
+    public func assignments<Rows: RandomAccessCollection>(
+        in rows: Rows, kind: (Rows.Element) -> MessageKind, payload: (Rows.Element) -> Data
+    ) -> [(index: Rows.Index, usage: AdvisorUsage)] {
+        var newestFirst: [Rows.Index] = []
+        for index in rows.indices.reversed() {
+            let row = rows[index]
+            if kind(row) == .result { break }
+            if kind(row) == .toolUse, AdvisorConsultation.callMessageID(payload: payload(row)) == messageID {
+                newestFirst.append(index)
+            }
+        }
+        return zip(newestFirst, usages.reversed()).map { (index: $0, usage: $1) }
+    }
 }
 
 /// What one consultation cost, which is all there is to say about advice nobody can read.

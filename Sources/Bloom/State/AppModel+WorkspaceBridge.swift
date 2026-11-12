@@ -302,12 +302,15 @@ extension AppModel {
                 ComposerControls.contextWindowKey(sessionID: sessionID)
             ))
             let codexFastMode = CodexSpeed.override(stored: try await store.setting(CodexSpeed.key(sessionID: sessionID)))
+            // An advisor switched off to save tokens stays off in the helper.
+            let advisor = ChatAdvisor(stored: try await store.setting(ChatAdvisor.key(sessionID: sessionID)))
             controls = ComposerControls(
                 session: session,
                 isFastMode: false,
                 outputStyle: OutputStyle.defaultName,
                 codexContextWindow: contextWindow,
-                codexFastMode: codexFastMode
+                codexFastMode: codexFastMode,
+                advisor: advisor
             )
         }
         controls = try await workspaceControls(for: order, inheriting: controls)
