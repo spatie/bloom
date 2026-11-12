@@ -6,18 +6,31 @@ import Foundation
 struct ChatAdvisorTests {
     @Test("Default follows Settings, whatever Settings says", arguments: ClaudeAdvisor.allCases)
     func defaultFollowsSettings(appWide: ClaudeAdvisor) {
-        #expect(ChatAdvisor.appDefault.resolved(over: appWide) == .consult(appWide))
+        #expect(ChatAdvisor.appDefault.resolved(over: appWide, isEnabled: true) == .consult(appWide))
     }
 
     @Test("a model chosen for the chat wins over Settings")
     func chosenModelWins() {
-        #expect(ChatAdvisor.sonnet.resolved(over: .opus) == .consult(.sonnet))
-        #expect(ChatAdvisor.fable.resolved(over: .inherit) == .consult(.fable))
+        #expect(ChatAdvisor.sonnet.resolved(over: .opus, isEnabled: true) == .consult(.sonnet))
+        #expect(ChatAdvisor.fable.resolved(over: .inherit, isEnabled: true) == .consult(.fable))
     }
 
     @Test("Off wins even when Settings names a model")
     func offWins() {
-        #expect(ChatAdvisor.off.resolved(over: .opus) == .off)
+        #expect(ChatAdvisor.off.resolved(over: .opus, isEnabled: true) == .off)
+    }
+
+    @Test("the switch in Settings turns off every chat, whatever it chose", arguments: ChatAdvisor.allCases)
+    func disabledAppWideWins(chat: ChatAdvisor) {
+        #expect(chat.resolved(over: .opus, isEnabled: false) == .off)
+    }
+
+    /// No row means on, so a database from before the switch keeps the advisor.
+    @Test("the switch is on unless stored off")
+    func switchDefaultsOn() {
+        #expect(ChatAdvisor.isEnabled(stored: nil))
+        #expect(!ChatAdvisor.isEnabled(stored: ChatAdvisor.storedEnabled(false)))
+        #expect(ChatAdvisor.storedEnabled(true) == nil)
     }
 
     /// No row is what lets a later change in Settings reach a chat left on Default.
@@ -47,6 +60,10 @@ struct ChatAdvisorTests {
         #expect(await ChatAdvisor.launch(sessionID: sessionID, in: store) == .consult(.opus))
 
         try await store.setSetting(ChatAdvisor.key(sessionID: sessionID), ChatAdvisor.off.rawValue)
+        #expect(await ChatAdvisor.launch(sessionID: sessionID, in: store) == .off)
+
+        try await store.setSetting(ChatAdvisor.key(sessionID: sessionID), ChatAdvisor.sonnet.rawValue)
+        try await store.setSetting(AppDefaults.Key.advisorEnabled, ChatAdvisor.storedEnabled(false))
         #expect(await ChatAdvisor.launch(sessionID: sessionID, in: store) == .off)
     }
 
