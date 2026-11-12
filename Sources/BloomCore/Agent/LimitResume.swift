@@ -117,26 +117,42 @@ extension LimitResume {
 
 extension LimitResume.Step {
     /// The line under a failed turn while the resume is waiting.
-    public func sentence(now: Date = Date(), timeZone: TimeZone = .current, locale: Locale = .current) -> String {
+    public func sentence(clock: ResetClock = ResetClock()) -> String {
         switch self {
         case .waitUntil(let reset):
-            var time = Date.FormatStyle(date: .omitted, time: .shortened)
-            time.timeZone = timeZone
-            time.locale = locale
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = timeZone
-            if calendar.isDate(reset, inSameDayAs: now) {
-                return "Continues after the limit resets at \(reset.formatted(time))."
-            }
-            // A weekly reset days away read as an hour already passed when only the time was shown.
-            var day = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
-            day.timeZone = timeZone
-            day.locale = locale
-            return "Continues after the limit resets on \(reset.formatted(day)) at \(reset.formatted(time))."
+            return "Continues after the limit resets \(clock.phrase(reset))."
         case .checking:
             return "Continues as soon as a usage reading shows the limit has reset."
         case .go:
             return "Continuing."
         }
+    }
+}
+
+/// When a limit resets, said against the reader's clock.
+public struct ResetClock: Sendable {
+    public var now: Date
+    public var timeZone: TimeZone
+    public var locale: Locale
+
+    public init(now: Date = Date(), timeZone: TimeZone = .current, locale: Locale = .current) {
+        self.now = now
+        self.timeZone = timeZone
+        self.locale = locale
+    }
+
+    /// "at 15:00" today, "on Mon 16 Nov at 15:00" otherwise: a weekly reset days away read as an
+    /// hour already passed when only the time was shown.
+    public func phrase(_ reset: Date) -> String {
+        var time = Date.FormatStyle(date: .omitted, time: .shortened)
+        time.timeZone = timeZone
+        time.locale = locale
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        if calendar.isDate(reset, inSameDayAs: now) { return "at \(reset.formatted(time))" }
+        var day = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
+        day.timeZone = timeZone
+        day.locale = locale
+        return "on \(reset.formatted(day)) at \(reset.formatted(time))"
     }
 }
