@@ -99,11 +99,11 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-          UPCLOUD_ACCESS_KEY_ID: ${{ secrets.UPCLOUD_ACCESS_KEY_ID }}
-          UPCLOUD_SECRET_ACCESS_KEY: ${{ secrets.UPCLOUD_SECRET_ACCESS_KEY }}
-          UPCLOUD_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
-          UPCLOUD_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
-          UPCLOUD_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_S3_ACCESS_KEY_ID: ${{ secrets.BLOOM_S3_ACCESS_KEY_ID }}
+          BLOOM_S3_SECRET_ACCESS_KEY: ${{ secrets.BLOOM_S3_SECRET_ACCESS_KEY }}
+          BLOOM_BUCKET: ${{ vars.BLOOM_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.BLOOM_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.BLOOM_S3_REGION }}
           BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
           SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
         run: |
@@ -112,8 +112,8 @@ jobs:
           for name in APPLE_CERTIFICATE_P12 APPLE_CERTIFICATE_PASSWORD \
                       APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER_ID \
                       SPARKLE_PRIVATE_KEY \
-                      UPCLOUD_ACCESS_KEY_ID UPCLOUD_SECRET_ACCESS_KEY \
-                      UPCLOUD_BUCKET UPCLOUD_S3_ENDPOINT UPCLOUD_S3_REGION \
+                      BLOOM_S3_ACCESS_KEY_ID BLOOM_S3_SECRET_ACCESS_KEY \
+                      BLOOM_BUCKET BLOOM_S3_ENDPOINT BLOOM_S3_REGION \
                       BLOOM_PUBLIC_BASE_URL SPARKLE_PUBLIC_KEY; do
             if [ -z "${!name:-}" ]; then
               missing="$missing $name"
@@ -222,9 +222,9 @@ jobs:
       # polls and the address the feed is written to cannot drift apart.
       - name: Build
         env:
-          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
-          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
-          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_BUCKET: ${{ vars.BLOOM_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.BLOOM_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.BLOOM_S3_REGION }}
           BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
           BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
           BLOOM_UPDATE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
@@ -309,14 +309,13 @@ jobs:
       # the image has to be in the bucket before the appcast names it.
       - name: Upload the zip and the disk image
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.UPCLOUD_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.UPCLOUD_SECRET_ACCESS_KEY }}
-          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
-          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
-          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BLOOM_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BLOOM_S3_SECRET_ACCESS_KEY }}
+          BLOOM_BUCKET: ${{ vars.BLOOM_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.BLOOM_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.BLOOM_S3_REGION }}
           BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
           BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
-          BLOOM_S3_ACL: ${{ vars.BLOOM_S3_ACL }}
           ZIP: ${{ steps.package.outputs.zip }}
           NAME: ${{ steps.package.outputs.name }}
           DMG: ${{ steps.package.outputs.dmg }}
@@ -330,14 +329,13 @@ jobs:
 
       - name: Update the appcast
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.UPCLOUD_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.UPCLOUD_SECRET_ACCESS_KEY }}
-          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
-          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
-          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BLOOM_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BLOOM_S3_SECRET_ACCESS_KEY }}
+          BLOOM_BUCKET: ${{ vars.BLOOM_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.BLOOM_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.BLOOM_S3_REGION }}
           BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
           BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
-          BLOOM_S3_ACL: ${{ vars.BLOOM_S3_ACL }}
           VERSION: ${{ steps.version.outputs.version }}
           BUILD: ${{ steps.version.outputs.build }}
           CHANNEL: ${{ steps.version.outputs.resolved_channel }}
@@ -353,8 +351,8 @@ jobs:
 
           # An empty channel means the default one, which is everybody. Only a
           # prerelease gets a channel written onto its item.
-          channel=""
-          [ "$CHANNEL" = "beta" ] && channel=beta
+          sparkle_channel=""
+          [ "$CHANNEL" = "beta" ] && sparkle_channel=beta
 
           Tools/release/appcast.py \
             --existing "$RUNNER_TEMP/appcast.xml" \
@@ -367,7 +365,7 @@ jobs:
             --dmg-url "$(Tools/release/bucket.sh url "$DMG_NAME")" \
             --dmg-length "$DMG_LENGTH" \
             --min-system "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist)" \
-            --channel "$channel" \
+            --channel "$sparkle_channel" \
             --notes-file "$RUNNER_TEMP/notes.html" \
             --link "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
             --feed-link "$(Tools/release/bucket.sh url appcast.xml)"
@@ -375,6 +373,9 @@ jobs:
           # Short cache: this is the file every copy of Bloom polls, and a stale
           # one means an update nobody is offered.
           Tools/release/bucket.sh put "$RUNNER_TEMP/appcast.xml" appcast.xml "public, max-age=300"
+
+          # Publish the smaller feed before deleting files it no longer names.
+          Tools/release/bucket.sh prune "$RUNNER_TEMP/appcast.xml"
 
       - name: Attach the zip and the disk image to the release
         if: github.event_name == 'release'
@@ -388,9 +389,9 @@ jobs:
       - name: Say where it went
         env:
           NAME: ${{ steps.package.outputs.name }}
-          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
-          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
-          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_BUCKET: ${{ vars.BLOOM_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.BLOOM_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.BLOOM_S3_REGION }}
           BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
           BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
           DMG_NAME: ${{ steps.package.outputs.dmg_name }}

@@ -190,8 +190,11 @@ def main() -> int:
     parser.add_argument("--feed-title", default="Bloom")
     parser.add_argument("--feed-link", default="", help="public URL of the feed itself")
     parser.add_argument("--feed-description", default="Updates for Bloom")
-    parser.add_argument("--max-items", type=int, default=20)
+    parser.add_argument("--max-items", type=int, default=5)
     args = parser.parse_args()
+
+    if args.max_items < 1:
+        raise SystemExit("appcast.py: --max-items must be positive")
 
     if not args.pub_date:
         # +0000 rather than the -0000 Python prefers or the GMT it offers.

@@ -3,7 +3,7 @@
 Publish a release on GitHub and `.github/workflows/release.yml` does the rest:
 it builds the tag, signs it with the Developer ID certificate, has Apple
 notarise it, staples the ticket, wraps the same bundle in the beach disk image
-and has that notarised and stapled too, uploads both files to the UpCloud
+and has that notarised and stapled too, uploads both files to the Laravel Cloud
 bucket, and adds the release to the Sparkle appcast that lives beside it.
 
 ## Two artefacts, and who each one is for
@@ -209,42 +209,66 @@ that route means editing the workflow as well. Prefer the key.
 
 ### 3. The bucket
 
-An UpCloud Managed Object Storage instance with a bucket in it. Everything in
-the bucket is world readable: it is a download and an update feed, and Sparkle
-fetches both with no credentials.
+Laravel Cloud Object Storage, backed by Cloudflare R2. Use a separate public
+bucket for releases, not the website's private feedback attachments bucket.
+Sparkle fetches the feed and downloads without credentials.
 
-1. UpCloud Hub, Managed Object Storage, create an instance, pick a zone.
-2. Create a bucket. `bloom-releases` is a reasonable name.
-3. Make it publicly readable. UpCloud supports both bucket policies and ACLs.
-   Prefer a bucket policy granting `s3:GetObject` on `<bucket>/*` to everyone:
-   it is one setting rather than one per object, and it keeps working if a
-   future upload forgets the ACL. If you go the ACL route instead, set the
-   repository variable `BLOOM_S3_ACL` to `public-read` and the workflow will
-   put that on each object.
-4. Create an access key scoped to that bucket. Write both halves down: the
-   secret is shown once.
-5. Note the endpoint. It looks like `https://xxxxx.upcloudobjects.com`.
-6. Work out the public URL prefix by uploading any file and opening it in a
-   browser. Depending on how the instance is set up this is either
-   `https://<bucket>.<instance>.upcloudobjects.com` or
-   `https://<instance>.upcloudobjects.com/<bucket>`. Do not guess: the appcast
-   the app polls is built from this, and a wrong prefix means every update
-   check 404s silently.
+1. Laravel Cloud, Resources, Object storage, create a public bucket named
+   `runbloom-app-releases`. Use the EU jurisdiction.
+2. Create a read/write access key named `github-releases`, scoped to that bucket.
+3. Copy the S3 bucket identifier, endpoint and credentials from its connection
+   settings. The S3 bucket identifier is the `fls-...` ID, not its display name.
+4. Use `auto` as the S3 signing region. Do not send per-object ACL headers;
+   R2 rejects them. Public access is set on the bucket itself.
+5. Check the Laravel Cloud public URL by fetching an uploaded file without
+   credentials. This is separate from the S3 API endpoint.
 
 Then:
 
-- secret `UPCLOUD_ACCESS_KEY_ID`, secret `UPCLOUD_SECRET_ACCESS_KEY`
-- variable `UPCLOUD_BUCKET`, the bucket name
-- variable `UPCLOUD_S3_ENDPOINT`, the `https://...upcloudobjects.com` endpoint
-- variable `UPCLOUD_S3_REGION`, the region the instance reports, for example
-  `europe-1`. It only has to match what the endpoint expects for signing.
+- secret `BLOOM_S3_ACCESS_KEY_ID`, secret `BLOOM_S3_SECRET_ACCESS_KEY`
+- variable `BLOOM_BUCKET`, the S3 bucket identifier
+- variable `BLOOM_S3_ENDPOINT`, the `https://...r2.cloudflarestorage.com` endpoint
+- variable `BLOOM_S3_REGION`, `auto`
 - variable `BLOOM_PUBLIC_BASE_URL`, the prefix you checked in a browser, with
   no trailing slash
 
-If uploads fail with a DNS or signature error, the addressing style is the
-usual cause. Setting the repository variable `AWS_S3_ADDRESSING_STYLE` to
-`path` is not wired up; add `AWS_S3_ADDRESSING_STYLE: path` to the two upload
-steps' `env` if you need it.
+The release bucket is `fls-a33f4523-72e9-47bf-827a-96603e72451c`. Its public base
+URL is `https://fls-a33f4523-72e9-47bf-827a-96603e72451c.laravel.cloud`.
+
+#### Moving from UpCloud
+
+Copy the five newest appcast releases, both ZIP and DMG, into Laravel Cloud.
+Verify their sizes and SHA-256 hashes against the originals before publishing
+the trimmed appcast with its download URLs pointing to the new bucket.
+Signatures remain valid because the signed ZIP bytes do not change.
+
+Configure the GitHub secrets and variables above before switching traffic.
+Keep `https://downloads.runbloom.app/appcast.xml` working through a redirect to
+the new public feed: that URL is embedded in installed apps. Redirect the retained
+download paths too, so existing links still work. Changing `BLOOM_PUBLIC_BASE_URL`
+alone does not move existing clients.
+
+Leave the old bucket intact until the new workflow and the old public URLs have
+been verified. Do not delete the UpCloud instance as part of copying files.
+
+#### The existing download address
+
+The Laravel app in `spatie/runbloom.app` redirects `downloads.runbloom.app/*`
+to the Laravel Cloud public bucket, preserving paths and query strings. Its
+domain-specific route uses 302 redirects so a storage move can be reversed
+without a permanent redirect cached on users' Macs. Laravel does not fetch or
+stream the files. `BLOOM_RELEASES_URL` configures the destination in the website.
+
+Attach `downloads.runbloom.app` to the website's Laravel Cloud environment and
+follow its DNS and TLS verification instructions before switching traffic.
+The website reads the bucket's appcast directly, avoiding a request back through
+its own redirect. No Cloudflare Worker is needed.
+
+The old UpCloud origin was the DNS-only CNAME `97pa8.upcloudobjects.com`;
+restoring that record rolls traffic back while the old bucket remains available.
+For UpCloud certificate renewals after a rollback, restore the
+`_acme-challenge.downloads.runbloom.app` CNAME to
+`_acme-challenge.10bbbb88bc9eaaad80bba3eac9e80b07c58866260804b1a2.upcloudlb.com` too.
 
 ### 4. The Sparkle signing key
 
@@ -296,20 +320,19 @@ Settings, Secrets and variables, Actions.
 | `APPLE_API_KEY_ID` | the Key ID next to the key in App Store Connect |
 | `APPLE_API_ISSUER_ID` | the Issuer ID at the top of the same page |
 | `SPARKLE_PRIVATE_KEY` | `generate_keys --account bloom -x` |
-| `UPCLOUD_ACCESS_KEY_ID` | UpCloud access key, first half |
-| `UPCLOUD_SECRET_ACCESS_KEY` | UpCloud access key, second half |
+| `BLOOM_S3_ACCESS_KEY_ID` | Laravel Cloud bucket access key ID |
+| `BLOOM_S3_SECRET_ACCESS_KEY` | Laravel Cloud bucket access key secret |
 
 **Variables**
 
 | Name | Where it comes from |
 | --- | --- |
-| `UPCLOUD_BUCKET` | the bucket name |
-| `UPCLOUD_S3_ENDPOINT` | `https://<instance>.upcloudobjects.com` |
-| `UPCLOUD_S3_REGION` | the instance's region, for example `europe-1` |
+| `BLOOM_BUCKET` | the S3 bucket identifier from Laravel Cloud |
+| `BLOOM_S3_ENDPOINT` | the bucket's R2 S3 endpoint |
+| `BLOOM_S3_REGION` | `auto` |
 | `BLOOM_PUBLIC_BASE_URL` | the public prefix you opened in a browser, no trailing slash |
 | `SPARKLE_PUBLIC_KEY` | printed by `generate_keys` |
 | `BLOOM_BUCKET_PREFIX` | optional, a key prefix if the bucket holds other things |
-| `BLOOM_S3_ACL` | optional, `public-read` if you used ACLs instead of a bucket policy |
 
 The workflow checks all of these are set before it builds, and fails naming the
 missing ones. Nothing prints a value.
@@ -327,6 +350,12 @@ Bloom-1.4.0-beta.1.dmg
 The feed URL is `<BLOOM_PUBLIC_BASE_URL>/appcast.xml`, and it is computed from
 the same variables the upload uses rather than written down twice, so the
 address the app polls cannot drift from the address the feed is written to.
+
+The feed retains five versions, ordered by Sparkle build number. After publishing
+the feed, the workflow deletes ZIP and DMG objects no longer referenced by it,
+only within `BLOOM_BUCKET_PREFIX`.
+It refuses cleanup for an empty feed or if a retained asset is missing. Unrelated
+objects and GitHub release attachments are left alone.
 
 ## Verify each release
 

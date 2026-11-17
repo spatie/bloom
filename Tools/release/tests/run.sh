@@ -25,6 +25,12 @@ expect_equal() {
   if [ "$2" = "$3" ]; then ok "$1"; else no "$1: expected '$3', got '$2'"; fi
 }
 
+if python3 "$TOOLS/tests/retention.py"; then
+  ok "five-version release retention"
+else
+  no "five-version release retention"
+fi
+
 expect_fails() {
   local label=$1; shift
   if "$@" >/dev/null 2>&1; then no "$label: it succeeded and should not have"; else ok "$label"; fi

@@ -1,17 +1,18 @@
 #!/bin/zsh
-# Reads and writes objects in the UpCloud bucket the releases live in.
+# Reads and writes objects in the Laravel Cloud bucket the releases live in.
 #
 #   Tools/release/bucket.sh get <remote-name> <local-path>    (missing is not an error)
 #   Tools/release/bucket.sh put <local-path> <remote-name> [<cache-control>]
 #   Tools/release/bucket.sh url <remote-name>
+#   Tools/release/bucket.sh prune <published-appcast-path>
 #
-# UpCloud Object Storage speaks S3, so this is the aws CLI pointed at a
+# Laravel Cloud Object Storage speaks S3, so this is the aws CLI pointed at a
 # different endpoint. It is a script rather than four lines of YAML because the
 # endpoint, the region and the prefix have to be identical on every call, and a
 # feed uploaded to a slightly different key than the one the app is configured
 # to read is a silent failure: nobody gets an update and nothing logs an error.
 #
-# From the environment, all of them required except the last two:
+# From the environment, all of them required except the prefix:
 #
 #   BLOOM_BUCKET            bucket name
 #   BLOOM_S3_ENDPOINT       https endpoint of the region the bucket is in
@@ -20,10 +21,7 @@
 #   AWS_ACCESS_KEY_ID       from the environment, never on the command line
 #   AWS_SECRET_ACCESS_KEY
 #   BLOOM_BUCKET_PREFIX     optional key prefix, no leading or trailing slash
-#   BLOOM_S3_ACL            optional canned ACL. Leave it unset and make the
-#                           bucket public with a bucket policy instead: object
-#                           ACLs are the older mechanism and not every S3
-#                           compatible provider still honours them.
+# Public access is configured on the bucket, not with per-object ACLs, which R2 rejects.
 
 set -euo pipefail
 
@@ -72,11 +70,14 @@ case "$ACTION" in
     DEST=${3:?bucket.sh get: needs a local path}
     # A missing object is the normal case for the very first release, so it is
     # reported and not treated as a failure. Any other error still stops here.
-    if s3 get-object --key "$KEY" "$DEST" >/dev/null 2>&1; then
+    if ERROR=$(s3 get-object --key "$KEY" "$DEST" 2>&1); then
       echo "==> got $KEY" >&2
-    else
+    elif [[ "$ERROR" == *'(NoSuchKey)'* || "$ERROR" == *'(404)'* || "$ERROR" == *'(NotFound)'* ]]; then
       echo "==> $KEY is not in the bucket yet" >&2
       : > "$DEST"
+    else
+      echo "$ERROR" >&2
+      exit 1
     fi
     ;;
   put)
@@ -95,7 +96,6 @@ case "$ACTION" in
       *.dmg) ARGS+=(--content-type application/x-apple-diskimage) ;;
     esac
     [ -n "$CACHE" ] && ARGS+=(--cache-control "$CACHE")
-    [ -n "${BLOOM_S3_ACL:-}" ] && ARGS+=(--acl "$BLOOM_S3_ACL")
 
     s3 "${ARGS[@]}" >/dev/null
     echo "==> put $(public_url "${3}")" >&2
@@ -103,8 +103,20 @@ case "$ACTION" in
   url)
     public_url "${2:?bucket.sh url: needs a remote name}"
     ;;
+  prune)
+    FEED=${2:?bucket.sh prune: needs the published appcast path}
+    WORK=$(mktemp -d)
+    trap 'rm -rf "$WORK"' EXIT
+    s3 list-objects-v2 --prefix "$(remote_key Bloom-)" --output json > "$WORK/objects.json"
+    python3 "${0:A:h}/prune.py" --feed "$FEED" --objects "$WORK/objects.json" \
+      --base-url "$BLOOM_PUBLIC_BASE_URL" --prefix "$PREFIX" > "$WORK/obsolete.txt"
+    while IFS= read -r KEY; do
+      s3 delete-object --key "$KEY" >/dev/null
+      echo "==> deleted $KEY" >&2
+    done < "$WORK/obsolete.txt"
+    ;;
   *)
-    echo "usage: bucket.sh get|put|url ..." >&2
+    echo "usage: bucket.sh get|put|url|prune ..." >&2
     exit 1
     ;;
 esac
