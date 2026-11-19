@@ -1360,6 +1360,11 @@ struct TranscriptTable: NSViewRepresentable {
             pendingPlacement = nil
             endLanded = false
             pendingResizeAnchor = nil
+            // A place read before a resize, replayed a turn later, threw a conversation opened at
+            // its end back to the top row. The resize pass still runs, and restores the end only.
+            if viewportPlace != nil { viewportPlace = PlaceBeforeResize(wasAtEnd: true, anchor: nil) }
+            placeWork?.cancel()
+            placeWork = nil
             putEnd()
             // **A movement rather than an instruction while the follower is running**, because
             // keeping the view at the end during a turn is precisely the follower's job and it is
@@ -1528,11 +1533,18 @@ struct TranscriptTable: NSViewRepresentable {
         private func aimingElsewhere() {
             pendingPlacement = nil
             pendingResizeAnchor = nil
+            forgetKeptPlace()
+            isFollowerDriving = false
+            releaseEnd()
+        }
+
+        /// A place read before a resize, replayed a turn later, undoes any move made since.
+        private func forgetKeptPlace() {
             viewportWork?.cancel()
             viewportWork = nil
             viewportPlace = nil
-            isFollowerDriving = false
-            releaseEnd()
+            placeWork?.cancel()
+            placeWork = nil
         }
 
         private func put(_ y: CGFloat, in scrollView: NSScrollView) {
@@ -2007,6 +2019,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// notifications. Reading it afterwards mistakes a shorter viewport for scrolling up.
         private func viewportWillResize() {
             guard !isLiveScrolling, viewportPlace == nil, heights.isReady else { return }
+            // A pane with no height has no reader in it yet: its place is the top row, and replayed
+            // after the first layout it threw a conversation just opened at its end back to the top.
+            guard TranscriptAnchor.canPlace(viewportHeight: Double(currentGeometry.viewportHeight)) else { return }
             // The middle row, as every correction after the resize holds: anchored on the top row
             // instead, an inspector opened and closed again left the reader tens of points away.
             viewportPlace = PlaceBeforeResize(
@@ -2066,9 +2081,7 @@ struct TranscriptTable: NSViewRepresentable {
             owedWork = nil
             owedHeights.removeAll()
             deferredWarmHeights.removeAll()
-            viewportWork?.cancel()
-            viewportWork = nil
-            viewportPlace = nil
+            forgetKeptPlace()
             pendingPlacement = nil
             // Nothing in the reuse pool belongs to this conversation, whatever key it says it
             // holds. See `cellGeneration`.
