@@ -572,7 +572,7 @@ extension AppModel {
         )
     }
 
-    /// The four settings the archived chat was being had under, plus the three that have no column.
+    /// The four settings the archived chat was being had under, plus the ones that have no column.
     ///
     /// Read off the plan and the archived session rather than resolved from the project, because
     /// this chat is not new. It is the same conversation, and the only reason it is being handed
@@ -593,12 +593,14 @@ extension AppModel {
         let codexFastMode = CodexSpeed.override(stored: try? await store.setting(
             CodexSpeed.key(sessionID: session.id)
         ))
+        let advisor = ChatAdvisor(stored: try? await store.setting(ChatAdvisor.key(sessionID: session.id)))
         return ComposerControls(
             session: session,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
             codexContextWindow: contextWindow,
-            codexFastMode: codexFastMode
+            codexFastMode: codexFastMode,
+            advisor: advisor
         )
     }
 

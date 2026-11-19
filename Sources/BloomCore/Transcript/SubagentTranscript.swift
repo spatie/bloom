@@ -255,11 +255,13 @@ public struct SubagentTranscript: Sendable, Equatable {
             guard !isUser, !thought.isEmpty, let payload = payload() else { return nil }
             return .row(kind: .thinking, payload: payload, refID: nil)
 
-        case "tool_use":
-            guard !isUser, let payload = payload() else { return nil }
+        // A subagent inherits the advisor, so its run holds the same two blocks a chat does.
+        case "tool_use", AdvisorConsultation.callType:
+            let isToolCall = block["type"]?.stringValue == "tool_use" || AdvisorConsultation.isCall(block)
+            guard !isUser, isToolCall, let payload = payload() else { return nil }
             return .row(kind: .toolUse, payload: payload, refID: block["id"]?.stringValue)
 
-        case "tool_result":
+        case "tool_result", AdvisorConsultation.resultType:
             guard let payload = payload() else { return nil }
             return .row(kind: .toolResult, payload: payload, refID: block["tool_use_id"]?.stringValue)
 

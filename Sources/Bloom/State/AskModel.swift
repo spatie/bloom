@@ -223,8 +223,10 @@ final class AskModel {
                 let codexFastMode = CodexSpeed.override(stored: try await store.setting(
                     CodexSpeed.key(sessionID: current.id)
                 ))
+                let advisor = ChatAdvisor(stored: try await store.setting(ChatAdvisor.key(sessionID: current.id)))
                 carried = ComposerControls(session: current, isFastMode: fast, outputStyle: style,
-                                           codexContextWindow: window, codexFastMode: codexFastMode)
+                                           codexContextWindow: window, codexFastMode: codexFastMode,
+                                           advisor: advisor)
             }
             let nextID = SessionID.new()
             let currentDirectory = try await store.setting(AskTabs.directoryKey(current.id))

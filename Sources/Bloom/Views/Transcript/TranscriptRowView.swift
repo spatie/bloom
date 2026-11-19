@@ -38,6 +38,7 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.refusal == rhs.row.refusal
             && lhs.row.refusalReason == rhs.row.refusalReason
             && lhs.row.durationMS == rhs.row.durationMS
+            && lhs.row.advisorUsage == rhs.row.advisorUsage
             && lhs.row.resultPayload?.count == rhs.row.resultPayload?.count
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
@@ -315,6 +316,9 @@ struct TranscriptRowView: View, Equatable {
             presentation.detailLead = .none
             presentation.literal = nil
             presentation.chips = []
+        }
+        if let advisorUsage = row.advisorUsage {
+            presentation.detail = advisorUsage.summary()
         }
         return presentation
     }

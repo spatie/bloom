@@ -101,12 +101,13 @@ struct AskTabsTests {
     @Test func newTabCarriesControlsAndDraftAtomically() async throws {
         let store = try makeTestStore("ask-tab-controls")
         let controls = ComposerControls(session: AskConversation.newSession(), isFastMode: true,
-                                        outputStyle: "Concise", codexFastMode: false)
+                                        outputStyle: "Concise", codexFastMode: false, advisor: .sonnet)
         let chat = try await store.createAskConversation(directory: "/chosen", controls: controls, draft: "hello")
         #expect(try await store.draft(sessionID: chat.id) == "hello")
         #expect(try await store.setting(ComposerControls.fastModeKey(sessionID: chat.id)) == "1")
         #expect(try await store.setting(CodexSpeed.key(sessionID: chat.id)) == "0")
         #expect(try await store.setting(ComposerControls.outputStyleKey(sessionID: chat.id)) == "Concise")
+        #expect(try await store.setting(ChatAdvisor.key(sessionID: chat.id)) == "sonnet")
     }
 
     @Test func projectFreeConversationCanBeArchivedRestoredAndDeleted() async throws {

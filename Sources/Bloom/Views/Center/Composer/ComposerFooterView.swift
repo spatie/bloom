@@ -290,7 +290,8 @@ struct ComposerFooterView: View, Equatable {
                     onOutputStyle: { id in edit { $0.outputStyle = id } },
                     onPermissionMode: selectPermissionMode,
                     onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } },
-                    onInteractionMode: { mode in edit { $0.interactionMode = mode } }
+                    onInteractionMode: { mode in edit { $0.interactionMode = mode } },
+                    onAdvisor: { advisor in edit { $0.advisor = advisor } }
                 )
 
                 ComposerFastModeToggle(

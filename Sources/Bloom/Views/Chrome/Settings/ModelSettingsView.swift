@@ -56,6 +56,18 @@ struct ModelSettingsView: View {
                     Text("Output style")
                     Text(outputStyles.detail(of: defaults.outputStyle) ?? "How new Claude Code sessions write.")
                 }
+                Toggle("Advisor", isOn: $defaults.advisorEnabled)
+                if defaults.advisorEnabled {
+                    Picker("Default advisor model", selection: $defaults.advisor) {
+                        ForEach(ClaudeAdvisor.allCases) { advisor in
+                            Text(advisor.label).tag(advisor)
+                        }
+                    }
+                }
+                Text(defaults.advisorEnabled
+                     ? "A stronger model Claude Code can consult during a turn, which uses more tokens. It is consulted only when it is at least as capable as the chat's own model. Not set leaves it to Claude Code's own settings. You can pick another, or none, for each chat in the composer."
+                     : "Claude Code chats never consult an advisor, whatever was picked for them in the composer.")
+                    .settingsFootnote()
             }
 
             Section {
