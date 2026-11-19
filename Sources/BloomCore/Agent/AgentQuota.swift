@@ -37,6 +37,11 @@ public struct QuotaWindow: Sendable, Hashable, Codable, Identifiable {
         self.duration = duration
     }
 
+    /// Claude's paid credits beyond the plan: a monthly balance with no reset time, not a window.
+    public static let extraUsage = QuotaWindow(key: "extra_usage", label: "Extra usage")
+
+    public var isCreditBalance: Bool { key == Self.extraUsage.key }
+
     /// A window given as a length, which is how Codex reports one.
     public static func lasting(_ duration: TimeInterval, key: String) -> QuotaWindow {
         QuotaWindow(key: key, label: label(forSeconds: duration), duration: duration)

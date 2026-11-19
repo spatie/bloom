@@ -33,14 +33,14 @@ public struct TurnFailure: Sendable, Hashable {
 
     /// Reads a failed result. Returns nil for a result that did not fail, and for one that failed
     /// with nothing at all to show, where a footer's red mark is already the whole of what is
-    /// known.
-    public static func of(_ result: AgentResult) -> TurnFailure? {
+    /// known. `limitHit` is the turn's own rejected `rate_limit_event`, when one was kept.
+    public static func of(_ result: AgentResult, limitHit: LimitHit? = nil) -> TurnFailure? {
         guard !result.succeeded else { return nil }
         let words = result.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         // Ahead of the terminal reason, which may well say `api_error` for this too and would
         // then tell somebody to ask again at once, into the same wall.
         let lead = LimitResume.isLimitHit(result)
-            ? limitLead
+            ? limitHit?.lead() ?? limitLead
             : self.lead(terminalReason: result.terminalReason, stopReason: result.stopReason)
         guard lead != nil || !words.isEmpty else { return nil }
         return TurnFailure(lead: lead, clisOwnWords: words.isEmpty ? nil : words)
