@@ -41,6 +41,7 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.resultPayload?.count == rhs.row.resultPayload?.count
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
+            && lhs.revealStage == rhs.revealStage
             && lhs.summariseTool == rhs.summariseTool
             && lhs.isNested == rhs.isNested
             && lhs.smoothMarkdownHandoff == rhs.smoothMarkdownHandoff
@@ -89,6 +90,9 @@ struct TranscriptRowView: View, Equatable {
     /// when there is no project behind this conversation. Handed down for the same reason `home`
     /// is: it is constant for a whole transcript.
     var projectName: String?
+    /// How far a long sent message is revealed, kept by the list. See `SentTurnPreview`.
+    var revealStage = 0
+    var onReveal: ((Int) -> Void)?
     var onToggle: () -> Void = {}
     /// Answering a permission question. Never a user turn: it writes a control response that
     /// unblocks a turn already in flight.
@@ -128,7 +132,11 @@ struct TranscriptRowView: View, Equatable {
                     reviewChips: review.chips,
                     home: home,
                     sentAt: row.createdAt,
-                    rewindSeq: row.seq
+                    rewindSeq: row.seq,
+                    // A row with no one to keep its stage, as in a subagent's thread, is drawn whole.
+                    foldsLongText: onReveal != nil,
+                    stage: revealStage,
+                    onReveal: onReveal
                 )
             } else {
                 // Attachments reach the agent as paths in the prompt text, which is the only
@@ -143,7 +151,10 @@ struct TranscriptRowView: View, Equatable {
                     attachments: turn.paths,
                     home: home,
                     sentAt: row.createdAt,
-                    rewindSeq: row.seq
+                    rewindSeq: row.seq,
+                    foldsLongText: onReveal != nil,
+                    stage: revealStage,
+                    onReveal: onReveal
                 )
             }
 

@@ -307,6 +307,29 @@ def corpus_fichiers(c, turns=30):
     c.close()
 
 
+def corpus_collee(c):
+    """What a reader pastes into a prompt: an API response on one line and an image as base64,
+    neither with a space or a block boundary to cut at, so the bubble is one row built whole."""
+    c.open()
+    c.assistant(c.paragraph(3))
+    c.result()
+    records = ",".join(f'{{"id":{index},"name":"{c.words(2)}","note":"{c.sentence(10)}"}}' for index in range(900))
+    c.user("Voici la réponse de l'API :\n\n" + '{"data":[' + records + "]}")
+    c.assistant(c.paragraph(2))
+    c.result()
+    log = "\n".join(f"2026-11-12 08:{index // 60 % 60:02d}:{index % 60:02d} INFO {c.sentence(8)}" for index in range(5_000))
+    c.user("Le build échoue, voici le log :\n\n" + log)
+    c.assistant(c.paragraph(2))
+    c.result()
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    blob = "".join(c.random.choice(alphabet) for _ in range(240_000))
+    c.user("curl -X POST https://api.example.test/upload -d 'image=data:image/png;base64," + blob + "'")
+    c.assistant(c.paragraph(2))
+    c.result()
+    c.user(c.sentence())
+    c.close()
+
+
 def corpus_nonlu(c):
     corpus_texte(c, turns=40)
     c.unread_from = len(c.rows) // 2
@@ -326,6 +349,7 @@ CORPORA = {
     "longue": corpus_longue,
     "enorme": lambda c: corpus_longue(c, turns=385),
     "fichiers": corpus_fichiers,
+    "collee": corpus_collee,
 }
 
 
@@ -427,7 +451,7 @@ def seed(directory):
 
 # MARK: - Plans
 
-LONG = ["texte", "markdown", "sousagents", "geante", "outils", "pieces"]
+LONG = ["texte", "markdown", "sousagents", "geante", "outils", "pieces", "collee"]
 GESTURES = {
     "molette": {"kind": "wheel", "lines": 2, "burst": 1, "intervalMs": 60},
     "trackpad": {"kind": "trackpad", "flickPoints": 40, "flickFrames": 6, "momentumMs": 700, "pauseMs": 90},
@@ -575,6 +599,10 @@ def plan(manifest_path, output, size, scenarios):
             step("trackpad", f"trackpad/{name}/up", direction="up", **gesture, timeoutMs=240000)
             step("rest", f"trackpad/{name}/rest-top", ms=1500)
             step("capture", f"trackpad/{name}/top", ocr=[FIRST_MARK])
+    # SCROLL_LAB_CORPORA=collee,texte keeps those corpora's steps only, for a question about one of them.
+    wanted = [name for name in os.environ.get("SCROLL_LAB_CORPORA", "").split(",") if name]
+    if wanted:
+        steps = [step for step in steps if step["label"].split("/")[1:2] and step["label"].split("/")[1] in wanted]
     Path(output).write_text(json.dumps({"width": width, "height": height, "steps": steps}, indent=1))
     print(f"{len(steps)} steps")
 
@@ -713,9 +741,12 @@ def judge(record, places):
     if kind in ("wheel", "trackpad"):
         judge_gesture(entry, step, result, frames)
     elif kind in ("select", "jump"):
+        # The first frame counts too: a conversation built whole holds the thread before it draws.
+        first = (frames[0][0] - record["t0"]) * 1000 if frames else 0.0
         entry["arrival"] = {
             "seconds": (result.get("settledAt") or 0) - (result.get("requestedAt") or record["t0"]),
-            "slides": slides(result.get("shifts", [])), "documentMoves": entry["document"]["count"]}
+            "slides": slides(result.get("shifts", [])), "documentMoves": entry["document"]["count"],
+            "longestMs": max(first, entry["frames"]["longest"])}
         if not result.get("stable", True):
             failures.append("jamais au repos")
         if entry["arrival"]["slides"]:
@@ -932,7 +963,8 @@ def fluidity_table(runs, builds, lines):
 
 def arrival_table(runs, builds, lines):
     lines += ["## Arrivées à froid (médiane des runs)", "",
-              "secondes jusqu'au repos, recalages visibles, changements de hauteur du document", "",
+              "secondes jusqu'au repos, recalages visibles, changements de hauteur du document, "
+              "plus long blocage du thread principal", "",
               "| corpus | " + " | ".join(builds) + " |", "|---|" + "---|" * len(builds)]
     corpora = list(dict.fromkeys(entry["corpus"] for run in runs for entry in run["steps"]
                                  if entry["scenario"] == "arrivee"))
@@ -946,7 +978,8 @@ def arrival_table(runs, builds, lines):
                 continue
             cells.append(f"{median([a['seconds'] for a in arrivals]):.2f} s, "
                          f"{median([len(a['slides']) for a in arrivals]):.0f}, "
-                         f"{median([a['documentMoves'] for a in arrivals]):.0f}")
+                         f"{median([a['documentMoves'] for a in arrivals]):.0f}, "
+                         f"{median([a.get('longestMs', 0.0) for a in arrivals]):.0f} ms")
         lines.append(f"| {corpus} | " + " | ".join(cells) + " |")
     lines.append("")
 

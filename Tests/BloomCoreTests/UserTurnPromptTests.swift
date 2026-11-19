@@ -25,6 +25,18 @@ struct UserTurnPromptTests {
         #expect(result == "Why is this so s…")
     }
 
+    @Test("a summary exactly at its limit keeps every word and no ellipsis")
+    func summaryAtTheLimit() {
+        #expect(UserTurnPrompt.summary(of: "  Why is\n\n this ", limit: 11) == "Why is this")
+        #expect(UserTurnPrompt.summary(of: "  Why is\n\n this!", limit: 11) == "Why is this…")
+    }
+
+    @Test("a pasted page on one line is summarised from its head")
+    func pastedPageSummary() {
+        let page = String(repeating: "QUJD", count: 60_000)
+        #expect(UserTurnPrompt.summary(of: page, limit: 8) == "QUJDQUJD…")
+    }
+
     @Test("an attachment trailer stays out of the pinned question")
     func attachmentsStayOut() {
         let turn = AttachmentTrailer.compose(

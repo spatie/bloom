@@ -117,6 +117,17 @@ public enum SentTurn {
         return out
     }
 
+    /// Where each block Bloom appended sits in `text`, in order. See `SentTurnPreview`.
+    static func blockRanges(in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var start = text.startIndex
+        while let found = firstBlock(in: text, from: start) {
+            ranges.append(found.range)
+            start = found.range.upperBound
+        }
+        return ranges
+    }
+
     /// The turn with every injected block taken out of it: what the message says on its own.
     ///
     /// For the one reader that has a line rather than a bubble to put a turn in, which is the
@@ -125,13 +136,16 @@ public enum SentTurn {
     /// nothing else, and a merge turn summarised as the first line of the rules about `--admin`
     /// says nothing about which pull request it was.
     public static func withoutInstructions(_ text: String) -> String {
-        segments(in: text)
-            .compactMap { segment -> String? in
-                if case .instructions = segment { return nil }
-                return segment.text
-            }
-            .joined()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // The blocks cut out of the text itself: the segments rebuild the text byte for byte, and
+        // scanning the words in them for files cost a pasted page most of a second.
+        var kept = ""
+        var start = text.startIndex
+        for block in blockRanges(in: text) {
+            kept += text[start..<block.lowerBound]
+            start = block.upperBound
+        }
+        kept += text[start...]
+        return kept.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Finding a block
@@ -185,7 +199,7 @@ public enum SentTurn {
         }
 
         for block in constants {
-            guard let range = text.range(of: block.body, range: start..<text.endIndex),
+            guard let range = byteRange(of: block.body, in: text, from: start),
                   startsABlock(range.lowerBound, in: text)
             else { continue }
             keep(Found(range: range, block: block))
@@ -198,7 +212,7 @@ public enum SentTurn {
         // appends it last and nothing follows it.
         for subject in ProjectInstructions.Subject.allCases {
             let lead = ProjectInstructions.inlineLead(for: subject) + "\n\n"
-            guard let range = text.range(of: lead, range: start..<text.endIndex),
+            guard let range = byteRange(of: lead, in: text, from: start),
                   startsABlock(range.lowerBound, in: text)
             else { continue }
             let body = String(text[range.upperBound...])
@@ -210,6 +224,25 @@ public enum SentTurn {
         }
 
         return best
+    }
+
+    /// `memmem` over the UTF-8 storage: Foundation's `range(of:)` held the main thread for most of
+    /// a second on a pasted page of 240 kB, and the generic `firstRange(of:)` for over four.
+    private static func byteRange(of needle: String, in text: String, from start: String.Index) -> Range<String.Index>? {
+        let utf8 = text.utf8
+        let offset = utf8.distance(from: utf8.startIndex, to: start)
+        let pattern = Array(needle.utf8)
+        let found = utf8.withContiguousStorageIfAvailable { haystack -> Int? in
+            guard let base = haystack.baseAddress,
+                  let hit = memmem(base + offset, haystack.count - offset, pattern, pattern.count)
+            else { return nil }
+            return base.distance(to: hit.assumingMemoryBound(to: UInt8.self))
+        }
+        // A string bridged from Objective-C has no contiguous UTF-8 to search.
+        guard let found else { return text.range(of: needle, range: start..<text.endIndex) }
+        guard let found else { return nil }
+        let lower = utf8.index(utf8.startIndex, offsetBy: found)
+        return lower..<utf8.index(lower, offsetBy: pattern.count)
     }
 
     /// Whether a match begins a paragraph of its own, which is the whole of what stops an ordinary

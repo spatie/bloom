@@ -31,6 +31,7 @@
 # Builds compile with `nice` and one at a time: this Mac is somebody's workstation. Set
 # SCROLL_LAB_HOME to keep builds and runs somewhere other than the temporary directory, and
 # SCROLL_LAB_CONFIGURATION=debug for a quicker build that measures nothing about smoothness.
+# SCROLL_LAB_CORPORA=collee,texte runs only those corpora's steps of the chosen scenarios.
 set -euo pipefail
 zmodload zsh/system
 cd "$(dirname "$0")/.."
