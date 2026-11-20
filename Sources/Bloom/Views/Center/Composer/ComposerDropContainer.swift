@@ -10,14 +10,17 @@ struct ComposerDropContainer<Content: View>: NSViewControllerRepresentable {
     var onFailure: @MainActor @Sendable (String) -> Void
     var content: Content
 
-    func makeNSViewController(context: Context) -> ComposerDropController {
-        let controller = ComposerDropController()
+    func makeNSViewController(context: Context) -> ComposerDropController<Content> {
+        let controller = ComposerDropController(
+            root: ComposerDropRootModel(content: content, environment: context.environment)
+        )
         updateNSViewController(controller, context: context)
         return controller
     }
 
-    func updateNSViewController(_ controller: ComposerDropController, context: Context) {
-        controller.host.rootView = AnyView(content.environment(\.self, context.environment))
+    func updateNSViewController(_ controller: ComposerDropController<Content>, context: Context) {
+        controller.root.content = content
+        controller.root.environment = context.environment
         controller.surface.onReceive = onReceive
         controller.surface.onFailure = onFailure
         controller.surface.onTarget = { isTargeted = $0 }
@@ -25,7 +28,7 @@ struct ComposerDropContainer<Content: View>: NSViewControllerRepresentable {
 
     func sizeThatFits(
         _ proposal: ProposedViewSize,
-        nsViewController controller: ComposerDropController,
+        nsViewController controller: ComposerDropController<Content>,
         context: Context
     ) -> CGSize? {
         controller.host.sizeThatFits(in: CGSize(
@@ -34,9 +37,58 @@ struct ComposerDropContainer<Content: View>: NSViewControllerRepresentable {
     }
 }
 
-final class ComposerDropController: NSViewController {
-    let host = NSHostingController(rootView: AnyView(EmptyView()))
+/// What the embedded hosting view draws, handed over by observation rather than by a new root.
+///
+/// **The root used to be a fresh `AnyView` on every update of the composer around it**, written
+/// into `host.rootView` from inside that composer's own graph update, which runs on every
+/// keystroke and on every change a running turn makes to the footer. Five crash reports from
+/// 1.40.0 to 1.41.1 abort in AttributeGraph inside this view's render: `input_value_ref_slow`
+/// under `NSHostingView.layout()`, from the window's display cycle, two of them in
+/// `AnyResetSeed`. The depth of that frame matches this view and no other hosting view whose
+/// root is an `AnyView` (17 levels of `_layoutSubtreeWithOldSize:` in the reports, and in
+/// `HostDepthProbe`), and three of the five came within two seconds of a message being sent.
+///
+/// **It was not reproduced**, so this is the likeliest cause rather than a proven one:
+/// `ComposerHostProbe` replays drafts, sends and workspace switches and has not aborted on either
+/// side of this change. If the abort comes back with this view at the same depth, the cause is
+/// somewhere else and this note is wrong.
+///
+/// So the root is now one concrete type that is set once, with no `AnyView` above the content,
+/// and the content and environment reach it as observed values, the way `TranscriptCellRoot`
+/// gives a transcript cell one root type for the same reason.
+@MainActor
+@Observable
+final class ComposerDropRootModel<Content: View> {
+    var content: Content
+    var environment: EnvironmentValues
+
+    init(content: Content, environment: EnvironmentValues) {
+        self.content = content
+        self.environment = environment
+    }
+}
+
+struct ComposerDropRoot<Content: View>: View {
+    let model: ComposerDropRootModel<Content>
+
+    var body: some View {
+        model.content.environment(\.self, model.environment)
+    }
+}
+
+final class ComposerDropController<Content: View>: NSViewController {
+    let root: ComposerDropRootModel<Content>
+    let host: NSHostingController<ComposerDropRoot<Content>>
     let surface = ComposerDropSurface()
+
+    init(root: ComposerDropRootModel<Content>) {
+        self.root = root
+        host = NSHostingController(rootView: ComposerDropRoot(model: root))
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not decoded from a nib") }
 
     override func loadView() {
         view = surface

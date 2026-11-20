@@ -114,6 +114,8 @@ struct BloomApp: App {
         #if DEBUG
         if MenuProbe.isRequested { MenuProbe.schedule() }
         if MenuActionProbe.isRequested { MenuActionProbe.schedule() }
+        if HostDepthProbe.isRequested { HostDepthProbe.schedule() }
+        if ComposerHostProbe.isRequested { ComposerHostProbe.schedule() }
         #endif
         Log.launchStep("app initialised")
     }

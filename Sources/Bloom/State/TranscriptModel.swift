@@ -2456,3 +2456,27 @@ enum ParentProbe {
         return object["parent_tool_use_id"] as? String
     }
 }
+
+#if DEBUG
+extension TranscriptModel {
+    /// What pressing Return does to the window, with no agent behind it: the box empties, the
+    /// sentence is drawn as the instant echo, the chat turns busy and the composer asks for focus.
+    /// For `ComposerHostProbe`, which cannot call `submit` because that starts a real turn.
+    func probeSend(_ body: String) {
+        let delivery = Delivery(
+            targetSessionID: session.id, body: body, interactionMode: session.interactionMode
+        )
+        draft = ""
+        messageArrivals.sent(delivery.id)
+        sending = delivery
+        setRunning(true)
+        composerFocusRequests += 1
+    }
+
+    /// Takes back what `probeSend` drew.
+    func probeSettle() {
+        sending = nil
+        setRunning(false)
+    }
+}
+#endif
