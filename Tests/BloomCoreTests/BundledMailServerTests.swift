@@ -208,6 +208,10 @@ struct BundledMailServerTests {
         let accepted = Darwin.accept(listener.descriptor, nil, nil)
         guard accepted >= 0 else { throw POSIXError(.EIO) }
         defer { Darwin.close(accepted) }
+        // Before either shutdown: once both directions are closed, macOS refuses SO_RCVTIMEO on the
+        // accepted socket with EINVAL, which failed this test about once in a thousand runs.
+        try setReceiveCeiling(client)
+        try setReceiveCeiling(accepted)
         // Both FINs must arrive before checking TIME_WAIT. Closing the descriptors alone races
         // the TCP shutdown and can leave the port looking occupied under CI load.
         guard Darwin.shutdown(accepted, SHUT_WR) == 0 else { throw POSIXError(.EIO) }
@@ -217,12 +221,15 @@ struct BundledMailServerTests {
         return listener.port
     }
 
-    private func receiveEOF(_ descriptor: Int32) throws {
+    private func setReceiveCeiling(_ descriptor: Int32) throws {
         // A ceiling on a broken handshake, not a timing assertion.
         var timeout = timeval(tv_sec: 30, tv_usec: 0)
         guard Darwin.setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
             throw POSIXError(.EIO)
         }
+    }
+
+    private func receiveEOF(_ descriptor: Int32) throws {
         var byte: UInt8 = 0
         guard Darwin.recv(descriptor, &byte, 1, 0) == 0 else { throw POSIXError(.EIO) }
     }
