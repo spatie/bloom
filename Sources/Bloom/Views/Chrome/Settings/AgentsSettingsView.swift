@@ -33,6 +33,8 @@ struct AgentsSettingsView: View {
     /// change handler runs, so committing against it would file one agent's path under another.
     @State private var draftKind: AgentKind = .claudeCode
     @FocusState private var isEditingPath: Bool
+    /// Whether a click lands on the path field itself, which must keep its focus.
+    @State private var isPointerOnPathField = false
 
     private var status: AgentStatus? { statuses[selection] }
 
@@ -108,6 +110,12 @@ struct AgentsSettingsView: View {
         } message: {
             Text("Bloom will delete the local sign-in files for \(accountToRemove?.name ?? "this account"). This cannot be undone.")
         }
+        // A click on the pane's empty space does not take the focus on macOS, so the path was
+        // applied only on Return or on leaving the tab. Any click outside the field ends editing,
+        // which commits it through `isEditingPath`.
+        .simultaneousGesture(TapGesture().onEnded {
+            if !isPointerOnPathField { isEditingPath = false }
+        })
         .onDisappear { commitPathDraft() }
         .onChange(of: selection) { _, kind in
             commitPathDraft()
@@ -248,6 +256,7 @@ struct AgentsSettingsView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
                     .focused($isEditingPath)
+                    .onHover { isPointerOnPathField = $0 }
                     .onSubmit { commitPathDraft() }
                     .onChange(of: isEditingPath) { wasEditing, editing in
                         if wasEditing && !editing { commitPathDraft() }
