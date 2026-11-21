@@ -87,6 +87,13 @@ enum ResizeProbe {
 
         guard let app = ProbeHarness.appModel else { harness.fail("no app model") }
         guard let workspaceID else { harness.fail("--resize-workspace named no workspace") }
+        // `--resize-visit-home` goes to Home first, so Home is kept behind the workspace for the
+        // whole run and its cost is in the numbers. Without it Home is never built. See
+        // `HomePresence`.
+        if ProbeHarness.isPresent("--resize-visit-home") {
+            app.selection = .home
+            try? await Task.sleep(for: .seconds(3))
+        }
         app.selection = .workspace(workspaceID)
         app.isInspectorVisible = true
 
@@ -247,6 +254,7 @@ enum ResizeProbe {
             // The three claims the timings below are worthless without. See the head of this file.
             "panes": .integer(panes),
             "inspector": .bool(AppModel.probeInstance?.isInspectorVisible ?? false),
+            "homeVisited": .bool(ProbeHarness.isPresent("--resize-visit-home")),
             "changedFiles": .integer(workspace.changedFiles.count),
             "scrollBefore": .object(scrollBefore),
             "scrollAfter": .object(scrollAfter),
