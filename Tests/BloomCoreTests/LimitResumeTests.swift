@@ -59,6 +59,22 @@ struct LimitResumeTests {
         #expect(!LimitResume.isLimitHit(try result(fine)))
     }
 
+    /// A limit hit arms the resume by itself, once: the continuation hitting the wall again gets
+    /// the button, so a 429 with no window to wait on cannot resend at every reading.
+    @Test func armsByItselfOncePerWall() throws {
+        let line = """
+        {"type":"result","subtype":"success","is_error":true,"api_error_status":429,\
+        "result":"You've hit your session limit","session_id":"s"}
+        """
+        let died = """
+        {"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error",\
+        "result":"API Error: Connection lost mid-response.","session_id":"s"}
+        """
+        #expect(LimitResume.armsByItself(after: try result(line), wasResumeTurn: false))
+        #expect(!LimitResume.armsByItself(after: try result(line), wasResumeTurn: true))
+        #expect(!LimitResume.armsByItself(after: try result(died), wasResumeTurn: false))
+    }
+
     /// Codex says it as a token on the failed turn, and the translation keeps it on the stored row.
     @Test func recognisesCodexHittingItsLimit() throws {
         let error = JSONValue.parse(#"{"message":"You've hit your usage limit.","codexErrorInfo":"usageLimitExceeded"}"#)

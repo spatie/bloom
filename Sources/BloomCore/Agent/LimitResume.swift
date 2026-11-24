@@ -107,6 +107,15 @@ public enum CodexErrorInfo {
 }
 
 extension LimitResume {
+    /// Whether a turn that has just ended arms the resume without anybody pressing the button.
+    ///
+    /// Never after the resume's own continuation: a 429 that no plan window explains has no reset
+    /// to wait for, so re-arming would resend at every usage reading with nobody watching. That
+    /// turn gets the button instead.
+    public static func armsByItself(after result: AgentResult, wasResumeTurn: Bool) -> Bool {
+        !wasResumeTurn && isLimitHit(result)
+    }
+
     /// Whether Bloom can read this provider's allowance at all. A resume that can never see a
     /// reading can never go, so it is not offered. These are the providers `AgentQuotaSources`
     /// asks; a third one added there belongs here too.
