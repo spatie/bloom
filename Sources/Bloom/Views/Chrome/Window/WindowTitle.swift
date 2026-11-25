@@ -22,21 +22,27 @@ import BloomCore
 /// double click can be bounded to the run of text rather than to the whole bar: a double click
 /// anywhere in a title bar is already the system's, wired to Zoom or Minimise in Desktop & Dock.
 /// The window still has a title, which is what the Window menu, Mission Control, the Dock and
-/// saved window state read. What this file keeps is the title itself; `WindowChrome` is what turns
+/// saved window state read, and it names the project too: see `WindowTitleParts`. What this file keeps is the title itself; `WindowChrome` is what turns
 /// AppKit's drawing of it off.
 struct WindowTitle: ViewModifier {
     let app: AppModel
 
     @State private var window: NSWindow?
 
-    private var title: String {
-        if app.selection == .mail { return "Incoming mails" }
-        if let workspace = app.selectedWorkspace { return workspace.name }
+    private var title: WindowTitleParts {
+        if app.selection == .mail { return WindowTitleParts(name: "Incoming mails") }
+        if let workspace = app.selectedWorkspace {
+            return WindowTitleParts(
+                name: workspace.name,
+                project: app.repo(for: workspace)?.name,
+                folder: workspace.path
+            )
+        }
         if case .conversation(let id) = app.selection,
            let conversation = app.ask.sessions.first(where: { $0.id == id }) {
-            return app.ask.title(for: conversation)
+            return WindowTitleParts(name: app.ask.title(for: conversation))
         }
-        return "Bloom"
+        return WindowTitleParts(name: "Bloom")
     }
 
     func body(content: Content) -> some View {
@@ -48,22 +54,29 @@ struct WindowTitle: ViewModifier {
             .onChange(of: window, initial: true) { _, _ in apply(title) }
     }
 
-    private func apply(_ value: String) {
+    private func apply(_ title: WindowTitleParts) {
         guard let window else { return }
+        let value = title.full
         window.title = value
         // Cleared rather than merely never set. A window restored from a previous launch, or one
         // that carried a represented URL before this was changed, keeps it otherwise, and the
         // folder icon would come back for exactly the readers who had already seen it.
         window.representedURL = nil
+        // The worktree, to Accessibility alone: a time tracker files by path, and unlike a
+        // represented URL this draws no folder icon.
+        window.setAccessibilityDocument(title.documentURL)
+        // SwiftUI later puts the scene's name back in `window.title`, and Timing then read "Bloom"
+        // alone. An explicit accessibility title outlives that.
+        window.setAccessibilityTitle(window.title)
         // Read BACK rather than passed on, so a build's own mark comes with it. See
         // `WindowTitleText`. Whether AppKit draws any of this is `WindowChrome`'s to say.
-        WindowTitleText.shared.set(window.title)
+        WindowTitleText.shared.set(title.drawn(from: window.title))
     }
 }
 
 /// What the title bar reads, published so a view can draw it.
 ///
-/// It is `window.title` read back rather than the name that went in, and that is the only reason
+/// It is `window.title` read back, less the project, rather than the name that went in, and that is the only reason
 /// this exists. `Tools/dev-build.sh` patches the assignment in `WindowTitle.apply` to prefix
 /// "[DEV] ", so once AppKit stops drawing the title a dev window has to keep saying so; reading
 /// the window back picks that mark up without a second anchor to keep in step with the first.
