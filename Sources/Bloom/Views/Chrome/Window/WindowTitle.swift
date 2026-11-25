@@ -65,6 +65,9 @@ struct WindowTitle: ViewModifier {
         // The worktree, to Accessibility alone: a time tracker files by path, and unlike a
         // represented URL this draws no folder icon.
         window.setAccessibilityDocument(title.documentURL)
+        // SwiftUI later puts the scene's name back in `window.title`, and Timing then read "Bloom"
+        // alone. An explicit accessibility title outlives that.
+        window.setAccessibilityTitle(window.title)
         // Read BACK rather than passed on, so a build's own mark comes with it. See
         // `WindowTitleText`. Whether AppKit draws any of this is `WindowChrome`'s to say.
         WindowTitleText.shared.set(title.drawn(from: window.title))
