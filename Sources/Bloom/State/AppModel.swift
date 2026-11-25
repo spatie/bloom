@@ -679,6 +679,8 @@ final class AppModel {
         startObservingWorkspaceMessages()
         startObservingQuotas()
         startPollingQuotas()
+        // After the poll has started, because a restored wait goes on a usage reading.
+        Task { await restoreLimitResumes() }
         // Looks for a Mailpit and keeps the app-wide Mail destination fed.
         Mailbox.shared.start()
         // After the bridge is bound, because it is the bridge that says what the entry should

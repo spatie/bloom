@@ -150,9 +150,11 @@ struct TurnFooterView: View {
                             .foregroundStyle(Palette.textTertiary)
                     }
                     if closesTranscript, let transcript, transcript.offersLimitResume(after: result) {
-                        LimitResumeControl(watch: transcript.limitResumeWatch) {
-                            transcript.continueAfterLimitResets(hitAt: row.createdAt)
-                        }
+                        LimitResumeControl(
+                            watch: transcript.limitResumeWatch,
+                            arm: { transcript.continueAfterLimitResets(hitAt: row.createdAt) },
+                            cancel: { Task { await transcript.callOffLimitResume() } }
+                        )
                         .padding(.top, TranscriptLayout.tight)
                     }
                 }

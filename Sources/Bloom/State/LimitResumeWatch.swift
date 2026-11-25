@@ -5,8 +5,8 @@ import BloomCore
 ///
 /// Owned by the chat's `TranscriptModel` and gone with it, so archiving a workspace or closing the
 /// chat cancels the wait rather than leaving a timer that sends into a conversation nobody can see.
-/// It is not persisted: a relaunch forgets it, and the button is still under the failed turn to
-/// press again. Every decision is `LimitResume`'s, in the core; this is the clock and the send.
+/// The timer itself is not persisted; `TranscriptModel` saves the wait so the next launch arms a
+/// new one. Every decision is `LimitResume`'s, in the core; this is the clock and the send.
 @MainActor
 @Observable
 final class LimitResumeWatch {
@@ -16,11 +16,14 @@ final class LimitResumeWatch {
     var isArmed: Bool { task != nil }
 
     /// Starts waiting. `quotas` is read on every look rather than captured, because the point is to
-    /// see the readings that arrive after this was pressed.
+    /// see the readings that arrive after this was pressed. `remember` hears the wait on the first
+    /// look and again whenever it learns a reset, which reaches `app.quotas` through the store's
+    /// observer and so can come after the arm. Awaited in the loop, so the writes land in order.
     func arm(
         _ resume: LimitResume,
         quotas: @escaping @MainActor () -> [AgentQuota],
         refresh: @escaping @MainActor () async -> Void,
+        remember: @escaping @MainActor (LimitResume) async -> Void,
         send: @escaping @MainActor () async -> Void
     ) {
         cancel()
@@ -28,8 +31,15 @@ final class LimitResumeWatch {
         step = first.step(quotas: quotas(), at: Date())
         task = Task { [weak self] in
             var resume = resume
+            var hasRemembered = false
+            var remembered: Date?
             while !Task.isCancelled {
                 let next = resume.step(quotas: quotas(), at: Date())
+                if !hasRemembered || resume.notBefore != remembered {
+                    hasRemembered = true
+                    remembered = resume.notBefore
+                    await remember(resume)
+                }
                 if self?.step != next { self?.step = next }
                 switch next {
                 case .go:

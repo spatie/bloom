@@ -53,9 +53,11 @@ public struct LimitResume: Sendable, Hashable {
     /// the quotas the moment its reset passes and the time it named has to outlive it.
     public private(set) var notBefore: Date?
 
-    public init(provider: AgentKind, hitAt: Date) {
+    /// `notBefore` is a reset learned before a relaunch. See `SavedLimitResume`.
+    public init(provider: AgentKind, hitAt: Date, notBefore: Date? = nil) {
         self.provider = provider
         self.hitAt = hitAt
+        self.notBefore = notBefore
     }
 
     /// Whether a failed turn failed on the allowance rather than on anything else.
