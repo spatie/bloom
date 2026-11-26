@@ -307,6 +307,13 @@ def corpus_fichiers(c, turns=30):
     c.close()
 
 
+def corpus_neuve(c):
+    """A conversation just started: the prompt and nothing else yet."""
+    c.add("system", {"type": "system", "subtype": "init", "cwd": "/tmp/lab", "session_id": "lab",
+                     "tools": ["Bash"], "model": "claude-opus-5-5", "permissionMode": "acceptEdits"})
+    c.user(f"{FIRST_MARK} {c.name}. " + c.sentence())
+
+
 def corpus_nonlu(c):
     corpus_texte(c, turns=40)
     c.unread_from = len(c.rows) // 2
@@ -326,6 +333,7 @@ CORPORA = {
     "longue": corpus_longue,
     "enorme": lambda c: corpus_longue(c, turns=385),
     "fichiers": corpus_fichiers,
+    "neuve": corpus_neuve,
 }
 
 
@@ -419,6 +427,20 @@ def seed(directory):
             (session_id, workspace_id, f"Lab {name}", f"lab-agent-{name}", "idle", now, now, read_seq))
         manifest["corpora"][name] = {"workspace": workspace_id, "session": session_id, "rows": last_seq,
                                      "lastReadSeq": read_seq}
+        if name in TABBED:
+            side = Conversation(f"{name}side", seed=1000 + order)
+            corpus_court(side)
+            side_id = f"LAB-SIDE-{name.upper()}"
+            for seq, (kind, payload, ref) in enumerate(side.rows, start=1):
+                database.execute(
+                    "insert into messages (session_id, seq, kind, payload, created_at, ref_id) values (?,?,?,?,?,?)",
+                    (side_id, seq, kind, json.dumps(payload, **COMPACT).encode(), now + seq, ref))
+            database.execute(
+                "insert into sessions (id, workspace_id, title, agent_session_id, state, sort_order, created_at,"
+                " updated_at, last_read_seq) values (?,?,?,?,?,?,?,?,?)",
+                (side_id, workspace_id, f"Lab {name} side", f"lab-agent-{name}-side", "idle", 1, now, now,
+                 len(side.rows)))
+            manifest["corpora"][name]["side"] = side_id
     database.commit()
     database.close()
     (root / "corpus.json").write_text(json.dumps(manifest, indent=2))
@@ -435,7 +457,9 @@ GESTURES = {
 }
 CLIMBS = {"molette": ["texte", "sousagents"], "trackpad": LONG, "frenetique": ["markdown", "outils"]}
 ALL_SCENARIOS = ["arrivee", "bascule", "molette", "trackpad", "frenetique", "saut", "redimension", "direct", "fleuve",
-                 "direct-longue", "retour", "derive"]
+                 "direct-longue", "retour", "derive", "onglet", "neuve", "largeur", "vivant"]
+# Corpora whose workspace gets a second chat, so the pane can leave a conversation for another tab.
+TABBED = ["outils", "longue", "markdown", "neuve"]
 
 
 def plan(manifest_path, output, size, scenarios):
@@ -562,6 +586,64 @@ def plan(manifest_path, output, size, scenarios):
             visit(name, f"{prefix}/back")
             step("rest", f"{prefix}/rest-back", ms=1500)
             step("capture", f"{prefix}/return", compareTo=f"{prefix}/leave")
+    if "onglet" in scenarios:
+        # A chat left for another tab of the same workspace and picked again: the pane is rebuilt.
+        for name, fraction in [(name, fraction) for name in TABBED for fraction in (0.5, 0.2)]:
+            prefix = f"onglet-{int(fraction * 100)}/{name}"
+            visit(name, f"{prefix}/select")
+            place(f"{prefix}/place", fraction)
+            step("rest", f"{prefix}/rest-before", ms=1200)
+            step("capture", f"{prefix}/leave")
+            step("select", f"{prefix}/away", workspace=corpora[name]["workspace"], session=corpora[name]["side"])
+            visit(name, f"{prefix}/back")
+            step("rest", f"{prefix}/rest-back", ms=1200)
+            step("capture", f"{prefix}/return", compareTo=f"{prefix}/leave")
+    if "neuve" in scenarios:
+        # A new chat read once, left for the other tab while the agent writes, and picked again.
+        live = corpora["neuve"]
+        visit("neuve", "neuve/neuve/select")
+        step("rest", "neuve/neuve/read", ms=1500)
+        step("select", "neuve/neuve/away", workspace=live["workspace"], session=live["side"])
+        step("append", "neuve/neuve/agent", session=live["session"], startSeq=live["rows"], intervalMs=150)
+        step("rest", "neuve/neuve/working", ms=6000)
+        step("appendStop", "neuve/neuve/stop")
+        visit("neuve", "neuve/neuve/back")
+        step("rest", "neuve/neuve/rest-back", ms=1500)
+        step("capture", "neuve/neuve/return")
+    if "vivant" in scenarios:
+        # Back to a chat while its agent is still writing, from another workspace and another tab.
+        for name, away in [("longue", "texte"), ("neuve", None)]:
+            live = corpora[name]
+            prefix = f"vivant-{'onglet' if away is None else 'espace'}/{name}"
+            visit(name, f"{prefix}/select")
+            step("rest", f"{prefix}/read", ms=1200)
+            if away is None:
+                step("select", f"{prefix}/away", workspace=live["workspace"], session=live["side"])
+            else:
+                visit(away, f"{prefix}/away")
+            step("append", f"{prefix}/agent", session=live["session"], startSeq=live["rows"] + 100000,
+                 intervalMs=120)
+            step("rest", f"{prefix}/working", ms=2500)
+            visit(name, f"{prefix}/back")
+            step("rest", f"{prefix}/rest-back", ms=1500)
+            step("capture", f"{prefix}/return")
+            step("appendStop", f"{prefix}/stop")
+            step("rest", f"{prefix}/after", ms=1000)
+    if "largeur" in scenarios:
+        # Back to a chat held at another width: the inspector differs from when it was last shown.
+        for name, other in [("longue", "texte"), ("outils", "markdown")]:
+            for first, then in [(False, True), (True, False)]:
+                prefix = f"largeur-{'ouvert' if then else 'ferme'}/{name}"
+                step("select", f"{prefix}/select", workspace=corpora[name]["workspace"],
+                     session=corpora[name]["session"], inspector=first)
+                step("rest", f"{prefix}/rest", ms=1500)
+                step("select", f"{prefix}/away", workspace=corpora[other]["workspace"],
+                     session=corpora[other]["session"], inspector=then)
+                step("rest", f"{prefix}/rest-away", ms=800)
+                step("select", f"{prefix}/back", workspace=corpora[name]["workspace"],
+                     session=corpora[name]["session"], inspector=then)
+                step("rest", f"{prefix}/rest-back", ms=1500)
+                step("capture", f"{prefix}/return")
     if "direct-longue" in scenarios:
         gesture = {key: value for key, value in GESTURES["trackpad"].items() if key != "kind"}
         for name in ["longue", "enorme"]:
@@ -716,7 +798,9 @@ def judge(record, places):
         entry["arrival"] = {
             "seconds": (result.get("settledAt") or 0) - (result.get("requestedAt") or record["t0"]),
             "slides": slides(result.get("shifts", [])), "documentMoves": entry["document"]["count"]}
-        if not result.get("stable", True):
+        if following_live_end(scenario, phase):
+            failures.extend(live_end_failures(place))
+        elif not result.get("stable", True):
             failures.append("jamais au repos")
         if entry["arrival"]["slides"]:
             failures.append(f"recalage visible x{len(entry['arrival']['slides'])}")
@@ -754,17 +838,30 @@ def judge_rest(entry, scenario, phase, result, frames, place):
         if moved:
             entry["failures"].append(f"recalage visible au redimensionnement x{len(moved)}")
         return
-    live = scenario.startswith("direct")
-    if live and phase == "follow":
-        if place.get("fromEnd", 0) > 4:
-            entry["failures"].append(f"décroche du direct ({place['fromEnd']:.0f} pt du bas)")
+    if following_live_end(scenario, phase):
+        entry["failures"].extend(live_end_failures(place))
         return
+    live = scenario.startswith(("direct", "vivant-"))
     # Rows an agent wrote can still land just after it stops, and a reader at the end follows them.
     if live and phase == "after" and place.get("fromEnd", 0) <= 4:
         return
     seen = visible_change(pixels)
     if seen:
         entry["failures"].append(f"bouge au repos : {seen}")
+
+
+def following_live_end(scenario, phase):
+    """The shown chat's agent is still writing and the reader is at its end, so the view has to
+    move with it: what is judged is staying at the end, not standing still."""
+    if scenario.startswith("direct"):
+        return phase == "follow"
+    return scenario.startswith("vivant-") and phase in ("back", "rest-back")
+
+
+def live_end_failures(place):
+    if place.get("fromEnd", 0) > 4:
+        return [f"décroche du direct ({place['fromEnd']:.0f} pt du bas)"]
+    return []
 
 
 def same_place(left, right):
@@ -782,6 +879,9 @@ def judge_capture(entry, scenario, phase, result, place, places):
             if not seen:
                 entry["failures"].append("première ligne invisible en haut" if token == FIRST_MARK
                                          else "dernière ligne invisible en bas")
+    if scenario in ("neuve", "largeur-ouvert", "largeur-ferme", "vivant-onglet", "vivant-espace") \
+            and phase == "return" and place.get("fromEnd", 0) > 4:
+        entry["failures"].append(f"rouverte ailleurs qu'en bas ({place['fromEnd']:.0f} pt du bas)")
     pixels = result.get("pixels")
     if pixels and phase == "return":
         entry["return"] = pixels
