@@ -59,6 +59,19 @@ struct LimitResumeTests {
         #expect(!LimitResume.isLimitHit(try result(fine)))
     }
 
+    /// The transcript asks with the line it already holds parsed, and must get the same answer.
+    @Test func answersTheSameFromAParsedLine() throws {
+        let lines = [
+            #"{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"limit","session_id":"s"}"#,
+            #"{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","result":"lost","session_id":"s"}"#,
+            #"{"type":"result","subtype":"error_during_execution","is_error":true,"codex_error_info":"usageLimitExceeded","session_id":"s"}"#,
+        ]
+        for line in lines {
+            let parsed = try #require(JSONValue.parse(Data(line.utf8)))
+            #expect(LimitResume.isLimitHit(line: parsed) == LimitResume.isLimitHit(try result(line)))
+        }
+    }
+
     /// A limit hit arms the resume by itself, once: the continuation hitting the wall again gets
     /// the button, so a 429 with no window to wait on cannot resend at every reading.
     @Test func armsByItselfOncePerWall() throws {

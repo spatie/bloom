@@ -373,11 +373,14 @@ struct TranscriptListView: View {
     }
 
     /// The wall a failed turn ran into, from its own rows. Only a turn that ended on the limit
-    /// walks back, so a pass over a long session costs one cached decode per result.
+    /// walks back, so a pass over a long session costs cached decodes only: parsing each failed
+    /// result's raw line again took 94 ms of main thread in a two minute trace.
     private func limitHit(closing index: Int, in rows: [TranscriptRow]) -> LimitHit? {
         let row = rows[index]
         guard case .result(let result)? = TranscriptEventCache.event(rowID: row.id, payload: row.payload),
-              !result.succeeded, LimitResume.isLimitHit(result) else { return nil }
+              !result.succeeded,
+              let line = TranscriptEventCache.json(rowID: row.id, payload: row.payload),
+              LimitResume.isLimitHit(line: line) else { return nil }
         let turn = rows[..<index].reversed().lazy.map { (kind: $0.kind, payload: $0.payload) }
         return LimitHit.latest(walkingBack: turn)
     }

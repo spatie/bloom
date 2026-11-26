@@ -66,6 +66,12 @@ public struct LimitResume: Sendable, Hashable {
     /// announced as `api_retry`, which `AgentRetry` reads. One that ends the turn is the wall.
     public static func isLimitHit(_ result: AgentResult) -> Bool {
         guard !result.succeeded, let line = JSONValue.parse(result.raw) else { return false }
+        return isLimitHit(line: line)
+    }
+
+    /// The same answer from a failed result's line already parsed, for a caller that holds it
+    /// cached rather than parsing the raw line again on every pass.
+    public static func isLimitHit(line: JSONValue) -> Bool {
         if line["api_error_status"]?.intValue == 429 { return true }
         return line["codex_error_info"]?.stringValue == CodexErrorInfo.usageLimitExceeded
     }
