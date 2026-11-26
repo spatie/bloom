@@ -30,9 +30,14 @@ public enum SourceReference {
                               column: Int(items.first(where: { $0.name == "column" })?.value ?? "") ?? 1)
     }
 
+    /// Compiled once: this runs on every measure of a streamed answer, and compiling it per call
+    /// was 280 ms of the main thread in two minutes of use.
+    private static let linkPattern = try? NSRegularExpression(
+        pattern: #"(?<![\w@:/])(?:[\w./-]+\.[\w]+)(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)"#
+    )
+
     public static func links(in text: String) -> [(NSRange, URL)] {
-        let pattern = #"(?<![\w@:/])(?:[\w./-]+\.[\w]+)(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let regex = linkPattern else { return [] }
         return regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
             guard let url = url((text as NSString).substring(with: match.range)) else { return nil }
             return (match.range, url)
