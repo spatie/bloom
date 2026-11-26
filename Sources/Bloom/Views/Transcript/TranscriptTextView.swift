@@ -747,15 +747,17 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         ))
     }
 
+    /// Not `super`: `NSTextView` only set the cursor this sets below, then passed the move up the
+    /// responder chain to the hosting views, which already get it from their own tracking areas.
+    /// That second round of SwiftUI hover took 226 ms of main thread in a two minute trace.
     override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
         let link = linkRange(at: point)
         let chip = fileChip(at: point)
         hover(link)
-        // After `super`, and on every move rather than only on the way in. A link is a range
-        // inside a run and not a view of its own, so crossing from prose onto it moves the pointer
-        // without leaving any tracking area: nothing else would ask again.
+        // On every move rather than only on the way in. A link is a range inside a run and not a
+        // view of its own, so crossing from prose onto it moves the pointer without leaving any
+        // tracking area: nothing else would ask again.
         pointer(link: link != nil, chip: chip).set()
         hoverChip(chip)
     }
