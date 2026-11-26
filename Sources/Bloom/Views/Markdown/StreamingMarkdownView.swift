@@ -19,14 +19,12 @@ struct StreamingMarkdownView: View {
 
     var body: some View {
         TranscriptTextView(
-            text: NSAttributedString(string: ""),
-            textAtWidth: { width in
-                StreamingMarkdownText.native(
-                    text, width: width, proseMeasure: proseMeasure, scale: fontScale,
-                    face: chatFont, lineHeight: lineHeight,
-                    allowedSchemes: TranscriptLinkPreferences.schemes(in: allowedLinkSchemes)
-                )
-            },
+            text: StreamingMarkdownText.native(
+                text, proseMeasure: proseMeasure, scale: fontScale,
+                face: chatFont, lineHeight: lineHeight,
+                allowedSchemes: TranscriptLinkPreferences.schemes(in: allowedLinkSchemes)
+            ),
+            growsAtEnd: true,
             linkColor: Palette.linkNSColor, actions: linkActions
         )
         // During handoff this prefix coexists with the saved answer's selectable blocks. The
@@ -40,29 +38,29 @@ struct StreamingMarkdownView: View {
 private enum StreamingMarkdownText {
     /// Only the current prefix is kept, so live deltas cannot evict settled Markdown caches.
     private static var nativeCache: (
-        text: String, width: CGFloat, prose: CGFloat, scale: CGFloat, face: ChatFont,
+        text: String, prose: CGFloat, scale: CGFloat, face: ChatFont,
         lineHeight: ChatLineHeight, allowedSchemes: Set<String>, rendered: NSAttributedString
     )?
 
     static func native(
-        _ text: String, width: CGFloat, proseMeasure: CGFloat, scale: CGFloat,
+        _ text: String, proseMeasure: CGFloat, scale: CGFloat,
         face: ChatFont, lineHeight: ChatLineHeight, allowedSchemes: Set<String>
     ) -> NSAttributedString {
-        if let value = nativeCache, value.text == text, value.width == width,
-           value.prose == proseMeasure, value.scale == scale, value.face == face,
+        if let value = nativeCache, value.text == text, value.prose == proseMeasure,
+           value.scale == scale, value.face == face,
            value.lineHeight == lineHeight, value.allowedSchemes == allowedSchemes {
             return value.rendered
         }
         let rendered = nativeBlocks(
-            MarkdownParser.parse(text, allowedSchemes: allowedSchemes), width: width, proseMeasure: proseMeasure,
+            MarkdownParser.parse(text, allowedSchemes: allowedSchemes), proseMeasure: proseMeasure,
             scale: scale, face: face, lineHeight: lineHeight
         )
-        nativeCache = (text, width, proseMeasure, scale, face, lineHeight, allowedSchemes, rendered)
+        nativeCache = (text, proseMeasure, scale, face, lineHeight, allowedSchemes, rendered)
         return rendered
     }
 
     private static func nativeBlocks(
-        _ values: [MarkdownBlock], width: CGFloat, proseMeasure: CGFloat, scale: CGFloat,
+        _ values: [MarkdownBlock], proseMeasure: CGFloat, scale: CGFloat,
         face: ChatFont, lineHeight: ChatLineHeight, separator: String = "\n\n"
     ) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
@@ -73,7 +71,7 @@ private enum StreamingMarkdownText {
                 let start: Int? = if case .numberedList(let start, _, _) = value { start } else { nil }
                 for (offset, item) in items.enumerated() {
                     if offset > 0 { result.append(NSAttributedString(string: "\n")) }
-                    let body = nativeBlocks(item, width: width, proseMeasure: proseMeasure,
+                    let body = nativeBlocks(item, proseMeasure: proseMeasure,
                         scale: scale, face: face, lineHeight: lineHeight, separator: "\n")
                     result.append(NSAttributedString(
                         string: start.map { "\($0 + offset).  " } ?? "•  ",
@@ -82,7 +80,7 @@ private enum StreamingMarkdownText {
                     result.append(body)
                 }
             case .blockQuote(let quoted):
-                let body = nativeBlocks(quoted, width: width, proseMeasure: proseMeasure,
+                let body = nativeBlocks(quoted, proseMeasure: proseMeasure,
                     scale: scale, face: face, lineHeight: lineHeight)
                 result.append(NSAttributedString(string: "│  ",
                     attributes: body.length > 0 ? body.attributes(at: 0, effectiveRange: nil) : nil))
@@ -93,10 +91,11 @@ private enum StreamingMarkdownText {
                 paragraph.lineSpacing = TranscriptLayout.proseLeading(
                     Typo.body, scale: scale, face: face, lineHeight: lineHeight
                 )
-                // A positive tail indent is measured from the leading edge. TextKit therefore
-                // gives paragraphs their own measure without splitting a live answer's view tree.
+                // A positive tail indent is measured from the leading edge, and a narrower container
+                // still wraps first. Independent of the offered width so every layout question sees
+                // the same text and TextKit keeps its layout.
                 if !value.needsFullChatColumn, proseMeasure.isFinite {
-                    paragraph.tailIndent = min(max(1, width), proseMeasure)
+                    paragraph.tailIndent = proseMeasure
                 }
                 run.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: run.length))
                 result.append(run)

@@ -132,9 +132,8 @@ struct FileChipHover: Equatable, Sendable {
 /// laying out an attributed string that someone else composed.
 struct TranscriptTextView: NSViewRepresentable {
     var text: NSAttributedString
-    /// Streaming uses one native text view, with paragraph indents computed at the offered width
-    /// so prose keeps its measure while a fence in the same string uses the whole column.
-    var textAtWidth: (@MainActor (CGFloat) -> NSAttributedString)?
+    /// A streamed answer, rendered again on every delta. See `LinkTextView.fixedWidthLayout`.
+    var growsAtEnd = false
     @Environment(\.transcriptTextSelection) private var selection
     @Environment(\.transcriptConversationSelection) private var conversation
     @Environment(\.transcriptEntryID) private var entryID
@@ -228,7 +227,7 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     private func apply(to view: LinkTextView) {
-        view.textAtWidth = textAtWidth
+        view.growsAtEnd = growsAtEnd
         view.onPlainClick = onPlainClick
         view.copyPrefix = copyPrefix
         view.copySeparatorBefore = copySeparatorBefore
@@ -243,7 +242,7 @@ struct TranscriptTextView: NSViewRepresentable {
             view.conversationSelection = conversation
             conversation?.register(view)
         }
-        view.applyMeasuredText(textAtWidth?(view.textContainer?.containerSize.width ?? 0) ?? text)
+        view.applyMeasuredText(text)
         conversation?.adopt(view)
         view.linkColor = linkColor
         view.overlaysScroller = overlaysScroller
@@ -289,7 +288,6 @@ struct TranscriptTextView: NSViewRepresentable {
         // exact proposal promises. Repeated proposals are still answered from `measurements`,
         // and the pane itself reflows in steps during a drag, which is where the saving is.
         let width = TranscriptTextMeasure.layoutWidth(proposed: proposed)
-        if let textAtWidth { nsView.applyMeasuredText(textAtWidth(width)) }
         // Only when it has actually moved. Whether TextKit throws its layout away on being handed
         // the size it already has is not documented either way, and this is the resize path: every
         // frame of a divider drag asks every realised row for its size, several times, and the
@@ -302,38 +300,43 @@ struct TranscriptTextView: NSViewRepresentable {
         // **An answer already given is given again without typesetting**, whichever question came
         // in between. See `TranscriptTextMeasureCache` for the multi-second switches this was.
         //
-        // The container still follows the question, exactly as it did when every question was
-        // typeset, because the view draws at whatever width it was last asked about. Setting a
-        // container's size only marks the layout stale, so TextKit lays the run out when it is next
-        // drawn or hit tested, at the width the pass left it at, instead of once per question.
-        if let known = nsView.measurements.value(for: key) {
-            if container.containerSize != wanted { container.containerSize = wanted }
+        // Outside a streamed answer (see below) the container follows the question, as it did when
+        // every question was typeset, because the view draws at whatever width it was last asked
+        // about. Setting a container's size only marks the layout stale, so TextKit lays the run out
+        // when it is next drawn or hit tested, at the width the pass left it at, instead of once per
+        // question.
+        if let known = nsView.measurement(for: key) {
+            if !nsView.growsAtEnd, container.containerSize != wanted { container.containerSize = wanted }
             nsView.bubbleInkOffset = known.bubbleInkOffset
             nsView.bubbleAlignmentWidth = alignsBubbleInk ? width : nil
             nsView.lastReportedMeasurement = (known.size, alignsBubbleInk)
             return known.size
         }
-        if container.containerSize != wanted { container.containerSize = wanted }
-        layout.ensureLayout(for: container)
+        // A streamed answer is measured away from the container it draws in, which keeps the
+        // width it was placed at. See `LinkTextView.fixedWidthLayout`.
+        let measuring = nsView.growsAtEnd ? nsView.fixedWidthLayout(width: width) : nil
+        if measuring == nil, container.containerSize != wanted { container.containerSize = wanted }
+        let (measuredLayout, measuredContainer) = measuring ?? (layout, container)
+        measuredLayout.ensureLayout(for: measuredContainer)
         if alignsBubbleInk {
             if nsView.bubbleAlignmentWidth != width {
-                nsView.bubbleInkOffset = BubbleTextAlignment.offset(layout: layout, container: container)
+                nsView.bubbleInkOffset = BubbleTextAlignment.offset(layout: measuredLayout, container: measuredContainer)
                 nsView.bubbleAlignmentWidth = width
             }
         } else {
             nsView.bubbleInkOffset = 0
             nsView.bubbleAlignmentWidth = nil
         }
-        let used = layout.usedRect(for: container)
+        let used = measuredLayout.usedRect(for: measuredContainer)
         let size = TranscriptTextMeasure.size(
-            widestLine: Double(widestLine(layout, in: container)),
+            widestLine: Double(widestLine(measuredLayout, in: measuredContainer)),
             usedHeight: Double(used.height),
             proposed: proposed,
-            lineHeight: Double(lineHeight(nsView, layout)),
+            lineHeight: Double(lineHeight(nsView, measuredLayout)),
             hasGlyphs: (nsView.textStorage?.length ?? 0) > 0
         )
         let result = CGSize(width: size.width, height: size.height)
-        nsView.measurements.store(
+        nsView.remember(
             LinkTextView.Measurement(size: result, bubbleInkOffset: nsView.bubbleInkOffset), for: key
         )
         nsView.lastReportedMeasurement = (result, alignsBubbleInk)
@@ -460,11 +463,57 @@ private final class TranscriptLayoutManager: NSLayoutManager {
 
 /// The text view itself: hover, and the menu over a link.
 final class LinkTextView: NSTextView, HoverQuickLookSource {
-    var textAtWidth: (@MainActor (CGFloat) -> NSAttributedString)?
+    var growsAtEnd = false {
+        didSet { if !growsAtEnd { dropFixedWidthLayouts() } }
+    }
 
+    /// One layout per width asked (minimum, ideal, placed), sharing the storage. One container
+    /// switching widths retypeset the whole answer per question: 36 ms per delta at 14,000
+    /// characters, against 0.4 ms when each width keeps its layout and only the tail is redone.
+    private var fixedWidthLayouts: [CGFloat: NSLayoutManager] = [:]
+    /// A divider drag asks about a new width on every frame, so old widths are let go past this.
+    private static let fixedWidthLayoutLimit = 4
+
+    func fixedWidthLayout(width: CGFloat) -> (NSLayoutManager, NSTextContainer)? {
+        if let layout = fixedWidthLayouts[width], let container = layout.textContainers.first {
+            return (layout, container)
+        }
+        guard let storage = textStorage, let drawing = layoutManager else { return nil }
+        if fixedWidthLayouts.count >= Self.fixedWidthLayoutLimit { dropFixedWidthLayouts() }
+        let layout = NSLayoutManager()
+        layout.usesFontLeading = drawing.usesFontLeading
+        layout.typesetterBehavior = drawing.typesetterBehavior
+        let container = NSTextContainer(size: CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = textContainer?.lineFragmentPadding ?? 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        fixedWidthLayouts[width] = layout
+        return (layout, container)
+    }
+
+    private func dropFixedWidthLayouts() {
+        for layout in fixedWidthLayouts.values { textStorage?.removeLayoutManager(layout) }
+        fixedWidthLayouts.removeAll()
+    }
+
+    /// The last text handed in, compared rather than the storage: the storage spreads each
+    /// paragraph's style over its separator, so it differed from every new rendering after the
+    /// first paragraph.
+    private var appliedText = NSAttributedString()
+
+    /// Only the part after the first difference is replaced, so TextKit keeps the layout above it.
+    /// See `AttributedTextDivergence`.
     func applyMeasuredText(_ text: NSAttributedString) {
-        guard textStorage?.isEqual(to: text) != true else { return }
-        textStorage?.setAttributedString(text)
+        guard text !== appliedText, let storage = textStorage else { return }
+        let from = AttributedTextDivergence.firstDifference(appliedText, text)
+        appliedText = text
+        guard from < storage.length || from < text.length else { return }
+        storage.beginEditing()
+        storage.replaceCharacters(
+            in: NSRange(location: from, length: storage.length - from),
+            with: text.attributedSubstring(from: NSRange(location: from, length: text.length - from))
+        )
+        storage.endEditing()
         bubbleAlignmentWidth = nil
         measurements.removeAll()
         lastReportedMeasurement = nil
@@ -483,13 +532,14 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     /// `sizeThatFits` leaves the container at its last question's width, which can be a probe
     /// rather than the placed frame. See `TranscriptTextMeasure.needsRelayoutAtFrame`.
     override func viewWillDraw() {
-        if let container = textContainer, let measured = lastReportedMeasurement,
+        if growsAtEnd, let container = textContainer, container.containerSize.width != bounds.width {
+            container.containerSize = CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
+        } else if !growsAtEnd, let container = textContainer, let measured = lastReportedMeasurement,
            TranscriptTextMeasure.needsRelayoutAtFrame(
                containerWidth: Double(container.containerSize.width),
                frameWidth: Double(bounds.width),
                reportedWidth: Double(measured.size.width)
            ) {
-            if let textAtWidth { applyMeasuredText(textAtWidth(bounds.width)) }
             container.containerSize = CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
             lastReportedMeasurement = nil
             if measured.alignsBubbleInk, let layout = layoutManager {
@@ -610,6 +660,28 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     /// text storage is written, and it clears these; anything that ever edits the storage in place
     /// has to clear them too.
     var measurements = TranscriptTextMeasureCache<Measurement>()
+
+    /// Answers about the latest streamed rendering, for the fresh copy the table hosts to measure
+    /// the live row after the drawn row has answered. That copy otherwise typeset the whole answer
+    /// again: 721 of the 809 layout samples left in a 400 delta stream.
+    private static var liveAnswers: (text: NSAttributedString, measurements: TranscriptTextMeasureCache<Measurement>)?
+
+    func measurement(for key: TranscriptTextMeasureCache<Measurement>.Key) -> Measurement? {
+        if let known = measurements.value(for: key) { return known }
+        guard growsAtEnd, var shared = Self.liveAnswers, shared.text === appliedText,
+              let known = shared.measurements.value(for: key) else { return nil }
+        measurements.store(known, for: key)
+        return known
+    }
+
+    func remember(_ measurement: Measurement, for key: TranscriptTextMeasureCache<Measurement>.Key) {
+        measurements.store(measurement, for: key)
+        guard growsAtEnd else { return }
+        if Self.liveAnswers?.text !== appliedText {
+            Self.liveAnswers = (appliedText, TranscriptTextMeasureCache())
+        }
+        Self.liveAnswers?.measurements.store(measurement, for: key)
+    }
     /// The last answer handed to SwiftUI, for correcting a wider layout before drawing a bubble.
     var lastReportedMeasurement: (size: CGSize, alignsBubbleInk: Bool)?
     var bubbleAlignmentWidth: CGFloat?
@@ -675,15 +747,17 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         ))
     }
 
+    /// Not `super`: `NSTextView` only set the cursor this sets below, then passed the move up the
+    /// responder chain to the hosting views, which already get it from their own tracking areas.
+    /// That second round of SwiftUI hover took 226 ms of main thread in a two minute trace.
     override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
         let link = linkRange(at: point)
         let chip = fileChip(at: point)
         hover(link)
-        // After `super`, and on every move rather than only on the way in. A link is a range
-        // inside a run and not a view of its own, so crossing from prose onto it moves the pointer
-        // without leaving any tracking area: nothing else would ask again.
+        // On every move rather than only on the way in. A link is a range inside a run and not a
+        // view of its own, so crossing from prose onto it moves the pointer without leaving any
+        // tracking area: nothing else would ask again.
         pointer(link: link != nil, chip: chip).set()
         hoverChip(chip)
     }
