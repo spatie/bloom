@@ -267,6 +267,11 @@ final class TranscriptModel {
     /// A turn that hit the account's allowance, waiting to be continued once it is back. See
     /// `LimitResume`.
     let limitResumeWatch = LimitResumeWatch()
+    /// Whether the turn running now was sent by the resume itself. See `LimitResume.armsByItself`.
+    @ObservationIgnored private var isLimitResumeTurn = false
+    /// Whether this chat's wait is in the settings table, so calling it off deletes it. See
+    /// `SavedLimitResume`.
+    @ObservationIgnored private var hasSavedLimitResume = false
 
     var draft = ""
 
@@ -777,7 +782,7 @@ final class TranscriptModel {
         guard !isWorkspaceArchiving else { return false }
         // Anything said to the chat supersedes a continuation waiting on the allowance, including
         // the continuation itself, which disarms before it gets here.
-        limitResumeWatch.cancel()
+        await callOffLimitResume()
         if usesInteractiveTerminal {
             app.alert = BloomAlert(
                 title: "This agent runs in a terminal",
@@ -853,15 +858,53 @@ final class TranscriptModel {
             && LimitResume.isLimitHit(result)
     }
 
+    /// A turn that ended on the allowance continues by itself once it is back, as Claude Code's
+    /// own apps do. Cancel under the turn, or anything typed, calls it off.
+    private func continueAfterLimitIfHit(_ result: AgentResult) {
+        let wasResumeTurn = isLimitResumeTurn
+        isLimitResumeTurn = false
+        guard !isRunning, offersLimitResume(after: result),
+              LimitResume.armsByItself(after: result, wasResumeTurn: wasResumeTurn) else { return }
+        continueAfterLimitResets(hitAt: Date())
+    }
+
     /// Waits for the allowance to come back and then sends `LimitResume.prompt`. See `LimitResume`
-    /// for when that is.
-    func continueAfterLimitResets(hitAt: Date) {
+    /// for when that is. Saved, so a relaunch waits again: see `AppModel.restoreLimitResumes`.
+    func continueAfterLimitResets(hitAt: Date, notBefore: Date? = nil) {
+        let resume = LimitResume(provider: session.agentKind, hitAt: hitAt, notBefore: notBefore)
         limitResumeWatch.arm(
-            LimitResume(provider: session.agentKind, hitAt: hitAt),
+            resume,
             quotas: { [unowned app] in app.quotas },
             refresh: { [unowned app] in await app.refreshQuotas(after: QuotaPollSchedule.onDemandFloor) },
-            send: { [weak self] in await self?.submit(LimitResume.prompt) }
+            remember: { [weak self] learned in
+                await self?.saveLimitResume(SavedLimitResume(hitAt: learned.hitAt, notBefore: learned.notBefore))
+            },
+            send: { [weak self] in
+                guard let self else { return }
+                isLimitResumeTurn = true
+                if await !submit(LimitResume.prompt) { isLimitResumeTurn = false }
+            }
         )
+    }
+
+    /// Cancel under the turn, and anything said to the chat. Not `teardown`: quitting keeps the
+    /// saved wait, which is the point of saving it.
+    func callOffLimitResume() async {
+        limitResumeWatch.cancel()
+        guard hasSavedLimitResume, let store else { return }
+        hasSavedLimitResume = false
+        try? await store.setSetting(SavedLimitResume.key(for: session.id), nil)
+    }
+
+    /// Only a workspace chat is saved: a project-free conversation is opened by selecting it,
+    /// which a launch must not do. See `AppModel.restoreLimitResumes`.
+    private func saveLimitResume(_ saved: SavedLimitResume) async {
+        guard let store, session.workspaceID != nil else { return }
+        let key = SavedLimitResume.key(for: session.id)
+        hasSavedLimitResume = true
+        try? await store.setSetting(key, saved.value)
+        // Called off while the write was in flight, whose delete may have landed first.
+        if !limitResumeWatch.isArmed { try? await store.setSetting(key, nil) }
     }
 
     /// Why the queue in front of this chat is not moving, which is both the drain's condition and
@@ -1257,6 +1300,9 @@ final class TranscriptModel {
         }
         // The queue is moving, whether or not that begins a turn.
         wasStoppedByHand = false
+        // A message from another workspace or a finished setup reaches here without `submit`,
+        // and it supersedes a continuation waiting on the allowance just as typing does.
+        await callOffLimitResume()
 
         // **Everything below is about a turn beginning, so it is asked whether one is.** On a
         // backend that takes a message mid turn this is reached with a turn already running, and
@@ -1808,6 +1854,7 @@ final class TranscriptModel {
             wasStoppedByHand = false
             await sendSteered(steered)
         } else if !wasStoppedByHand { await drain() }
+        continueAfterLimitIfHit(result)
         if !isRunning {
             await reportToOrchestrator(CrewMessage.stopped(name: session.title, lastMessage: result.summary))
             await app.noteWorkspaceTurnEnded(
@@ -2026,6 +2073,7 @@ final class TranscriptModel {
             } else if !isReconcilingPresentation, !wasStoppedByHand {
                 await drain()
             }
+            if !isReconcilingPresentation { continueAfterLimitIfHit(result) }
             // After the drain, and only if nothing moved: a crew member whose orchestrator said
             // something while it was busy has just started the next turn, and telling the
             // orchestrator it has stopped in the same breath would have it act on an answer that

@@ -337,7 +337,7 @@ public enum ClaudeCodeUsageAdapter: AgentQuotaAdapter {
         }
         return [AgentQuota(
             provider: provider,
-            window: QuotaWindow(key: "extra_usage", label: "Extra usage"),
+            window: .extraUsage,
             measure: measure,
             resetsAt: nil,
             observedAt: now

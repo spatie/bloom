@@ -59,6 +59,35 @@ struct LimitResumeTests {
         #expect(!LimitResume.isLimitHit(try result(fine)))
     }
 
+    /// The transcript asks with the line it already holds parsed, and must get the same answer.
+    @Test func answersTheSameFromAParsedLine() throws {
+        let lines = [
+            #"{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"limit","session_id":"s"}"#,
+            #"{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","result":"lost","session_id":"s"}"#,
+            #"{"type":"result","subtype":"error_during_execution","is_error":true,"codex_error_info":"usageLimitExceeded","session_id":"s"}"#,
+        ]
+        for line in lines {
+            let parsed = try #require(JSONValue.parse(Data(line.utf8)))
+            #expect(LimitResume.isLimitHit(line: parsed) == LimitResume.isLimitHit(try result(line)))
+        }
+    }
+
+    /// A limit hit arms the resume by itself, once: the continuation hitting the wall again gets
+    /// the button, so a 429 with no window to wait on cannot resend at every reading.
+    @Test func armsByItselfOncePerWall() throws {
+        let line = """
+        {"type":"result","subtype":"success","is_error":true,"api_error_status":429,\
+        "result":"You've hit your session limit","session_id":"s"}
+        """
+        let died = """
+        {"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error",\
+        "result":"API Error: Connection lost mid-response.","session_id":"s"}
+        """
+        #expect(LimitResume.armsByItself(after: try result(line), wasResumeTurn: false))
+        #expect(!LimitResume.armsByItself(after: try result(line), wasResumeTurn: true))
+        #expect(!LimitResume.armsByItself(after: try result(died), wasResumeTurn: false))
+    }
+
     /// Codex says it as a token on the failed turn, and the translation keeps it on the stored row.
     @Test func recognisesCodexHittingItsLimit() throws {
         let error = JSONValue.parse(#"{"message":"You've hit your usage limit.","codexErrorInfo":"usageLimitExceeded"}"#)
@@ -127,6 +156,25 @@ struct LimitResumeTests {
         #expect(step == .waitUntil(weeklyReset))
     }
 
+    /// A spent credit balance has no reset and is no longer restated once the org disables it. It
+    /// must not hold the resume after the session window turns over, nor release it before.
+    @Test func ignoresASpentCreditBalance() {
+        var resume = LimitResume(provider: .claudeCode, hitAt: hit)
+        let credits = AgentQuota(
+            provider: .claudeCode, window: .extraUsage,
+            measure: .counted(used: 500, limit: 500, unit: "EUR"),
+            resetsAt: nil, observedAt: hit.addingTimeInterval(-86_400)
+        )
+        let session = quota(fraction: 1, observedAt: hit)
+        let before = resume.step(quotas: [credits, session], at: hit.addingTimeInterval(60))
+        #expect(before == .waitUntil(reset))
+
+        let weekly = quota("seven_day", fraction: 0.4, resetsAt: reset.addingTimeInterval(86_400 * 3),
+                           observedAt: reset.addingTimeInterval(30))
+        let after = resume.step(quotas: [credits, session, weekly], at: reset.addingTimeInterval(40))
+        #expect(after == .go)
+    }
+
     /// With no reset stated anywhere, it needs a reading from after the hit showing room.
     @Test func withNoResetKnownItWaitsForAReadingAfterTheHit() {
         var resume = LimitResume(provider: .claudeCode, hitAt: hit)
@@ -151,7 +199,21 @@ struct LimitResumeTests {
         let utc = TimeZone(identifier: "UTC")!
         let locale = Locale(identifier: "en_GB")
         let at = Date(timeIntervalSince1970: 1_789_767_600)
-        #expect(LimitResume.Step.waitUntil(at).sentence(timeZone: utc, locale: locale)
+        let sameDay = at.addingTimeInterval(-3600)
+        #expect(LimitResume.Step.waitUntil(at).sentence(clock: ResetClock(now: sameDay, timeZone: utc, locale: locale))
             == "Continues after the limit resets at 21:40.")
+    }
+
+    /// A weekly reset days away names its day, so the time cannot pass for one already gone.
+    @Test func namesTheDayOfAResetOnAnotherDay() {
+        let utc = TimeZone(identifier: "UTC")!
+        let locale = Locale(identifier: "en_GB")
+        let at = Date(timeIntervalSince1970: 1_789_767_600)
+        let daysBefore = at.addingTimeInterval(-3 * 86_400)
+        let sentence = LimitResume.Step.waitUntil(at).sentence(
+            clock: ResetClock(now: daysBefore, timeZone: utc, locale: locale)
+        )
+        #expect(sentence.hasPrefix("Continues after the limit resets on "))
+        #expect(sentence.hasSuffix(" at 21:40."))
     }
 }

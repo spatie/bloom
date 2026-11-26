@@ -53,9 +53,11 @@ public struct LimitResume: Sendable, Hashable {
     /// the quotas the moment its reset passes and the time it named has to outlive it.
     public private(set) var notBefore: Date?
 
-    public init(provider: AgentKind, hitAt: Date) {
+    /// `notBefore` is a reset learned before a relaunch. See `SavedLimitResume`.
+    public init(provider: AgentKind, hitAt: Date, notBefore: Date? = nil) {
         self.provider = provider
         self.hitAt = hitAt
+        self.notBefore = notBefore
     }
 
     /// Whether a failed turn failed on the allowance rather than on anything else.
@@ -64,6 +66,12 @@ public struct LimitResume: Sendable, Hashable {
     /// announced as `api_retry`, which `AgentRetry` reads. One that ends the turn is the wall.
     public static func isLimitHit(_ result: AgentResult) -> Bool {
         guard !result.succeeded, let line = JSONValue.parse(result.raw) else { return false }
+        return isLimitHit(line: line)
+    }
+
+    /// The same answer from a failed result's line already parsed, for a caller that holds it
+    /// cached rather than parsing the raw line again on every pass.
+    public static func isLimitHit(line: JSONValue) -> Bool {
         if line["api_error_status"]?.intValue == 429 { return true }
         return line["codex_error_info"]?.stringValue == CodexErrorInfo.usageLimitExceeded
     }
@@ -72,7 +80,11 @@ public struct LimitResume: Sendable, Hashable {
     ///
     /// Mutating, so it cannot be called inside `#expect`: lift it into a `let` first.
     public mutating func step(quotas: [AgentQuota], at now: Date) -> Step {
-        let live = quotas.filter { $0.provider == provider && !$0.hasExpired(at: now) }
+        // A spent credit balance never resets and stops being reported once the org disables it,
+        // so counting it kept the resume checking forever. The plan windows alone decide.
+        let live = quotas.filter {
+            $0.provider == provider && !$0.window.isCreditBalance && !$0.hasExpired(at: now)
+        }
         let spent = live.filter { QuotaSeverity.of($0.fraction) == .spent }
 
         if let wall = spent.compactMap(\.resetsAt).max() {
@@ -103,6 +115,15 @@ public enum CodexErrorInfo {
 }
 
 extension LimitResume {
+    /// Whether a turn that has just ended arms the resume without anybody pressing the button.
+    ///
+    /// Never after the resume's own continuation: a 429 that no plan window explains has no reset
+    /// to wait for, so re-arming would resend at every usage reading with nobody watching. That
+    /// turn gets the button instead.
+    public static func armsByItself(after result: AgentResult, wasResumeTurn: Bool) -> Bool {
+        !wasResumeTurn && isLimitHit(result)
+    }
+
     /// Whether Bloom can read this provider's allowance at all. A resume that can never see a
     /// reading can never go, so it is not offered. These are the providers `AgentQuotaSources`
     /// asks; a third one added there belongs here too.
@@ -113,17 +134,42 @@ extension LimitResume {
 
 extension LimitResume.Step {
     /// The line under a failed turn while the resume is waiting.
-    public func sentence(timeZone: TimeZone = .current, locale: Locale = .current) -> String {
+    public func sentence(clock: ResetClock = ResetClock()) -> String {
         switch self {
         case .waitUntil(let reset):
-            var style = Date.FormatStyle(date: .omitted, time: .shortened)
-            style.timeZone = timeZone
-            style.locale = locale
-            return "Continues after the limit resets at \(reset.formatted(style))."
+            return "Continues after the limit resets \(clock.phrase(reset))."
         case .checking:
             return "Continues as soon as a usage reading shows the limit has reset."
         case .go:
             return "Continuing."
         }
+    }
+}
+
+/// When a limit resets, said against the reader's clock.
+public struct ResetClock: Sendable {
+    public var now: Date
+    public var timeZone: TimeZone
+    public var locale: Locale
+
+    public init(now: Date = Date(), timeZone: TimeZone = .current, locale: Locale = .current) {
+        self.now = now
+        self.timeZone = timeZone
+        self.locale = locale
+    }
+
+    /// "at 15:00" today, "on Mon 16 Nov at 15:00" otherwise: a weekly reset days away read as an
+    /// hour already passed when only the time was shown.
+    public func phrase(_ reset: Date) -> String {
+        var time = Date.FormatStyle(date: .omitted, time: .shortened)
+        time.timeZone = timeZone
+        time.locale = locale
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        if calendar.isDate(reset, inSameDayAs: now) { return "at \(reset.formatted(time))" }
+        var day = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
+        day.timeZone = timeZone
+        day.locale = locale
+        return "on \(reset.formatted(day)) at \(reset.formatted(time))"
     }
 }

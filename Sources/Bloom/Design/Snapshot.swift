@@ -1325,7 +1325,7 @@ private struct LimitsStateGallery: View {
             ),
             AgentQuota(
                 provider: .claudeCode,
-                window: QuotaWindow(key: "extra_usage", label: "Extra usage"),
+                window: .extraUsage,
                 measure: .counted(used: 17.2, limit: 50, unit: "USD"),
                 resetsAt: nil,
                 observedAt: now

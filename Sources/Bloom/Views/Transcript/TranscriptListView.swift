@@ -372,6 +372,19 @@ struct TranscriptListView: View {
         )
     }
 
+    /// The wall a failed turn ran into, from its own rows. Only a turn that ended on the limit
+    /// walks back, so a pass over a long session costs cached decodes only: parsing each failed
+    /// result's raw line again took 94 ms of main thread in a two minute trace.
+    private func limitHit(closing index: Int, in rows: [TranscriptRow]) -> LimitHit? {
+        let row = rows[index]
+        guard case .result(let result)? = TranscriptEventCache.event(rowID: row.id, payload: row.payload),
+              !result.succeeded,
+              let line = TranscriptEventCache.json(rowID: row.id, payload: row.payload),
+              LimitResume.isLimitHit(line: line) else { return nil }
+        let turn = rows[..<index].reversed().lazy.map { (kind: $0.kind, payload: $0.payload) }
+        return LimitHit.latest(walkingBack: turn)
+    }
+
     /// Everything the table draws, in order.
     ///
     /// Assembled on every pass over this body, which is what the lazy stack's `ForEach` was doing
@@ -428,7 +441,11 @@ struct TranscriptListView: View {
             work: folds, revealed: revealed, drawn: drawnRange
         )
         let lastVisibleRow = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })
-        let lastVisibleSeq = lastVisibleRow?.seq
+        // Claude Code stores `commands_changed` or `peer_message_hold` after a result. They draw
+        // nothing, and counting them took the limit resume control off the turn that hit the wall.
+        let closingSeq = drawnRows.last(where: {
+            !TranscriptNoise.isHidden($0) && !TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload)
+        })?.seq
         let hasCompletedTurn = drawnRange.upperBound == rows.count && sending == nil
             && lastVisibleRow.map { transcript.isCurrentTurnResult($0) } == true
         // The group the loop is inside, so its line is emitted once, and the indices of its
@@ -670,7 +687,7 @@ struct TranscriptListView: View {
             let wasStopped = row.seq == stoppedTurnSeq
             // The echo already follows this footer. Waiting for its stored row to land added
             // the inter-turn gap halfway through the send and pushed the travelling bubble down.
-            let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq && sending == nil
+            let closesTranscript = row.kind == .result && row.seq == closingSeq && sending == nil
             let stillRunning = closesTranscript ? backgroundWork : nil
             // The same fields `TranscriptRowView.==` compared, and for the same reason: the
             // payload is never read, because comparing it is 1.6MB of `Data` per pass.
@@ -679,6 +696,7 @@ struct TranscriptListView: View {
             // is built rather than baked in as this runs, and putting it in the key would rebuild
             // the cell again a fifth of a second later when the answer expired, throwing away the
             // settle it is meant to be showing. See `TranscriptArrivals`.
+            let limitHit = row.kind == .result ? limitHit(closing: index, in: rows) : nil
             let key = TranscriptContentKey {
                 $0.combine(row.id)
                 $0.combine(row.seq)
@@ -699,6 +717,7 @@ struct TranscriptListView: View {
                 $0.combine(stillRunning)
                 $0.combine(closingTurn?.durationMS)
                 $0.combine(showsTurnDuration)
+                $0.combine(limitHit)
             }
             // Free, and no for the two kinds that make up most of a long session, so it is asked
             // here rather than inside the closure that runs per cell.
@@ -730,7 +749,8 @@ struct TranscriptListView: View {
                                 closesTranscript: closesTranscript,
                                 transcript: transcript,
                                 showsDuration: showsTurnDuration,
-                                durationMS: closingTurn?.durationMS
+                                durationMS: closingTurn?.durationMS,
+                                limitHit: limitHit
                             )
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)

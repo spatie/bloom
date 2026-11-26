@@ -35,6 +35,8 @@ struct TurnFooterView: View {
     var showsDuration = true
     /// The duration of the visible segment when a running turn was steered by another message.
     var durationMS: Int?
+    /// The turn's rejected `rate_limit_event`, which names the wall the CLI's sentence buries.
+    var limitHit: LimitHit?
 
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
@@ -135,7 +137,7 @@ struct TurnFooterView: View {
 
             // A turn that failed used to draw a red mark, a duration and nothing at all, with the
             // CLI's own explanation parked behind the copy menu. See `TurnFailure`.
-            if outcome == .failed, let result, let failure = TurnFailure.of(result) {
+            if outcome == .failed, let result, let failure = TurnFailure.of(result, limitHit: limitHit) {
                 VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
                     if let lead = failure.lead {
                         Text(lead)
@@ -148,9 +150,11 @@ struct TurnFooterView: View {
                             .foregroundStyle(Palette.textTertiary)
                     }
                     if closesTranscript, let transcript, transcript.offersLimitResume(after: result) {
-                        LimitResumeControl(watch: transcript.limitResumeWatch) {
-                            transcript.continueAfterLimitResets(hitAt: row.createdAt)
-                        }
+                        LimitResumeControl(
+                            watch: transcript.limitResumeWatch,
+                            arm: { transcript.continueAfterLimitResets(hitAt: row.createdAt) },
+                            cancel: { Task { await transcript.callOffLimitResume() } }
+                        )
                         .padding(.top, TranscriptLayout.tight)
                     }
                 }

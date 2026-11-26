@@ -6,13 +6,14 @@ import BloomCore
 struct LimitResumeControl: View {
     var watch: LimitResumeWatch
     var arm: () -> Void
+    var cancel: () -> Void
 
     var body: some View {
         HStack(spacing: TranscriptLayout.block) {
             if let step = watch.step {
                 Text(step.sentence())
                     .foregroundStyle(Palette.textSecondary)
-                Button("Cancel") { watch.cancel() }
+                Button("Cancel", action: cancel)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             } else {
